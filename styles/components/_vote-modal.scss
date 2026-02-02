@@ -1,0 +1,61 @@
+.vote-modal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.5rem;
+  margin-top: 2.5rem;
+
+  &__header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.25rem;
+
+    &__icon-holder {
+      width: 4rem;
+      height: 4rem;
+      display: flex;
+      flex-direction: row;
+      justify-content: center;
+      align-items: center;
+      background: var(--button--neutral);
+      border-radius: 2rem;
+
+      &__icon {
+        width: 1.5rem;
+        height: 1.5rem;
+        border-radius: 2rem;
+
+        &--check {
+          fill: var(--button--supply--deemphasized);
+          background: var(--icon--supply);
+          padding: 6%;
+        }
+
+        &--against {
+          fill: var(--data--caution);
+          background: var(--button--supply--deemphasized);
+        }
+
+        &--abstain {
+          fill: var(--icon--2);
+          background: var(--button--supply--deemphasized);
+        }
+      }
+    }
+
+    &__text {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+
+      &--title {
+        color: var(--text--2);
+      }
+    }
+  }
+
+  &__input {
+    width: 100%;
+  }
+}

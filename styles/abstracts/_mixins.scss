@@ -1,0 +1,20 @@
+@use '../abstracts/variables' as *;
+
+@mixin state-circle($background-color) {
+  position: absolute;
+  transform: translateY(-50%);
+  content: ' ';
+  border-radius: 50%;
+  background: $background-color;
+  height: 24px;
+  width: 24px;
+  background-size: 100% 100%;
+}
+
+@mixin extension-icons-urls($theme-choice) {
+  $extensions-icons-list: ('collateral_swap', 'comet_migrator', 'comp_vote', 'default', 'defisaver', 'bulker');
+  $extension-icons-path: '/images/extension-icons/#{$theme-choice}';
+  @each $icon-name in $extensions-icons-list {
+    --extension-icon-url-#{$icon-name}: url('#{$extension-icons-path}/#{$icon-name}.svg');
+  }
+}

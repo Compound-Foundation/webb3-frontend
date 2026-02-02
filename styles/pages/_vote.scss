@@ -1,0 +1,41 @@
+@use '../abstracts/variables' as *;
+
+.vote {
+  color: var(--text--1);
+
+  &__content {
+    filter: var(--elevation--3);
+  }
+
+  .vote-panel {
+    padding: 2.5rem;
+
+    &__header-row {
+      padding-bottom: 1.25rem;
+    }
+  }
+
+  @media (max-width: $device--sm) {
+    &__content {
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 0.5rem;
+      width: 100%;
+    }
+
+    &__proposals,
+    &__sidebar {
+      width: calc(100vw - 1rem);
+      position: relative;
+      left: calc(-50vw + 50% + 0.5rem);
+    }
+
+    .vote-panel {
+      padding: 2rem;
+
+      &__header-row {
+        padding-bottom: 0.75rem;
+      }
+    }
+  }
+}

@@ -1,0 +1,150 @@
+@use 'abstracts/variables' as *;
+
+@use 'base/reset';
+@use 'base/scaffolding';
+@use 'base/theme';
+@use 'base/typography';
+
+@use 'components/action-input-view';
+@use 'components/action-queue-item';
+@use 'components/alert-banner';
+@use 'components/asset';
+@use 'components/asset-row';
+@use 'components/assets-table';
+@use 'components/bulk-transaction';
+@use 'components/button';
+@use 'components/circle-meter';
+@use 'components/connect-wallet-modal';
+@use 'components/connected-wallet';
+@use 'components/currency-toggle';
+@use 'components/delegate-modal';
+@use 'components/detail-sheet';
+@use 'components/divider';
+@use 'components/dropdown';
+@use 'components/extension-icon';
+@use 'components/extension-list-row';
+@use 'components/footer';
+@use 'components/go-to-desktop';
+@use 'components/hamburger';
+@use 'components/gov-profile';
+@use 'components/header';
+@use 'components/header-nav-button-highlight';
+@use 'components/icon-pair';
+@use 'components/icon-text-pair';
+@use 'components/text-input-view';
+@use 'components/interest-rate-model';
+@use 'components/load-spinner';
+@use 'components/loading-icon-holder';
+@use 'components/logo';
+@use 'components/market-history-panel';
+@use 'components/market-overview-history-panel';
+@use 'components/market-overview-panels';
+@use 'components/market-overview-panel';
+@use 'components/market-selector';
+@use 'components/additional-market-data-panel';
+@use 'components/market-stats';
+@use 'components/masthead';
+@use 'components/meter';
+@use 'components/modal';
+@use 'components/net-rates-graph';
+@use 'components/net-rates-tooltip';
+@use 'components/panel';
+@use 'components/panel-with-header';
+@use 'components/panel-with-no-header';
+@use 'components/position-card';
+@use 'components/proposals';
+@use 'components/rewards';
+@use 'components/svg';
+@use 'components/theme-toggle';
+@use 'components/transaction_date';
+@use 'components/transaction_text_holder';
+@use 'components/tooltip';
+@use 'components/unit-transaction';
+@use 'components/utilization-meter';
+@use 'components/vote-hero-panel';
+@use 'components/vote-modal';
+@use 'components/vote-transaction-modal';
+@use 'components/vote-wallet';
+@use 'components/wallet-trx-history-row';
+
+@use 'pages/home';
+@use 'pages/markets';
+@use 'pages/extensions';
+@use 'pages/extension-list';
+@use 'pages/transactions';
+@use 'pages/vote';
+
+.text-link:hover {
+  opacity: 0.85;
+}
+
+.placeholder-content {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+
+  &:before {
+    content: '';
+    position: absolute;
+    top: 0.125rem;
+    bottom: 0.125rem;
+    left: 0;
+    right: 0;
+    animation: content-loading 1.2s linear infinite alternate;
+    background: $neutral--50;
+    border-radius: 4px;
+  }
+
+  &:after {
+    content: '\00a0';
+    color: transparent;
+  }
+
+  &--circle {
+    height: 100%;
+
+    &:before {
+      top: 0;
+      bottom: 0;
+      border-radius: 50%;
+    }
+  }
+}
+
+.no-scroll {
+  @media (max-width: $device--sm) {
+    overflow: hidden;
+  }
+}
+
+.mobile-hide {
+  display: flex;
+
+  @media (max-width: $device--sm) {
+    display: none;
+  }
+}
+
+.mobile-only {
+  display: none;
+
+  @media (max-width: $device--sm) {
+    display: flex;
+  }
+}
+
+@media (max-width: $device--sm) {
+  .tooltip {
+    display: none;
+  }
+}
+
+@keyframes content-loading {
+  0% {
+    background: rgba($neutral--50, 0.1);
+  }
+
+  100% {
+    background: rgba($neutral--50, 0.3);
+  }
+}

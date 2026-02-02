@@ -1,0 +1,32 @@
+@use '../abstracts/variables' as *;
+
+.home {
+  color: var(--text--1);
+
+  &__content {
+    filter: var(--elevation--3);
+  }
+
+  &__assets {
+    .panel {
+      &__header-row {
+        padding-right: calc($actions-width + 1.25rem);
+      }
+    }
+  }
+
+  @media (max-width: $device--sm) {
+    &__content {
+      gap: 0.5rem;
+
+      .panel {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+
+        &__header-row {
+          padding-right: 1.25rem;
+        }
+      }
+    }
+  }
+}

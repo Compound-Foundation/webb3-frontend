@@ -1,0 +1,76 @@
+@use '../abstracts/variables' as *;
+
+.vote-hero-panel {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+
+  &__label {
+    color: var(--text--supply);
+
+    .placeholder-content {
+      width: 50%;
+    }
+  }
+
+  &__value {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+
+    &--decimal {
+      color: var(--text--2);
+    }
+
+    .placeholder-content {
+      width: 12rem;
+    }
+  }
+
+  &__action-buttons {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding-bottom: 0.25rem;
+  }
+
+  .utilization-meter {
+    margin: 2.5rem 0 0rem;
+    flex-basis: 100%;
+    flex-grow: 1;
+
+    &--vote--filled {
+      margin: 2.5rem 0 1.5rem;
+    }
+  }
+
+  @media (max-width: $device--sm) {
+    width: 100%;
+
+    &__value {
+      font-size: 2rem;
+    }
+
+    .utilization-meter {
+      margin: 2rem 0 0;
+    }
+
+    &__action-buttons {
+      margin-top: 2rem;
+      padding-bottom: 0;
+      order: 1;
+      width: 100%;
+
+      .button {
+        position: relative;
+        width: 100%;
+
+        .svg {
+          position: absolute;
+          left: 1rem;
+        }
+      }
+    }
+  }
+}

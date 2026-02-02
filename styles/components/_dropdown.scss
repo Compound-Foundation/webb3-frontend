@@ -1,0 +1,122 @@
+@use '../abstracts/variables' as *;
+
+.dropdown {
+  position: relative;
+  user-select: none;
+
+  &--outline {
+    align-items: center;
+    background-color: var(--ui--foreground--2);
+    border: 1px solid var(--ui--border);
+    border-radius: 8px;
+    display: flex;
+    height: 4rem;
+    position: relative;
+    padding: 1.25rem;
+
+    .dropdown__content {
+      border: 1px solid var(--ui--border);
+      top: 4rem;
+      left: 0;
+      right: 0;
+      width: 100%;
+    }
+  }
+
+  &__content {
+    background-color: var(--ui--foreground--1);
+    border: 0.25px solid var(--ui--border);
+    border-radius: 1rem;
+    box-shadow: var(--modal);
+    padding: 1.25rem 0.5rem;
+    position: absolute;
+    width: 16rem;
+    top: 3rem;
+    left: calc(50% - 8rem);
+    z-index: 20;
+    animation: bounce 0.3s ease;
+
+    &__header-row {
+      align-items: center;
+      display: flex;
+      margin-bottom: 0.5rem;
+      padding: 0 0.75rem;
+      justify-content: space-between;
+      @media (max-width: $device--sm) {
+        padding: 0rem;
+        margin-top: 1.25rem;
+      }
+    }
+
+    .label + &__value {
+      margin-top: 0.25rem;
+    }
+
+    &__row {
+      display: flex;
+      flex-direction: column;
+      padding: 0.25rem 0.75rem;
+      @media (max-width: $device--sm) {
+        padding: 0.25rem 0rem;
+      }
+
+      .divider {
+        @media (max-width: $device--sm) {
+          display: none;
+        }
+      }
+      a {
+        cursor: pointer;
+      }
+
+      &__clear-btn {
+        cursor: pointer;
+      }
+      &__see-all-btn {
+        cursor: pointer;
+      }
+    }
+
+    &__action-row {
+      align-items: center;
+      display: flex;
+      padding: 0 0.75rem;
+      margin-top: 0.75rem;
+
+      .button {
+        width: 100%;
+      }
+    }
+
+    //TODO: Should add modifier to this for wider one...
+    //TODO: Torrey take a pass at all styles in here to make sure....
+    &__transaction-history {
+      width: 20rem;
+      left: calc(50% - 16.25rem);
+    }
+  }
+
+  @media (max-width: $device--sm) {
+    &__content {
+      top: 3.5rem;
+    }
+  }
+}
+
+@keyframes bounce {
+  0% {
+    transform: translateY(-3px);
+  }
+
+  30% {
+    transform: translateY(2px);
+  }
+
+  85% {
+    transform: translateY(-1px);
+  }
+
+  100% {
+    transform: translateY(0);
+  }
+}

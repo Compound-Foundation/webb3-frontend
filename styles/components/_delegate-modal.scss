@@ -1,0 +1,109 @@
+.delegate-modal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+
+  .delegate-modal-row {
+    padding: 1.25rem;
+    margin: 0 -1.25rem;
+    color: var(--text--1);
+    display: flex;
+    flex-direction: row;
+    gap: 1.25rem;
+
+    &:hover {
+      background: var(--ui--foreground--2);
+      border-radius: 0.5rem;
+      cursor: pointer;
+    }
+
+    &__icon-holder {
+      width: 3.125rem;
+      height: 2.5rem;
+      display: flex;
+      flex-direction: row;
+      justify-content: center;
+      align-items: center;
+      background: var(--button--supply--deemphasized);
+      border-radius: 1.5rem;
+
+      &__icon {
+        width: 1rem;
+        height: 1rem;
+        fill: var(--button--supply--deemphasized);
+        background: var(--icon--supply);
+        border-radius: 1.5rem;
+        padding: 6%;
+      }
+    }
+
+    &__info {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: start;
+      gap: 0.25rem;
+    }
+
+    &__description {
+      text-align: left;
+      color: var(--text--2);
+    }
+
+    &__title {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+
+      .status {
+        text-transform: capitalize;
+        border-radius: 1.25rem;
+        padding: 0.25rem 0.5rem;
+        text-align: center;
+        color: var(--text--supply--deemphasized);
+        background-color: var(--button--supply--deemphasized);
+      }
+    }
+  }
+
+  .delegate-modal-content {
+    padding-top: 1.25rem;
+
+    &--delegate {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.25rem;
+      padding-top: 1.25rem;
+    }
+    &__input {
+      width: 100%;
+    }
+
+    &__body {
+      text-align: left;
+    }
+
+    &__block {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+
+      &__description {
+        color: var(--text--2);
+      }
+    }
+  }
+
+  .link {
+    text-transform: none;
+    text-decoration: none;
+    width: 100%;
+  }
+
+  .leaderboard-link {
+    color: var(--text--1);
+  }
+}

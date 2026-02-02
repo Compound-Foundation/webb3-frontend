@@ -1,0 +1,104 @@
+@use '../abstracts/variables' as *;
+
+.wallet-trx-history-row {
+  display: flex;
+  border-radius: 0.5rem;
+  margin: 0 -0.5rem;
+  padding: 0.5rem;
+
+  &:hover {
+    background: var(--ui--hover-overlay);
+    .wallet-trx-history-row__external-link {
+      opacity: 1;
+    }
+    .wallet-trx-history-row__icons__icon-with-mask {
+      border: 0.15rem solid var(--ui--hover-overlay);
+    }
+  }
+
+  &__icons {
+    --trx--icon--mask-border: 0.15rem;
+
+    display: flex;
+    align-items: flex-start;
+    width: 2.5rem;
+    min-width: 2.5rem;
+
+    .asset {
+      height: 1rem;
+      width: 1rem;
+
+      &:nth-of-type(2),
+      &:nth-of-type(3) {
+        margin-left: -0.4rem;
+        width: 1.5rem;
+      }
+
+      &:nth-of-type(3) {
+        .wallet-trx-history-row__icons__icon-with-mask {
+          margin-left: calc(-2 * var(--trx--icon--mask-border));
+        }
+      }
+    }
+
+    &__icon-with-mask {
+      height: calc(1rem + 2 * var(--trx--icon--mask-border));
+      width: calc(1rem + 2 * var(--trx--icon--mask-border));
+      background-color: var(--ui--foreground--1);
+      border-radius: 50%;
+      border: var(--trx--icon--mask-border) solid var(--ui--foreground--1);
+      margin-top: calc(-1 * var(--trx--icon--mask-border));
+
+      &--first-icon {
+        margin-left: calc(-1 * var(--trx--icon--mask-border));
+      }
+
+      &--loading {
+        position: relative;
+        z-index: 2;
+      }
+    }
+
+    .placeholder-content--circle {
+      width: 1rem;
+      height: 1rem;
+    }
+  }
+
+  &__details {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    margin-left: 0.75rem;
+
+    &__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .meta + .meta {
+      margin-top: 0;
+    }
+
+    .placeholder-content + .placeholder-content {
+      margin-top: 0.125rem;
+    }
+
+    .placeholder-content {
+      &:nth-of-type(1) {
+        height: 0.75rem;
+        width: 50%;
+      }
+      &:nth-of-type(2) {
+        height: 0.75rem;
+        width: 35%;
+      }
+    }
+  }
+
+  &__external-link {
+    margin-right: 0.25rem;
+    opacity: 0;
+  }
+}

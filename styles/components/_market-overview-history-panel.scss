@@ -1,0 +1,138 @@
+@use '../abstracts/variables' as *;
+@use '../base/typography' as *;
+
+.market-overview-history-panel {
+  color: var(--text--1);
+
+  &__overview {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+
+    @media (max-width: $device--sm) {
+      flex-direction: column;
+      align-items: start;
+      gap: 2rem;
+    }
+
+    &__breakdown {
+      display: flex;
+      gap: 2.25rem;
+
+      > div {
+        // Stops the value from jumping when the text changes
+        min-width: 8rem;
+        @media (max-width: $device--sm) {
+          min-width: 5rem;
+        }
+
+        // Design uses a different heading size on mobile
+        .heading {
+          @media (max-width: $device--sm) {
+            font-size: #{$heading-font-size--emphasized--L4};
+          }
+        }
+      }
+
+      @media (max-width: $device--sm) {
+        width: 100%;
+        gap: 0;
+        justify-content: space-between;
+      }
+    }
+  }
+
+  &__dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background-color: currentcolor;
+    border-radius: 100%;
+    margin-right: 0.5rem;
+  }
+
+  &__graph {
+    margin-top: 40px;
+    display: flex;
+    height: 200px;
+    align-items: end;
+    gap: 0.25rem;
+    // Makes some room for the date labels
+    box-sizing: content-box;
+    padding-bottom: 3rem;
+
+    @media (max-width: $device--sm) {
+      overflow-x: scroll;
+      overflow-y: visible;
+
+      padding-left: 1rem;
+      padding-right: 1rem;
+
+      position: relative;
+
+      // Make the graph go edge to edge
+      margin-left: -20px;
+      margin-right: -20px;
+
+      -webkit-user-select: none;
+      user-select: none;
+
+      > .placeholder-content {
+        min-width: 2rem;
+      }
+    }
+  }
+
+  &__parent-bar {
+    flex-grow: 1;
+    flex-shrink: 0;
+    display: flex;
+    align-items: end;
+    background-color: var(--data--neutral--2);
+    border-radius: 0.25rem;
+    padding: 0.25rem;
+    gap: 0.25rem;
+
+    @media (max-width: $device--sm) {
+      width: 2rem;
+    }
+
+    position: relative;
+
+    &--selected {
+      background-color: $neutral--00;
+    }
+  }
+
+  &__child-bar {
+    &--earn {
+      --background-color: var(--text--supply);
+    }
+
+    &--borrow {
+      --background-color: var(--text--borrow);
+    }
+
+    border-radius: 0.125rem;
+    width: 100%;
+    background-color: var(--background-color);
+  }
+
+  &__graph-date {
+    position: absolute;
+    bottom: -2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    width: fit-content;
+    white-space: nowrap;
+    color: var(--text--2);
+  }
+
+  &__loading-date-labels {
+    display: flex;
+    margin-top: -2rem;
+    justify-content: space-between;
+    width: 100%;
+  }
+}

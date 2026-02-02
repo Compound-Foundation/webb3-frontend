@@ -1,0 +1,208 @@
+@use '../abstracts/variables' as *;
+@use '../abstracts/mixins' as *;
+
+.theme {
+  --ui--background: #{$neutral--100};
+  --ui--foreground--1: #{$neutral--85};
+  --ui--foreground--2: #{$neutral--90};
+  --ui--border: #{rgba($neutral--05, 0.15)};
+  --ui--hover-overlay: #{rgba($neutral--05, 0.05)};
+  // TODO: these 2 new and unused, should it replace something else?
+  --ui--scrim: #{rgba($neutral--100, 0.6)};
+  --ui--active-overlay: #{rgba($neutral--05, 0.025)};
+
+  --text--1: #{$neutral--00};
+  --text--2: #{$neutral--50};
+  --text--3: #{$neutral--60};
+  --text--button-label: #{$neutral--00};
+  --text--button-label--emphasized: #{$neutral--00};
+  --text--button-label--disabled: #{$neutral--60};
+  --text--supply: #{$green--30};
+  --text--supply--deemphasized: #{$green--30};
+  --text--borrow: #{$purple--50};
+  --text--borrow--deemphasized: #{$purple--30};
+  --text--chip--review: #{$blue--30};
+  --text--warning: #{$gold--50};
+
+  --icon--1: #{$neutral--00};
+  --icon--2: #{$neutral--50};
+  --icon--3: #{$neutral--60};
+  --icon--supply: #{$green--30};
+  --icon--borrow: #{$purple--50};
+
+  --data--supply: #{$green--30};
+  --data--borrow: #{$purple--50};
+  --data--warning: #{$gold--30};
+  --data--caution: #{$red--50};
+  --data--neutral: #{$neutral--10};
+  --data--neutral--1: #{$neutral--00};
+  --data--neutral--2: #{$neutral--80};
+
+  --button--neutral: #{$neutral--80};
+  --button--neutral--disabled--1: #{$neutral--90};
+  --button--neutral--disabled--2: #{$neutral--95};
+  --button--borrow: #{$purple--70};
+  --button--borrow--emphasized: #{$purple--70};
+  --button--borrow--deemphasized: #{$purple--90};
+  --button--supply: #{$green--50};
+  --button--supply--emphasized: #{$green--50};
+  --button--supply--deemphasized: #{$green--90};
+
+  --container--purple: #{$purple--90};
+  --container--gold: #{$gold--90};
+
+  --chip--review: #{$blue--90};
+
+  --action-input--shadow: 0 -2px 9px rgba(0, 0, 0, 0.25), 0 8px 24px rgba(0, 0, 0, 0.25);
+
+  --asset-table--gradient: linear-gradient(90deg, #{rgba($neutral--85, 0.2)} 0%, #{rgba($neutral--85, 1)} 80%);
+
+  --elevation--1: 0px 1px 2px rgba(15, 23, 31, 0.02), 0px 1px 4px rgba(15, 23, 31, 0.02);
+  --elevation--2: 0px 2px 4px rgba(15, 23, 31, 0.02), 0px 4px 8px rgba(15, 23, 31, 0.02);
+  --elevation--3: drop-shadow(0px 2px 12px rgba(15, 23, 31, 0.02)) drop-shadow(0px 8px 20px rgba(15, 23, 31, 0.02)); // note, elevation 3 is used as filter instead of box-shadow
+  --sheet: 0px -2px 8px rgba(15, 23, 31, 0.02), 0px -4px 16px rgba(15, 23, 31, 0.02);
+  --modal: 0px 8px 16px rgba(3, 4, 5, 0.1), 0px 16px 32px rgba(3, 4, 5, 0.05);
+
+  --gradient--background-disolve: linear-gradient(
+    180deg,
+    #0d131a 0%,
+    rgba(13, 19, 26, 0.991353) 6.67%,
+    rgba(13, 19, 26, 0.96449) 13.33%,
+    rgba(13, 19, 26, 0.91834) 20%,
+    rgba(13, 19, 26, 0.852589) 26.67%,
+    rgba(13, 19, 26, 0.768225) 33.33%,
+    rgba(13, 19, 26, 0.668116) 40%,
+    rgba(13, 19, 26, 0.557309) 46.67%,
+    rgba(13, 19, 26, 0.442691) 53.33%,
+    rgba(13, 19, 26, 0.331884) 60%,
+    rgba(13, 19, 26, 0.231775) 66.67%,
+    rgba(13, 19, 26, 0.147411) 73.33%,
+    rgba(13, 19, 26, 0.0816599) 80%,
+    rgba(13, 19, 26, 0.03551) 86.67%,
+    rgba(13, 19, 26, 0.0086472) 93.33%,
+    rgba(13, 19, 26, 0) 100%
+  );
+
+  @include extension-icons-urls('dark');
+
+  &--light {
+    --ui--background: #{$neutral--10};
+    --ui--foreground--1: #{$neutral--00};
+    --ui--foreground--2: #{$neutral--05};
+    --ui--border: #{rgba($neutral--100, 0.15)};
+
+    // TODO: these 3 new and unused, should it replace something else?
+    --ui--scrim: #{rgba($neutral--100, 0.6)};
+    --ui--hover-overlay: #{rgba($neutral--100, 0.05)};
+    --ui--active-overlay: #{rgba($neutral--100, 0.075)};
+
+    --text--1: #{$neutral--90};
+    --text--2: #{$neutral--50};
+    --text--3: #{$neutral--40};
+    --text--button-label: #{$neutral--90};
+    --text--button-label--emphasized: #{$neutral--00};
+    --text--button-label--disabled: #{$neutral--40};
+    --text--supply: #{$green--50};
+    --text--supply--deemphasized: #{$green--70};
+    --text--borrow: #{$purple--70};
+    --text--borrow--deemphasized: #{$purple--70};
+    --text--chip--review: #{$blue--50};
+
+    --icon--1: #{$neutral--90};
+    --icon--2: #{$neutral--50};
+    --icon--3: #{$neutral--30};
+    --icon--supply: #{$green--50};
+    --icon--borrow: #{$purple--70};
+
+    --data--supply: #{$green--30};
+    --data--borrow: #{$purple--50};
+    --data--warning: #{$gold--30};
+    --data--caution: #{$red--50};
+    --data--neutral: #{$neutral--100};
+    --data--neutral--1: #{$neutral--60};
+    --data--neutral--2: #{$neutral--30};
+
+    --button--neutral: #{$neutral--20};
+    --button--neutral--disabled--1: #{$neutral--10};
+    --button--neutral--disabled--2: #{$neutral--15};
+    --button--borrow: #{$purple--70};
+    --button--borrow--emphasized: #{$purple--70};
+    --button--borrow--deemphasized: #{$purple--10};
+    --button--supply: #{$green--30};
+    --button--supply--emphasized: #{$green--30};
+    --button--supply--deemphasized: #{$green--10};
+
+    --container--purple: #{$purple--10};
+    --container--gold: #{$gold--10};
+
+    --chip--review: #{$blue--10};
+
+    --action-input--shadow: inset 0 0 0 1px var(--ui--border), 0 -2px 9px rgba(0, 0, 0, 0.03),
+      0 8px 24px rgba(0, 0, 0, 0.03);
+
+    --asset-table--gradient: linear-gradient(90deg, #{rgba($neutral--00, 0.2)} 0%, #{rgba($neutral--00, 1)} 80%);
+
+    --gradient--background-disolve: linear-gradient(
+      180deg,
+      #f0f2f5 0%,
+      rgba(240, 242, 245, 0.991353) 6.67%,
+      rgba(240, 242, 245, 0.96449) 13.33%,
+      rgba(240, 242, 245, 0.91834) 20%,
+      rgba(240, 242, 245, 0.852589) 26.67%,
+      rgba(240, 242, 245, 0.768225) 33.33%,
+      rgba(240, 242, 245, 0.705657) 37.5%,
+      rgba(240, 242, 245, 0.668116) 40%,
+      rgba(240, 242, 245, 0.557309) 46.67%,
+      rgba(240, 242, 245, 0.442691) 53.33%,
+      rgba(240, 242, 245, 0.331884) 60%,
+      rgba(240, 242, 245, 0.231775) 66.67%,
+      rgba(240, 242, 245, 0.147411) 73.33%,
+      rgba(240, 242, 245, 0.0816599) 80%,
+      rgba(240, 242, 245, 0.03551) 86.67%,
+      rgba(240, 242, 245, 0.0086472) 93.33%,
+      rgba(240, 242, 245, 0) 100%
+    );
+
+    @include extension-icons-urls('light');
+  }
+
+  background-color: var(--ui--background);
+
+  .text-color {
+    &--1 {
+      color: var(--text--1);
+    }
+
+    &--2 {
+      color: var(--text--2);
+    }
+
+    &--3 {
+      color: var(--text--3);
+    }
+
+    &--button-label {
+      color: var(--text--button-label);
+    }
+
+    &--button-label--disabled {
+      color: var(--text--button-label--disabled);
+    }
+
+    &--borrow {
+      color: var(--text--borrow);
+    }
+
+    &--caution {
+      color: var(--data--caution);
+    }
+
+    &--supply {
+      color: var(--text--supply);
+    }
+
+    &--warning {
+      color: var(--text--warning);
+    }
+  }
+}

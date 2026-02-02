@@ -1,0 +1,35 @@
+@use '../abstracts/variables' as *;
+
+.extension-icon {
+  width: 4rem;
+  height: 4rem;
+  background-size: cover;
+
+  // default icon to use if none exists.
+  background-image: var(--extension-icon-url-default);
+
+  &--comet_migrator {
+    @extend .extension-icon;
+    background-image: var(--extension-icon-url-comet_migrator);
+  }
+
+  &--comp_vote {
+    @extend .extension-icon;
+    background-image: var(--extension-icon-url-comp_vote);
+  }
+
+  &--defisaver {
+    @extend .extension-icon;
+    background-image: var(--extension-icon-url-defisaver);
+  }
+
+  &--collateral_swap {
+    @extend .extension-icon;
+    background-image: var(--extension-icon-url-collateral_swap);
+  }
+
+  &--bulker {
+    @extend .extension-icon;
+    background-image: var(--extension-icon-url-bulker);
+  }
+}

@@ -1,0 +1,38 @@
+.icon-pair {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+
+  &__item {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  &__item:first-child {
+    margin-right: -0.5rem;
+  }
+
+  &--reverse-draw {
+    .icon-pair__item:first-child {
+      width: calc(2.25rem + 4px);
+      height: calc(2.25rem + 4px);
+      border-radius: 50%;
+      border: 2px solid var(--ui--background);
+      background-color: var(--ui--background);
+      z-index: 1;
+    }
+
+    .icon-pair__item:nth-child(2) {
+      z-index: 0;
+    }
+  }
+}
+
+.icon {
+  display: flex;
+  vertical-align: top;
+  flex-wrap: nowrap;
+  &--centered {
+    align-items: center;
+  }
+}

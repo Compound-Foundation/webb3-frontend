@@ -1,0 +1,88 @@
+@use '../abstracts/variables' as *;
+
+.net-rates-graph {
+  opacity: 1;
+  transition: opacity 300ms ease;
+
+  &__earn-group {
+    display: flex;
+    gap: 0.125rem;
+  }
+
+  &__graph {
+    display: flex;
+    flex-direction: column;
+    gap: 0.38rem;
+    min-width: 5.4rem;
+
+    &__row {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+    }
+  }
+
+  &__bar {
+    margin-top: 0.25rem;
+    height: 1.5rem;
+    min-height: 1.5rem;
+    border-radius: 0.25rem;
+
+    &--borrow {
+      background-color: var(--data--borrow);
+    }
+
+    &--supply {
+      background-color: var(--data--supply);
+    }
+
+    &--rewards {
+      background-color: var(--data--warning);
+    }
+  }
+
+  &__reward {
+    height: calc(100% - 0.26rem);
+    box-sizing: content-box;
+    border-radius: 0.1875rem;
+    margin-right: 0.13rem;
+    min-width: 5.8rem;
+    position: relative;
+
+    &--borrow {
+      background-color: var(--container--purple);
+      box-shadow: 0 0 0 2px var(--data--borrow);
+    }
+
+    &--interest {
+      background-color: var(--container--gold);
+      box-shadow: 0 0 0 2px var(--data--warning);
+    }
+
+    &__asset {
+      height: 100%;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 0.25rem;
+
+      &--nested {
+        padding: 0.25rem 0.5rem;
+      }
+
+      .asset {
+        width: 0.75rem;
+        height: 0.75rem;
+      }
+    }
+
+    .line-texture {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 0.1875rem;
+    }
+  }
+}

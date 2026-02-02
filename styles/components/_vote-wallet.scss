@@ -1,0 +1,82 @@
+@use '../abstracts/variables' as *;
+
+.vote-wallet {
+  &__row {
+    padding-top: 0;
+    padding-bottom: 2.5rem;
+
+    &:last-child {
+      padding: 0;
+    }
+
+    .divider {
+      margin: 0;
+    }
+
+    &__bar {
+      padding-top: 1.25rem;
+    }
+
+    &__heading {
+      padding-bottom: 0.75rem;
+    }
+
+    &__button {
+      padding-top: 2.5rem;
+    }
+  }
+
+  .asset {
+    height: 2rem;
+    width: 2rem;
+    min-height: 2rem;
+    min-width: 2rem;
+  }
+
+  .placeholder-content {
+    &__balance {
+      width: 20%;
+    }
+
+    &__label {
+      width: 30%;
+    }
+
+    &__body {
+      width: 60%;
+    }
+  }
+
+  .icon-text-pair {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0;
+  }
+
+  .delegate-row {
+    display: flex;
+    align-items: center;
+
+    &__info {
+      flex-grow: 1;
+    }
+  }
+
+  .setup-voting {
+    &__link {
+      color: var(--icon--supply);
+    }
+  }
+
+  @media (max-width: $device--sm) {
+    &__row {
+      padding-top: 0;
+      padding-bottom: 1.25rem;
+
+      &__button {
+        padding-top: 1.25rem;
+      }
+    }
+  }
+}

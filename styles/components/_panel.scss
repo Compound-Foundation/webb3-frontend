@@ -1,0 +1,81 @@
+@use '../abstracts/variables' as *;
+
+.panel {
+  position: relative;
+  background-color: var(--ui--foreground--1);
+  overflow: hidden;
+  padding: 2.5rem 1.25rem;
+
+  @media (max-width: $device--sm) {
+    padding: 2rem;
+    margin: 0 calc(-50vw + 50% + 0.5rem);
+  }
+
+  &--markets-overview,
+  &--markets-assets {
+    padding: 2.5rem 2.5rem 2rem;
+    color: var(--text--1);
+
+    @media (max-width: $device--sm) {
+      padding: 2rem;
+      margin: -0.5rem -0.75rem;
+    }
+
+    .panel__header-row {
+      justify-content: flex-start;
+      padding: 0;
+      margin: 0 0 0.75rem 0;
+
+      .asset {
+        margin-right: 0.75rem;
+      }
+    }
+  }
+
+  &--markets-assets {
+    padding: 0;
+
+    @media (max-width: $device--sm) {
+      &:after {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        right: 0;
+        width: 2.5rem;
+        background: var(--asset-table--gradient);
+      }
+
+      &__content {
+        padding: 0 2.5rem 0 1.5rem;
+      }
+    }
+  }
+
+  &__header-row {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.875rem;
+    padding: 0 1.25rem;
+  }
+
+  &__description {
+    margin-bottom: 0.875rem;
+    padding: 0 1.25rem;
+  }
+
+  & + & {
+    margin-top: 1.25rem;
+
+    @media (max-width: $device--sm) {
+      margin-top: 0.5rem;
+    }
+  }
+
+  @media (max-width: $device--sm) {
+    .panel--markets-assets__content {
+      overflow: auto;
+    }
+  }
+}

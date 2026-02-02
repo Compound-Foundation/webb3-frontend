@@ -1,0 +1,51 @@
+@use '../abstracts/variables' as *;
+
+.panel-with-header {
+  position: relative;
+  background-color: var(--ui--foreground--2);
+  overflow: hidden;
+  border-radius: 0.5rem;
+  height: fit-content;
+
+  &__header {
+    display: flex;
+    height: 3.5rem;
+    padding: 0rem 2rem;
+    color: var(--text--2);
+    align-items: center;
+
+    &__secondary-text {
+      margin-left: 0.5rem;
+    }
+  }
+
+  &__content {
+    background-color: var(--ui--foreground--1);
+    padding: 1.5rem 2rem 2rem 2rem;
+  }
+
+  // for collateral asset table row we need a diff padding
+  &.assets-table-panel {
+    .panel-with-header__content {
+      padding: 0.75rem 2rem 1.25rem 2rem;
+    }
+  }
+
+  @media (max-width: $device--sm) {
+    margin: -0.25rem -0.75rem;
+
+    &__header {
+      padding: 0rem 1.25rem;
+    }
+
+    &__content {
+      padding: 1.5rem 1.25rem 2rem 1.25rem;
+    }
+
+    &.assets-table-panel {
+      .panel-with-header__content {
+        padding: 0.75rem 1.25rem 1.25rem 0.5rem;
+      }
+    }
+  }
+}

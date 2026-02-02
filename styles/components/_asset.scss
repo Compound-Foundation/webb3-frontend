@@ -1,0 +1,366 @@
+.asset {
+  flex-shrink: 0;
+  display: inline-block;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  border-radius: 50%;
+  width: 2.25rem;
+  height: 2.25rem;
+
+  &--small {
+    height: 1rem;
+    width: 1rem;
+    margin-right: 0.5rem;
+  }
+  &--medium {
+    height: 1.2rem;
+    width: 1.2rem;
+    margin-right: 0.5rem;
+  }
+  &--large {
+    height: 2.25rem;
+    width: 2.25rem;
+    margin-right: 0.5rem;
+  }
+
+  &--AAVE {
+    background-image: url('/images/assets/asset_AAVE.svg');
+  }
+
+  &--AVALANCHE {
+    background-image: url('/images/assets/asset_AVALANCHE.svg');
+  }
+
+  &--AXS {
+    background-image: url('/images/assets/asset_AXS.png');
+  }
+
+  &--cbETH {
+    background-image: url('/images/assets/asset_cbETH.svg');
+  }
+
+  &--cbBTC {
+    background-image: url('/images/assets/asset_cbBTC.svg');
+  }
+
+  &--COMPOUND {
+    background-image: url('/images/assets/asset_COMPOUND.svg');
+  }
+
+  &--FEI {
+    background-image: url('/images/assets/asset_FEI.svg');
+  }
+
+  &--BAT {
+    background-image: url('/images/assets/asset_BAT.svg');
+  }
+
+  &--COMP {
+    background-image: url('/images/assets/asset_COMP.svg');
+  }
+
+  &--DAI {
+    background-image: url('/images/assets/asset_DAI.svg');
+  }
+
+  &--ETH,
+  &--WETH {
+    background-image: url('/images/assets/asset_WETH.svg');
+  }
+
+  &--ETHEREUM {
+    background-image: url('/images/assets/asset_ETHEREUM.svg');
+  }
+
+  &--LBTC {
+    background-image: url('/images/assets/asset_LBTC.png');
+  }
+
+  &--LINK {
+    background-image: url('/images/assets/asset_LINK.svg');
+  }
+
+  &--LIQUIDATE {
+    background-image: url('/images/assets/asset_LIQUIDATE.svg');
+  }
+
+  &--MKR {
+    background-image: url('/images/assets/asset_MKR.svg');
+  }
+
+  &--pumpBTC {
+    background-image: url('/images/assets/asset_PUMPBTC.png');
+  }
+
+  &--REP {
+    background-image: url('/images/assets/asset_REP.svg');
+  }
+
+  &--RON {
+    background-image: url('/images/assets/asset_RON.png');
+  }
+
+  &--rETH {
+    background-image: url('/images/assets/asset_rETH.svg');
+  }
+
+  &--rsETH,
+  &--wrsETH {
+    background-image: url('/images/assets/asset_rsETH.svg');
+  }
+
+  &--osETH {
+    background-image: url('/images/assets/asset_osETH.svg');
+  }
+
+  &--ezETH {
+    background-image: url('/images/assets/asset_ezETH.svg');
+  }
+
+  &--rswETH {
+    background-image: url('/images/assets/asset_rswETH.svg');
+  }
+
+  &--SAI {
+    background-image: url('/images/assets/asset_SAI.svg');
+  }
+
+  &--SKY {
+    background-image: url('/images/assets/asset_SKY.svg');
+  }
+
+  &--stETH {
+    background-image: url('/images/assets/asset_stETH.svg');
+  }
+
+  &--wstETH {
+    background-image: url('/images/assets/asset_wstETH.svg');
+  }
+
+  &--SUSHI {
+    background-image: url('/images/assets/asset_SUSHI.svg');
+  }
+
+  &--TESTNET {
+    background-image: url('/images/assets/asset_TESTNET.svg');
+  }
+
+  &--TUSD {
+    background-image: url('/images/assets/asset_TUSD.svg');
+  }
+
+  &--UNI {
+    background-image: url('/images/assets/asset_UNI.svg');
+  }
+
+  &--USDC,
+  &--USDbC {
+    background-image: url('/images/assets/asset_USDC.svg');
+  }
+
+  &--USDP {
+    background-image: url('/images/assets/asset_USDP.svg');
+  }
+
+  &--USDT {
+    background-image: url('/images/assets/asset_USDT.svg');
+  }
+
+  &--USDS {
+    background-image: url('/images/assets/asset_USDS.svg');
+  }
+
+  &--sUSDS {
+    background-image: url('/images/assets/asset_sUSDS.svg');
+  }
+
+  &--USDe {
+    background-image: url('/images/assets/asset_USDe.svg');
+  }
+
+  &--USDTugrik0 {
+    background-image: url('/images/assets/asset_USDTugrik0.png');
+  }
+
+  &--WBTC,
+  &--WBTC2 {
+    background-image: url('/images/assets/asset_BTC.svg');
+  }
+
+  &--tBTC {
+    background-image: url('/images/assets/asset_tBTC.svg');
+  }
+
+  &--wUSDM {
+    background-image: url('/images/assets/asset_wUSDM.svg');
+  }
+
+  &--weETH {
+    background-image: url('/images/assets/asset_weETH.svg');
+  }
+
+  &--sFRAX {
+    background-image: url('/images/assets/asset_sFRAX.png');
+  }
+
+  &--ETHx {
+    background-image: url('/images/assets/asset_ETHx.png');
+  }
+
+  &--wsuperOETHb {
+    background-image: url('/images/assets/wsuperOETHb.png');
+  }
+
+  &--YFI {
+    background-image: url('/images/assets/asset_YFI.svg');
+  }
+
+  &--ZRX {
+    background-image: url('/images/assets/asset_ZRX.svg');
+  }
+  &--V2 {
+    background-image: url('/images/assets/asset_V2.svg');
+  }
+
+  &--POL,
+  &--WPOL,
+  &--WMATIC {
+    background-image: url('/images/assets/asset_MATIC.svg');
+  }
+
+  &--POLYGON {
+    background-image: url('/images/assets/asset_POLYGON.svg');
+  }
+
+  &--MaticX {
+    background-image: url('/images/assets/asset_MATICX.svg');
+  }
+
+  &--stMATIC {
+    background-image: url('/images/assets/asset_STMATIC.svg');
+  }
+
+  &--OPTIMISM,
+  &--OP {
+    background-image: url('/images/assets/asset_OPTIMISM.svg');
+  }
+
+  &--ARB {
+    background-image: url('/images/assets/asset_ARBITRUM.svg');
+  }
+
+  &--AERO {
+    background-image: url('/images/assets/asset_AERO.svg');
+  }
+
+  &--ARBITRUM-NETWORK {
+    background-image: url('/images/assets/asset_ARBITRUM-NETWORK.svg');
+  }
+
+  &--GMX {
+    background-image: url('/images/assets/asset_GMX.svg');
+  }
+
+  &--mETH {
+    background-image: url('/images/assets/asset_mETH.png');
+  }
+
+  &--tETH {
+    background-image: url('/images/assets/asset_tETH.svg');
+  }
+
+  &--FBTC {
+    background-image: url('/images/assets/asset_FBTC.png');
+  }
+
+  &--WRON {
+    background-image: url('/images/assets/asset_WRON.png');
+  }
+
+  &--BASE-NETWORK {
+    background-image: url('/images/assets/asset_BASE_NETWORK.svg');
+  }
+
+  &--SCROLL-NETWORK {
+    background-image: url('/images/assets/asset_SCROLL_NETWORK.svg');
+  }
+
+  &--OPTIMISM-NETWORK {
+    background-image: url('/images/assets/asset_OPTIMISM_NETWORK.svg');
+  }
+
+  &--LINEA-NETWORK {
+    background-image: url('/images/assets/asset_LINEA.svg');
+  }
+
+  &--MANTLE-NETWORK {
+    background-image: url('/images/assets/asset_MANTLE_NETWORK.svg');
+  }
+
+  &--UNICHAIN-NETWORK {
+    background-image: url('/images/assets/asset_UNICHAIN.svg');
+  }
+
+  &--RONIN-NETWORK {
+    background-image: url('/images/assets/asset_RONINCHAIN.svg');
+  }
+  
+  &--sdeUSD {
+    background-image: url('/images/assets/asset_sdeUSD.svg');
+  }
+
+  &--deUSD {
+    background-image: url('/images/assets/asset_deUSD.svg');
+  }
+
+  &--pufETH {
+    background-image: url('/images/assets/asset_pufETH.png');
+  }
+
+  &--wOETH {
+    background-image: url('/images/assets/asset_wOETH.svg');
+  }
+}
+
+.theme--light {
+  .asset--ETHEREUM {
+    background-image: url('/images/assets/asset_ETHEREUM_light.svg');
+  }
+
+  .asset--POLYGON {
+    background-image: url('/images/assets/asset_POLYGON_light.svg');
+  }
+
+  .asset--BASE-NETWORK {
+    background-image: url('/images/assets/asset_BASE_NETWORK_light.svg');
+  }
+
+  .asset--SCROLL-NETWORK {
+    background-image: url('/images/assets/asset_SCROLL_NETWORK_light.svg');
+  }
+
+  .asset--OPTIMISM-NETWORK {
+    background-image: url('/images/assets/asset_OPTIMISM_NETWORK_light.svg');
+  }
+
+  .asset--ARBITRUM-NETWORK {
+    background-image: url('/images/assets/asset_ARBITRUM-NETWORK_light.svg');
+  }
+
+  .asset--MANTLE-NETWORK {
+    background-image: url('/images/assets/asset_MANTLE_NETWORK_light.svg');
+  }
+
+  .asset--LINEA-NETWORK {
+    background-image: url('/images/assets/asset_LINEA_light.svg');
+  }
+
+  .asset--UNICHAIN-NETWORK {
+    background-image: url('/images/assets/asset_UNICHAIN_light.svg');
+  }
+
+  .asset--RONIN-NETWORK {
+    background-image: url('/images/assets/asset_RONINCHAIN_light.svg');
+  }
+}

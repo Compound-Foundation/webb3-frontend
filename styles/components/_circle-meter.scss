@@ -1,0 +1,36 @@
+@use '../abstracts/variables' as *;
+
+.circle-meter {
+  width: 19px;
+  height: 19px;
+
+  svg {
+    margin: 0 auto;
+    display: block;
+  }
+  @keyframes progress {
+    0% {
+      stroke-dasharray: 0 100;
+    }
+  }
+
+  &__bg {
+    fill: none;
+    stroke: var(--data--neutral--2);
+    stroke-width: 3px;
+  }
+
+  &__circle {
+    stroke: $green--30;
+    fill: none;
+    stroke-width: 3px;
+    stroke-linecap: round;
+    animation: progress 1s ease-out forwards;
+  }
+}
+
+@keyframes progress {
+  0% {
+    stroke-dasharray: 0 100;
+  }
+}

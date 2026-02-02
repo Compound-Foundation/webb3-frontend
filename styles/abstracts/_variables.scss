@@ -1,0 +1,11 @@
+@use '/node_modules/compound-styles/scss/abstracts/variables' as *;
+@forward '/node_modules/compound-styles/scss/abstracts/variables';
+
+$device--sm: 70rem;
+$device--lg: 82rem;
+$actions-width: 7.25rem;
+$header-button-height: 2.75rem;
+
+$color--ethereum: $green--50;
+$color--rinkeby: #eec55c;
+$color--ropsten: #ec598d;

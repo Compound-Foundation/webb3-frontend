@@ -1,0 +1,3152 @@
+[
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.05522336415504",
+    "supply_apr": "0.050513680374192",
+    "total_borrow_value": "395512106.3547642025284",
+    "total_supply_value": "406084295.2253218243986",
+    "total_collateral_value": "731922726.23266307211819654401269696",
+    "utilization": "973965368980013646",
+    "base_usd_price": "1.0001326",
+    "timestamp": 1691593703,
+    "date": "2023-08-09"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.055836397788624",
+    "supply_apr": "0.051335383304736",
+    "total_borrow_value": "395774365.3164781106262",
+    "total_supply_value": "405902865.80120178852384",
+    "total_collateral_value": "731113936.32722238241608619854154685",
+    "utilization": "975046557030260433",
+    "base_usd_price": "1.00029938",
+    "timestamp": 1691680103,
+    "date": "2023-08-10"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.067151918091744",
+    "supply_apr": "0.066502571006448",
+    "total_borrow_value": "396280721.61145355479797",
+    "total_supply_value": "398270698.97398202544642",
+    "total_collateral_value": "729578983.767595296083319934593928",
+    "utilization": "995003382988513511",
+    "base_usd_price": "1.00001281",
+    "timestamp": 1691766503,
+    "date": "2023-08-11"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.059568658695936",
+    "supply_apr": "0.056338061092128",
+    "total_borrow_value": "393724570.494731713407",
+    "total_supply_value": "401092937.015502190693",
+    "total_collateral_value": "727435372.97317390185317916665605209",
+    "utilization": "981629027805365209",
+    "base_usd_price": "0.999941",
+    "timestamp": 1691852903,
+    "date": "2023-08-12"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.05320641446856",
+    "supply_apr": "0.047810185219008",
+    "total_borrow_value": "393907411.66199284862",
+    "total_supply_value": "405919241.6093521899192",
+    "total_collateral_value": "728035081.901749941844989406809006",
+    "utilization": "970408138500777185",
+    "base_usd_price": "1.0001992",
+    "timestamp": 1691939315,
+    "date": "2023-08-13"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.05117314379832",
+    "supply_apr": "0.04508481357216",
+    "total_borrow_value": "394494161.281467645326",
+    "total_supply_value": "408031764.205567953488",
+    "total_collateral_value": "724147084.63720472522899369779004028",
+    "utilization": "966822123207535205",
+    "base_usd_price": "1.000361",
+    "timestamp": 1692025715,
+    "date": "2023-08-14"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.054557168961744",
+    "supply_apr": "0.049620720306384",
+    "total_borrow_value": "397117478.9076513835586",
+    "total_supply_value": "408224938.0631426115048",
+    "total_collateral_value": "736123235.881930529822003489984114",
+    "utilization": "972790421532111675",
+    "base_usd_price": "0.9999094",
+    "timestamp": 1692112115,
+    "date": "2023-08-15"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.052396468821072",
+    "supply_apr": "0.046724543786304",
+    "total_borrow_value": "394618302.42851715756",
+    "total_supply_value": "407251285.13395136488",
+    "total_collateral_value": "720726230.12228139330176893437040694",
+    "utilization": "968979662940274748",
+    "base_usd_price": "0.99994",
+    "timestamp": 1692198515,
+    "date": "2023-08-16"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.04692802686192",
+    "supply_apr": "0.039394709736336",
+    "total_borrow_value": "390699355.31504503312016",
+    "total_supply_value": "407260212.72492466110816",
+    "total_collateral_value": "701801030.17241214381519525626167",
+    "utilization": "959335144460134470",
+    "base_usd_price": "1.00003772",
+    "timestamp": 1692284927,
+    "date": "2023-08-17"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.038438101348128",
+    "supply_apr": "0.029035899304272",
+    "total_borrow_value": "347714632.77070308618237",
+    "total_supply_value": "407161363.85362747811394",
+    "total_collateral_value": "606599641.05159406109553918185899448",
+    "utilization": "853997039137515104",
+    "base_usd_price": "0.99995969",
+    "timestamp": 1692371327,
+    "date": "2023-08-18"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.038230613389728",
+    "supply_apr": "0.028824049727856",
+    "total_borrow_value": "298525035.359435188316",
+    "total_supply_value": "352131271.141795383666",
+    "total_collateral_value": "544272840.6322156056890774114917961",
+    "utilization": "847766169018319589",
+    "base_usd_price": "0.999997",
+    "timestamp": 1692457727,
+    "date": "2023-08-19"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.037794137678784",
+    "supply_apr": "0.028378398838464",
+    "total_borrow_value": "262087912.334621140568",
+    "total_supply_value": "314006029.251405875513",
+    "total_collateral_value": "494955923.35455551555096567298766752",
+    "utilization": "834658790597025651",
+    "base_usd_price": "1.00011425",
+    "timestamp": 1692544127,
+    "date": "2023-08-20"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.037930773705984",
+    "supply_apr": "0.028517907101472",
+    "total_borrow_value": "261141820.91563983915",
+    "total_supply_value": "311341883.71013167523",
+    "total_collateral_value": "496759969.48935439600876375575190086",
+    "utilization": "838761974075512820",
+    "base_usd_price": "1.000105",
+    "timestamp": 1692630539,
+    "date": "2023-08-21"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.039424978209888",
+    "supply_apr": "0.030043521303696",
+    "total_borrow_value": "266959506.807831933735",
+    "total_supply_value": "302115816.171583434747",
+    "total_collateral_value": "506310638.54344992580571431843282",
+    "utilization": "883632980778011944",
+    "base_usd_price": "0.999997",
+    "timestamp": 1692716939,
+    "date": "2023-08-22"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.039304766730672",
+    "supply_apr": "0.0299207828448",
+    "total_borrow_value": "266877509.25246110784955",
+    "total_supply_value": "303261792.85780511320968",
+    "total_collateral_value": "492519876.85420872400029163594326464",
+    "utilization": "880023025902433493",
+    "base_usd_price": "1.00002433",
+    "timestamp": 1692803339,
+    "date": "2023-08-23"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.039210089540688",
+    "supply_apr": "0.029824115480928",
+    "total_borrow_value": "270206546.97915299070023",
+    "total_supply_value": "308039589.28682216661251",
+    "total_collateral_value": "507804542.9813334025104241628992182",
+    "utilization": "877179867839831647",
+    "base_usd_price": "1.00007179",
+    "timestamp": 1692889739,
+    "date": "2023-08-24"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.037660839737184",
+    "supply_apr": "0.028242298828656",
+    "total_borrow_value": "272296813.684056776004",
+    "total_supply_value": "327809372.571878549202",
+    "total_collateral_value": "505620389.40791621107483468680723348",
+    "utilization": "830655849039211262",
+    "base_usd_price": "1.000086",
+    "timestamp": 1692976151,
+    "date": "2023-08-25"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.037622651501808",
+    "supply_apr": "0.028203307875936",
+    "total_borrow_value": "272148191.54951671089045",
+    "total_supply_value": "328083139.1612907832653",
+    "total_collateral_value": "505222232.17701464500854839951866039",
+    "utilization": "829509055861201480",
+    "base_usd_price": "1.00002195",
+    "timestamp": 1693062551,
+    "date": "2023-08-26"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.038010190436352",
+    "supply_apr": "0.028598993253072",
+    "total_borrow_value": "272708805.4225851133715",
+    "total_supply_value": "324209975.0700402523955",
+    "total_collateral_value": "504892664.654490813140324193119835",
+    "utilization": "841146861086363967",
+    "base_usd_price": "1.0002155",
+    "timestamp": 1693148951,
+    "date": "2023-08-27"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.038072786053536",
+    "supply_apr": "0.02866290467832",
+    "total_borrow_value": "272692219.539107505933",
+    "total_supply_value": "323467611.325467700608",
+    "total_collateral_value": "506227243.42131801970615308866150632",
+    "utilization": "843026609292551145",
+    "base_usd_price": "1.000173",
+    "timestamp": 1693235351,
+    "date": "2023-08-28"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.03803273593272",
+    "supply_apr": "0.028622012672448",
+    "total_borrow_value": "272270488.028481889344",
+    "total_supply_value": "323428481.819235807936",
+    "total_collateral_value": "504112336.48023618199437356036867",
+    "utilization": "841823903272960067",
+    "base_usd_price": "1.000128",
+    "timestamp": 1693321751,
+    "date": "2023-08-29"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.038940346207008",
+    "supply_apr": "0.029548701848304",
+    "total_borrow_value": "278258751.717457287568",
+    "total_supply_value": "320176334.569522639395",
+    "total_collateral_value": "546919608.99521230709908525990680607",
+    "utilization": "869079466805002306",
+    "base_usd_price": "1.000109",
+    "timestamp": 1693408151,
+    "date": "2023-08-30"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.039218884804944",
+    "supply_apr": "0.029833095609216",
+    "total_borrow_value": "280129710.6486379690713",
+    "total_supply_value": "319256427.7712445660895",
+    "total_collateral_value": "539341355.80138411311870124975696669",
+    "utilization": "877443989360056330",
+    "base_usd_price": "1.00006415",
+    "timestamp": 1693494575,
+    "date": "2023-08-31"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.039459251313936",
+    "supply_apr": "0.0300785148792",
+    "total_borrow_value": "282661344.293623",
+    "total_supply_value": "319513177.309459",
+    "total_collateral_value": "527876278.19053888973268591603975002",
+    "utilization": "884662202884589314",
+    "base_usd_price": "1.0",
+    "timestamp": 1693580975,
+    "date": "2023-09-01"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.039370213202256",
+    "supply_apr": "0.02998760510592",
+    "total_borrow_value": "281231198.0012898068433",
+    "total_supply_value": "318860417.41025705741298",
+    "total_collateral_value": "521307407.24647240272889761620589586",
+    "utilization": "881988386117579049",
+    "base_usd_price": "1.00006557",
+    "timestamp": 1693667375,
+    "date": "2023-09-02"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.039438164641392",
+    "supply_apr": "0.03005698493664",
+    "total_borrow_value": "281502721.79843097991262",
+    "total_supply_value": "318431529.24743367408926",
+    "total_collateral_value": "527782011.67627563212495469029874745",
+    "utilization": "884028969561219253",
+    "base_usd_price": "1.00018459",
+    "timestamp": 1693753775,
+    "date": "2023-09-03"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.039568832701344",
+    "supply_apr": "0.030190399782192",
+    "total_borrow_value": "281174353.2717114457369",
+    "total_supply_value": "316654351.07271328019101",
+    "total_collateral_value": "530097684.5197637735723408323594287",
+    "utilization": "887952935634879379",
+    "base_usd_price": "1.00013747",
+    "timestamp": 1693840175,
+    "date": "2023-09-04"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.039732436392048",
+    "supply_apr": "0.030357442568304",
+    "total_borrow_value": "281103329.92330663202554",
+    "total_supply_value": "314832408.55790922396523",
+    "total_collateral_value": "529327017.1182023796157018037038095",
+    "utilization": "892865959014267407",
+    "base_usd_price": "0.99996917",
+    "timestamp": 1693926575,
+    "date": "2023-09-05"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.039735246344256",
+    "supply_apr": "0.030360311618976",
+    "total_borrow_value": "281704726.95981651960579",
+    "total_supply_value": "315475819.01412455476621",
+    "total_collateral_value": "529132214.05752278393040293411356274",
+    "utilization": "892950342299553606",
+    "base_usd_price": "0.99994253",
+    "timestamp": 1694012975,
+    "date": "2023-09-06"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+    },
+    "borrow_apr": "0.040201180873488",
+    "supply_apr": "0.030836040536016",
+    "total_borrow_value": "285023684.52920875623012",
+    "total_supply_value": "314268639.16176591114735",
+    "total_collateral_value": "535146819.2700410921896769451700177",
+    "utilization": "906942369819992364",
+    "base_usd_price": "0.99993411",
+    "timestamp": 1694099375,
+    "date": "2023-09-07"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.034718343581808",
+    "supply_apr": "0.013596074557056",
+    "total_borrow_value": "24225.03637545201205989",
+    "total_supply_value": "50570.450065634725660895",
+    "total_collateral_value": "35124.82535160913772949344291778",
+    "utilization": "479031885129459126",
+    "base_usd_price": "1855.65548",
+    "timestamp": 1691593703,
+    "date": "2023-08-09"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.033906739487616",
+    "supply_apr": "0.01315064728944",
+    "total_borrow_value": "23071.076753108986757671",
+    "total_supply_value": "49793.127044257387817872",
+    "total_collateral_value": "33298.19605372583398542248750934",
+    "utilization": "463338100100844192",
+    "base_usd_price": "1855.27271869",
+    "timestamp": 1691680103,
+    "date": "2023-08-10"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.034713825419088",
+    "supply_apr": "0.013593594881376",
+    "total_borrow_value": "23876.023376623429900237",
+    "total_supply_value": "49850.92618871164206406",
+    "total_collateral_value": "33164.8408122902798486203005915",
+    "utilization": "478944518716482806",
+    "base_usd_price": "1851.1597955",
+    "timestamp": 1691766503,
+    "date": "2023-08-11"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.04366082535984",
+    "supply_apr": "0.018503917442928",
+    "total_borrow_value": "25584.535670545055104391",
+    "total_supply_value": "39243.036026411421556767",
+    "total_collateral_value": "35170.78679676085785994611123867",
+    "utilization": "651950415133804881",
+    "base_usd_price": "1845.4751",
+    "timestamp": 1691852903,
+    "date": "2023-08-12"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.040757817700656",
+    "supply_apr": "0.016910679019104",
+    "total_borrow_value": "23850.785332396484694969",
+    "total_supply_value": "40030.454452790239863449",
+    "total_collateral_value": "33082.82790108882064578941961416",
+    "utilization": "595815683064002518",
+    "base_usd_price": "1848.88214",
+    "timestamp": 1691939303,
+    "date": "2023-08-13"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.043334648448768",
+    "supply_apr": "0.018324903938112",
+    "total_borrow_value": "22997.679828667537618612",
+    "total_supply_value": "35619.775374178058418627",
+    "total_collateral_value": "29817.73088533436219436705159552",
+    "utilization": "645643214133955522",
+    "base_usd_price": "1838.05958915",
+    "timestamp": 1692025703,
+    "date": "2023-08-14"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.039566839090032",
+    "supply_apr": "0.0162570421548",
+    "total_borrow_value": "20170.867061291525064612",
+    "total_supply_value": "35214.413593474390279557",
+    "total_collateral_value": "26759.1414071359105509952727009",
+    "utilization": "572786027995604377",
+    "base_usd_price": "1844.12",
+    "timestamp": 1692112103,
+    "date": "2023-08-15"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.035622717694848",
+    "supply_apr": "0.014092416223632",
+    "total_borrow_value": "17455.862798664389125298",
+    "total_supply_value": "35155.798690013821117317",
+    "total_collateral_value": "23625.68849302206614715366750441",
+    "utilization": "496519541204043026",
+    "base_usd_price": "1827.39",
+    "timestamp": 1692198515,
+    "date": "2023-08-16"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.036243162256896",
+    "supply_apr": "0.014432930661744",
+    "total_borrow_value": "17878.105866779294321802",
+    "total_supply_value": "35157.099846358855884884",
+    "total_collateral_value": "24103.24513639982605542377435169",
+    "utilization": "508516921873501318",
+    "base_usd_price": "1808.62",
+    "timestamp": 1692284915,
+    "date": "2023-08-17"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.039055955606208",
+    "supply_apr": "0.015976657376352",
+    "total_borrow_value": "19790.340334893933820604",
+    "total_supply_value": "35157.13794617276169088",
+    "total_collateral_value": "26329.57400553180873470189446492",
+    "utilization": "562907202312879334",
+    "base_usd_price": "1639.66",
+    "timestamp": 1692371315,
+    "date": "2023-08-18"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.039542654793888",
+    "supply_apr": "0.016243769251584",
+    "total_borrow_value": "20125.081131725112923546",
+    "total_supply_value": "35163.817777492389703643",
+    "total_collateral_value": "26408.12021094712430776159469185",
+    "utilization": "572318382783366945",
+    "base_usd_price": "1662.91",
+    "timestamp": 1692457715,
+    "date": "2023-08-19"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.036174998138976",
+    "supply_apr": "0.014395520608704",
+    "total_borrow_value": "17856.392427833485264612",
+    "total_supply_value": "35205.519563469346465408",
+    "total_collateral_value": "23829.01236419688853332290517791",
+    "utilization": "507198849418009804",
+    "base_usd_price": "1670.547712",
+    "timestamp": 1692544115,
+    "date": "2023-08-20"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.035401453518672",
+    "supply_apr": "0.01397098127376",
+    "total_borrow_value": "17881.1484617561324229",
+    "total_supply_value": "36325.948514433123421627",
+    "total_collateral_value": "23827.85712977518816764321954645",
+    "utilization": "492241011264538896",
+    "base_usd_price": "1688.99",
+    "timestamp": 1692630515,
+    "date": "2023-08-21"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.0371377641204",
+    "supply_apr": "0.014923909063872",
+    "total_borrow_value": "18502.960701967647399403",
+    "total_supply_value": "35189.000930264865261888",
+    "total_collateral_value": "23835.73165504421080093074910962",
+    "utilization": "525815614205717897",
+    "base_usd_price": "1672.2891",
+    "timestamp": 1692716927,
+    "date": "2023-08-22"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.028354327535808",
+    "supply_apr": "0.014121485067744",
+    "total_borrow_value": "18070.537758125313256636",
+    "total_supply_value": "36319.461686191759921223",
+    "total_collateral_value": "23866.23237941214719941865463412",
+    "utilization": "497543727214975141",
+    "base_usd_price": "1628.87",
+    "timestamp": 1692803327,
+    "date": "2023-08-23"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.03042671394672",
+    "supply_apr": "0.015711195874608",
+    "total_borrow_value": "19471.707532984806091561",
+    "total_supply_value": "35175.673949981865640032",
+    "total_collateral_value": "25724.59984729618829787126911282",
+    "utilization": "553554170748320385",
+    "base_usd_price": "1685.645",
+    "timestamp": 1692889727,
+    "date": "2023-08-24"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.028246058771328",
+    "supply_apr": "0.01403843299344",
+    "total_borrow_value": "17448.843276351047707038",
+    "total_supply_value": "35277.354677279987163906",
+    "total_collateral_value": "23388.44658838972119713940724982",
+    "utilization": "494617544950519490",
+    "base_usd_price": "1644.87202551",
+    "timestamp": 1692976127,
+    "date": "2023-08-25"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.028223947809504",
+    "supply_apr": "0.01402147182888",
+    "total_borrow_value": "17447.43095178890547984",
+    "total_supply_value": "35317.048899389915510508",
+    "total_collateral_value": "23388.25416970052186372821590044",
+    "utilization": "494019950851101374",
+    "base_usd_price": "1645.73",
+    "timestamp": 1693062527,
+    "date": "2023-08-26"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.028643843184624",
+    "supply_apr": "0.014343570157536",
+    "total_borrow_value": "17848.783862717243761399",
+    "total_supply_value": "35318.303492387219905632",
+    "total_collateral_value": "23931.1188979582379333613400087",
+    "utilization": "505368474379883148",
+    "base_usd_price": "1645.6384",
+    "timestamp": 1693148927,
+    "date": "2023-08-27"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.029999226815712",
+    "supply_apr": "0.015383273982048",
+    "total_borrow_value": "19143.729776824226027795",
+    "total_supply_value": "35320.212276383250252021",
+    "total_collateral_value": "25477.19014633197991834803895864",
+    "utilization": "542000464448811606",
+    "base_usd_price": "1654.49615745",
+    "timestamp": 1693235327,
+    "date": "2023-08-28"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.027272270295648",
+    "supply_apr": "0.013291447740048",
+    "total_borrow_value": "17875.908232901825558326",
+    "total_supply_value": "38171.657565779427830166",
+    "total_collateral_value": "23875.77067005190545738572779983",
+    "utilization": "468298937029923494",
+    "base_usd_price": "1645.53",
+    "timestamp": 1693321739,
+    "date": "2023-08-29"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.027280551996144",
+    "supply_apr": "0.01329780057264",
+    "total_borrow_value": "17880.910691944084157638",
+    "total_supply_value": "38163.991748552078827015",
+    "total_collateral_value": "23885.64006311584582406252575549",
+    "utilization": "468522766988901418",
+    "base_usd_price": "1737.4309",
+    "timestamp": 1693408139,
+    "date": "2023-08-30"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.027279257411808",
+    "supply_apr": "0.013296807504",
+    "total_borrow_value": "17882.255344808888438285",
+    "total_supply_value": "38169.902078601098006666",
+    "total_collateral_value": "23900.3654803383164908802848878",
+    "utilization": "468487777993471846",
+    "base_usd_price": "1702.19",
+    "timestamp": 1693494539,
+    "date": "2023-08-31"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.029316452232672",
+    "supply_apr": "0.014859523116432",
+    "total_borrow_value": "19985.038582067886878015",
+    "total_supply_value": "38172.330962782160045358",
+    "total_collateral_value": "26221.19668925525602881654567369",
+    "utilization": "523547097386905066",
+    "base_usd_price": "1655.50407",
+    "timestamp": 1693580939,
+    "date": "2023-09-01"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.030431705180976",
+    "supply_apr": "0.015715024628832",
+    "total_borrow_value": "21251.18084524057829035",
+    "total_supply_value": "38380.878328235087437795",
+    "total_collateral_value": "27819.83486246368576421051686077",
+    "utilization": "553689069007468506",
+    "base_usd_price": "1619.9",
+    "timestamp": 1693667339,
+    "date": "2023-09-02"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.028805698645632",
+    "supply_apr": "0.014467728177936",
+    "total_borrow_value": "19565.256058321057572209",
+    "total_supply_value": "38382.481390951647603061",
+    "total_collateral_value": "26216.93002060218477056470460286",
+    "utilization": "509742946638658394",
+    "base_usd_price": "1632.155",
+    "timestamp": 1693753739,
+    "date": "2023-09-03"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.027985940855568",
+    "supply_apr": "0.013838898634992",
+    "total_borrow_value": "17594.299195708321433389",
+    "total_supply_value": "36084.314511878552147812",
+    "total_collateral_value": "26343.60096933325174757442705954",
+    "utilization": "487587330501819352",
+    "base_usd_price": "1636.8339",
+    "timestamp": 1693840139,
+    "date": "2023-09-04"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.02981824164864",
+    "supply_apr": "0.015244441724736",
+    "total_borrow_value": "19435.673800196505322912",
+    "total_supply_value": "36185.663307090486650782",
+    "total_collateral_value": "26134.99252688130181120979606372",
+    "utilization": "537108973755367001",
+    "base_usd_price": "1630.48170124",
+    "timestamp": 1693926551,
+    "date": "2023-09-05"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.032960830002768",
+    "supply_apr": "0.017655095759904",
+    "total_borrow_value": "22497.72956534291652901",
+    "total_supply_value": "36167.24611004957064293",
+    "total_collateral_value": "29625.12067484391950274979792351",
+    "utilization": "622043793905909489",
+    "base_usd_price": "1635.88171",
+    "timestamp": 1694012951,
+    "date": "2023-09-06"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+    },
+    "borrow_apr": "0.033898024514016",
+    "supply_apr": "0.018374010062832",
+    "total_borrow_value": "23437.531576900406067212",
+    "total_supply_value": "36203.89821937278045416",
+    "total_collateral_value": "30855.66024911104200865630618278",
+    "utilization": "647373375204769162",
+    "base_usd_price": "1643.71",
+    "timestamp": 1694099351,
+    "date": "2023-09-07"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.041392626689952",
+    "supply_apr": "0.024507439102656",
+    "total_borrow_value": "16061067.76448532279576",
+    "total_supply_value": "21299026.53221529016684",
+    "total_collateral_value": "31789059.5106919367535277775801237",
+    "utilization": "754075049973766823",
+    "base_usd_price": "1.00001438",
+    "timestamp": 1691593703,
+    "date": "2023-08-09"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.042362082655344",
+    "supply_apr": "0.025407648193104",
+    "total_borrow_value": "15729639.1713987045884",
+    "total_supply_value": "20120439.69487652338407",
+    "total_collateral_value": "31538327.3181054061771834220949176",
+    "utilization": "781773791307848844",
+    "base_usd_price": "1.00012289",
+    "timestamp": 1691680103,
+    "date": "2023-08-10"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.041162325809904",
+    "supply_apr": "0.02429358825168",
+    "total_borrow_value": "15731774.2231064007075",
+    "total_supply_value": "21045984.13038781759275",
+    "total_collateral_value": "31485889.84359177565316234368716213",
+    "utilization": "747495024195706470",
+    "base_usd_price": "1.00010025",
+    "timestamp": 1691766503,
+    "date": "2023-08-11"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.041570678441376",
+    "supply_apr": "0.02467277285832",
+    "total_borrow_value": "15729084.3337905495486",
+    "total_supply_value": "20718976.6868735020104",
+    "total_collateral_value": "31551095.0751341145642528374297134",
+    "utilization": "759162242191176901",
+    "base_usd_price": "1.0000218",
+    "timestamp": 1691852903,
+    "date": "2023-08-12"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.042762112621056",
+    "supply_apr": "0.025779104587584",
+    "total_borrow_value": "15728646.609586761422",
+    "total_supply_value": "19829274.344323599474",
+    "total_collateral_value": "31326242.88417347832717617646969018",
+    "utilization": "793203218876409178",
+    "base_usd_price": "1.000109",
+    "timestamp": 1691939319,
+    "date": "2023-08-13"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.040971619513152",
+    "supply_apr": "0.024116503867056",
+    "total_borrow_value": "15699761.17487124095712",
+    "total_supply_value": "21157388.18334172748337",
+    "total_collateral_value": "31239821.7966707421042655797198981",
+    "utilization": "742046273450576332",
+    "base_usd_price": "0.99992967",
+    "timestamp": 1692025719,
+    "date": "2023-08-14"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.042162604967088",
+    "supply_apr": "0.025222418911152",
+    "total_borrow_value": "15699345.54301522525468",
+    "total_supply_value": "20229155.25646354486928",
+    "total_collateral_value": "31047861.3921234598231601580808409",
+    "utilization": "776074428775524226",
+    "base_usd_price": "1.00009316",
+    "timestamp": 1692112119,
+    "date": "2023-08-15"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.042499062078048",
+    "supply_apr": "0.025534843382592",
+    "total_borrow_value": "15719335.06653454698977",
+    "total_supply_value": "20007101.40303383476186",
+    "total_collateral_value": "31835736.56497963862660540068860081",
+    "utilization": "785687489112627042",
+    "base_usd_price": "1.00022261",
+    "timestamp": 1692198519,
+    "date": "2023-08-16"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.04246231245192",
+    "supply_apr": "0.025500718718496",
+    "total_borrow_value": "15721818.69533406976125",
+    "total_supply_value": "20037043.40008290276375",
+    "total_collateral_value": "31790805.80561810382124547099475998",
+    "utilization": "784637500094905675",
+    "base_usd_price": "0.99997125",
+    "timestamp": 1692284927,
+    "date": "2023-08-17"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.05308148917728",
+    "supply_apr": "0.042130382743728",
+    "total_borrow_value": "15174085.570061906292",
+    "total_supply_value": "18057368.016272769752",
+    "total_collateral_value": "29115337.98498348940906062111471643",
+    "utilization": "840325956924929991",
+    "base_usd_price": "1.000292",
+    "timestamp": 1692371327,
+    "date": "2023-08-18"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.045925730283744",
+    "supply_apr": "0.030681168501456",
+    "total_borrow_value": "15176177.94339154956",
+    "total_supply_value": "18696702.320850115632",
+    "total_collateral_value": "28982490.5913589495999791116996442",
+    "utilization": "811702921316922034",
+    "base_usd_price": "1.000146",
+    "timestamp": 1692457727,
+    "date": "2023-08-19"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.044299190190816",
+    "supply_apr": "0.028078704346464",
+    "total_borrow_value": "15177551.71747907925",
+    "total_supply_value": "18849489.733661241375",
+    "total_collateral_value": "29048581.79446810677146298388658008",
+    "utilization": "805196760977866659",
+    "base_usd_price": "1.000125",
+    "timestamp": 1692544127,
+    "date": "2023-08-20"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.04417097424408",
+    "supply_apr": "0.027873558819072",
+    "total_borrow_value": "15182694.6086367167184",
+    "total_supply_value": "18867869.5927123452798",
+    "total_collateral_value": "29091289.55900342079693583281599622",
+    "utilization": "804683897143774486",
+    "base_usd_price": "1.00017612",
+    "timestamp": 1692630543,
+    "date": "2023-08-21"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.04592416029552",
+    "supply_apr": "0.030678656501376",
+    "total_borrow_value": "15183131.6293490237832",
+    "total_supply_value": "18705424.0570448412624",
+    "total_collateral_value": "29292137.251350555312412002716009",
+    "utilization": "811696641365915534",
+    "base_usd_price": "1.0001064",
+    "timestamp": 1692716943,
+    "date": "2023-08-22"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.046169854717104",
+    "supply_apr": "0.031071767594832",
+    "total_borrow_value": "15184249.28164498704462",
+    "total_supply_value": "18684168.11144652268843",
+    "total_collateral_value": "29007551.29543769120805051090500689",
+    "utilization": "812679419046774642",
+    "base_usd_price": "1.00009651",
+    "timestamp": 1692803343,
+    "date": "2023-08-23"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.04271225559264",
+    "supply_apr": "0.025732808793504",
+    "total_borrow_value": "15183395.583830413842",
+    "total_supply_value": "19176298.73220799306716",
+    "total_collateral_value": "29207714.34832342440625638973392675",
+    "utilization": "791778732494145746",
+    "base_usd_price": "1.00008717",
+    "timestamp": 1692889743,
+    "date": "2023-08-24"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.050130204569424",
+    "supply_apr": "0.037408327358544",
+    "total_borrow_value": "15192004.33069097829",
+    "total_supply_value": "18336297.036363627465",
+    "total_collateral_value": "30731160.5204495220441596336892959",
+    "utilization": "828520818462998916",
+    "base_usd_price": "1.000515",
+    "timestamp": 1692976143,
+    "date": "2023-08-25"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.048434649864192",
+    "supply_apr": "0.034695439868016",
+    "total_borrow_value": "15201461.97590603574425",
+    "total_supply_value": "18499144.29558673918125",
+    "total_collateral_value": "30594475.2877582682723606275914565",
+    "utilization": "821738599721755352",
+    "base_usd_price": "1.00004275",
+    "timestamp": 1693062557,
+    "date": "2023-08-26"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.047178383029632",
+    "supply_apr": "0.032685412901184",
+    "total_borrow_value": "15104993.7545976225012",
+    "total_supply_value": "18494847.9539126248989",
+    "total_collateral_value": "30260041.48312183976037995177802515",
+    "utilization": "816713532325402801",
+    "base_usd_price": "1.0000929",
+    "timestamp": 1693148957,
+    "date": "2023-08-27"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.043060403130336",
+    "supply_apr": "0.026096645049696",
+    "total_borrow_value": "15117893.51951490768032",
+    "total_supply_value": "18891660.64615908244876",
+    "total_collateral_value": "29553829.78787850381726611512515274",
+    "utilization": "800241612738512428",
+    "base_usd_price": "0.99999026",
+    "timestamp": 1693235357,
+    "date": "2023-08-28"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.042165091549152",
+    "supply_apr": "0.025224727882464",
+    "total_borrow_value": "14910087.86897249562982",
+    "total_supply_value": "19210423.40275486092365",
+    "total_collateral_value": "28223651.34514412205502464373581678",
+    "utilization": "776145473887361738",
+    "base_usd_price": "1.00001653",
+    "timestamp": 1693321757,
+    "date": "2023-08-29"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.042036989226624",
+    "supply_apr": "0.025105775730336",
+    "total_borrow_value": "14762632.62793051962",
+    "total_supply_value": "19110562.522525643445",
+    "total_collateral_value": "27922643.674195693334635696280904",
+    "utilization": "772485408350736171",
+    "base_usd_price": "1.000185",
+    "timestamp": 1693408157,
+    "date": "2023-08-30"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.052412801504688",
+    "supply_apr": "0.041060482473888",
+    "total_borrow_value": "14763679.84961143732568",
+    "total_supply_value": "17625083.76395121866324",
+    "total_collateral_value": "28003698.71643824058696416646322049",
+    "utilization": "837651206235990879",
+    "base_usd_price": "1.00016884",
+    "timestamp": 1693494557,
+    "date": "2023-08-31"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.042823191167424",
+    "supply_apr": "0.025835820412176",
+    "total_borrow_value": "17714408.35942718871258",
+    "total_supply_value": "22283709.02706054213966",
+    "total_collateral_value": "33041196.22404609778484575219248984",
+    "utilization": "794948320747245829",
+    "base_usd_price": "1.00010046",
+    "timestamp": 1693580957,
+    "date": "2023-09-01"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.04278316523472",
+    "supply_apr": "0.02579865347016",
+    "total_borrow_value": "17718024.550603954563",
+    "total_supply_value": "22320377.357560599114",
+    "total_collateral_value": "33157130.99529740653396810147995543",
+    "utilization": "793804722868082882",
+    "base_usd_price": "1.000107",
+    "timestamp": 1693667375,
+    "date": "2023-09-02"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.042910910506656",
+    "supply_apr": "0.025917274052784",
+    "total_borrow_value": "17723565.17786000884224",
+    "total_supply_value": "22225160.07876072119528",
+    "total_collateral_value": "33048694.85045165619665902676058697",
+    "utilization": "797454587218962927",
+    "base_usd_price": "1.00005748",
+    "timestamp": 1693753775,
+    "date": "2023-09-03"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.042848523783936",
+    "supply_apr": "0.02585934355608",
+    "total_borrow_value": "17728203.72986571442716",
+    "total_supply_value": "22280767.99390673796838",
+    "total_collateral_value": "32893993.846246276649397902571854",
+    "utilization": "795672109872115928",
+    "base_usd_price": "0.99996442",
+    "timestamp": 1693840175,
+    "date": "2023-09-04"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.042920476006176",
+    "supply_apr": "0.025926156324864",
+    "total_borrow_value": "17729848.4450174840088",
+    "total_supply_value": "22225418.18039523006342",
+    "total_collateral_value": "32915253.02057788131212816558473688",
+    "utilization": "797727887353436041",
+    "base_usd_price": "1.00005254",
+    "timestamp": 1693926575,
+    "date": "2023-09-05"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.041622136930944",
+    "supply_apr": "0.024720555764016",
+    "total_borrow_value": "17734055.73160088095722",
+    "total_supply_value": "23314862.05522074662634",
+    "total_collateral_value": "32957664.1453848220352636525158163",
+    "utilization": "760632485531886784",
+    "base_usd_price": "1.00007937",
+    "timestamp": 1694012975,
+    "date": "2023-09-06"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+    },
+    "borrow_apr": "0.041637919658256",
+    "supply_apr": "0.0247352111424",
+    "total_borrow_value": "17726728.1508639396975",
+    "total_supply_value": "23291434.8924704349055",
+    "total_collateral_value": "33073312.96344870698911336203335765",
+    "utilization": "761083420635047735",
+    "base_usd_price": "1.0003265",
+    "timestamp": 1694099375,
+    "date": "2023-09-07"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.027494244441792",
+    "supply_apr": "0.01160179843464",
+    "total_borrow_value": "4898591.954590339968",
+    "total_supply_value": "13722357.84095651946",
+    "total_collateral_value": "12031817.38570662057380819694308243",
+    "utilization": "356978413657677502",
+    "base_usd_price": "1.000028",
+    "timestamp": 1691593705,
+    "date": "2023-08-09"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.027581194081872",
+    "supply_apr": "0.01168253737488",
+    "total_borrow_value": "4896530.98854961376368",
+    "total_supply_value": "13621754.06327208237104",
+    "total_collateral_value": "11932146.65711076036837831204228566",
+    "utilization": "359462689304980642",
+    "base_usd_price": "1.00059944",
+    "timestamp": 1691680105,
+    "date": "2023-08-10"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.028242883821456",
+    "supply_apr": "0.012296963575152",
+    "total_borrow_value": "4923883.949821236036",
+    "total_supply_value": "13013469.133622770596",
+    "total_collateral_value": "12277445.09352557239695351992493401",
+    "utilization": "378368110642341114",
+    "base_usd_price": "1.000468",
+    "timestamp": 1691766505,
+    "date": "2023-08-11"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.028066207418064",
+    "supply_apr": "0.012132906901344",
+    "total_borrow_value": "4951760.8115434854633",
+    "total_supply_value": "13264099.9413836061012",
+    "total_collateral_value": "12182677.77492669883483874282374299",
+    "utilization": "373320212856643182",
+    "base_usd_price": "1.00049955",
+    "timestamp": 1691852905,
+    "date": "2023-08-12"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.028699295582448",
+    "supply_apr": "0.012720774491568",
+    "total_borrow_value": "4998697.56056552109054",
+    "total_supply_value": "12771051.82298093724876",
+    "total_collateral_value": "12118649.55095582601084950693946728",
+    "utilization": "391408446403207171",
+    "base_usd_price": "1.00049934",
+    "timestamp": 1691939320,
+    "date": "2023-08-13"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.028505180717136",
+    "supply_apr": "0.012540524996304",
+    "total_borrow_value": "5032725.594301782135",
+    "total_supply_value": "13042800.221228989695",
+    "total_collateral_value": "12196943.99100489503562702427504488",
+    "utilization": "385862307761349534",
+    "base_usd_price": "1.000395",
+    "timestamp": 1692025720,
+    "date": "2023-08-14"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.029280607437456",
+    "supply_apr": "0.013260564062208",
+    "total_borrow_value": "5033575.82182631514",
+    "total_supply_value": "12336647.95964322918",
+    "total_collateral_value": "12272312.43173425329473516700957",
+    "utilization": "408017356307232955",
+    "base_usd_price": "1.00059",
+    "timestamp": 1692112120,
+    "date": "2023-08-15"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.032042397140928",
+    "supply_apr": "0.015825083061312",
+    "total_borrow_value": "5738448.56389795527",
+    "total_supply_value": "11785057.93158555018",
+    "total_collateral_value": "13296987.5002603971502906594345806",
+    "utilization": "486925633503362282",
+    "base_usd_price": "1.000365",
+    "timestamp": 1692198520,
+    "date": "2023-08-16"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.032392639268208",
+    "supply_apr": "0.01615030793208",
+    "total_borrow_value": "5710561.7869653099112",
+    "total_supply_value": "11491546.8931418907816",
+    "total_collateral_value": "13194109.30938864746663810976955589",
+    "utilization": "496932552149052012",
+    "base_usd_price": "1.0000106",
+    "timestamp": 1692284932,
+    "date": "2023-08-17"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.031143325333248",
+    "supply_apr": "0.014990230690992",
+    "total_borrow_value": "5283676.637431585656",
+    "total_supply_value": "11455397.594596554111",
+    "total_collateral_value": "12558494.02574147676050014421777125",
+    "utilization": "461237867905198412",
+    "base_usd_price": "1.000137",
+    "timestamp": 1692371332,
+    "date": "2023-08-18"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.030396965533344",
+    "supply_apr": "0.014297182309872",
+    "total_borrow_value": "5077416.17630102647",
+    "total_supply_value": "11541843.65287335591",
+    "total_collateral_value": "11751657.48157408198358348214561695",
+    "utilization": "439913302128847113",
+    "base_usd_price": "1.00001",
+    "timestamp": 1692457732,
+    "date": "2023-08-19"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.027742205576448",
+    "supply_apr": "0.011832048068688",
+    "total_borrow_value": "3769146.98253024251098",
+    "total_supply_value": "10353001.91962478006263",
+    "total_collateral_value": "9973622.778589398924521823611419",
+    "utilization": "364063017679540769",
+    "base_usd_price": "1.00011157",
+    "timestamp": 1692544132,
+    "date": "2023-08-20"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.029709395806896",
+    "supply_apr": "0.013658724699984",
+    "total_borrow_value": "3799016.5503601124343",
+    "total_supply_value": "9039481.30301780690682",
+    "total_collateral_value": "10077129.487080624020378893842336",
+    "utilization": "420268452654028407",
+    "base_usd_price": "1.00012123",
+    "timestamp": 1692630544,
+    "date": "2023-08-21"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.03089815649064",
+    "supply_apr": "0.014762573915328",
+    "total_borrow_value": "3923359.3527736068",
+    "total_supply_value": "8637318.8633627841",
+    "total_collateral_value": "10310666.50051057550070527040604539",
+    "utilization": "454233043973080025",
+    "base_usd_price": "1.0001",
+    "timestamp": 1692716944,
+    "date": "2023-08-22"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.031979518141248",
+    "supply_apr": "0.015766695418752",
+    "total_borrow_value": "3943446.6814645167822",
+    "total_supply_value": "8128650.67970372640804",
+    "total_collateral_value": "10135390.75395460398633102438940684",
+    "utilization": "485129090793257541",
+    "base_usd_price": "0.99998593",
+    "timestamp": 1692803344,
+    "date": "2023-08-23"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.031428351359424",
+    "supply_apr": "0.015254897706288",
+    "total_borrow_value": "3553784.322144390844",
+    "total_supply_value": "7571187.624375696428",
+    "total_collateral_value": "9431444.24173315019657863820168894",
+    "utilization": "469381468996924016",
+    "base_usd_price": "0.999892",
+    "timestamp": 1692889744,
+    "date": "2023-08-24"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.031502097790848",
+    "supply_apr": "0.015323376553488",
+    "total_borrow_value": "3657855.36141801888",
+    "total_supply_value": "7758090.7503623227155",
+    "total_collateral_value": "9747952.33374052336642429352718268",
+    "utilization": "471488509649800031",
+    "base_usd_price": "1.0000415",
+    "timestamp": 1692976144,
+    "date": "2023-08-25"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.031586089196448",
+    "supply_apr": "0.015401368581984",
+    "total_borrow_value": "3675605.4598381537988",
+    "total_supply_value": "7756260.72723025690205",
+    "total_collateral_value": "9508858.67847636663148348694346144",
+    "utilization": "473888264423183277",
+    "base_usd_price": "1.00009181",
+    "timestamp": 1693062557,
+    "date": "2023-08-26"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.031569144336",
+    "supply_apr": "0.01538563404168",
+    "total_borrow_value": "3670394.386240906984",
+    "total_supply_value": "7753184.67538156032",
+    "total_collateral_value": "9468353.06267325626358520492864717",
+    "utilization": "473404125301688222",
+    "base_usd_price": "1.000124",
+    "timestamp": 1693148957,
+    "date": "2023-08-27"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.032349934352304",
+    "supply_apr": "0.016110653335776",
+    "total_borrow_value": "3723368.273917575178",
+    "total_supply_value": "7511143.699549897036",
+    "total_collateral_value": "9609508.4855251465007762075449894",
+    "utilization": "495712411458755012",
+    "base_usd_price": "1.000174",
+    "timestamp": 1693235357,
+    "date": "2023-08-28"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.035779542060096",
+    "supply_apr": "0.019295289080208",
+    "total_borrow_value": "3740829.549451446515",
+    "total_supply_value": "6300861.85156386651",
+    "total_collateral_value": "9582843.34546979131817880452936663",
+    "utilization": "593701203437457803",
+    "base_usd_price": "1.000265",
+    "timestamp": 1693321757,
+    "date": "2023-08-29"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.03500188870896",
+    "supply_apr": "0.018573182388",
+    "total_borrow_value": "3717551.645364141585",
+    "total_supply_value": "6505100.372145331593",
+    "total_collateral_value": "10012476.51003434100045925367016428",
+    "utilization": "571482536065039512",
+    "base_usd_price": "1.000181",
+    "timestamp": 1693408157,
+    "date": "2023-08-30"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.036450695690208",
+    "supply_apr": "0.019918503165312",
+    "total_borrow_value": "4082275.5990421828573",
+    "total_supply_value": "6660833.47756608466064",
+    "total_collateral_value": "10432556.54187226669430086974428452",
+    "utilization": "612877020990058760",
+    "base_usd_price": "1.00000174",
+    "timestamp": 1693494557,
+    "date": "2023-08-31"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.03702629949768",
+    "supply_apr": "0.02045299241736",
+    "total_borrow_value": "4025327.8678564777056",
+    "total_supply_value": "6396277.7979541882224",
+    "total_collateral_value": "10096759.38983502253346795258015288",
+    "utilization": "629322844243846142",
+    "base_usd_price": "1.0000368",
+    "timestamp": 1693580977,
+    "date": "2023-09-01"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.037167742494288",
+    "supply_apr": "0.020584332320256",
+    "total_borrow_value": "4032171.65785278744",
+    "total_supply_value": "6366270.817973220255",
+    "total_collateral_value": "9841422.23971446515566275393512",
+    "utilization": "633364072436183587",
+    "base_usd_price": "1.000035",
+    "timestamp": 1693667377,
+    "date": "2023-09-02"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.0389691684396",
+    "supply_apr": "0.02225708498376",
+    "total_borrow_value": "4019199.7246984914",
+    "total_supply_value": "5868856.884775777",
+    "total_collateral_value": "9879639.46786876781521558243648582",
+    "utilization": "684833385327544315",
+    "base_usd_price": "1.0001",
+    "timestamp": 1693753777,
+    "date": "2023-09-03"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.039418372458576",
+    "supply_apr": "0.022674203014896",
+    "total_borrow_value": "4009220.70740474376627",
+    "total_supply_value": "5746568.92121987339319",
+    "total_collateral_value": "9938564.96895171924446880198734108",
+    "utilization": "697667785710505996",
+    "base_usd_price": "1.00016361",
+    "timestamp": 1693840177,
+    "date": "2023-09-04"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.03766517281512",
+    "supply_apr": "0.021046231912896",
+    "total_borrow_value": "3714662.47645352467825",
+    "total_supply_value": "5736251.18657215187745",
+    "total_collateral_value": "9041728.54058717571531278599309145",
+    "utilization": "647576367219494440",
+    "base_usd_price": "1.00006277",
+    "timestamp": 1693926577,
+    "date": "2023-09-05"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.042030274991472",
+    "supply_apr": "0.025099541094672",
+    "total_borrow_value": "3438720.0407344883408",
+    "total_supply_value": "4452604.408873189008",
+    "total_collateral_value": "8669536.01381044287211056849715542",
+    "utilization": "772293572596100666",
+    "base_usd_price": "1.0000264",
+    "timestamp": 1694012977,
+    "date": "2023-09-06"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+    },
+    "borrow_apr": "0.046244384597376",
+    "supply_apr": "0.031191015428496",
+    "total_borrow_value": "3281257.63640274643242",
+    "total_supply_value": "4036097.49915354462126",
+    "total_collateral_value": "8100903.39504329763907070449154432",
+    "utilization": "812977538620675375",
+    "base_usd_price": "1.00023678",
+    "timestamp": 1694099377,
+    "date": "2023-09-07"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000137",
+    "timestamp": 1691593705,
+    "date": "2023-08-09"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000137",
+    "timestamp": 1691680105,
+    "date": "2023-08-10"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000137",
+    "timestamp": 1691766505,
+    "date": "2023-08-11"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000137",
+    "timestamp": 1691852905,
+    "date": "2023-08-12"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000137",
+    "timestamp": 1691939305,
+    "date": "2023-08-13"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000137",
+    "timestamp": 1692025705,
+    "date": "2023-08-14"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000137",
+    "timestamp": 1692112105,
+    "date": "2023-08-15"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000137",
+    "timestamp": 1692198505,
+    "date": "2023-08-16"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000137",
+    "timestamp": 1692284905,
+    "date": "2023-08-17"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000137",
+    "timestamp": 1692371305,
+    "date": "2023-08-18"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.00001",
+    "timestamp": 1692457705,
+    "date": "2023-08-19"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.00011157",
+    "timestamp": 1692544105,
+    "date": "2023-08-20"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.00012123",
+    "timestamp": 1692630505,
+    "date": "2023-08-21"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.0001",
+    "timestamp": 1692716920,
+    "date": "2023-08-22"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "0.999892",
+    "timestamp": 1692803320,
+    "date": "2023-08-23"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.0000415",
+    "timestamp": 1692889720,
+    "date": "2023-08-24"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.00020506",
+    "timestamp": 1692976120,
+    "date": "2023-08-25"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.00009181",
+    "timestamp": 1693062532,
+    "date": "2023-08-26"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000124",
+    "timestamp": 1693148932,
+    "date": "2023-08-27"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000174",
+    "timestamp": 1693235332,
+    "date": "2023-08-28"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000265",
+    "timestamp": 1693321732,
+    "date": "2023-08-29"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000181",
+    "timestamp": 1693408144,
+    "date": "2023-08-30"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.00000174",
+    "timestamp": 1693494544,
+    "date": "2023-08-31"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.0000368",
+    "timestamp": 1693580944,
+    "date": "2023-09-01"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.22596586406712",
+    "supply_apr": "0.318745382567472",
+    "total_borrow_value": "153.35517124314",
+    "total_supply_value": "100.112962831065",
+    "total_collateral_value": "233.2511322571996587",
+    "utilization": "1531863456543456543",
+    "base_usd_price": "1.000035",
+    "timestamp": 1693667344,
+    "date": "2023-09-02"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.015106035739536",
+    "supply_apr": "0.000098461793808",
+    "total_borrow_value": "8988.4174048653",
+    "total_supply_value": "2966871.8711483627",
+    "total_collateral_value": "18764.59853103018312546790453706",
+    "utilization": "3029593932504854",
+    "base_usd_price": "1.0001",
+    "timestamp": 1693753757,
+    "date": "2023-09-03"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.015173276357232",
+    "supply_apr": "0.00016089951024",
+    "total_borrow_value": "13755.24750090019653",
+    "total_supply_value": "2778385.30504546186746",
+    "total_collateral_value": "26226.33464777408310828084153288",
+    "utilization": "4950754306330087",
+    "base_usd_price": "1.00016361",
+    "timestamp": 1693840157,
+    "date": "2023-09-04"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.018117618125472",
+    "supply_apr": "0.00289493116344",
+    "total_borrow_value": "252492.51513155647962",
+    "total_supply_value": "2834595.1343385235005",
+    "total_collateral_value": "795401.57833212744046619161804538",
+    "utilization": "89074805164804223",
+    "base_usd_price": "0.99994822",
+    "timestamp": 1693926557,
+    "date": "2023-09-05"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.017818950477168",
+    "supply_apr": "0.002617596893808",
+    "total_borrow_value": "253325.4670527771368",
+    "total_supply_value": "3145279.20307888536",
+    "total_collateral_value": "801199.33865077590137969023187304",
+    "utilization": "80541443308881855",
+    "base_usd_price": "1.0000264",
+    "timestamp": 1694012957,
+    "date": "2023-09-06"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.019339728476112",
+    "supply_apr": "0.004029747879312",
+    "total_borrow_value": "390635.81432039279304",
+    "total_supply_value": "3150450.2305981508724",
+    "total_collateral_value": "899357.64341405220018319674930392",
+    "utilization": "123992243058846637",
+    "base_usd_price": "1.00023678",
+    "timestamp": 1694099357,
+    "date": "2023-09-07"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1845.52",
+    "timestamp": 1691593705,
+    "date": "2023-08-09"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1845.52",
+    "timestamp": 1691680105,
+    "date": "2023-08-10"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1845.52",
+    "timestamp": 1691766505,
+    "date": "2023-08-11"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1845.52",
+    "timestamp": 1691852905,
+    "date": "2023-08-12"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1852.01",
+    "timestamp": 1691939305,
+    "date": "2023-08-13"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1847.45",
+    "timestamp": 1692025705,
+    "date": "2023-08-14"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1845.98",
+    "timestamp": 1692112105,
+    "date": "2023-08-15"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1841.65",
+    "timestamp": 1692198505,
+    "date": "2023-08-16"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1817.97280586",
+    "timestamp": 1692284905,
+    "date": "2023-08-17"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1736.57",
+    "timestamp": 1692371305,
+    "date": "2023-08-18"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1666.15",
+    "timestamp": 1692457705,
+    "date": "2023-08-19"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.009945209642544",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1675.97",
+    "timestamp": 1692544105,
+    "date": "2023-08-20"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.01419160697208",
+    "supply_apr": "0.003257376965856",
+    "total_borrow_value": "37.012807873044824713",
+    "total_supply_value": "322.501611089080802111",
+    "total_collateral_value": "45.789175423097492350194",
+    "utilization": "114767495995437789",
+    "base_usd_price": "1675.16",
+    "timestamp": 1692630521,
+    "date": "2023-08-21"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.013513330494864",
+    "supply_apr": "0.002737076580144",
+    "total_borrow_value": "37.014246583000435603",
+    "total_supply_value": "383.82300817785010944",
+    "total_collateral_value": "45.77887220262191686000987182",
+    "utilization": "96435699187018101",
+    "base_usd_price": "1663.71",
+    "timestamp": 1692716921,
+    "date": "2023-08-22"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.011593501029216",
+    "supply_apr": "0.001264390949664",
+    "total_borrow_value": "37.015495793543764042",
+    "total_supply_value": "830.903217640241695315",
+    "total_collateral_value": "46.79231569371142647211927722",
+    "utilization": "44548416125007027",
+    "base_usd_price": "1641.38",
+    "timestamp": 1692803321,
+    "date": "2023-08-23"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.010619491864608",
+    "supply_apr": "0.00051723644256",
+    "total_borrow_value": "37.664617385847044614",
+    "total_supply_value": "2066.776349645850923941",
+    "total_collateral_value": "47.603664406252257937836",
+    "utilization": "18223844656618740",
+    "base_usd_price": "1678.44262825",
+    "timestamp": 1692889721,
+    "date": "2023-08-24"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.015619350554352",
+    "supply_apr": "0.004352587493184",
+    "total_borrow_value": "402.676388273201836138",
+    "total_supply_value": "2625.772324829086242285",
+    "total_collateral_value": "541.0279229490703129996918368",
+    "utilization": "153355160272283571",
+    "base_usd_price": "1649.94597217",
+    "timestamp": 1692976121,
+    "date": "2023-08-25"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.015199813964304",
+    "supply_apr": "0.004030764347664",
+    "total_borrow_value": "402.693561772443587711",
+    "total_supply_value": "2835.541240347621634236",
+    "total_collateral_value": "541.37321042871877870830347601",
+    "utilization": "142016333190450428",
+    "base_usd_price": "1647.1",
+    "timestamp": 1693062521,
+    "date": "2023-08-26"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.01480646436408",
+    "supply_apr": "0.003729029098032",
+    "total_borrow_value": "402.724957509308611197",
+    "total_supply_value": "3065.22002132908854816",
+    "total_collateral_value": "541.20359560301314631862",
+    "utilization": "131385263419231989",
+    "base_usd_price": "1644.15",
+    "timestamp": 1693148921,
+    "date": "2023-08-27"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.014421321787104",
+    "supply_apr": "0.003433589317008",
+    "total_borrow_value": "483.392466069914573353",
+    "total_supply_value": "3995.767513214040839046",
+    "total_collateral_value": "631.59494382556432777416",
+    "utilization": "120976004019291824",
+    "base_usd_price": "1653.49",
+    "timestamp": 1693235321,
+    "date": "2023-08-28"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.015651067728672",
+    "supply_apr": "0.004376917485648",
+    "total_borrow_value": "550.63505023962759597",
+    "total_supply_value": "3570.621423333336165043",
+    "total_collateral_value": "713.36995110042701467943398893",
+    "utilization": "154212381548945111",
+    "base_usd_price": "1651.85",
+    "timestamp": 1693321733,
+    "date": "2023-08-29"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.015992131271616",
+    "supply_apr": "0.004638544556688",
+    "total_borrow_value": "580.409191045385741952",
+    "total_supply_value": "3551.406697078208847192",
+    "total_collateral_value": "746.8626600759108127655177658",
+    "utilization": "163430314883922871",
+    "base_usd_price": "1740.29",
+    "timestamp": 1693408133,
+    "date": "2023-08-30"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.017176013714592",
+    "supply_apr": "0.005546691163728",
+    "total_borrow_value": "679.862339599325089709",
+    "total_supply_value": "3478.853236921920379101",
+    "total_collateral_value": "854.39993145332698559530334129",
+    "utilization": "195427137701090494",
+    "base_usd_price": "1702.22",
+    "timestamp": 1693494533,
+    "date": "2023-08-31"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.019103178359232",
+    "supply_apr": "0.007025003573472",
+    "total_borrow_value": "679.897777652823859003",
+    "total_supply_value": "2746.920168790734213669",
+    "total_collateral_value": "855.50466572967286741959756648",
+    "utilization": "247512668907338578",
+    "base_usd_price": "1658.91",
+    "timestamp": 1693580933,
+    "date": "2023-09-01"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.021084812992224",
+    "supply_apr": "0.0085450994172",
+    "total_borrow_value": "810.86579876905926991",
+    "total_supply_value": "2693.276206130606435464",
+    "total_collateral_value": "1007.1092537832625811365911498",
+    "utilization": "301070361179369208",
+    "base_usd_price": "1620.89",
+    "timestamp": 1693667333,
+    "date": "2023-09-02"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.020068526287584",
+    "supply_apr": "0.007765514107632",
+    "total_borrow_value": "810.947939868765653797",
+    "total_supply_value": "2963.956387283807293878",
+    "total_collateral_value": "1019.36680561440777873607631416",
+    "utilization": "273603152923068839",
+    "base_usd_price": "1630.42749153",
+    "timestamp": 1693753733,
+    "date": "2023-09-03"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.01996558871544",
+    "supply_apr": "0.0076865515272",
+    "total_borrow_value": "811.142476914842986011",
+    "total_supply_value": "2995.120959514577853679",
+    "total_collateral_value": "1008.02768592755692141860558684",
+    "utilization": "270821056470849769",
+    "base_usd_price": "1637.86",
+    "timestamp": 1693840133,
+    "date": "2023-09-04"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.019959420936096",
+    "supply_apr": "0.007681820307264",
+    "total_borrow_value": "811.187033961748978392",
+    "total_supply_value": "2997.126341514994987165",
+    "total_collateral_value": "1008.65825544058301084414270796",
+    "utilization": "270654360120677987",
+    "base_usd_price": "1630.93",
+    "timestamp": 1693926533,
+    "date": "2023-09-05"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.019198990876752",
+    "supply_apr": "0.007098500555136",
+    "total_borrow_value": "847.146780901583027508",
+    "total_supply_value": "3387.202026611147326546",
+    "total_collateral_value": "1048.0695539887454994615318471",
+    "utilization": "250102196393135764",
+    "base_usd_price": "1638.98",
+    "timestamp": 1694012945,
+    "date": "2023-09-06"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+    },
+    "borrow_apr": "0.018165959344512",
+    "supply_apr": "0.006306070443552",
+    "total_borrow_value": "869.15327682855836023",
+    "total_supply_value": "3911.876876173633795687",
+    "total_collateral_value": "1072.07684059857517615026792561",
+    "utilization": "222182424985284321",
+    "base_usd_price": "1628.18570996",
+    "timestamp": 1694099345,
+    "date": "2023-09-07"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.00007",
+    "timestamp": 1691593705,
+    "date": "2023-08-09"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.000128",
+    "timestamp": 1691680105,
+    "date": "2023-08-10"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "0.999827",
+    "timestamp": 1691766505,
+    "date": "2023-08-11"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.014999999976144",
+    "supply_apr": "0.0",
+    "total_borrow_value": "0.0",
+    "total_supply_value": "0.0",
+    "total_collateral_value": "0.0",
+    "utilization": "0",
+    "base_usd_price": "1.0",
+    "timestamp": 1691852905,
+    "date": "2023-08-12"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.01665358228368",
+    "supply_apr": "0.001535469265296",
+    "total_borrow_value": "4061.2946609611936",
+    "total_supply_value": "85962.0355068009416",
+    "total_collateral_value": "9204.2449207546864633075179367",
+    "utilization": "47245208964472341",
+    "base_usd_price": "1.0000676",
+    "timestamp": 1691939305,
+    "date": "2023-08-13"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.03309166236528",
+    "supply_apr": "0.016799400774144",
+    "total_borrow_value": "1221576.4990085866758",
+    "total_supply_value": "2363248.7321570877002",
+    "total_collateral_value": "1872823.94570869406685736960381544",
+    "utilization": "516904640330464913",
+    "base_usd_price": "1.0002274",
+    "timestamp": 1692025705,
+    "date": "2023-08-14"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.026406250423488",
+    "supply_apr": "0.010591518265776",
+    "total_borrow_value": "1612891.75072804732976",
+    "total_supply_value": "4949145.00952936441308",
+    "total_collateral_value": "2594810.7308917417000209788692",
+    "utilization": "325892870348050120",
+    "base_usd_price": "1.00001324",
+    "timestamp": 1692112121,
+    "date": "2023-08-15"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.028311189220656",
+    "supply_apr": "0.012360390008256",
+    "total_borrow_value": "2374335.212958886882",
+    "total_supply_value": "6242986.664347684654",
+    "total_collateral_value": "3839896.52468082174458339756883",
+    "utilization": "380319693055230279",
+    "base_usd_price": "0.999941",
+    "timestamp": 1692198521,
+    "date": "2023-08-16"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.02859677683992",
+    "supply_apr": "0.012625578502848",
+    "total_borrow_value": "2871969.78439285289072",
+    "total_supply_value": "7392847.81741367342717",
+    "total_collateral_value": "4654422.90501831904297499292487798",
+    "utilization": "388479339258350570",
+    "base_usd_price": "1.00010047",
+    "timestamp": 1692284921,
+    "date": "2023-08-17"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.028346741960976",
+    "supply_apr": "0.01239340328064",
+    "total_borrow_value": "2680899.386002",
+    "total_supply_value": "7030282.585316",
+    "total_collateral_value": "4357708.6175481460723525250380605",
+    "utilization": "381335485951802601",
+    "base_usd_price": "1.0",
+    "timestamp": 1692371321,
+    "date": "2023-08-18"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.038572248711888",
+    "supply_apr": "0.021888516687696",
+    "total_borrow_value": "4834193.25462941309148",
+    "total_supply_value": "7177784.62587468644488",
+    "total_collateral_value": "9350899.84896018737783216356106574",
+    "utilization": "673492821679940193",
+    "base_usd_price": "1.00002244",
+    "timestamp": 1692457721,
+    "date": "2023-08-19"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.037658591977248",
+    "supply_apr": "0.02104012115064",
+    "total_borrow_value": "4841943.410488",
+    "total_supply_value": "7479194.43843",
+    "total_collateral_value": "9414335.3780429060887912727404861",
+    "utilization": "647388343501294187",
+    "base_usd_price": "1.0",
+    "timestamp": 1692544121,
+    "date": "2023-08-20"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.037349508524256",
+    "supply_apr": "0.020753115073632",
+    "total_borrow_value": "4605790.9340892558076",
+    "total_supply_value": "7212803.435893414876",
+    "total_collateral_value": "8941560.91486284302085680206428",
+    "utilization": "638557387340124703",
+    "base_usd_price": "1.0001332",
+    "timestamp": 1692630533,
+    "date": "2023-08-21"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.03627233334072",
+    "supply_apr": "0.019752880981392",
+    "total_borrow_value": "4545619.74525363893972",
+    "total_supply_value": "7479034.27326722464854",
+    "total_collateral_value": "8753517.09003720914191054341661011",
+    "utilization": "607780954286876299",
+    "base_usd_price": "1.00000922",
+    "timestamp": 1692716933,
+    "date": "2023-08-22"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.035032224259584",
+    "supply_apr": "0.0186013511316",
+    "total_borrow_value": "4474702.868111894872",
+    "total_supply_value": "7818132.688136660062",
+    "total_collateral_value": "8295965.91709439089237871705549764",
+    "utilization": "572349265855033962",
+    "base_usd_price": "0.999898",
+    "timestamp": 1692803333,
+    "date": "2023-08-23"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.032835971031696",
+    "supply_apr": "0.016561973104992",
+    "total_borrow_value": "4424862.838753081004",
+    "total_supply_value": "8683021.2048760502",
+    "total_collateral_value": "8673228.8616734495790223334751",
+    "utilization": "509599173265875511",
+    "base_usd_price": "1.000132",
+    "timestamp": 1692889733,
+    "date": "2023-08-24"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.033650520588288",
+    "supply_apr": "0.017318340570672",
+    "total_borrow_value": "4432829.54886060461844",
+    "total_supply_value": "8318750.68202681188392",
+    "total_collateral_value": "8490898.41414380810923867598216598",
+    "utilization": "532872018365909439",
+    "base_usd_price": "1.00005479",
+    "timestamp": 1692976133,
+    "date": "2023-08-25"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.033745654640304",
+    "supply_apr": "0.01740667930848",
+    "total_borrow_value": "4513262.09526708198263",
+    "total_supply_value": "8426703.55706700448046",
+    "total_collateral_value": "8519667.63856506701174668045693258",
+    "utilization": "535590133676171421",
+    "base_usd_price": "1.00015391",
+    "timestamp": 1693062533,
+    "date": "2023-08-26"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.0337949835984",
+    "supply_apr": "0.017452484812368",
+    "total_borrow_value": "4535405.9634844159858",
+    "total_supply_value": "8445820.2319291081186",
+    "total_collateral_value": "8557520.4875524111978719850731",
+    "utilization": "536999533121972129",
+    "base_usd_price": "1.00017745",
+    "timestamp": 1693148945,
+    "date": "2023-08-27"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.03098450536992",
+    "supply_apr": "0.014842754983728",
+    "total_borrow_value": "4492465.2680204918511",
+    "total_supply_value": "9836778.27942029731104",
+    "total_collateral_value": "8541788.79463352482225492193269",
+    "utilization": "456700154303952455",
+    "base_usd_price": "1.00006038",
+    "timestamp": 1693235345,
+    "date": "2023-08-28"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.03240533115216",
+    "supply_apr": "0.01616209325064",
+    "total_borrow_value": "5886901.0446853444",
+    "total_supply_value": "11837834.9116416517",
+    "total_collateral_value": "10619733.65725405359041759539233057",
+    "utilization": "497295177419408102",
+    "base_usd_price": "1.0001",
+    "timestamp": 1693321745,
+    "date": "2023-08-29"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.033142570267824",
+    "supply_apr": "0.016846672418208",
+    "total_borrow_value": "6116171.384088655936",
+    "total_supply_value": "11799071.25104433408",
+    "total_collateral_value": "11492695.11734878549677710296618099",
+    "utilization": "518359151984004399",
+    "base_usd_price": "1.000232",
+    "timestamp": 1693408145,
+    "date": "2023-08-30"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.033573363443856",
+    "supply_apr": "0.0172466946576",
+    "total_borrow_value": "6044559.28724098477455",
+    "total_supply_value": "11390476.27613747697516",
+    "total_collateral_value": "11210797.27577425882321823901085874",
+    "utilization": "530667528598493215",
+    "base_usd_price": "1.00005807",
+    "timestamp": 1693494545,
+    "date": "2023-08-31"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.02982385884096",
+    "supply_apr": "0.013765011805296",
+    "total_borrow_value": "5463987.554109",
+    "total_supply_value": "12900782.933704",
+    "total_collateral_value": "9895524.73858614056453527431370724",
+    "utilization": "423538825457389174",
+    "base_usd_price": "1.0",
+    "timestamp": 1693580945,
+    "date": "2023-09-01"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.03056289900912",
+    "supply_apr": "0.014451263390016",
+    "total_borrow_value": "5379623.09618272527254",
+    "total_supply_value": "12098431.99454842734229",
+    "total_collateral_value": "9656657.98841070083327476049101124",
+    "utilization": "444654258607478654",
+    "base_usd_price": "0.99996673",
+    "timestamp": 1693667345,
+    "date": "2023-09-02"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.030582885958272",
+    "supply_apr": "0.014469822704448",
+    "total_borrow_value": "5341066.962360141784",
+    "total_supply_value": "11996318.6940315034176",
+    "total_collateral_value": "9653079.67891099478846099719554244",
+    "utilization": "445225314451292647",
+    "base_usd_price": "1.0002404",
+    "timestamp": 1693753757,
+    "date": "2023-09-03"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.031033419188112",
+    "supply_apr": "0.014888174991552",
+    "total_borrow_value": "5351043.70316444704048",
+    "total_supply_value": "11681007.71504302614524",
+    "total_collateral_value": "9660046.10278802135633783524549864",
+    "utilization": "458097692818630719",
+    "base_usd_price": "1.00014278",
+    "timestamp": 1693840157,
+    "date": "2023-09-04"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.030974240622672",
+    "supply_apr": "0.01483322344848",
+    "total_borrow_value": "5832398.91408896035045",
+    "total_supply_value": "12778932.23500662850147",
+    "total_collateral_value": "10264607.37552070393170921250076423",
+    "utilization": "456406876291007829",
+    "base_usd_price": "0.99998467",
+    "timestamp": 1693926557,
+    "date": "2023-09-05"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.032553753412464",
+    "supply_apr": "0.01629991392768",
+    "total_borrow_value": "5921794.702076150799",
+    "total_supply_value": "11807307.817929978112",
+    "total_collateral_value": "10613119.31898735559651911861367936",
+    "utilization": "501535813442573335",
+    "base_usd_price": "0.999977",
+    "timestamp": 1694012957,
+    "date": "2023-09-06"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+    },
+    "borrow_apr": "0.03160986929568",
+    "supply_apr": "0.015423450057648",
+    "total_borrow_value": "5907613.20826590586256",
+    "total_supply_value": "12448397.58544010699828",
+    "total_collateral_value": "10595426.738663210187059868360755",
+    "utilization": "474567695122316508",
+    "base_usd_price": "1.00010948",
+    "timestamp": 1694099357,
+    "date": "2023-09-07"
+  }
+]

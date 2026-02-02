@@ -1,0 +1,22 @@
+.additional-market-data {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 1rem;
+
+  &__content {
+    .placeholder-content {
+      width: 6rem;
+      margin-right: 2rem;
+    }
+    a {
+      display: flex;
+      margin-right: 2rem;
+    }
+    p {
+      margin-right: 0.25rem;
+    }
+    .external-link {
+      margin: 0.3rem;
+    }
+  }
+}

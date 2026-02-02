@@ -1,0 +1,137 @@
+@use '../abstracts/variables' as *;
+
+.market-selector {
+  position: relative;
+
+  .dropdown__content {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    min-width: 100%;
+    width: unset;
+    left: unset;
+    right: 0;
+
+    .divider {
+      background-color: var(--ui--border);
+      border: none;
+      flex-shrink: 0;
+      height: unset;
+      margin: 0;
+      width: 0.5px;
+    }
+  }
+
+  &__selected-market {
+    align-items: center;
+    background: none;
+    border: none;
+    border-radius: 0.5rem;
+    display: flex;
+    height: $header-button-height;
+    padding: 0.75rem 1rem;
+    transition: all 0.25s ease;
+
+    &:hover,
+    &--active {
+      background: var(--ui--hover-overlay);
+    }
+
+    &__info {
+      display: flex;
+      flex-direction: column;
+      margin-left: 0.5rem;
+    }
+  }
+
+  &__options {
+    min-height: 9.5rem;
+    min-width: 10rem;
+    width: 100%;
+
+    .legacy-wrapper {
+      padding: 0.5rem 0.75rem;
+
+      label {
+        display: flex;
+      }
+    }
+  }
+
+  &__option {
+    cursor: pointer;
+    align-items: center;
+    border-radius: 0.5rem;
+    display: flex;
+    padding: 0.5rem;
+    width: 100%;
+    text-transform: none;
+
+    .svg {
+      margin-left: auto;
+
+      &--supply {
+        color: var(--icon--supply);
+      }
+    }
+
+    &__info {
+      display: flex;
+      flex-direction: column;
+      margin-left: 1rem;
+
+      &--right {
+        display: flex;
+        flex-direction: column;
+        margin-left: auto;
+      }
+    }
+
+    .icon + .market-selector__option__info {
+      margin-left: 0.5rem;
+    }
+
+    &:hover,
+    &--active {
+      background: var(--ui--foreground--2);
+    }
+
+    &--arrow {
+      margin-left: 0.75rem;
+    }
+  }
+
+  @media (max-width: $device--sm) {
+    position: unset;
+
+    .dropdown {
+      position: unset;
+      &__content {
+        border: 0.25px solid var(--ui--border);
+        width: 100%;
+        left: 0rem;
+      }
+    }
+
+    &__selected-market {
+      margin-left: 0.5rem;
+
+      &:hover,
+      &--active {
+        background: none;
+      }
+
+      & > &__info {
+        margin-left: 0;
+      }
+
+      & > &__info ~ &__info {
+        margin-left: 0.5rem;
+      }
+    }
+
+    &__options {
+      min-width: unset;
+    }
+  }
+}

@@ -1,0 +1,157 @@
+@use '../abstracts/variables' as *;
+
+@mixin rewards-dropdown {
+  .divider {
+    background-color: var(--ui--border);
+    border: none;
+    flex-shrink: 0;
+    height: 0.5px;
+    margin-left: 1.75rem;
+    width: calc(100% - 1.75rem);
+  }
+
+  &__network-row {
+    overflow: hidden;
+
+    &__content {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+
+      &__icons-with-info {
+        align-items: center;
+        display: flex;
+        gap: 0.75rem;
+
+        &__total {
+          opacity: 1;
+          transition: all 120ms linear;
+        }
+
+        .asset {
+          flex-shrink: 0;
+          height: 1rem;
+          width: 1rem;
+        }
+
+        &--big {
+          gap: 0.5rem;
+          margin-top: 0.5rem;
+
+          .asset {
+            height: 1.25rem;
+            width: 1.25rem;
+          }
+        }
+
+        &--small {
+          gap: 0.375rem;
+          .asset {
+            height: 0.75rem;
+            width: 0.75rem;
+          }
+        }
+      }
+
+      &--expandable {
+        display: flex;
+        flex-direction: column;
+        opacity: 0;
+        max-height: 0;
+        height: auto;
+        padding-left: 1.75rem;
+        transition: all 120ms linear;
+      }
+    }
+
+    .chevron {
+      transition: all 120ms linear;
+    }
+
+    &--active {
+      .rewards__network-row__content {
+        &--expandable {
+          opacity: 1;
+          height: 100%;
+          max-height: none;
+
+          .rewards__network-row__content {
+            margin-top: 0.75rem;
+
+            &--unclaimed {
+              margin-top: 0.25rem;
+            }
+          }
+          .rewards__network-row__content + .rewards__network-row__content--unclaimed {
+            margin-top: 0.5rem;
+          }
+        }
+
+        &__icons-with-info {
+          &__total {
+            opacity: 0;
+          }
+        }
+      }
+
+      .button {
+        margin-top: 0.75rem;
+      }
+
+      .chevron {
+        transform: rotate(180deg);
+      }
+    }
+  }
+}
+
+.rewards {
+  justify-content: flex-start;
+  padding-left: 1rem;
+
+  &__clickable {
+    cursor: pointer;
+    label {
+      cursor: pointer;
+    }
+  }
+
+  &__icon {
+    margin-right: 0.5rem;
+  }
+
+  &.active {
+    background-color: $green--30;
+    transition: padding 0.2s ease;
+  }
+
+  &__dropdown {
+    padding: 1.25rem;
+
+    .divider {
+      background-color: var(--ui--border);
+      border: none;
+      flex-shrink: 0;
+      height: 0.5px;
+      margin-left: 1.75rem;
+      width: calc(100% - 1.75rem);
+    }
+
+    .button {
+      margin-top: 0.75rem;
+      width: 100%;
+    }
+  }
+
+  @include rewards-dropdown();
+
+  @media (max-width: $device--sm) {
+    .rewards__dropdown {
+      display: none;
+    }
+  }
+}
+
+.header__wallet-menu__claim {
+  @include rewards-dropdown();
+}

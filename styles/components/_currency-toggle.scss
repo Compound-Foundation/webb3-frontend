@@ -1,0 +1,28 @@
+@use '../abstracts/variables' as *;
+
+.currency-toggle {
+  --button-shadow: #0d131a05;
+
+  display: flex;
+  margin: 0.75rem 0 0.75rem auto;
+  background-color: var(--ui--background);
+  border: 0.25rem var(--ui--border);
+  padding: 0.25rem;
+  border-radius: 1rem;
+  box-shadow: 0rem 0.0625rem 0.25rem 0rem var(--button-shadow);
+  border: 0.0156rem solid var(--ui--border);
+
+  label {
+    text-align: center;
+    padding: 0.25rem 0.75rem;
+    cursor: pointer;
+    transition: background-color 200ms ease;
+
+    &.active {
+      border-radius: 1rem;
+      background-color: var(--ui--foreground--1);
+      border: 0.0156rem solid var(--ui--border);
+      box-shadow: 0rem 0.0625rem 0.125rem 0rem var(--button-shadow);
+    }
+  }
+}

@@ -1,0 +1,43 @@
+@forward '/node_modules/compound-styles/scss/base/typography';
+
+body {
+  font-family: var(--body-font-family), sans-serif;
+  font-weight: var(--body-font-weight);
+  line-height: 1;
+}
+
+a {
+  text-decoration: none;
+}
+
+@keyframes press-up {
+  0% {
+    transform: scale(0.95);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.press-up {
+  animation-name: press-up;
+  animation-duration: 120ms;
+  animation-timing-function: ease-in;
+  animation-fill-mode: forwards;
+}
+
+@keyframes press-down {
+  0% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(0.95);
+  }
+}
+
+.press-down {
+  animation-name: press-down;
+  animation-duration: 120ms;
+  animation-timing-function: ease-in;
+  animation-fill-mode: forwards;
+}

@@ -1,0 +1,21 @@
+@use '../abstracts/variables' as *;
+
+.net-rates-tooltip {
+  opacity: 1;
+  transition: opacity 300ms ease;
+
+  &__section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+
+    &__group {
+      display: flex;
+      gap: 0.125rem;
+    }
+  }
+
+  .divider {
+    margin: 1.25rem 0;
+  }
+}

@@ -1,0 +1,11 @@
+.transaction__text-holder {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+
+  &__dot-seperator {
+    margin-left: 0.1rem;
+    margin-right: 0.3rem;
+  }
+}

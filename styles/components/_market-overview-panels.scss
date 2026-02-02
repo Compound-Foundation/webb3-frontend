@@ -1,0 +1,210 @@
+@use '../abstracts/variables' as *;
+@use '../base/typography' as *;
+
+.market-overview-panels {
+  &__dropdowns {
+    display: flex;
+    gap: 1rem;
+    margin-left: -0.5rem;
+
+    .dropdown__content {
+      left: 0;
+      top: calc(100% + 0.25rem);
+      padding: 0.5rem;
+    }
+  }
+
+  &__sort-button {
+    background-color: transparent;
+    border: none;
+    height: fit-content;
+    padding: 0.5rem 0.5rem;
+    border-radius: 0.25rem;
+    display: flex;
+    gap: 0.25rem;
+
+    // Raise the stacking context above the panels underneath
+    z-index: 2;
+
+    &--active,
+    &:hover {
+      background-color: var(--ui--hover-overlay);
+    }
+  }
+
+  &__tables-container {
+    margin-top: 20px;
+
+    .panel-with-header__content {
+      margin-left: -0.75rem;
+      margin-right: -0.75rem;
+    }
+  }
+
+  &__table-header {
+    th {
+      padding-top: 1rem;
+      padding-bottom: 1rem;
+    }
+
+    th:first-child {
+      padding-left: 0.75rem;
+      // Seems like a quirk with tables. Setting only min-width makes the column too large
+      width: 260px;
+      min-width: 260px;
+    }
+
+    th:last-child {
+      padding-right: 0.75rem;
+    }
+
+    @media (max-width: $device--sm) {
+      th {
+        min-width: 120px;
+      }
+    }
+  }
+
+  &__table-row {
+    height: 4.5rem;
+    cursor: pointer;
+
+    // Styling table rows is difficult so there
+    // are some hoops to jump through
+    --row-background-color: var(--ui--foreground--1);
+
+    &--loading {
+      pointer-events: none;
+    }
+
+    &:hover {
+      --row-background-color: var(--ui--foreground--2);
+    }
+
+    td {
+      background: var(--row-background-color);
+    }
+
+    td:first-child {
+      padding-left: 0.75rem;
+
+      border-top-left-radius: 0.5rem;
+      border-bottom-left-radius: 0.5rem;
+    }
+
+    td:last-child {
+      padding-right: 0.75rem;
+
+      border-top-right-radius: 0.5rem;
+      border-bottom-right-radius: 0.5rem;
+    }
+  }
+
+  &__market-container {
+    display: flex;
+    gap: 1rem;
+
+    > .icon-pair:first-child .asset {
+      border-color: var(--row-background-color);
+    }
+  }
+
+  &__asset-description-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  &__utilization-container {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+
+    // Visually align the utilization meter with the text
+    .circle-meter {
+      margin-bottom: 1px;
+    }
+  }
+
+  &__dropdown-button {
+    background-color: transparent;
+    border: none;
+    height: fit-content;
+    padding: 0.75rem;
+    width: 100%;
+
+    // text-align: left;
+    justify-content: space-between;
+    margin: 0;
+    border-radius: 0.5rem;
+
+    &:hover {
+      background: var(--ui--foreground--2);
+    }
+  }
+
+  &__collateral-asset-container {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    max-width: 10.625rem;
+  }
+
+  &__collateral-asset-icons-container {
+    display: flex;
+    flex-wrap: wrap;
+    max-width: 8.75rem;
+    // Visually align the icons with the text
+    margin-bottom: 1px;
+    // add a little bit of left margin to the whole container, not just the first icon
+    margin-left: 0.25rem;
+
+    &--equal-rows {
+      display: grid;
+      grid-auto-flow: row;
+      justify-content: start;
+      flex-wrap: unset;
+    }
+  }
+
+  &__collateral-asset-icon {
+    width: 1rem;
+    height: 1rem;
+
+    border: 1px solid var(--row-background-color);
+    margin-left: -0.25rem;
+  }
+
+  &__header-with-logo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+
+    .asset {
+      width: 1rem;
+      height: 1rem;
+    }
+  }
+
+  &__icon-pair-loading {
+    > path {
+      fill: $neutral--50;
+      animation: content-loading-fill 1.2s linear infinite alternate;
+    }
+    > circle {
+      fill: $neutral--50;
+      stroke: var(--ui--foreground--1);
+      animation: content-loading-fill 1.2s linear infinite alternate;
+    }
+
+    @keyframes content-loading-fill {
+      0% {
+        fill: rgba($neutral--50, 0.1);
+      }
+
+      100% {
+        fill: rgba($neutral--50, 0.3);
+      }
+    }
+  }
+}

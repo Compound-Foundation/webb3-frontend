@@ -1,0 +1,116 @@
+@use '../abstracts/variables' as *;
+
+.detail-sheet {
+  position: fixed;
+  display: none;
+  height: 100vh;
+  width: 100vw;
+  z-index: 1000;
+
+  &__overlay {
+    background-color: var(--ui--scrim);
+    position: fixed;
+    opacity: 0;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    transition: opacity 300ms ease;
+    pointer-events: none;
+
+    &--hidden {
+      opacity: 0;
+    }
+  }
+
+  &__content {
+    background-color: var(--ui--foreground--1);
+    border-radius: 1rem 1rem 0 0;
+    border-top: 0.5px solid var(--ui--border);
+    display: none;
+    padding: 1.25rem;
+    position: fixed;
+    width: 100vw;
+  }
+
+  dd {
+    color: var(--text--1);
+  }
+
+  &__actions {
+    display: flex;
+    gap: 0.5rem;
+
+    .button {
+      flex-grow: 1;
+      width: 2.75rem;
+      min-width: 2.75rem;
+      max-width: unset;
+      height: 2.75rem;
+      min-height: 2.75rem;
+      max-height: unset;
+
+      span {
+        display: contents;
+      }
+
+      .button__mobile-info {
+        display: flex;
+        margin: 0 0.25rem;
+      }
+
+      .svg + .button__mobile-info {
+        margin-left: 0;
+      }
+    }
+
+    .button + .button {
+      margin-left: 0;
+    }
+
+    .button + .button {
+      margin-left: 0;
+    }
+  }
+
+  &--foreground-2 {
+    .detail-sheet__content {
+      background-color: var(--ui--foreground--2);
+    }
+  }
+
+  @media (max-width: $device--sm) {
+    display: flex;
+
+    &__content {
+      display: flex;
+      flex-direction: column;
+      bottom: -100%;
+      left: 0;
+      opacity: 0;
+      right: 0;
+      height: fit-content;
+      transition: all 300ms ease;
+
+      .tooltip__content {
+        height: fit-content;
+        width: 100%;
+      }
+    }
+
+    &--active {
+      z-index: 1500;
+
+      .detail-sheet__overlay:not(.detail-sheet__overlay--hidden) {
+        opacity: 1;
+        pointer-events: unset;
+      }
+
+      .detail-sheet__content {
+        bottom: 0;
+        box-shadow: var(--sheet);
+        opacity: 1;
+      }
+    }
+  }
+}

@@ -1,0 +1,54 @@
+@use '../abstracts/variables' as *;
+
+.transactions {
+  &__content {
+    display: flex;
+    flex-direction: column;
+    gap: 2.5rem;
+  }
+  .transaction-history__month {
+    &__content {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    &__date-label {
+      padding: 0.25rem 0;
+    }
+
+    &__end {
+      display: flex;
+      align-items: center;
+      margin-right: 0.65rem;
+      margin-left: 5.5rem;
+
+      &--full {
+        margin-left: 0;
+      }
+
+      &__text {
+        margin-left: 1rem;
+      }
+    }
+  }
+}
+
+@media (max-width: $device--sm) {
+  .transactions {
+    &__content {
+      width: 100%;
+      min-height: 55vh;
+    }
+
+    .transaction-history__month {
+      display: flex;
+      flex-direction: column;
+
+      &__end {
+        margin-right: 0;
+        margin-left: 0;
+      }
+    }
+  }
+}

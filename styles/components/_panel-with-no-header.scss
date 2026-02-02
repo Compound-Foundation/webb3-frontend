@@ -1,0 +1,8 @@
+@use '../abstracts/variables' as *;
+
+.panel-with-no-header {
+  &__content {
+    background-color: var(--ui--foreground--1);
+    padding: 2rem 1.5rem;
+  }
+}

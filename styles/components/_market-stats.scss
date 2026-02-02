@@ -1,0 +1,36 @@
+@use '../abstracts/variables' as *;
+
+.market-stats {
+  align-items: baseline;
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: space-between;
+  gap: 1rem 0;
+  white-space: nowrap;
+
+  &__oracle-price {
+    div {
+      width: 100%;
+    }
+  }
+  &__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 2rem;
+
+    .market-overview__stats__item {
+      width: auto;
+    }
+  }
+
+  @media (max-width: $device--sm) {
+    &__stats {
+      flex-basis: 100%;
+      width: 100%;
+      gap: 1rem 0rem;
+      .market-overview__stats__item {
+        width: 50%;
+      }
+    }
+  }
+}

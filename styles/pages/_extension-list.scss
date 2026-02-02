@@ -1,0 +1,48 @@
+@use '../abstracts/variables' as *;
+
+.extension-list {
+  color: var(--text--1);
+
+  &__masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1875rem;
+
+    .body {
+      width: 50.5rem;
+      color: var(--text--2);
+    }
+    @media (max-width: $device--sm) {
+      .body {
+        width: 100%;
+      }
+    }
+  }
+
+  &__grouped-wrapper {
+    gap: 2.5rem;
+
+    &__label {
+      padding-top: 1.25rem;
+
+      &__enabled {
+        @extend .extension-list__grouped-wrapper__label;
+        color: #00c289;
+      }
+
+      &__not-enabled {
+        @extend .extension-list__grouped-wrapper__label;
+        color: #7a8a99;
+      }
+    }
+
+    @media (max-width: $device--sm) {
+      gap: 0;
+
+      &__content {
+        margin-top: 1rem;
+        width: 100%;
+      }
+    }
+  }
+}
