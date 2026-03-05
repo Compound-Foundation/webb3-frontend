@@ -152,7 +152,7 @@ const getGauntletUrlForMarket = (baseSymbol: string, chainName: string) => {
     case 'Ronin':
       return links['Ronin'][baseSymbol];
     case 'Mantle':
-      return links['Ronin'][baseSymbol];
+      return links['Mantle'][baseSymbol];
     case 'Base':
       return links['Base'][baseSymbol];
     case 'Arbitrum':
