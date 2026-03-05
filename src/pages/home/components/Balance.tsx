@@ -8,10 +8,10 @@ export const Balance = ({
   wholeNumberBalance: string;
   fractionalNumberBalance: string;
 }) => {
-  const { counterCurrency } = useCurrencyContext();
+  const { baseAssetSymbol, counterCurrency } = useCurrencyContext();
   return (
     <div className="meta">
-      {counterCurrency !== 'USD' && <MarketNetworkIcon icon={counterCurrency as string} />}
+      {counterCurrency !== 'USD' && <MarketNetworkIcon icon={baseAssetSymbol} />}
       {wholeNumberBalance}
       <span className={`text-color--${counterCurrency === 'USD' ? '1' : '2'}`}>{`.${fractionalNumberBalance.replace(
         counterCurrency as string,

@@ -16,6 +16,7 @@ type CurrencyManagerContext = {
   counterCurrency: Currency;
   updateShowCurrencyToggle: (showCurrencyToggle: boolean) => void;
   showCurrencyToggle: boolean;
+  baseAssetSymbol: string;
 };
 
 const initialCurrencyManagerContext = {
@@ -29,6 +30,7 @@ const initialCurrencyManagerContext = {
   baseAssetPriceInDollar: 0n,
   updateShowCurrencyToggle: () => undefined,
   showCurrencyToggle: false,
+  baseAssetSymbol: ''
 };
 
 let CurrencyContext: Context<Currency>;
@@ -140,6 +142,7 @@ export const CurrencyContextProvider = ({ children }: { children: ReactNode | Re
         setPressUpAnimate,
         updateShowCurrencyToggle,
         showCurrencyToggle,
+        baseAssetSymbol
       }}
     >
       {children}
