@@ -1,4 +1,4 @@
-import { Currency, MeterRiskLevel, TokenWithAccountState, BaseAsset, BaseAssetWithAccountState } from '@types';
+import { BaseAsset, BaseAssetWithAccountState, Currency, MeterRiskLevel, TokenWithAccountState } from '@types';
 
 import { adjustValueForAeroAsset } from './baseAssetPrice';
 
@@ -46,6 +46,27 @@ const getCurrencySuffix = (currency: Currency | undefined) => {
       break;
     case Currency.WETH:
       currencySuffix = ' WETH';
+      break;
+    case Currency.USDT:
+      currencySuffix = ' USDT';
+      break;
+    case Currency['USD₮0']:
+      currencySuffix = ' USD₮0'
+      break;
+    case Currency.wstETH:
+      currencySuffix = ' wstETH';
+      break;
+    case Currency.USDS:
+      currencySuffix = ' USDS';
+      break;
+    case Currency.USDbC:
+      currencySuffix = ' USDbC';
+      break;
+    case Currency['USDC.e']:
+      currencySuffix = ' USDC.e';
+      break;
+    case Currency.USDe:
+      currencySuffix = ' USDe';
       break;
   }
   return currencySuffix;

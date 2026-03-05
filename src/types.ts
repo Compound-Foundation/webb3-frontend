@@ -551,6 +551,13 @@ export enum Currency {
   AERO = 'AERO',
   WBTC = 'WBTC',
   RON = 'RON',
+  'USD₮0' = 'USD₮0',
+  USDT = 'USDT',
+  wstETH = 'wstETH',
+  USDS = 'USDS',
+  USDbC = 'USDbC',
+  'USDC.e' = 'USDC.e',
+  USDe = 'USDe',
 }
 
 // START of transaction history types
