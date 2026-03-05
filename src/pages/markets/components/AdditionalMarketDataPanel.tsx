@@ -22,6 +22,56 @@ type AdditionalMarketDataPanelContent = {
   gauntlet: string | undefined;
 };
 
+const links: Record<string, Record<string, string>> = {
+  Ethereum: {
+    WBTC: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-ethereum-wbtc',
+    wstETH: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-ethereum-wsteth',
+    USDS: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-ethereum-usds',
+    USDT: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-ethereum-usdt',
+    ETH: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-ethereum-weth',
+    USDC: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-ethereum-usdc',
+  },
+  Optimism: {
+    ETH: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-optimism-weth',
+    USDT: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-optimism-usdt',
+    USDC: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-optimism-usdc'
+  },
+  Polygon: {
+    'USDC.e': 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-polygon-usdc',
+    USDT0: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-polygon-usdt'
+  },
+  Ronin: {
+    RON: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-ronin-wron',
+    WETH: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-ronin-weth'
+  },
+  Mantle: {
+    USDe: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-mantle-usde'
+  },
+  Base: {
+    USDbC: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-base-usdbc',
+    AERO: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-base-aero',
+    USDS: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-base-usds',
+    ETH: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-base-weth',
+    USDC: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-base-usdc',
+  },
+  Arbitrum: {
+    ETH: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-arbitrum-weth',
+    USDC: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-arbitrum-usdc',
+    'USD₮0': 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-arbitrum-usdt',
+    'USDC.e': 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-arbitrum-usdce'
+  },
+  Linea: {
+    USDC: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-linea-usdc'
+  },
+  Scroll: {
+    USDC: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-scroll-usdc'
+  },
+  Unichain: {
+    USDC: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-unichain-usdc',
+    ETH: 'https://dashboards.gauntlet.xyz/protocols/compound/markets/v3-unichain-weth'
+  }
+};
+
 export type AdditionalMarketDataPanelState = AdditionalMarketDataPanelLoading | AdditionalMarketDataPanelHydrated;
 
 function getAdditionalMarketDataUrls(state: AdditionalMarketDataPanelState): AdditionalMarketDataPanelContent {
@@ -94,15 +144,25 @@ const getChaosLabsUrlForMarket = (baseSymbol: string, chainName: string) => {
 const getGauntletUrlForMarket = (baseSymbol: string, chainName: string) => {
   switch (chainName) {
     case 'Ethereum':
-      if (baseSymbol === 'USDC') {
-        return 'https://risk.gauntlet.network/protocols/compound/markets/v3-eth-usdc';
-      } else {
-        return 'https://risk.gauntlet.network/protocols/compound/markets/v3-eth-weth';
-      }
+      return links['Ethereum'][baseSymbol];
+    case 'Optimism':
+      return links['Optimism'][baseSymbol];
     case 'Polygon':
-      return 'https://risk.gauntlet.network/protocols/compound/markets/v3-polygon-usdc';
-    case 'Abitrum':
-      return 'https://risk.gauntlet.network/protocols/compound/markets/v3-arbitrum';
+      return links['Polygon'][baseSymbol];
+    case 'Ronin':
+      return links['Ronin'][baseSymbol];
+    case 'Mantle':
+      return links['Ronin'][baseSymbol];
+    case 'Base':
+      return links['Base'][baseSymbol];
+    case 'Arbitrum':
+      return links['Arbitrum'][baseSymbol];
+    case 'Linea':
+      return links['Linea'][baseSymbol];
+    case 'Scroll':
+      return links['Scroll'][baseSymbol];
+    case 'Unichain':
+      return links['Unichain'][baseSymbol];
     default:
       return '';
   }
