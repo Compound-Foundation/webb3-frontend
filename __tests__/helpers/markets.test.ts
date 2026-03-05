@@ -76,7 +76,7 @@ describe('getMarketDescriptors', () => {
 
   test('returns the correct market descriptors for arbitrum USDT', () => {
     expect(getMarketDescriptors(arbitrumUSDTRoots['comet'].toLowerCase(), 42161)).toEqual([
-      'USDT',
+      'USD₮0',
       'Arbitrum',
       'Tether',
     ]);

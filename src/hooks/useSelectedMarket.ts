@@ -271,7 +271,7 @@ export function parseMarketKeyOrDefault(
     return defaultData;
   }
 
-  const maybeShorthandMatch = marketKey.match(new RegExp('^([a-zA-Z.]+)-([a-zA-Z]+)$'));
+  const maybeShorthandMatch = marketKey.match(new RegExp('^([₮0-9a-zA-Z.]+)-([₮0-9a-zA-Z]+)$'));
   if (maybeShorthandMatch !== null) {
     // Matches a market key like 'usdc-mainnet'
     const [, baseAssetSymbol, networkName] = maybeShorthandMatch;
