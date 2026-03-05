@@ -120,6 +120,11 @@ export const calculateRoundedUnit = (tokenDecimals: number, value: bigint, forma
 export const displayValue = (tokenDecimals: number, value: bigint): string => {
   const formatPrecision = 4;
   const roundedUnits = calculateRoundedUnit(tokenDecimals, value, formatPrecision);
+
+  if (value !== 0n && roundedUnits === 0) {
+    return '< 0.0001'
+  }
+
   // but if the value is bigger than 1.000B then we still shorten it
   if (roundedUnits < BILLION) {
     return `${roundedUnits.toLocaleString('en-US', {
@@ -141,6 +146,11 @@ export const displayValue = (tokenDecimals: number, value: bigint): string => {
 export const formatValue = (tokenDecimals: number, value: bigint): string => {
   const formatPrecision = 4;
   const roundedUnits = calculateRoundedUnit(tokenDecimals, value, formatPrecision);
+
+  if (value !== 0n && roundedUnits === 0) {
+    return '< 0.0001';
+  }
+
   return formatUnits(roundedUnits);
 };
 
@@ -148,6 +158,11 @@ export const formatValue = (tokenDecimals: number, value: bigint): string => {
 export const formatValueInCurrency = (tokenDecimals: number, value: bigint, currency: Currency): string => {
   const formatPrecision = 4;
   const roundedUnits = calculateRoundedUnit(tokenDecimals, value, formatPrecision);
+
+  if (value !== 0n && roundedUnits === 0) {
+    return '< 0.0001';
+  }
+
   return formatUnits(roundedUnits, currency);
 };
 
@@ -155,6 +170,11 @@ export const formatValueInCurrency = (tokenDecimals: number, value: bigint, curr
 export const formatValueInDollars = (tokenDecimals: number, value: bigint): string => {
   const formatPrecision = 2;
   const roundedUnits = calculateRoundedUnit(tokenDecimals, value, formatPrecision);
+
+  if (value !== 0n && roundedUnits === 0) {
+    return '< $0.01';
+  }
+
   return formatUnits(roundedUnits, Currency.USD);
 };
 
@@ -174,13 +194,24 @@ export const formatTokenBalance = (
 
   const units = Number((value * BigInt(scale)) / baseUnit) / scale;
   const roundingScale = 10 ** formatPrecision;
-  const roundedUnits = Math.round(units * roundingScale) / roundingScale;
+  let roundedUnits = Math.round(units * roundingScale) / roundingScale;
+
+  if (value !== 0n && roundedUnits === 0) {
+    return currency === Currency.USD ? '< $0.01' : '< 0.0001';
+  }
+
   const prefix = currency === Currency.USD ? '$' : '';
   const currencySuffix = getCurrencySuffix(currency);
 
   // but if the value is bigger than 1.000B then we still shorten it
   if (!shortened && roundedUnits < BILLION) {
-    return `${prefix}${roundedUnits.toLocaleString('en-US', {
+    const isTooSmall = roundedUnits > 0 && roundedUnits < (currency === Currency.USD ? 0.01 : 0.0001);
+
+    if (isTooSmall) {
+      roundedUnits = currency === Currency.USD ? 0.01 : 0.0001;
+    }
+
+    return `${isTooSmall ? '< ' : ''}${prefix}${roundedUnits.toLocaleString('en-US', {
       minimumFractionDigits: formatPrecision,
       maximumFractionDigits: formatPrecision,
     })}${currencySuffix}`;
@@ -195,6 +226,12 @@ export const formatUnits = (units: number, currency?: Currency) => {
   let postfix: string;
   let minimumFractionDigits = currency ? 2 : 4;
   let formatPrecision: number = currency ? 2 : 4;
+
+  const isTooSmall = units > 0 && units < (currency === Currency.USD ? 0.01 : 0.0001);
+
+  if (isTooSmall) {
+    units = currency === Currency.USD ? 0.01 : 0.0001;
+  }
 
   if (units >= BILLION) {
     shortenedUnits = units / BILLION;
@@ -215,19 +252,26 @@ export const formatUnits = (units: number, currency?: Currency) => {
     formatPrecision = currency !== 'USD' ? 4 : 2;
   }
 
-  return `${prefix}${shortenedUnits.toLocaleString('en-US', {
+  return `${isTooSmall ? '< ' : ''}${prefix}${shortenedUnits.toLocaleString('en-US', {
     minimumFractionDigits,
     maximumFractionDigits: formatPrecision,
   })}${postfix}${currencySuffix}`;
 };
 
 export const formatUnitsWithTruncation = ({ amount }: { amount: string }) => {
+  const numericAmount = Number(amount);
+
+  if (numericAmount > 0 && numericAmount < 0.0001) {
+    return '< 0.0001';
+  }
+
   let digits = 4;
   // the amount is either an interger or have all 0 decimals, we format with no decimals, or else with 4 decimals
   if ((amount.split('.')[1] || '').match(/^[0]*$/) !== null) {
     digits = 0;
   }
-  return `${Number(amount).toLocaleString('en-US', {
+
+  return `${numericAmount.toLocaleString('en-US', {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   })}`;
