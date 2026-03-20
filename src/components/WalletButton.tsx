@@ -1,4 +1,4 @@
-import { useState, useRef, ReactNode } from 'react';
+import { useState, useRef, ReactNode, useEffect } from 'react';
 
 import { CHAINS } from '@constants/chains';
 import type { Web3 } from '@contexts/Web3Context';
@@ -83,8 +83,18 @@ const WalletButton = ({
   const ref = useRef(null);
   useOnClickOutside(ref, () => setDropdownActive(false));
 
-  const { state } = useTransactionHistory(web3, RECENT_NUM);
+  const { state, refreshData } = useTransactionHistory(web3, RECENT_NUM);
   const [transactionsStateType, transactionsState] = state;
+  const trxRef = useRef(transactions.length || 0);
+
+  // when there's a change in pendingTransactions.length
+  // we refresh to check for any new transaction history
+  useEffect(() => {
+    if (transactions.length || 0 < trxRef.current) {
+      refreshData();
+      trxRef.current = transactions.length || 0;
+    }
+  }, [transactions]);
 
   return (
     <div ref={ref} className="header__pill-dropdown connected-wallet L2">
