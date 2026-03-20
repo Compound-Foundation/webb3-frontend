@@ -7,6 +7,7 @@ export const assetIconForAssetSymbol = (symbol: string): string => {
     case 'USDbC':
       return 'USDC';
     case 'USD₮0':
+    case 'USDT0':
       return 'USDTugrik0';
     default:
       return symbol;

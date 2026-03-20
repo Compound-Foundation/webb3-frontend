@@ -68,6 +68,9 @@ const getCurrencySuffix = (currency: Currency | undefined) => {
     case Currency.USDe:
       currencySuffix = ' USDe';
       break;
+    case Currency.USDT0:
+      currencySuffix = ' USDT0';
+      break;
   }
   return currencySuffix;
 };

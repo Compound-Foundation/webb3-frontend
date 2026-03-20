@@ -79,7 +79,7 @@ export const MARKETS: MarketData[] = [
       [1, 'USDS', 'USDS', mainnetUSDSRoots],
       [1, 'WBTC', 'Wrapped BTC', mainnetWBTCRoots],
       [137, 'USDC.e', 'USD Coin (Bridged)', polygonUSDCRoots],
-      [137, 'USDT', 'Tether', polygonUSDTRoots],
+      [137, 'USDT0', 'Tether', polygonUSDTRoots],
       [42161, 'USDC', 'USD Coin', arbitrumNativeUSDCRoots],
       [42161, 'USDC.e', 'USD Coin (Bridged)', arbitrumBridgedUSDCRoots],
       [42161, 'ETH', 'Ether', arbitrumWETHRoots],

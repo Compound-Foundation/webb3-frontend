@@ -558,6 +558,7 @@ export enum Currency {
   USDbC = 'USDbC',
   'USDC.e' = 'USDC.e',
   USDe = 'USDe',
+  USDT0 = 'USDT0'
 }
 
 // START of transaction history types

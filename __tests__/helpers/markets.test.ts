@@ -51,7 +51,7 @@ describe('getMarketDescriptors', () => {
   });
 
   test('returns the correct market descriptors for polygon USDT', () => {
-    expect(getMarketDescriptors(polygonUSDTRoots['comet'].toLowerCase(), 137)).toEqual(['USDT', 'Polygon', 'Tether']);
+    expect(getMarketDescriptors(polygonUSDTRoots['comet'].toLowerCase(), 137)).toEqual(['USDT0', 'Polygon', 'Tether']);
   });
 
   test('returns the correct market descriptors for arbitrum bridged USDC', () => {
