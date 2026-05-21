@@ -1,0 +1,88 @@
+name: Build & Push to IPFS
+on: push
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      deployments: write
+    steps:
+      - name: Build Note for ${{ github.ref }}
+        run: |
+          echo Building ${GITHUB_REF}...
+
+      - uses: chrnorm/deployment-action@v2
+        name: Create GitHub deployment
+        id: deployment
+        with:
+          token: '${{ github.token }}'
+          environment: production
+
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '25'
+          corepack: true
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install Node Dependencies
+        run: yarn install
+
+      - name: Build App
+        run: yarn run build
+        env:
+          VITE_V3_API_HOST: ${{secrets.VITE_V3_API_HOST}}
+          VITE_V3_GAS_SUFFIX: ${{secrets.VITE_V3_GAS_SUFFIX}}
+          VITE_V3_RPC_PROVIDER_HOST: ${{secrets.VITE_V3_RPC_PROVIDER_HOST}}
+          VITE_V3_WALLET_CONNECT_PROJECT_ID: ${{secrets.VITE_V3_WALLET_CONNECT_PROJECT_ID}}
+
+      - name: Archive App
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Deploy to IPFS
+        run: |
+          node scripts/ipfs.js | tee .release-notes
+          echo "::notice ::Release is $(cat .release)"
+          echo "::notice ::Deployed to $(cat .release-url)"
+        env:
+          PINATA_JWT: ${{ secrets.PINATA_JWT }}
+          PINATA_GATEWAY_URL: ${{ secrets.PINATA_GATEWAY_URL }}
+
+      - name: Upload IPFS Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: .release
+          include-hidden-files: true
+          path: .release
+
+      - name: Echo
+        run: |
+          echo "Release URL: ${{ env.RELEASE_URL }}"
+
+      - name: Update deployment status (success)
+        if: success()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: '${{ github.token }}'
+          environment-url: '${{ env.RELEASE_URL }}'
+          state: 'success'
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+
+      - name: Update deployment status (failure)
+        if: failure()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: '${{ github.token }}'
+          environment-url: '${{ env.RELEASE_URL }}'
+          state: 'failure'
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}

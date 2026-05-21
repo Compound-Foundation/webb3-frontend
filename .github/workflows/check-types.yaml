@@ -1,0 +1,32 @@
+name: Check types and linting
+on:
+  workflow_dispatch:
+  pull_request:
+jobs:
+  check-types:
+    name: Check types and linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '25'
+          corepack: true
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install packages
+        run: yarn install
+
+      - name: Enumerate
+        run: find src
+
+      - name: Check types
+        run: tsc
+
+      - name: Check linting
+        run: yarn lint

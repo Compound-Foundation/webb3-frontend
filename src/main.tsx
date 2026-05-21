@@ -18,7 +18,7 @@ import TransactionHistory from './pages/transactions';
 import Vote from './pages/vote';
 
 const { pathname } = window.location;
-const ipfsMatch = new RegExp('.*/Qm[a-zA-Z0-9]{44}/').exec(pathname);
+const ipfsMatch = new RegExp('.*/ba[a-zA-Z0-9]{57}/').exec(pathname);
 const queryClient = new QueryClient();
 
 createRoot(document.getElementById('root') as HTMLElement).render(
@@ -40,5 +40,5 @@ createRoot(document.getElementById('root') as HTMLElement).render(
         </QueryClientProvider>
       </WagmiProvider>
     </Router>
-  </React.StrictMode>
+  </React.StrictMode>,
 );
