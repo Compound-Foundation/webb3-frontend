@@ -1,6 +1,6 @@
-const { ethers } = require('ethers');
-const fetch = require('node-fetch');
-const fs = require('fs/promises');
+import { ethers } from 'ethers';
+import fetch from 'node-fetch';
+import * as fs from 'fs/promises';
 
 const releaseFile = '.release';
 const ethereumNode = process.env['ETHEREUM_NODE'] || 'http://localhost:8585';

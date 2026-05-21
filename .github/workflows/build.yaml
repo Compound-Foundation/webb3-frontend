@@ -52,8 +52,6 @@ jobs:
       - name: Deploy to IPFS
         run: |
           node scripts/ipfs.js | tee .release-notes
-          echo "::notice ::Release is $(cat .release)"
-          echo "::notice ::Deployed to $(cat .release-url)"
         env:
           PINATA_JWT: ${{ secrets.PINATA_JWT }}
           PINATA_GATEWAY_URL: ${{ secrets.PINATA_GATEWAY_URL }}
