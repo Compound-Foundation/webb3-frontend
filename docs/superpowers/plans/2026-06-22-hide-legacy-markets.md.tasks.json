@@ -1,9 +1,9 @@
 {
   "planPath": "docs/superpowers/plans/2026-06-22-hide-legacy-markets.md",
   "tasks": [
-    {"id": 1, "subject": "Task 1: Add INACTIVE_CHAIN_IDS constant", "status": "pending"},
-    {"id": 2, "subject": "Task 2: Split core/inactive panels with collapsible toggle (TDD)", "status": "pending", "blockedBy": [1]},
-    {"id": 3, "subject": "Task 3: Style the Inactive Markets toggle button", "status": "pending", "blockedBy": [2]}
+    {"id": 1, "subject": "Task 1: Add INACTIVE_CHAIN_IDS constant", "status": "completed"},
+    {"id": 2, "subject": "Task 2: Split core/inactive panels with collapsible toggle (TDD)", "status": "completed", "blockedBy": [1]},
+    {"id": 3, "subject": "Task 3: Style the Inactive Markets toggle button", "status": "completed", "blockedBy": [2]}
   ],
   "lastUpdated": "2026-06-22"
 }
