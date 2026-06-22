@@ -5,6 +5,7 @@ import { useContext } from 'react';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { isNonStablecoinMarket } from '@helpers/baseAssetPrice';
 import { convertApiResponse } from '@helpers/functions';
+import { filterLegacyCollateralSymbols } from '@helpers/legacyCollateral';
 import { getMarketDescriptors } from '@helpers/markets';
 import { BASE_FACTOR, FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 import { getHistoricalMarketSummaryEndpoint, getLatestMarketSummaryEndpoint } from '@helpers/urls';
@@ -157,6 +158,10 @@ const sanitizeMarketSummary = (marketSummary: MarketSummaryResponse): MarketSumm
     utilization: utilization,
     timestamp: marketSummary.timestamp,
     date: marketSummary.date,
-    collateralAssetSymbols: marketSummary.collateralAssetSymbols,
+    collateralAssetSymbols: filterLegacyCollateralSymbols(
+      marketSummary.chainId,
+      baseAsset,
+      marketSummary.collateralAssetSymbols ?? []
+    ),
   };
 };
