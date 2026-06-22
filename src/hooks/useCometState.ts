@@ -7,7 +7,7 @@ import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
 import { getBaseAssetPriceFeed, getBaseAssetDollarPrice, adjustCollateralPrice } from '@helpers/baseAssetPrice';
 import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
-import { isLegacyCollateral } from '@helpers/legacyCollateral';
+import { shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
 import { REFRESH_INTERVAL, getCapacity, getCollateralValue, MAX_UINT256 } from '@helpers/numbers';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
@@ -126,11 +126,8 @@ export function useCometState(web3: Web3, marketState: MarketDataState, transact
       const { chainId } = market.chainInformation;
       const baseSymbol = market.baseAsset.symbol;
       marketStateWithCollaterals.collateralAssets = marketStateWithCollaterals.collateralAssets.filter((asset) => {
-        if (!isLegacyCollateral(chainId, baseSymbol, asset.symbol)) {
-          return true;
-        }
         const balance = 'balance' in asset ? (asset.balance as bigint) : 0n;
-        return balance > 0n;
+        return shouldKeepCollateralAsset(chainId, baseSymbol, asset.symbol, balance);
       });
     }
   }

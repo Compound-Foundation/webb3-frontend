@@ -40,3 +40,20 @@ export function filterLegacyCollateralSymbols(
 ): string[] {
   return symbols.filter((symbol) => !isLegacyCollateral(chainId, baseAssetSymbol, symbol));
 }
+
+/**
+ * Whether a collateral asset should remain visible on a market detail page.
+ * Non-legacy assets are always kept; a legacy asset is kept only when the user
+ * still holds a positive collateral balance of it (so it can be withdrawn).
+ */
+export function shouldKeepCollateralAsset(
+  chainId: number,
+  baseAssetSymbol: string,
+  collateralSymbol: string,
+  balance: bigint
+): boolean {
+  if (!isLegacyCollateral(chainId, baseAssetSymbol, collateralSymbol)) {
+    return true;
+  }
+  return balance > 0n;
+}

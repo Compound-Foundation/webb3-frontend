@@ -1,4 +1,4 @@
-import { isLegacyCollateral, filterLegacyCollateralSymbols } from '@helpers/legacyCollateral';
+import { isLegacyCollateral, filterLegacyCollateralSymbols, shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
 
 describe('isLegacyCollateral — full deny-list coverage', () => {
   test.each([
@@ -54,6 +54,26 @@ describe('isLegacyCollateral', () => {
     expect(isLegacyCollateral(1, 'WBTC', 'weETH')).toBe(false);
     expect(isLegacyCollateral(1, 'ETH', 'USDe')).toBe(false);
     expect(isLegacyCollateral(10, 'USDT', 'mETH')).toBe(false);
+  });
+});
+
+describe('shouldKeepCollateralAsset', () => {
+  test('keeps non-legacy collateral regardless of balance', () => {
+    expect(shouldKeepCollateralAsset(1, 'USDT', 'WBTC', 0n)).toBe(true);
+    expect(shouldKeepCollateralAsset(1, 'USDT', 'WBTC', 5n)).toBe(true);
+  });
+
+  test('hides a legacy collateral the user does not hold', () => {
+    expect(shouldKeepCollateralAsset(1, 'USDT', 'weETH', 0n)).toBe(false);
+  });
+
+  test('keeps a legacy collateral the user still holds (so it can be withdrawn)', () => {
+    expect(shouldKeepCollateralAsset(1, 'USDT', 'weETH', 1n)).toBe(true);
+  });
+
+  test('matches the legacy symbol case-insensitively', () => {
+    expect(shouldKeepCollateralAsset(1, 'usdt', 'weeth', 0n)).toBe(false);
+    expect(shouldKeepCollateralAsset(1, 'usdt', 'weeth', 1n)).toBe(true);
   });
 });
 
