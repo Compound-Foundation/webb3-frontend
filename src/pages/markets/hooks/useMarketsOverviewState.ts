@@ -122,7 +122,7 @@ const getState = async (rewardsState: RewardsState, includeTestnets = false): Pr
  * @param marketSummary
  * @returns
  */
-const sanitizeMarketSummary = (marketSummary: MarketSummaryResponse): MarketSummary => {
+export const sanitizeMarketSummary = (marketSummary: MarketSummaryResponse): MarketSummary => {
   const baseUsdPrice = BigInt(Math.floor(Number(marketSummary.baseUsdPrice) * 10 ** PRICE_PRECISION));
   const borrowAPR = BigInt(Math.floor(Number(marketSummary.borrowApr) * 10 ** FACTOR_PRECISION));
   const supplyAPR = BigInt(Math.floor(Number(marketSummary.supplyApr) * 10 ** FACTOR_PRECISION));
