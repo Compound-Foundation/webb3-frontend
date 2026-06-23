@@ -7,7 +7,7 @@ import IconPair from '@components/IconPair';
 import { CaretDown, CheckMark } from '@components/Icons';
 import PanelWithHeader from '@components/PanelWithHeader';
 import PanelWithNoHeader from '@components/PanelWithNoHeader';
-import { CHAINS } from '@constants/chains';
+import { CHAINS, INACTIVE_CHAIN_IDS } from '@constants/chains';
 import { assetIconForAssetSymbol, iconNameForChainId } from '@helpers/assets';
 import { getMarketDescriptors } from '@helpers/markets';
 import { BASE_FACTOR, PRICE_PRECISION, formatValueInDollars } from '@helpers/numbers';
@@ -33,6 +33,7 @@ const MarketOverviewPanels = ({ latestMarketSummaries }: MarketOverviewPanelsPro
   const [sortOrder, setSortOrder] = useState<(typeof SORT_ORDER_OPTIONS)[number]>('Ascending');
   const [sortByDropdownActive, setSortByDropdownActive] = useState<boolean>(false);
   const [sortOrderDropdownActive, setSortOrderDropdownActive] = useState<boolean>(false);
+  const [showInactive, setShowInactive] = useState<boolean>(false);
 
   const sortByDropdownRef = useRef(null);
   useOnClickOutside(sortByDropdownRef, () => setSortByDropdownActive(false));
@@ -122,9 +123,37 @@ const MarketOverviewPanels = ({ latestMarketSummaries }: MarketOverviewPanelsPro
         </div>
       </div>
 
-      {Object.keys(marketSummariesByChain).map((chainId) => {
-        return <Panel key={chainId} chainId={Number(chainId)} marketSummaries={marketSummariesByChain[chainId]} />;
-      })}
+      {(() => {
+        const chainIds = Object.keys(marketSummariesByChain).map(Number);
+        const coreChainIds = chainIds.filter((id) => !INACTIVE_CHAIN_IDS.has(id));
+        const inactiveChainIds = chainIds.filter((id) => INACTIVE_CHAIN_IDS.has(id));
+
+        return (
+          <>
+            {coreChainIds.map((chainId) => (
+              <Panel key={chainId} chainId={chainId} marketSummaries={marketSummariesByChain[chainId]} />
+            ))}
+
+            {inactiveChainIds.length > 0 && (
+              <div className="market-overview-panels__tables-container">
+                <button
+                  className="button market-overview-panels__inactive-toggle L2 text-color--2"
+                  onClick={() => setShowInactive((prev) => !prev)}
+                >
+                  <label className="label L2 text-color--2">
+                    {showInactive ? 'Hide inactive markets' : 'Show inactive markets'}
+                  </label>
+                </button>
+              </div>
+            )}
+
+            {showInactive &&
+              inactiveChainIds.map((chainId) => (
+                <Panel key={chainId} chainId={chainId} marketSummaries={marketSummariesByChain[chainId]} />
+              ))}
+          </>
+        );
+      })()}
 
       <div className="market-overview-panels__tables-container">
         <PanelWithNoHeader>
