@@ -7,6 +7,7 @@ import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
 import { getBaseAssetPriceFeed, getBaseAssetDollarPrice, adjustCollateralPrice } from '@helpers/baseAssetPrice';
 import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
+import { shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
 import { REFRESH_INTERVAL, getCapacity, getCollateralValue, MAX_UINT256 } from '@helpers/numbers';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
@@ -113,21 +114,21 @@ export function useCometState(web3: Web3, marketState: MarketDataState, transact
   }, [web3.read.account, refreshData]);
 
   /**
-   * This is a temporary fix for the USDT market.
-   *
-   * The code block below avoids the usage of the wUSDM collateral on the UI.
-   *
-   * TODO: Remove this once the collateral is fixed.
+   * Hide legacy collateral assets per Comet (Linear COM-18). A removed asset is
+   * still shown when the connected user holds a positive collateral balance of it,
+   * so existing positions remain visible and withdrawable.
    */
   {
+    const market = marketState[1];
     const [, marketStateWithCollaterals] = state;
 
-    if (marketStateWithCollaterals) {
-      marketStateWithCollaterals.collateralAssets = marketStateWithCollaterals.collateralAssets.filter(
-        ({ address }) => {
-          return address.toLowerCase() !== '0x57f5e098cad7a3d1eed53991d4d66c45c9af7812';
-        }
-      );
+    if (market && marketStateWithCollaterals) {
+      const { chainId } = market.chainInformation;
+      const baseSymbol = market.baseAsset.symbol;
+      marketStateWithCollaterals.collateralAssets = marketStateWithCollaterals.collateralAssets.filter((asset) => {
+        const balance = 'balance' in asset ? (asset.balance as bigint) : 0n;
+        return shouldKeepCollateralAsset(chainId, baseSymbol, asset.symbol, balance);
+      });
     }
   }
 

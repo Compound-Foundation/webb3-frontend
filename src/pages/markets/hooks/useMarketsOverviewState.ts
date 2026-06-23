@@ -5,6 +5,7 @@ import { useContext } from 'react';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { isNonStablecoinMarket } from '@helpers/baseAssetPrice';
 import { convertApiResponse } from '@helpers/functions';
+import { filterLegacyCollateralSymbols } from '@helpers/legacyCollateral';
 import { getMarketDescriptors } from '@helpers/markets';
 import { BASE_FACTOR, FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 import { getHistoricalMarketSummaryEndpoint, getLatestMarketSummaryEndpoint } from '@helpers/urls';
@@ -121,7 +122,7 @@ const getState = async (rewardsState: RewardsState, includeTestnets = false): Pr
  * @param marketSummary
  * @returns
  */
-const sanitizeMarketSummary = (marketSummary: MarketSummaryResponse): MarketSummary => {
+export const sanitizeMarketSummary = (marketSummary: MarketSummaryResponse): MarketSummary => {
   const baseUsdPrice = BigInt(Math.floor(Number(marketSummary.baseUsdPrice) * 10 ** PRICE_PRECISION));
   const borrowAPR = BigInt(Math.floor(Number(marketSummary.borrowApr) * 10 ** FACTOR_PRECISION));
   const supplyAPR = BigInt(Math.floor(Number(marketSummary.supplyApr) * 10 ** FACTOR_PRECISION));
@@ -157,6 +158,10 @@ const sanitizeMarketSummary = (marketSummary: MarketSummaryResponse): MarketSumm
     utilization: utilization,
     timestamp: marketSummary.timestamp,
     date: marketSummary.date,
-    collateralAssetSymbols: marketSummary.collateralAssetSymbols,
+    collateralAssetSymbols: filterLegacyCollateralSymbols(
+      marketSummary.chainId,
+      baseAsset,
+      marketSummary.collateralAssetSymbols ?? []
+    ),
   };
 };
