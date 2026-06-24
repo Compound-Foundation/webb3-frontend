@@ -101,7 +101,7 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
         marketRef.current = marketKey(desiredMarket);
       }
     },
-    [location.pathname, state[1], web3.switchReadNetwork]
+    [location.pathname, state[1], web3.switchReadNetwork],
   );
 
   const selectMarketByAddress = useCallback(
@@ -111,7 +111,7 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
         selectMarket(market);
       }
     },
-    [selectMarket]
+    [selectMarket],
   );
 
   useEffect(() => {
@@ -169,7 +169,7 @@ export function getSleuthOptions(chainId: number): { contractAddress: string } {
 
 export const queryCometData = async (
   providerConnection: string | ConnectionInfo,
-  market: MarketData | MarketDataLoaded
+  market: MarketData | MarketDataLoaded,
 ): Promise<CometStateResponse> => {
   const provider = new StaticJsonRpcProvider(providerConnection);
   const sleuth = new Sleuth(provider, getSleuthOptions(market.chainInformation.chainId));
@@ -192,7 +192,7 @@ export const queryCometData = async (
 
 const getState = async (
   providerConnection: string | ConnectionInfo,
-  market: MarketData | MarketDataLoaded
+  market: MarketData | MarketDataLoaded,
 ): Promise<MarketDataHydrated> => {
   if (isV2Market(market)) {
     return [StateType.Hydrated, market];
@@ -208,8 +208,8 @@ const getState = async (
       !isLegacyCollateral(
         market.chainInformation.chainId,
         market.baseAsset.symbol,
-        getAssetDisplaySymbol(assetInfo.collateralAsset, assetInfo.symbol, market.chainInformation)
-      )
+        getAssetDisplaySymbol(assetInfo.collateralAsset, assetInfo.symbol, market.chainInformation),
+      ),
   );
 
   const marketDataLoaded: MarketDataLoaded = {
@@ -219,14 +219,14 @@ const getState = async (
       symbol: getAssetDisplaySymbol(
         cometResponse.baseAsset.baseAsset,
         cometResponse.baseAsset.symbol,
-        market.chainInformation
+        market.chainInformation,
       ),
       decimals: cometResponse.baseAsset.decimals.toNumber(),
       minBorrow: cometResponse.baseAsset.minBorrow.toBigInt(),
       name: getAssetDisplayName(
         cometResponse.baseAsset.baseAsset,
         cometResponse.baseAsset.name,
-        market.chainInformation
+        market.chainInformation,
       ),
       priceFeed: cometResponse.baseAsset.priceFeed,
     },
@@ -241,7 +241,7 @@ const getState = async (
       name: getAssetDisplayName(
         assetInfo.collateralAsset,
         sanitizeCollateralAssetName(assetInfo.name),
-        market.chainInformation
+        market.chainInformation,
       ),
       collateralFactor: assetInfo.collateralFactor.toBigInt(),
       liquidateCollateralFactor: assetInfo.liquidateCollateralFactor.toBigInt(),
@@ -278,10 +278,10 @@ export function shortMarketKey(market: MarketData | MarketDataLoaded): string {
 export function parseMarketKeyOrDefault(
   markets: MarketData[],
   defaultData: MarketData,
-  marketKey?: string | null
+  marketKey?: string | null,
 ): MarketData {
   if (marketKey === undefined || marketKey === null) {
-    // No market key was found, e.g. if the user visits app.compound.finance for the first time.
+    // No market key was found, e.g. if the user visits app.compound.xyz for the first time.
     return defaultData;
   }
 
@@ -293,7 +293,8 @@ export function parseMarketKeyOrDefault(
       (market: MarketData) =>
         market.chainInformation.key.toLowerCase() === networkName.toLowerCase() &&
         ((!market.baseAsset.isWrapped && market.baseAsset.symbol.toLowerCase() === baseAssetSymbol.toLowerCase()) ||
-          (market.baseAsset.isWrapped && `w${market.baseAsset.symbol}`.toLowerCase() === baseAssetSymbol.toLowerCase()))
+          (market.baseAsset.isWrapped &&
+            `w${market.baseAsset.symbol}`.toLowerCase() === baseAssetSymbol.toLowerCase())),
     );
 
     if (maybeMarketFromShorthand) {
@@ -309,7 +310,7 @@ export function parseMarketKeyOrDefault(
       (market: MarketData) =>
         market.chainInformation.chainId === Number(chainId) &&
         market.baseAsset.symbol === baseAssetSymbol &&
-        market.marketAddress === marketAddress
+        market.marketAddress === marketAddress,
     );
 
     if (maybeMarket) {
@@ -328,7 +329,7 @@ export function parseMarketKey(markets: MarketData[], marketKey: string): Market
     (market: MarketData) =>
       market.chainInformation.chainId === Number(chainId) &&
       market.baseAsset.symbol === baseAssetSymbol &&
-      market.marketAddress === marketAddress
+      market.marketAddress === marketAddress,
   );
 
   return supportedMarket;

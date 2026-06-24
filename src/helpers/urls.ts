@@ -4,13 +4,13 @@ import { ChainInformation, PendingTransaction, MarketData, MarketDataLoaded, Tra
 
 import { getGovernanceContractAddress, GovernanceNetworksEnum } from './contracts';
 
-export const COMPOUND_URL = 'https://compound.finance/';
-export const V2_URL = 'https://v2-app.compound.finance';
-export const GOV_URL = `https://compound.finance/governance`;
+export const COMPOUND_URL = 'https://compound.xyz/';
+export const V2_URL = 'https://v2-app.compound.xyz';
+export const GOV_URL = `https://compound.xyz/governance`;
 export const SUPPORT_URL = `https://medium.com/compound-finance/the-compound-guide-to-supplying-borrowing-crypto-assets-94821f2950a0`;
 export const TERMS_URL = `${V2_URL}/#terms`;
 export const V3_API_URL = import.meta.env.VITE_V3_API_HOST || 'V3_API_HOST_NOT_CONFIGURED';
-export const TIMESTAMP_API = 'https://timestamp.compound.finance';
+export const TIMESTAMP_API = 'https://timestamp.compound.xyz';
 export const TALLY_URL = 'https://www.tally.xyz';
 export const TALLY_GOV_URL = 'https://www.tally.xyz/gov/compound';
 
@@ -48,7 +48,7 @@ export function getGovernanceUrlForChain(chainKey: string): string {
 
 export function getTallyProfileForChain(chainId: number, address: string): string {
   const [governor] = getGovernanceContractAddress(
-    isTestnet(chainId) ? GovernanceNetworksEnum.Testnet : GovernanceNetworksEnum.Mainnet
+    isTestnet(chainId) ? GovernanceNetworksEnum.Testnet : GovernanceNetworksEnum.Mainnet,
   );
   return `${TALLY_URL}/profile/${address}?governanceId=eip155:${chainId}:${governor}`;
 }
@@ -57,7 +57,7 @@ export function getTransactionHistoryEndpoint(
   account: string,
   cursor?: string,
   limit?: number,
-  useTestnet?: boolean // temporarily hardcode testnet markets to test transaction history
+  useTestnet?: boolean, // temporarily hardcode testnet markets to test transaction history
 ): string {
   const useTestnetSuffix = useTestnet
     ? '&markets[]=11155111_0x2943ac1216979aD8dB76D9147F64E61adc126e96,11155111_0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e'

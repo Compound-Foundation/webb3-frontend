@@ -41,14 +41,17 @@ const MarketOverviewPanels = ({ latestMarketSummaries }: MarketOverviewPanelsPro
   useOnClickOutside(sortOrderDropdownRef, () => setSortOrderDropdownActive(false));
 
   // Groups market summaries by chain ID
-  const marketSummariesByChain = latestMarketSummaries.reduce((acc, marketSummary) => {
-    const { chainId } = marketSummary;
-    if (!acc[chainId]) {
-      acc[chainId] = [];
-    }
-    acc[chainId].push(marketSummary);
-    return acc;
-  }, {} as { [chainId: string]: LatestMarketSummaries });
+  const marketSummariesByChain = latestMarketSummaries.reduce(
+    (acc, marketSummary) => {
+      const { chainId } = marketSummary;
+      if (!acc[chainId]) {
+        acc[chainId] = [];
+      }
+      acc[chainId].push(marketSummary);
+      return acc;
+    },
+    {} as { [chainId: string]: LatestMarketSummaries },
+  );
 
   // Sort the markets in place
   Object.values(marketSummariesByChain).forEach((marketSummaries) => {
@@ -160,7 +163,7 @@ const MarketOverviewPanels = ({ latestMarketSummaries }: MarketOverviewPanelsPro
           <label className="label L2 text-color--1">Looking for V2? </label>
           <label className="label L2 text-color--2">Compound V2 market data has moved to </label>
           <Link className="label L2 text-color--2" to="/markets/v2" onClick={() => scrollTo(0, 0)}>
-            app.compound.finance/markets/v2
+            app.compound.xyz/markets/v2
           </Link>
         </PanelWithNoHeader>
       </div>
@@ -346,7 +349,7 @@ const CollateralAssets = ({ collateralAssets }: CollateralAssetsProps) => {
             <div
               key={collateralAsset}
               className={`asset asset--${assetIconForAssetSymbol(
-                collateralAsset
+                collateralAsset,
               )} market-overview-panels__collateral-asset-icon`}
             />
           );

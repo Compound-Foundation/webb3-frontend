@@ -16,7 +16,7 @@ const GoToDesktop = () => {
       <div className="bottom">
         <button
           className="button button--dark button--earn button--jumbo"
-          onClick={() => (document.location.href = 'https://compound.finance')}
+          onClick={() => (document.location.href = 'https://compound.xyz')}
         >
           Go to marketing site
         </button>
