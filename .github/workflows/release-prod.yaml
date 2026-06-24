@@ -41,7 +41,7 @@ jobs:
         if: github.event.inputs.cid == ''
 
       - name: Seacrest
-        uses: torreyatcitty/seacrest@7db399e44482d234f11a5b5f523ef7caa49a9f95
+        uses: torreyatcitty/seacrest@57db4c6e700afc442655ab054b46eb053a9d799d
         with:
           wallet_connect_project_id: ${{secrets.VITE_V3_WALLET_CONNECT_PROJECT_ID}}
           requested_network: mainnet
