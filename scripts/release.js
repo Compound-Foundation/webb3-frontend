@@ -35,44 +35,47 @@ async function release(payload, url, signature) {
 }
 
 // The signed message is the JSON-stringified payload. The worker recovers the
-// signer from this exact body and checks it matches `deployer` and `nonce`, so
-// the object signed here must be byte-identical to the one sent in `release`.
-function buildPayload(cid, nonce, deployer) {
-  return { cid, nonce, deployer };
+// signer from this exact body and checks it matches `deployer` and `timestamp`,
+// so the object signed here must be byte-identical to the one sent in `release`.
+function buildPayload(cid, timestamp, deployer) {
+  return { cid, timestamp, deployer };
 }
 
-async function run(cid, signature, nonce, deployer) {
+async function run(cid, signature, timestamp, deployer) {
   if (!cid) {
     cid = (await fs.readFile(releaseFile, 'utf-8')).trim();
   }
 
-  // Resolve the deployer address and on-chain nonce from the Ethereum node
-  // (e.g. Seacrest) whenever any of them is missing.
-  if (deployer === undefined || nonce === undefined || !signature) {
+  // Release timestamp (epoch ms) provides replay protection: the worker
+  // requires it to strictly increase between releases.
+  if (timestamp === undefined) {
+    timestamp = Date.now();
+  }
+
+  // Resolve the deployer address from the Ethereum node (e.g. Seacrest) and
+  // sign the payload there whenever either is missing.
+  if (deployer === undefined || !signature) {
     const provider = new ethers.providers.JsonRpcProvider(ethereumNode);
     const signer = provider.getSigner();
 
     if (deployer === undefined) {
       deployer = await signer.getAddress();
     }
-    if (nonce === undefined) {
-      nonce = await provider.getTransactionCount(deployer);
-    }
 
     if (!signature) {
       // If no signature, sign the payload via the node, e.g. Seacrest
-      signature = await signer.signMessage(JSON.stringify(buildPayload(cid, nonce, deployer)));
+      signature = await signer.signMessage(JSON.stringify(buildPayload(cid, timestamp, deployer)));
     }
   }
 
-  return await release(buildPayload(cid, nonce, deployer), url, signature);
+  return await release(buildPayload(cid, timestamp, deployer), url, signature);
 }
 
-let [_node, _app, cidArg, signatureArg, nonceArg, deployerArg, ...rest] = process.argv;
+let [_node, _app, cidArg, signatureArg, timestampArg, deployerArg, ...rest] = process.argv;
 const cid = cidArg || process.env['CID'];
 const signature = signatureArg || process.env['SIGNATURE'];
-const nonceRaw = nonceArg || process.env['NONCE'];
-const nonce = nonceRaw ? Number(nonceRaw) : undefined;
+const timestampRaw = timestampArg || process.env['TIMESTAMP'];
+const timestamp = timestampRaw ? Number(timestampRaw) : undefined;
 const deployer = deployerArg || process.env['DEPLOYER'] || undefined;
 
-run(cid, signature, nonce, deployer);
+run(cid, signature, timestamp, deployer);

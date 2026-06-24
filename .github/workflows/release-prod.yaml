@@ -10,9 +10,9 @@ on:
         name: Signature
         description: Signature (if blank, pulled via Seacrest)
 
-      nonce:
-        name: Nonce
-        description: Deployer nonce (if blank, pulled from the Ethereum node)
+      timestamp:
+        name: Timestamp
+        description: Release timestamp in epoch ms (if blank, generated at release time)
 
       deployer:
         name: Deployer
@@ -61,5 +61,5 @@ jobs:
           ETHEREUM_NODE: http://localhost:8585
           CID: '${{github.event.inputs.cid}}'
           SIGNATURE: '${{ github.event.inputs.signature }}'
-          NONCE: '${{ github.event.inputs.nonce }}'
+          TIMESTAMP: '${{ github.event.inputs.timestamp }}'
           DEPLOYER: '${{ github.event.inputs.deployer }}'
