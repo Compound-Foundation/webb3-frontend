@@ -65,40 +65,6 @@ export const extensions: Extension[] = [
     },
   },
   {
-    id: 'comet_migrator',
-    name: 'Compound V3 Position Migrator',
-    description:
-      'Migrate stablecoin borrow balances and supported collateral assets from Compound V2 or Aave V2 to the Compound V3 USDC market on the Ethereum network.',
-    developer: 'Compound Labs',
-    links: {
-      github: 'https://github.com/compound-finance/comet-migrator',
-      website: 'https://twitter.com/compoundfinance',
-    },
-    permissions: {
-      storage: '*',
-      trx: [
-        {
-          contract: '$operator',
-          abi: 'migrate(((address,uint256)[],(address,uint256)[],(bytes,uint256)[]),((address,uint256)[],(address,uint256)[],(bytes,uint256)[]),uint256)',
-          params: '*',
-        },
-        {
-          contract: '*',
-          abi: 'approve(address,uint256)',
-          params: ['$operator', '*'],
-        },
-      ],
-    },
-    source: {
-      ipfs: 'QmbLCnpr74GPexVV1f1Ws5R6JtitztteHgSLbXnB8n7Xkv',
-      domain: 'comet-v2-migrator.infura-ipfs.io',
-      path: '/embedded.html',
-    },
-    supportedMarkets: {
-      '1_USDC_0xc3d688B66703497DAA19211EEdff47f25384cdc3': '0x3b6f1FE07CDAB8A43f39C3b99Ba8FF26e28DB8b4',
-    },
-  },
-  {
     id: 'comp_vote',
     name: 'Comp.Vote',
     description:
@@ -149,30 +115,6 @@ export const extensions: Extension[] = [
       '8453_USDC_0xb125E6687d4313864e53df431d5425969c15Eb2F': null,
       '8453_USDbC_0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf': null,
       '8453_ETH_0x46e6b214b524310239732D51387075E0e70970bf': null,
-    },
-  },
-  {
-    id: 'collateral_swap',
-    name: 'Collateral Swap',
-    description:
-      'Swap collateral assets directly in Compound without unwinding your borrow position, saving time and complexity.',
-    sub_description: 'Note, a Wido service fee of 0.3% per swap is associated with this extension. ',
-    developer: 'Wido Labs',
-    links: {
-      github: 'https://github.com/widolabs/compound-collateral-extension-ui',
-      website: 'https://www.joinwido.com/',
-    },
-    permissions: {
-      sign: '*',
-    },
-    source: {
-      url: 'https://ipfs.fleek.co/ipfs/QmcEEQekV9Vz4oN519uBsPLqjXUs7YathsvGvjNtbC3Y88/embedded.html',
-    },
-    supportedMarkets: {
-      '1_USDC_0xc3d688B66703497DAA19211EEdff47f25384cdc3': null,
-      '1_WETH_0xA17581A9E3356d9A858b789D68B4d866e593aE94': null,
-      '137_USDC_0xF25212E676D1F7F89Cd72fFEe66158f541246445': null,
-      '42161_USDC_0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA': null,
     },
   },
   {
