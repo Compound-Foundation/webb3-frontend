@@ -9,6 +9,14 @@ on:
       signature:
         name: Signature
         description: Signature (if blank, pulled via Seacrest)
+
+      nonce:
+        name: Nonce
+        description: Deployer nonce (if blank, pulled from the Ethereum node)
+
+      deployer:
+        name: Deployer
+        description: Deployer address (if blank, pulled via Seacrest)
 jobs:
   build:
     name: Release Branch
@@ -53,3 +61,5 @@ jobs:
           ETHEREUM_NODE: http://localhost:8585
           CID: '${{github.event.inputs.cid}}'
           SIGNATURE: '${{ github.event.inputs.signature }}'
+          NONCE: '${{ github.event.inputs.nonce }}'
+          DEPLOYER: '${{ github.event.inputs.deployer }}'
