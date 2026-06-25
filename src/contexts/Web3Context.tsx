@@ -24,7 +24,7 @@ import { CONNECTOR_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { isLedgerConnector } from '@helpers/Ledger';
 import { DEFAULT_MARKET } from '@helpers/markets';
-import { isSanctioned } from '@helpers/sanctions';
+import { useAddressScreening } from '@hooks/useAddressScreening';
 
 import { WALLECT_CONNECT_PROJECT_ID } from '../../envVars';
 
@@ -139,6 +139,7 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
 
   let writeWeb3: WriteWeb3;
   const urlAccount = searchParams.has('account') ? (searchParams.get('account') as string) : account;
+  const screeningStatus = useAddressScreening(urlAccount);
   if (searchParams.has('account')) {
     writeWeb3 = {
       account: urlAccount,
@@ -275,7 +276,8 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
     window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
   };
 
-  if (writeWeb3.account !== undefined && isSanctioned(writeWeb3.account)) {
+  // Fail-closed screening gate: expose the account only when explicitly allowed.
+  if (writeWeb3.account !== undefined && screeningStatus !== 'allowed') {
     writeWeb3.account = undefined;
     writeWeb3.isActive = false;
   }
