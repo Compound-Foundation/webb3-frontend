@@ -31,6 +31,10 @@ export const config = createConfig({
     walletConnect({ projectId: WALLECT_CONNECT_PROJECT_ID }),
     coinbaseWallet({
       appName: 'Compound III',
+      // Disable the Coinbase Wallet SDK's telemetry, which injects an inline
+      // <script> at runtime that violates our script-src CSP. `options` is
+      // required by the connector's Preference type, so keep its default.
+      preference: { options: 'all', telemetry: false },
     }),
     ledgerConnector(),
   ],
