@@ -15,6 +15,15 @@ export default defineConfig({
   // handle paths with a `.`. See https://stackoverflow.com/questions/66734726/paramname-doesnt-match-url-segments-containing-dot-in-react-app-with-vitej
   // eg. /markets/usdc.e-arb
   plugins: [react(), pluginRewriteAll()],
+  // Bind dev/preview servers to loopback only — never expose to the network
+  // (do not use `--host` / `host: true`). Security: prevents the local dev
+  // server from being reachable from the LAN.
+  server: {
+    host: '127.0.0.1',
+  },
+  preview: {
+    host: '127.0.0.1',
+  },
   // Node.js global to browser globalThis
   define: {
     global: 'globalThis',
