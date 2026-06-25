@@ -12,7 +12,14 @@ export default {
           before: [
             {
               path: 'ts-jest-mock-import-meta',
-              options: { metaObjectReplacement: { env: { VITE_V3_API_HOST: 'http://localhost' } } },
+              options: {
+                metaObjectReplacement: {
+                  env: {
+                    VITE_V3_API_HOST: 'http://localhost',
+                    VITE_SCREENING_ENDPOINT: 'http://localhost/screen',
+                  },
+                },
+              },
             },
           ],
         },

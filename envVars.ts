@@ -16,3 +16,7 @@ export const MANTLE_URL = `https://${rpcProviderHost}/mantle-mainnet`;
 export const LINEA_URL = `https://${rpcProviderHost}/linea-mainnet`;
 export const UNICHAIN_URL = `https://${rpcProviderHost}/unichain-mainnet`;
 export const RONIN_URL = `https://${rpcProviderHost}/ronin-mainnet`;
+
+const screeningEndpoint = import.meta.env.VITE_SCREENING_ENDPOINT || 'SCREENING_ENDPOINT_NOT_CONFIGURED';
+
+export const SCREENING_URL = screeningEndpoint;
