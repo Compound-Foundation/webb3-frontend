@@ -1,4 +1,4 @@
-import { TALLY_GOV_URL, TERMS_URL } from '@helpers/urls';
+import { PRIVACY_URL, TALLY_GOV_URL, TERMS_URL } from '@helpers/urls';
 import { Theme } from '@hooks/useThemeManager';
 
 export type FooterProps = {
@@ -17,6 +17,9 @@ const Footer = ({ theme, setTheme }: FooterProps) => {
             </a>
             <a href={TERMS_URL} target="_blank" rel="noreferrer">
               Terms
+            </a>
+            <a href={PRIVACY_URL} target="_blank" rel="noreferrer">
+              Privacy
             </a>
           </div>
           <div className="footer__content__right">
