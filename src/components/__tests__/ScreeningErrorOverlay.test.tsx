@@ -99,4 +99,37 @@ describe('ScreeningErrorOverlay', () => {
     );
     expect(screen.getByText('Unexpected error')).toBeInTheDocument();
   });
+
+  test('stays visible when a blocked wallet is disconnected (blocked -> idle)', () => {
+    const { rerender } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <Harness status="blocked" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('Unexpected error')).toBeInTheDocument();
+
+    // The fail-closed disconnect sends status back to idle; the overlay must latch.
+    rerender(
+      <MemoryRouter initialEntries={['/']}>
+        <Harness status="idle" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('Unexpected error')).toBeInTheDocument();
+  });
+
+  test('hides when a clean wallet connects (allowed)', () => {
+    const { rerender } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <Harness status="blocked" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('Unexpected error')).toBeInTheDocument();
+
+    rerender(
+      <MemoryRouter initialEntries={['/']}>
+        <Harness status="allowed" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText('Unexpected error')).not.toBeInTheDocument();
+  });
 });

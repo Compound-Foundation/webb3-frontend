@@ -25,6 +25,7 @@ import { useEthersProvider } from '@helpers/ethersAdapter';
 import { isLedgerConnector } from '@helpers/Ledger';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { useAddressScreening, ScreeningStatus } from '@hooks/useAddressScreening';
+import { useDisconnectBlockedWallet } from '@hooks/useDisconnectBlockedWallet';
 
 import { WALLECT_CONNECT_PROJECT_ID } from '../../envVars';
 
@@ -141,6 +142,8 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
   let writeWeb3: WriteWeb3;
   const urlAccount = searchParams.has('account') ? (searchParams.get('account') as string) : account;
   const screeningStatus = useAddressScreening(urlAccount);
+  // A blocked wallet is fully disconnected, not just gated out of view.
+  useDisconnectBlockedWallet(screeningStatus, disconnect);
   if (searchParams.has('account')) {
     writeWeb3 = {
       account: urlAccount,

@@ -11,8 +11,11 @@ type Props = {
 /**
  * Shows a dismissible "Unexpected error" overlay on the rising edge of a
  * `blocked` screening result (i.e. each connect-wallet flow that ends blocked).
- * Plain navigation dismisses it and produces no new screening result, so it
- * stays dismissed while the user browses.
+ *
+ * A blocked wallet is fully disconnected (see useDisconnectBlockedWallet), which
+ * sends the status `blocked -> idle`. The overlay therefore LATCHES: once shown,
+ * it stays until the user navigates away or a clean wallet connects (`allowed`).
+ * `idle`/`checking` leave it unchanged so the disconnect doesn't dismiss it.
  */
 const ScreeningErrorOverlay = ({ screeningStatus }: Props) => {
   const [visible, setVisible] = useState(false);
@@ -20,14 +23,16 @@ const ScreeningErrorOverlay = ({ screeningStatus }: Props) => {
   const location = useLocation();
   const mounted = useRef(false);
 
-  // Rising edge into `blocked`: show.
   useEffect(() => {
     if (screeningStatus === 'blocked' && prevStatus.current !== 'blocked') {
+      // Rising edge into `blocked`: show.
       setVisible(true);
-    }
-    if (screeningStatus !== 'blocked') {
+    } else if (screeningStatus === 'allowed') {
+      // A clean wallet connected: clear any stale error.
       setVisible(false);
     }
+    // `idle`/`checking` intentionally leave `visible` unchanged so the overlay
+    // survives the disconnect a blocked wallet triggers (blocked -> idle).
     prevStatus.current = screeningStatus;
   }, [screeningStatus]);
 
