@@ -7,6 +7,7 @@ import ConnectWalletModal from '@components/ConnectWalletModal';
 import Footer from '@components/Footer';
 import Header from '@components/Header';
 import NetworkSwitchModal, { NetworkSwitchModalState } from '@components/NetworkSwitchModal';
+import ScreeningErrorOverlay from '@components/ScreeningErrorOverlay';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import { CurrencyContextProvider } from '@contexts/CurrencyContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
@@ -187,24 +188,27 @@ function App({ Component, pageProps }: any) {
               }}
             />
             <NetworkSwitchModal state={networkSwitchState} onSwitchNetwork={handleSwitchNetwork} />
-            <Component
-              transactions={transactions}
-              web3={web3}
-              addTransaction={addTransaction}
-              theme={theme}
-              cometState={cometState}
-              setShowConnectWalletModal={setShowConnectWalletModal}
-              switchWriteNetwork={(chainId: number, description?: string) => {
-                if (web3.write.chainId) {
-                  handleRequestNetworkSwitch(web3.write.chainId, chainId, description);
-                  return;
-                }
+            <div className="app-content">
+              <Component
+                transactions={transactions}
+                web3={web3}
+                addTransaction={addTransaction}
+                theme={theme}
+                cometState={cometState}
+                setShowConnectWalletModal={setShowConnectWalletModal}
+                switchWriteNetwork={(chainId: number, description?: string) => {
+                  if (web3.write.chainId) {
+                    handleRequestNetworkSwitch(web3.write.chainId, chainId, description);
+                    return;
+                  }
 
-                web3.switchWriteNetwork(chainId);
-              }}
-              estimatedGasMap={estimatedGasMap}
-              {...pageProps}
-            />
+                  web3.switchWriteNetwork(chainId);
+                }}
+                estimatedGasMap={estimatedGasMap}
+                {...pageProps}
+              />
+              <ScreeningErrorOverlay screeningStatus={web3.screeningStatus} />
+            </div>
             <Footer theme={theme} setTheme={setTheme} />
             <div id="overlay"></div>
           </CurrencyContextProvider>
