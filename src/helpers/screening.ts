@@ -7,7 +7,7 @@
  * if the worker changes.
  *
  * Contract:
- *   Request:  GET ${VITE_SCREENING_ENDPOINT}?address=<lowercased-addr>
+ *   Request:  POST ${VITE_SCREENING_ENDPOINT}  (JSON body { address: <lowercased-addr> })
  *   Response: 200 { flagged: boolean }   // true = on the list; threat detail is not exposed
  *
  * "Allowed" means strictly `flagged === false`. Everything else is BLOCKED
@@ -30,8 +30,12 @@ export async function screenAddress(address: string, timeoutMs: number = DEFAULT
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const url = `${SCREENING_URL}?address=${encodeURIComponent(address.toLowerCase())}`;
-    const res = await fetch(url, { method: 'GET', signal: controller.signal });
+    const res = await fetch(SCREENING_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address: address.toLowerCase() }),
+      signal: controller.signal,
+    });
     if (!res.ok) return false;
     const data = await res.json();
     // Worker returns { flagged }; "allowed" means strictly not flagged.
