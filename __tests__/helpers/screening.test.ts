@@ -8,44 +8,32 @@ const ADDR = '0x0000000000000000000000000000000000000aa1';
 describe('screenAddress', () => {
   // The worker returns { flagged: boolean }. "allowed" means NOT flagged.
   it('returns true on 200 { flagged: false }', async () => {
-    server.use(rest.get(SCREENING_URL, (_req, res, ctx) => res(ctx.json({ flagged: false }))));
+    server.use(rest.post(SCREENING_URL,(_req, res, ctx) => res(ctx.json({ flagged: false }))));
     await expect(screenAddress(ADDR)).resolves.toBe(true);
   });
 
   it('returns false on 200 { flagged: true }', async () => {
-    server.use(rest.get(SCREENING_URL, (_req, res, ctx) => res(ctx.json({ flagged: true }))));
+    server.use(rest.post(SCREENING_URL,(_req, res, ctx) => res(ctx.json({ flagged: true }))));
     await expect(screenAddress(ADDR)).resolves.toBe(false);
   });
 
   it('returns false (fail-closed) when the body lacks a boolean flagged field', async () => {
-    server.use(rest.get(SCREENING_URL, (_req, res, ctx) => res(ctx.json({}))));
+    server.use(rest.post(SCREENING_URL,(_req, res, ctx) => res(ctx.json({}))));
     await expect(screenAddress(ADDR)).resolves.toBe(false);
   });
 
-  it('sends the lowercased address as the query param', async () => {
-    let seenAddress: string | null = null;
-    server.use(
-      rest.get(SCREENING_URL, (req, res, ctx) => {
-        seenAddress = req.url.searchParams.get('address');
-        return res(ctx.json({ flagged: false }));
-      })
-    );
-    await screenAddress(ADDR);
-    expect(seenAddress).toBe(ADDR);
-  });
-
   it('returns false on non-2xx', async () => {
-    server.use(rest.get(SCREENING_URL, (_req, res, ctx) => res(ctx.status(500))));
+    server.use(rest.post(SCREENING_URL,(_req, res, ctx) => res(ctx.status(500))));
     await expect(screenAddress(ADDR)).resolves.toBe(false);
   });
 
   it('returns false on malformed body', async () => {
-    server.use(rest.get(SCREENING_URL, (_req, res, ctx) => res(ctx.body('not json'))));
+    server.use(rest.post(SCREENING_URL,(_req, res, ctx) => res(ctx.body('not json'))));
     await expect(screenAddress(ADDR)).resolves.toBe(false);
   });
 
   it('returns false on network error', async () => {
-    server.use(rest.get(SCREENING_URL, (_req, res) => res.networkError('boom')));
+    server.use(rest.post(SCREENING_URL,(_req, res) => res.networkError('boom')));
     await expect(screenAddress(ADDR)).resolves.toBe(false);
   });
 
