@@ -24,7 +24,7 @@ import { CONNECTOR_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { isLedgerConnector } from '@helpers/Ledger';
 import { DEFAULT_MARKET } from '@helpers/markets';
-import { useAddressScreening } from '@hooks/useAddressScreening';
+import { useAddressScreening, ScreeningStatus } from '@hooks/useAddressScreening';
 
 import { WALLECT_CONNECT_PROJECT_ID } from '../../envVars';
 
@@ -101,6 +101,7 @@ export type WriteWeb3 = {
 export type Web3 = {
   read: ReadWeb3;
   write: WriteWeb3;
+  screeningStatus: ScreeningStatus;
   desiredWriteNetwork?: number;
   setConnector: Dispatch<SetStateAction<Connector | null>>;
   switchReadNetwork: (desiredChainId: number) => Promise<boolean>;
@@ -291,6 +292,7 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
       provider: readProvider,
     },
     write: writeWeb3,
+    screeningStatus,
     desiredWriteNetwork,
     setConnector,
     switchReadNetwork,
