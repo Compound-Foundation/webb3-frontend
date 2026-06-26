@@ -25,7 +25,11 @@ const ScreeningErrorOverlay = ({ screeningStatus }: Props) => {
 
   useEffect(() => {
     if (screeningStatus === 'blocked' && prevStatus.current !== 'blocked') {
-      // Rising edge into `blocked`: show.
+      // Show only on the rising edge into `blocked`, not on every render while
+      // already blocked — that is what keeps the overlay dismissible. After the
+      // user dismisses it (via navigation) the status can still be `blocked`
+      // (e.g. the `?account=` view-as path, which a wallet disconnect does not
+      // clear), and we must not immediately re-show it.
       setVisible(true);
     } else if (screeningStatus === 'allowed') {
       // A clean wallet connected: clear any stale error.
