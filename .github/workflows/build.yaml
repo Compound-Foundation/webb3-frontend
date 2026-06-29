@@ -42,6 +42,8 @@ jobs:
           VITE_V3_GAS_SUFFIX: ${{secrets.VITE_V3_GAS_SUFFIX}}
           VITE_V3_RPC_PROVIDER_HOST: ${{secrets.VITE_V3_RPC_PROVIDER_HOST}}
           VITE_V3_WALLET_CONNECT_PROJECT_ID: ${{secrets.VITE_V3_WALLET_CONNECT_PROJECT_ID}}
+          VITE_SCREENING_ENDPOINT: ${{secrets.VITE_SCREENING_ENDPOINT}}
+          VITE_TURNSTILE_SITE_KEY: ${{secrets.VITE_TURNSTILE_SITE_KEY}}
 
       - name: Archive App
         uses: actions/upload-artifact@v4
