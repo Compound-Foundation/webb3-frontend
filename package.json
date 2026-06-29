@@ -30,7 +30,6 @@
     "@tanstack/react-query": "^5.90.2",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
-    "@walletconnect/ethereum-provider": "^2.23.10",
     "comet": "https://github.com/compound-finance/comet.git#cbe77c1ba4430266c781a251d25c8326573a33da",
     "compound-styles": "https://github.com/compound-finance/compound-styles.git#d36cfe2a33fbc0b434da130b920a372b6dcad6d5",
     "date-fns": "^4.1.0",
