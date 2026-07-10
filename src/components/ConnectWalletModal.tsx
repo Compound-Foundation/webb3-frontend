@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { BinanceWallet } from '@components/Icons/BinanceWallet';
 import {Ronin} from "@components/Icons/Ronin";
 import { Connector, ConnectorType } from '@contexts/Web3Context';
 import { getShortAddress } from '@helpers/address';
@@ -203,6 +204,20 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
                 <Ronin className="connect-wallet-item__symbol" />
                 <div className="connect-wallet-item__info">
                   <div className="heading heading--emphasized">Ronin</div>
+                </div>
+                <ArrowRight />
+              </div>
+
+              <div
+                className="connect-wallet-item"
+                onClick={() => {
+                  onSelectConnector([ConnectorType.Binance]);
+                  onClose();
+                }}
+              >
+                <BinanceWallet className="connect-wallet-item__symbol" />
+                <div className="connect-wallet-item__info">
+                  <div className="heading heading--emphasized">Binance Wallet</div>
                 </div>
                 <ArrowRight />
               </div>
