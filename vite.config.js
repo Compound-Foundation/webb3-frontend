@@ -41,7 +41,6 @@ export default defineConfig({
         transactions: resolve(__dirname, 'transactions/index.html'),
       },
       plugins: [nodePolyfills()],
-      external: ['@safe-global/safe-apps-sdk', '@safe-globalThis/safe-apps-sdk', '@safe-globalThis/safe-apps-provider'],
     },
   },
   base: '',

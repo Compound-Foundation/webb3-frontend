@@ -1,6 +1,8 @@
 import { ReactNode, useContext, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useSearchParams } from 'react-router-dom';
 
+import { Swap } from '@components/Icons/Nav/Swap';
+import { SwapMobile } from '@components/Icons/Nav/SwapMobile';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
 import { getShortAddress } from '@helpers/address';
@@ -35,6 +37,13 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
   const [mobileWalletActive, setMobileWalletActive] = useState(false);
   const { selectedMarket } = useContext(getSelectedMarketContext());
   const [, currentMarket] = selectedMarket;
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const openSwapModal = () => {
+    const params = new URLSearchParams(searchParams);
+    params.set('swapModal', 'true');
+    setSearchParams(params);
+  };
 
   const pendingTransactions = filterMap<Transaction, PendingTransaction>(transactions, (tx) =>
     tx.state === TransactionState.Pending ? tx : undefined
@@ -100,6 +109,9 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
           <div className="header__content__right">
             <div className="header__buttons">
               {!hideMarketSelector && <MarketSelector />}
+              <button className={'button okx-modal-open-button'} onClick={openSwapModal}>
+                <Swap/> Swap
+              </button>
               <RewardsButton web3={web3} />
               <WalletButton
                 transactions={transactions}
@@ -108,6 +120,9 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
                 onOpenWalletSelectionModal={onConnectWalletClick}
                 onClickDisconnect={onWalletDisconnect}
               />
+              <button className={'button button--circle okx-modal-open-button-mobile'} onClick={openSwapModal}>
+                <SwapMobile/>
+              </button>
               <div
                 className={`button button--circle button--connect-wallet--mobile mobile-only${
                   mobileWalletActive ? ' button--circle--active' : ''

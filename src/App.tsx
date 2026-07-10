@@ -7,6 +7,7 @@ import ConnectWalletModal from '@components/ConnectWalletModal';
 import Footer from '@components/Footer';
 import Header from '@components/Header';
 import NetworkSwitchModal, { NetworkSwitchModalState } from '@components/NetworkSwitchModal';
+import { OkxSwapModal } from '@components/OkxSwapModal';
 import ScreeningErrorOverlay from '@components/ScreeningErrorOverlay';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import { CurrencyContextProvider } from '@contexts/CurrencyContext';
@@ -162,6 +163,7 @@ function App({ Component, pageProps }: any) {
         <ActionQueueContext.Provider value={actionQueue}>
           <CurrencyContextProvider>
             <AlertBanner web3={web3} />
+            <OkxSwapModal theme={theme}/>
             <Header
               web3={web3}
               transactions={transactions}
