@@ -134,6 +134,15 @@
       margin-bottom: 1rem;
     }
 
+    .tooltip__link {
+      color: var(--text--supply);
+      margin-top: 0.5rem;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+
     // this could be moved in separate file once we standardize this atomic component
     .label-text-row {
       display: flex;
