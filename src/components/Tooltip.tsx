@@ -9,7 +9,8 @@ type TooltipCoordinates = {
 
 // Grace period (ms) before an interactive tooltip hides after the pointer leaves
 // the trigger, giving the user time to move onto the tooltip to click its content.
-const HIDE_DELAY_MS = 150;
+// Generous enough that a slow pointer can cross the gap between trigger and tooltip.
+const HIDE_DELAY_MS = 300;
 
 // Minimum distance (px) kept between the tooltip and the viewport edges.
 const VIEWPORT_MARGIN = 8;
@@ -64,20 +65,27 @@ const Tooltip = ({
       setShowTooltip(true);
       const triggerEl = e.currentTarget.getBoundingClientRect();
 
+      const tooltipHeight = tooltipRef.current.clientHeight;
       // By default, try to set the tooltip above the hovered element.
-      let yCoords = triggerEl.bottom - tooltipRef.current.clientHeight - triggerEl.height - yOffset;
+      let yCoords = triggerEl.bottom - tooltipHeight - triggerEl.height - yOffset;
+      let below = false;
       if (under) {
-        // Deliberately anchor below the trigger, with a gap, and flip the caret up.
+        // Deliberately anchor below the trigger, with a gap.
         yCoords = triggerEl.bottom + yOffset;
-        setPlacement('below');
+        below = true;
+        // Flip back above if that would run past the bottom of the viewport.
+        if (yCoords + tooltipHeight > window.innerHeight - VIEWPORT_MARGIN) {
+          yCoords = triggerEl.top - tooltipHeight - yOffset;
+          below = false;
+        }
       } else if (yCoords < -yOffset) {
         // If the tooltip would get cut off above the screen, then move it
         // below the hovered element instead.
         yCoords = triggerEl.bottom;
-        setPlacement('above');
-      } else {
-        setPlacement('above');
+        below = true;
       }
+      // The caret flips to whichever edge faces the trigger.
+      setPlacement(below ? 'below' : 'above');
 
       // Center the tooltip on the trigger, but clamp it inside the viewport;
       // when clamping shifts it, offset the caret so it still points at the trigger.
@@ -155,7 +163,7 @@ const Tooltip = ({
           <span
             className={`tooltip tooltip${!showTooltip && '--inactive'} tooltip${hideArrow && '--hide-arrow'} tooltip${
               mini && '--mini'
-            } tooltip${placement === 'below' && !hideArrow && '--below'} tooltip${interactive && '--interactive'}`}
+            } tooltip${placement === 'below' && '--below'} tooltip${interactive && '--interactive'}`}
             id="tooltip"
             ref={tooltipRef}
             style={

@@ -44,7 +44,8 @@
 
   // Tooltip anchored below its trigger: flip the caret to the top so it points
   // up at the origin (e.g. the rewards info icon).
-  &--below::before {
+  &--below::before,
+  &--sticky::before {
     bottom: unset;
     top: -7px;
     transform: rotate(135deg);
@@ -57,12 +58,6 @@
     transform: translateX(-50%);
     width: 15rem;
     z-index: 100;
-
-    &::before {
-      bottom: unset;
-      top: -7px;
-      transform: rotate(135deg);
-    }
   }
 
   &__header-icon {
