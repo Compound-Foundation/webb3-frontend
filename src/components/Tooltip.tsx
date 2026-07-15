@@ -38,6 +38,7 @@ const Tooltip = ({
 }) => {
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
   const [coordinates, setCoordinates] = useState<TooltipCoordinates>({ x: 0, y: 0 });
+  const [placement, setPlacement] = useState<'above' | 'below'>('above');
   const tooltipRef = useRef<null | HTMLSpanElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -59,10 +60,17 @@ const Tooltip = ({
 
       // By default, try to set the tooltip above the hovered element.
       let yCoords = triggerEl.bottom - tooltipRef.current.clientHeight - triggerEl.height - yOffset;
-      // If the tooltip would get cut off above the screen, then move it
-      // below the hovered element instead.
-      if (yCoords < -yOffset || under) {
+      if (under) {
+        // Deliberately anchor below the trigger, with a gap, and flip the caret up.
+        yCoords = triggerEl.bottom + yOffset;
+        setPlacement('below');
+      } else if (yCoords < -yOffset) {
+        // If the tooltip would get cut off above the screen, then move it
+        // below the hovered element instead.
         yCoords = triggerEl.bottom;
+        setPlacement('above');
+      } else {
+        setPlacement('above');
       }
 
       setCoordinates({
@@ -94,7 +102,7 @@ const Tooltip = ({
           <span
             className={`tooltip tooltip${!showTooltip && '--inactive'} tooltip${hideArrow && '--hide-arrow'} tooltip${
               mini && '--mini'
-            }`}
+            } tooltip${placement === 'below' && !hideArrow && '--below'}`}
             id="tooltip"
             ref={tooltipRef}
             style={{ width: width, left: coordinates.x, top: coordinates.y }}

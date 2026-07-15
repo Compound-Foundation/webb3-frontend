@@ -40,6 +40,14 @@
     pointer-events: none;
   }
 
+  // Tooltip anchored below its trigger: flip the caret to the top so it points
+  // up at the origin (e.g. the rewards info icon).
+  &--below::before {
+    bottom: unset;
+    top: -7px;
+    transform: rotate(135deg);
+  }
+
   &--sticky {
     position: absolute;
     top: 4rem;

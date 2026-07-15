@@ -22,6 +22,7 @@ const RewardsPauseTooltip = () => (
   <Tooltip
     width={220}
     interactive
+    under
     content={
       <div className="tooltip__content L4">
         <p className="body">
