@@ -1,4 +1,4 @@
-import React, { cloneElement, useRef, useState } from 'react';
+import React, { cloneElement, useEffect, useRef, useState } from 'react';
 
 import Portal from './Portal';
 
@@ -6,6 +6,10 @@ type TooltipCoordinates = {
   x: number;
   y: number;
 };
+
+// Grace period (ms) before an interactive tooltip hides after the pointer leaves
+// the trigger, giving the user time to move onto the tooltip to click its content.
+const HIDE_DELAY_MS = 150;
 
 const Tooltip = ({
   width,
@@ -15,6 +19,7 @@ const Tooltip = ({
   hideArrow = false,
   mini = false,
   disabled = false,
+  interactive = false,
   yOffset = 20,
   x,
   y,
@@ -26,6 +31,7 @@ const Tooltip = ({
   hideArrow?: boolean;
   mini?: boolean;
   disabled?: boolean;
+  interactive?: boolean;
   yOffset?: number;
   x?: number;
   y?: number;
@@ -33,9 +39,21 @@ const Tooltip = ({
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
   const [coordinates, setCoordinates] = useState<TooltipCoordinates>({ x: 0, y: 0 });
   const tooltipRef = useRef<null | HTMLSpanElement>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearHideTimer = () => {
+    if (hideTimer.current !== null) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+  };
+
+  useEffect(() => clearHideTimer, []);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleMouseOver = (e: any) => {
     if (!disabled && tooltipRef.current) {
+      clearHideTimer();
       setShowTooltip(true);
       const triggerEl = e.currentTarget.getBoundingClientRect();
 
@@ -53,7 +71,16 @@ const Tooltip = ({
       });
     }
   };
-  const handleMouseOut = () => setShowTooltip(false);
+  const handleMouseOut = () => {
+    // For interactive tooltips, delay hiding so the pointer can travel from the
+    // trigger onto the tooltip (where onMouseOver cancels the pending hide).
+    if (interactive) {
+      clearHideTimer();
+      hideTimer.current = setTimeout(() => setShowTooltip(false), HIDE_DELAY_MS);
+    } else {
+      setShowTooltip(false);
+    }
+  };
   return (
     <>
       {disabled
@@ -71,6 +98,10 @@ const Tooltip = ({
             id="tooltip"
             ref={tooltipRef}
             style={{ width: width, left: coordinates.x, top: coordinates.y }}
+            {...(interactive && {
+              onMouseOver: clearHideTimer,
+              onMouseOut: handleMouseOut,
+            })}
           >
             {content}
           </span>

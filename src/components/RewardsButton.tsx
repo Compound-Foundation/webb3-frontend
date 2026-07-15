@@ -21,6 +21,7 @@ import Tooltip from './Tooltip';
 const RewardsPauseTooltip = () => (
   <Tooltip
     width={220}
+    interactive
     content={
       <div className="tooltip__content L4">
         <p className="body">
