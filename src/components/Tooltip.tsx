@@ -169,6 +169,12 @@ const Tooltip = ({
             {...(interactive && {
               onMouseOver: clearHideTimer,
               onMouseOut: handleMouseOut,
+              // Clicks on tooltip content are portal-rendered but still bubble up
+              // the React tree to the trigger's ancestors (e.g. the rewards
+              // dropdown toggle), and the native mousedown would hit
+              // useOnClickOutside handlers. Contain both.
+              onClick: (e: React.MouseEvent) => e.stopPropagation(),
+              onMouseDown: (e: React.MouseEvent) => e.stopPropagation(),
             })}
           >
             {content}
