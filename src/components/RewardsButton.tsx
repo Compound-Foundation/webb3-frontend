@@ -23,10 +23,12 @@ const RewardsPauseTooltip = () => (
     width={220}
     content={
       <div className="tooltip__content L4">
-        <p className="body">Pausing Comet Rewards Top-ups</p>
-        <SimpleLink to={REWARDS_PAUSE_FORUM_URL} className="body tooltip__link">
-          Learn more
-        </SimpleLink>
+        <p className="body">
+          Comet reward top-ups have been paused.{' '}
+          <SimpleLink to={REWARDS_PAUSE_FORUM_URL} className="tooltip__link">
+            Learn more
+          </SimpleLink>
+        </p>
       </div>
     }
   >
