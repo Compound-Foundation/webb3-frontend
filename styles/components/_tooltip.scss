@@ -6,7 +6,9 @@
   box-shadow: 0 2px 8px 0 rgba(black, 0.4);
   color: var(--text--1);
   border-radius: 8px;
-  z-index: 100;
+  // Above the header stacking context (300) and the mobile wallet menu nested
+  // inside it (1500), which otherwise cover tooltips triggered from the menu.
+  z-index: 2000;
   padding: 1rem 1.25rem;
   white-space: normal;
   opacity: 1;
@@ -18,7 +20,7 @@
     height: 0;
     position: absolute;
     bottom: -7px;
-    left: calc(50% - 7px);
+    left: var(--tooltip-caret-left, calc(50% - 7px));
     border: 8px solid var(--ui--foreground--1);
     border-color: transparent transparent var(--ui--foreground--1) var(--ui--foreground--1);
     box-shadow: -4px 4px 6px -2px rgba(black, 40%);
