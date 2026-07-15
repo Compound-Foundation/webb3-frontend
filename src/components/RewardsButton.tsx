@@ -177,7 +177,7 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
             <label className="label text-color--1">{`${wholeNumberTotalRewards}.${fractionalTotalRewards}`}</label>
             <label className="label label--secondary text-color--2">{`${wholeNumberUnclaimed}.${fractionalUnclaimed} Unclaimed`}</label>
           </div>
-          <RewardsPauseTooltip />
+          {totalUnclaimed > 0n && <RewardsPauseTooltip />}
           <DetailSheet active={dropdownActive} className="header__wallet-menu__claim">
             {dropdownContent}
           </DetailSheet>
@@ -191,7 +191,7 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
           <div className={`button button--rewards rewards`} onClick={onClickDropdown}>
             <span className={`asset asset--${rewardAsset.symbol} rewards__icon`} />
             <label className="label text-color--1">{`${wholeNumberTotalRewards}.${fractionalTotalRewards}`}</label>
-            <RewardsPauseTooltip />
+            {totalUnclaimed > 0n && <RewardsPauseTooltip />}
           </div>
           {dropdownActive && <div className={`dropdown__content rewards__dropdown`}>{dropdownContent} </div>}
         </div>
