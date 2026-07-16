@@ -30,3 +30,4 @@ export * from './SwitchToggle';
 export * from './TailSpin';
 export * from './V2';
 export * from './Wallet';
+export * from './Nav/Rewards'
