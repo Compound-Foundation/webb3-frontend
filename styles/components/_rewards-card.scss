@@ -1,0 +1,36 @@
+@use '../abstracts/variables' as *;
+
+.rewards-card {
+  display: flex;
+  flex-direction: column;
+  background: $neutral--85;
+  border-radius: 0.5rem;
+  padding: 1.75rem 1.25rem ;
+  flex: 1;
+}
+
+.rewards-card__inner {
+  display: flex;
+}
+
+.rewards-card__checkmark {
+  fill: $green--30;
+  margin-right: 1.5625rem;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.rewards-card__title {
+  color: $neutral--00;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 400;
+  margin-bottom: 0.125rem;
+}
+
+.rewards-card__text {
+  color: $neutral--50;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 400;
+}

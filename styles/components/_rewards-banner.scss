@@ -1,0 +1,42 @@
+@use '../abstracts/variables' as *;
+
+.rewards-banner {
+  display: flex;
+  width: 100%;
+  margin-top: 3.125rem;
+  margin-bottom: 1.25rem;
+  align-items: center;
+  border-radius: 1.25rem;
+  padding: 2rem 1.5rem;
+  background-image: url(../../public/images/merkl-bg.png);
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  background-position: center center;
+
+  @media (max-width: 70rem) {
+    margin-top: 2.5rem;
+  }
+}
+
+.rewards-banner__logo {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-right: 0.5rem;
+}
+
+.rewards-banner__title {
+  color: $neutral--00;
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 600;
+}
+
+.rewards-banner__text {
+  color: $neutral--00;
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 24px;
+}
+
