@@ -10,13 +10,11 @@ import NetworkSwitchModal, { NetworkSwitchModalState } from '@components/Network
 import ScreeningErrorOverlay from '@components/ScreeningErrorOverlay';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import { CurrencyContextProvider } from '@contexts/CurrencyContext';
-import RewardsStateContext from '@contexts/RewardsStateContext';
 import { initializeContext, getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { useWeb3Context } from '@contexts/Web3Context';
 import { estimateGasForActions, getKeyForActions, initialEstimatedGasMap } from '@helpers/gasEstimator';
 import { useActionQueue } from '@hooks/useActionQueue';
 import { useCometState } from '@hooks/useCometState';
-import { useRewardsState } from '@hooks/useRewardsState';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
 import { useThemeManager } from '@hooks/useThemeManager';
 import { useTransactionManager } from '@hooks/useTransactionManager';
@@ -36,7 +34,6 @@ function App({ Component, pageProps }: any) {
 
   const location = useLocation();
   const { transactions, addTransaction, clearTransactions } = useTransactionManager(web3);
-  const rewardsState = useRewardsState(web3, transactions);
   const { theme, setTheme } = useThemeManager();
   const themeRef = useRef(theme);
 
@@ -139,11 +136,10 @@ function App({ Component, pageProps }: any) {
       const actionsInQueue = actionQueue.getActions(
         cometState[1].baseAsset,
         cometState[1].collateralAssets,
-        rewardsState
       );
       preEstimateGas(actionsInQueue);
     }
-  }, [transactions, selectedMarketState.selectedMarket[0], cometState[0], rewardsState[0]]);
+  }, [transactions, selectedMarketState.selectedMarket[0], cometState[0]]);
 
   useEffect(() => {
     let maybeChainInfo = undefined;
@@ -158,7 +154,6 @@ function App({ Component, pageProps }: any) {
 
   return (
     <SelectedMarketContext.Provider value={selectedMarketState}>
-      <RewardsStateContext.Provider value={rewardsState}>
         <ActionQueueContext.Provider value={actionQueue}>
           <CurrencyContextProvider>
             <AlertBanner web3={web3} />
@@ -213,7 +208,6 @@ function App({ Component, pageProps }: any) {
             <div id="overlay"></div>
           </CurrencyContextProvider>
         </ActionQueueContext.Provider>
-      </RewardsStateContext.Provider>
     </SelectedMarketContext.Provider>
   );
 }

@@ -1,6 +1,5 @@
 import NetRatesGraph, { NetRatesGraphType } from '@components/NetRatesGraph';
 import { formatRateFactor } from '@helpers/numbers';
-import { Token } from '@types';
 
 export enum NetRatesTooltipView {
   Borrow = 'borrow',
@@ -10,30 +9,22 @@ export enum NetRatesTooltipView {
 
 export interface NetRatesTooltipProps {
   borrowAPR: bigint;
-  borrowRewardsAPR: bigint | undefined;
   earnAPR: bigint;
-  earnRewardsAPR: bigint | undefined;
-  rewardsAsset: Token | undefined;
   view: NetRatesTooltipView;
 }
 
 const NetRatesTooltip = ({
   borrowAPR,
-  borrowRewardsAPR,
   earnAPR,
-  earnRewardsAPR,
-  rewardsAsset,
   view,
 }: NetRatesTooltipProps) => {
-  const netBorrowAPR = borrowRewardsAPR ? borrowAPR - borrowRewardsAPR : borrowAPR;
-  const netSupplyAPR = earnRewardsAPR ? earnRewardsAPR + earnAPR : earnAPR;
+  const netBorrowAPR = borrowAPR;
+  const netSupplyAPR = earnAPR;
 
   const netBorrowRateGraph = (
     <NetRatesGraph
       state={NetRatesGraphType.Borrow}
       borrowAPR={borrowAPR}
-      borrowRewardsAPR={borrowRewardsAPR}
-      rewardsAsset={rewardsAsset}
     />
   );
 
@@ -41,8 +32,6 @@ const NetRatesTooltip = ({
     <NetRatesGraph
       state={NetRatesGraphType.Earn}
       earnAPR={earnAPR}
-      earnRewardsAPR={earnRewardsAPR}
-      rewardsAsset={rewardsAsset}
     />
   );
 

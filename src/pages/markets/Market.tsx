@@ -3,12 +3,10 @@ import { Link } from 'react-router-dom';
 
 import IconPair from '@components/IconPair';
 import { ArrowLeft, ExternalLink } from '@components/Icons';
-import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
 import { isV2Market } from '@helpers/markets';
 import { formatTokenBalance, getTokenValue, PRICE_PRECISION } from '@helpers/numbers';
-import { getRewardsForSelectedMarket } from '@helpers/rewards';
 import { getBlockExplorerUrlForAddress } from '@helpers/urls';
 import { CTokenWithMarketState, Currency, StateType, Token, TokenWithMarketState } from '@types';
 
@@ -32,7 +30,6 @@ const Market = ({ web3 }: MarketsProps) => {
 
   const marketCurrencyToShow = Currency.USD;
 
-  const rewards = useContext(RewardsStateContext);
   const state = useMarketsState(web3, selectedMarket);
   const [marketStateType, marketStateData] = state;
   const [, market] = selectedMarket;
@@ -113,10 +110,8 @@ const Market = ({ web3 }: MarketsProps) => {
               baseAssetPrice: token.price,
               borrowAPR: token.borrowAPR,
               borrowCap: token.borrowCap,
-              borrowRewardsAPR: token.borrowRewardsAPR,
               collateralFactor: token.collateralFactor,
               earnAPR: token.supplyAPR,
-              earnRewardsAPR: token.supplyRewardsAPR,
               interestRateModel: modelState,
               reserveFactor: token.reserveFactor,
               reserves: token.reserves,
@@ -143,12 +138,6 @@ const Market = ({ web3 }: MarketsProps) => {
       utilization,
     } = marketStateData;
     let borrowRewardsAPR: bigint | undefined, earnRewardsAPR: bigint | undefined, rewardsAsset: Token | undefined;
-    const rewardsState = getRewardsForSelectedMarket(rewards, selectedMarket);
-    if (rewardsState !== undefined) {
-      borrowRewardsAPR = rewardsState.borrowRewardsAPR;
-      earnRewardsAPR = rewardsState.earnRewardsAPR;
-      rewardsAsset = rewardsState.rewardAsset;
-    }
 
     assetRows = (
       <CollateralAssetsPanel>

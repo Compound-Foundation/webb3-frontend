@@ -36,15 +36,12 @@ type PanelContent = {
   baseAssetPrice: string;
   borrowAPR: string;
   borrowCap: string;
-  borrowRewardsAPR: string;
   collateralFactor: string;
   earnAPR: string;
-  earnRewardsAPR: string;
   interestRateModel: InterestRateModelState;
   reserveFactor: string;
   reserves: string;
   reservesPercentage?: string;
-  rewardsAsset?: string;
   totalBorrow: string;
   totalSupply: string;
   withHeader?: boolean;
@@ -122,10 +119,8 @@ function getMarketOverviewPanelContent(state: MarketOverviewPanelState): PanelCo
       baseAssetPrice: formatTokenBalance(PRICE_PRECISION, baseAssetPriceInDollars, false, Currency.USD),
       borrowAPR: formatRateFactor(borrowAPR),
       borrowCap: borrowCap,
-      borrowRewardsAPR: formatRateFactor(borrowRewardsAPR ?? 0n),
       collateralFactor: formatRateFactor(collateralFactor ?? 0n),
       earnAPR: formatRateFactor(earnAPR),
-      earnRewardsAPR: formatRateFactor(earnRewardsAPR ?? 0n),
       interestRateModel: [
         StateType.Hydrated,
         {
@@ -140,7 +135,6 @@ function getMarketOverviewPanelContent(state: MarketOverviewPanelState): PanelCo
       reserves: formatTokenBalance(PRICE_PRECISION + baseAsset.decimals, reserves * price, true, currency),
       reserveFactor: formatRateFactor(reserveFactor ?? 0n),
       reservesPercentage,
-      rewardsAsset: rewardsAsset === undefined ? undefined : rewardsAsset.symbol,
       totalBorrow: formatTokenBalance(PRICE_PRECISION + baseAsset.decimals, totalBorrow * price, true, currency),
       totalSupply: formatTokenBalance(PRICE_PRECISION + baseAsset.decimals, totalSupply * price, true, currency),
     };
@@ -190,14 +184,11 @@ export const MarketOverviewPanelView = ({
   baseAssetPrice,
   borrowAPR,
   borrowCap,
-  borrowRewardsAPR,
   collateralFactor,
   earnAPR,
-  earnRewardsAPR,
   interestRateModel,
   reserveFactor,
   reserves,
-  rewardsAsset,
   totalBorrow,
   totalSupply,
   withHeader = false,
@@ -207,11 +198,9 @@ export const MarketOverviewPanelView = ({
     <div className="market-overview__stats">
       <MarketOverviewPanelItem label={'Total Earning'} value={totalSupply} />
       <MarketOverviewPanelItem asset={baseAsset.symbol} label={'Earn APR'} value={earnAPR} />
-      <MarketOverviewPanelItem asset={rewardsAsset} label={'Earn Distribution'} value={earnRewardsAPR} />
       <MarketOverviewPanelItem label={'Reserves'} value={reserves} />
       <MarketOverviewPanelItem label={'Total Borrowing'} value={totalBorrow} />
       <MarketOverviewPanelItem asset={baseAsset.symbol} label={'Borrow APR'} value={borrowAPR} />
-      <MarketOverviewPanelItem asset={rewardsAsset} label={'Borrow Distribution'} value={borrowRewardsAPR} />
       <MarketOverviewPanelItem label={'Borrow Cap'} value={zeroIsNotALimit} />
       <MarketOverviewPanelItem label={'Collateral Factor'} value={collateralFactor} />
       <MarketOverviewPanelItem label={'Reserve Factor'} value={reserveFactor} />

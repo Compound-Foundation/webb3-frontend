@@ -1,25 +1,21 @@
 import { useQuery } from '@tanstack/react-query';
 import { getAddress } from 'ethers/lib/utils';
-import { useContext } from 'react';
 
-import RewardsStateContext from '@contexts/RewardsStateContext';
 import { isNonStablecoinMarket } from '@helpers/baseAssetPrice';
 import { convertApiResponse } from '@helpers/functions';
 import { filterLegacyCollateralSymbols } from '@helpers/legacyCollateral';
 import { getMarketDescriptors } from '@helpers/markets';
 import { BASE_FACTOR, FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 import { getHistoricalMarketSummaryEndpoint, getLatestMarketSummaryEndpoint } from '@helpers/urls';
-import { AggregatedHistoricalSummary, MarketOverviewState, MarketSummary, RewardsState, StateType } from '@types';
+import { AggregatedHistoricalSummary, MarketOverviewState, MarketSummary, StateType } from '@types';
 
 const LATEST_SUMMARY_REFRESH_INTERVAL = 1000 * 60 * 10; // 10 minutes
 
 export function useMarketsOverviewState(): MarketOverviewState {
   // TODO: This can also be modified to use react-query
-  const rewardsState = useContext(RewardsStateContext);
-
   const query = useQuery({
-    queryKey: ['marketOverviewState', rewardsState[0]],
-    queryFn: () => getState(rewardsState),
+    queryKey: ['marketOverviewState'],
+    queryFn: () => getState(),
     initialData: [StateType.Loading],
     refetchInterval: LATEST_SUMMARY_REFRESH_INTERVAL,
   });
@@ -44,39 +40,13 @@ type MarketSummaryResponse = {
   collateralAssetSymbols: string[];
 };
 
-const getState = async (rewardsState: RewardsState, includeTestnets = false): Promise<MarketOverviewState> => {
-  const [rewardsStateType, rewards] = rewardsState;
-  if (rewardsStateType === StateType.Loading || rewards === undefined) {
-    return [StateType.Loading];
-  }
-
+const getState = async (includeTestnets = false): Promise<MarketOverviewState> => {
   const latestMarketSummariesResponse = await fetch(getLatestMarketSummaryEndpoint(includeTestnets));
   const latestMarketSummaries = await latestMarketSummariesResponse.json();
 
   const sanitizedLatestMarketSummaries: MarketSummary[] = latestMarketSummaries
     .map(convertApiResponse)
     .map(sanitizeMarketSummary)
-    // Add the rewards earned to the supply and borrow rates
-    .map((marketSummary: MarketSummary): MarketSummary => {
-      const rewardForChain = rewards.find((reward) => Number(reward[0]) === marketSummary.chainId);
-      if (rewardForChain === undefined) {
-        return marketSummary;
-      }
-
-      const rewardsForMarket = rewardForChain[1].rewardsStates.find((rewardState) => {
-        return rewardState.comet === marketSummary.comet.address;
-      });
-
-      if (rewardsForMarket === undefined) {
-        return marketSummary;
-      }
-
-      return {
-        ...marketSummary,
-        borrowAPR: marketSummary.borrowAPR - rewardsForMarket.borrowRewardsAPR,
-        supplyAPR: marketSummary.supplyAPR + rewardsForMarket.earnRewardsAPR,
-      };
-    });
 
   const historicalMarketSummariesResponse = await fetch(getHistoricalMarketSummaryEndpoint(includeTestnets));
   const historicalMarketSummaries = await historicalMarketSummariesResponse.json();
