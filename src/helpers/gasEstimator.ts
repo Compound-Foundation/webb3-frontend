@@ -139,24 +139,6 @@ async function estimateGas(
           trxFnArgs = [assetInfo.address, amount.toString()];
         }
         break;
-      case ActionType.ClaimRewards:
-        {
-          const rewardsAccountState = singleAction[3];
-          if (
-            web3.write.provider !== undefined &&
-            web3.write.chainId === web3.read.chainId &&
-            web3.write.account !== undefined
-          ) {
-            const sender = web3.write.account;
-            const signer = web3.write.provider.getSigner(sender).connectUnchecked();
-
-            const rewards = new Contract(rewardsAccountState.cometRewards, Rewards, signer);
-
-            trxEstimateGasFn = rewards.estimateGas.claim;
-            trxFnArgs = [rewardsAccountState.comet, sender, true];
-          }
-        }
-        break;
       default:
         throw new Error(`Cannot execute ActionType ${actionType} as a single action`);
     }

@@ -105,7 +105,6 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
           <div className="header__content__right">
             <div className="header__buttons">
               {!hideMarketSelector && <MarketSelector />}
-              {/*<RewardsButton web3={web3} />*/}
               <WalletButton
                 transactions={transactions}
                 clearTransactions={clearTransactions}
@@ -254,13 +253,6 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
 
           <div className="header__wallet-menu__buttons">
             <label className="label L2 text-color--2 header__wallet-menu__buttons__label">COMP Distribution</label>
-            {/*<RewardsButton*/}
-            {/*  mobile*/}
-            {/*  web3={web3}*/}
-            {/*  onClaimClicked={() => {*/}
-            {/*    setMobileWalletActive(false);*/}
-            {/*  }}*/}
-            {/*/>*/}
             <div className="header__wallet-menu__buttons__wrapper">
               <button
                 className="button button--x-large"

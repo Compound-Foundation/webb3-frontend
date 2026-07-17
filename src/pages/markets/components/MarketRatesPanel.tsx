@@ -89,7 +89,7 @@ const LoadingView = () => {
   );
 };
 
-const MarketRatesPanelView = ({ borrowAPR, borrowRewardsAPR, earnAPR, earnRewardsAPR, rewardsAsset }: PanelContent) => {
+const MarketRatesPanelView = ({ borrowAPR, borrowRewardsAPR, earnAPR, earnRewardsAPR }: PanelContent) => {
   const netBorrowAPR = borrowRewardsAPR ? borrowAPR - borrowRewardsAPR : borrowAPR;
   const netSupplyAPR = earnRewardsAPR ? earnRewardsAPR + earnAPR : earnAPR;
 
@@ -97,8 +97,6 @@ const MarketRatesPanelView = ({ borrowAPR, borrowRewardsAPR, earnAPR, earnReward
     <NetRatesGraph
       state={NetRatesGraphType.Borrow}
       borrowAPR={borrowAPR}
-      borrowRewardsAPR={borrowRewardsAPR}
-      rewardsAsset={rewardsAsset}
     />
   );
 
@@ -106,8 +104,6 @@ const MarketRatesPanelView = ({ borrowAPR, borrowRewardsAPR, earnAPR, earnReward
     <NetRatesGraph
       state={NetRatesGraphType.Earn}
       earnAPR={earnAPR}
-      earnRewardsAPR={earnRewardsAPR}
-      rewardsAsset={rewardsAsset}
     />
   );
 
