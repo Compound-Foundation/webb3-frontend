@@ -54,6 +54,13 @@ export default defineConfig({
     alias: {
       comet: resolve(__dirname, 'node_modules/comet'),
       '/fonts': resolve(__dirname, 'node_modules/compound-styles/public/fonts'),
+      // Redirect the (transitive) WalletConnect provider to its self-contained UMD
+      // bundle. The ESM entry has bare imports of @msgpack/msgpack and blakejs, which
+      // aren't in the tree and break esbuild dep pre-bundling in dev.
+      '@walletconnect/ethereum-provider': resolve(
+        __dirname,
+        'node_modules/@walletconnect/ethereum-provider/dist/index.umd.js'
+      ),
       '@components': resolve(__dirname, 'src/components'),
       '@hooks': resolve(__dirname, 'src/hooks'),
       '@contexts': resolve(__dirname, 'src/contexts'),

@@ -138,6 +138,12 @@
   .tooltip {
     display: none;
   }
+
+  // Interactive tooltips are tap-driven rather than hover-only, so they stay
+  // usable on touch devices (visibility is still controlled by --inactive).
+  .tooltip--interactive {
+    display: block;
+  }
 }
 
 @keyframes content-loading {

@@ -8,13 +8,37 @@ import type { Web3 } from '@contexts/Web3Context';
 import { iconNameForChainId } from '@helpers/assets';
 import { filterMap } from '@helpers/functions';
 import { formatTokenBalance } from '@helpers/numbers';
+import { REWARDS_PAUSE_FORUM_URL } from '@helpers/urls';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 import { AccountRewardsState, ActionType, ChainInformation, StateType } from '@types';
 
 import DetailSheet from './DetailSheet';
 import IconPair from './IconPair';
-import { CaretDown } from './Icons';
+import { CaretDown, InfoSolid } from './Icons';
 import { SimpleLink } from './SimpleLink';
+import Tooltip from './Tooltip';
+
+const RewardsPauseTooltip = () => (
+  <Tooltip
+    width={220}
+    interactive
+    under
+    content={
+      <div className="tooltip__content L4">
+        <p className="body">
+          Comet reward top-ups have been paused.{' '}
+          <SimpleLink to={REWARDS_PAUSE_FORUM_URL} className="tooltip__link">
+            Learn more
+          </SimpleLink>
+        </p>
+      </div>
+    }
+  >
+    <span className="rewards__info-icon" onClick={(e) => e.stopPropagation()}>
+      <InfoSolid />
+    </span>
+  </Tooltip>
+);
 
 export type RewardsButtonProps = {
   web3: Web3;
@@ -153,6 +177,7 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
             <label className="label text-color--1">{`${wholeNumberTotalRewards}.${fractionalTotalRewards}`}</label>
             <label className="label label--secondary text-color--2">{`${wholeNumberUnclaimed}.${fractionalUnclaimed} Unclaimed`}</label>
           </div>
+          <RewardsPauseTooltip />
           <DetailSheet active={dropdownActive} className="header__wallet-menu__claim">
             {dropdownContent}
           </DetailSheet>
@@ -166,6 +191,7 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
           <div className={`button button--rewards rewards`} onClick={onClickDropdown}>
             <span className={`asset asset--${rewardAsset.symbol} rewards__icon`} />
             <label className="label text-color--1">{`${wholeNumberTotalRewards}.${fractionalTotalRewards}`}</label>
+            <RewardsPauseTooltip />
           </div>
           {dropdownActive && <div className={`dropdown__content rewards__dropdown`}>{dropdownContent} </div>}
         </div>
