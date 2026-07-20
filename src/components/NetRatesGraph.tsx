@@ -1,3 +1,5 @@
+import { clsx } from 'clsx';
+
 import { formatRateFactor } from '@helpers/numbers';
 
 export enum NetRatesGraphType {
@@ -33,15 +35,14 @@ const NetRatesGraph = (state: NetRatesGraphState) => {
     }
     case NetRatesGraphType.Earn: {
       const { earnAPR } = state;
-
       return (
-        <div className="net-rates-graph__earn-group">
-          <div className="net-rates-graph__graph net-rates-graph--earn-group">
-            <div className="net-rates-graph__bar net-rates-graph__bar--supply"></div>
-            <p className="L3 meta text-color--1">
-              {formatRateFactor(earnAPR)} <span className="L4 meta text-color--2">Interest</span>
-            </p>
-          </div>
+        <div className={clsx('net-rates-graph__graph', {
+          'net-rates-graph__graph__small': earnAPR === 0n,
+        })}>
+          <div className="net-rates-graph__graph__row net-rates-graph__bar net-rates-graph__bar--supply"></div>
+          <p className="L3 meta text-color--1">
+            {formatRateFactor(earnAPR)} <span className="L4 meta text-color--2"> Interest</span>
+          </p>
         </div>
       );
     }

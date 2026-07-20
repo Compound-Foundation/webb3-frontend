@@ -141,9 +141,7 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
 
   let writeWeb3: WriteWeb3;
   const urlAccount = searchParams.has('account') ? (searchParams.get('account') as string) : account;
-  // const screeningStatus = useAddressScreening(urlAccount);
-  // TODO: screening status
-  const screeningStatus = 'allowed';
+  const screeningStatus = useAddressScreening(urlAccount);
   // A blocked wallet is fully disconnected, not just gated out of view.
   useDisconnectBlockedWallet(screeningStatus, disconnect);
   if (searchParams.has('account')) {

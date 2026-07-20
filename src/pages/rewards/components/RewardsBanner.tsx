@@ -5,8 +5,8 @@ export const RewardsBanner = () => {
     <div className={'rewards-banner'}>
       <img className={'rewards-banner__logo'} src={merklLogo} alt="merkl" />
       <div className={'rewards-banner__content'}>
-        <h6 className={'rewards-banner__title'}>Earn Rewards with Ecosystem partners</h6>
-        <p className={'rewards-banner__text'}>View your rewards and explore new reward opportunities.</p>
+        <h6 className={'rewards-banner__title'}>Earn and Claim your COMP Rewards via Merkl</h6>
+        <p className={'rewards-banner__text'}>How you earn hasn't changed – Compound calculates rewards, Merkl is for claiming</p>
       </div>
     </div>
   );

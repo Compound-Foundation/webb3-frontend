@@ -295,6 +295,17 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
             Markets
           </SimpleLink>
           <SimpleLink
+            to="/rewards"
+            className={({ isActive }) =>
+              isActive ? 'heading heading--emphasized active' : 'heading heading--emphasized'
+            }
+            onClick={() => {
+              setMobileNavActive(false);
+            }}
+          >
+            Rewards
+          </SimpleLink>
+          <SimpleLink
             to="/extensions"
             className={({ isActive }) =>
               isActive ? 'heading heading--emphasized active' : 'heading heading--emphasized'
