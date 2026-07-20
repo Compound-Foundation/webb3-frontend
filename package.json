@@ -41,7 +41,7 @@
     "react-dom": "19.1.2",
     "react-router-dom": "7.18.0",
     "rollup-plugin-polyfill-node": "^0.13.0",
-    "uuid": "^13.0.0",
+    "uuid": "^14.0.0",
     "viem": "2.45.0",
     "wagmi": "^2.17.5"
   },
