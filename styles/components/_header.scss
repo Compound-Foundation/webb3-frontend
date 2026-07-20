@@ -485,6 +485,10 @@
           display: flex;
           flex-direction: column;
         }
+
+        .rewards__info-icon {
+          margin-left: auto;
+        }
       }
 
       &__claim {
