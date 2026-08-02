@@ -1,8 +1,0 @@
-[
-  {
-    "id": "GHSA-qwww-vcr4-c8h2",
-    "module": "react-router",
-    "justification": "CSRF bypass in React Router's RSC server mode (action execution before 400 response). This app is a client-only Vite SPA: no SSR, no RSC, no router actions run on a server, so the vulnerable code path is unreachable. The patched release (8.3.0) is a major upgrade of react-router-dom, tracked as separate work.",
-    "added": "2026-07-31"
-  }
-]

@@ -1,5 +1,5 @@
 import { useState, useRef, useContext, useEffect, Fragment } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { iconNameForChainId } from '@helpers/assets';
