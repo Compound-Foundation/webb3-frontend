@@ -1,6 +1,6 @@
 import { getAddress } from 'ethers/lib/utils';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 
 import type { Web3 } from '@contexts/Web3Context';
 import { convertApiResponse } from '@helpers/functions';

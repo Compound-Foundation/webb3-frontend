@@ -1,5 +1,5 @@
 import { ReactNode, useContext } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 import IconPair from '@components/IconPair';
 import { ArrowLeft, ExternalLink } from '@components/Icons';

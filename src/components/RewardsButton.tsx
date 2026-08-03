@@ -1,5 +1,5 @@
 import { useState, useRef, useContext, useEffect, MouseEventHandler } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
