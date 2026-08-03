@@ -2,7 +2,7 @@ import { BigNumber } from '@ethersproject/bignumber';
 import { JsonRpcProvider, StaticJsonRpcProvider } from '@ethersproject/providers';
 import { Contract, Provider } from 'ethers-multicall';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 
 import type { Web3 } from '@contexts/Web3Context';
 import Comet from '@helpers/abis/Comet';

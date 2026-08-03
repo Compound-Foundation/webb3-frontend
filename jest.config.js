@@ -25,8 +25,12 @@ export default {
         },
       },
     ],
+    // react-router 8+ and its cookie-es dependency ship ESM-only, so they
+    // must be compiled to CJS for jest
+    'node_modules/(react-router|cookie-es)/.+\\.m?js$':
+      '<rootDir>/scripts/jest-react-router-transform.cjs',
   },
-  transformIgnorePatterns: ['<rootDir>/node_modules/(?!msw)/'],
+  transformIgnorePatterns: ['<rootDir>/node_modules/(?!(msw|react-router|cookie-es)/)'],
   setupFilesAfterEnv: ['<rootDir>/setup.jest.ts', '<rootDir>/setupTests.ts'],
   testPathIgnorePatterns: ['<rootDir>/__tests__/mocks/'],
   moduleNameMapper: {
