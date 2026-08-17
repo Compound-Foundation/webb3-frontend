@@ -74,6 +74,7 @@ export enum ConnectorType {
   WalletLink = 'WalletLink',
   Ledger = 'Ledger',
   Ronin = 'Ronin',
+  Binance = 'Binance'
 }
 
 export type Connector =
@@ -81,7 +82,7 @@ export type Connector =
   | [ConnectorType.WalletConnect]
   | [ConnectorType.WalletLink]
   | [ConnectorType.Ledger, [string, string]]
-  | [ConnectorType.Ronin];
+  | [ConnectorType.Ronin] | [ConnectorType.Binance];
 
 export type ReadWeb3 = {
   connector: undefined;
@@ -121,6 +122,7 @@ const connectorsMap = {
   [ConnectorType.WalletLink]: { id: 'coinbaseWalletSDK' },
   [ConnectorType.Ledger]: { id: 'ledger' },
   [ConnectorType.Ronin]: { id: 'com.roninchain.wallet' },
+  [ConnectorType.Binance]: { id: 'com.binance.wallet' }
 };
 
 export const Web3Provider = ({ children }: Web3ProviderProps) => {
