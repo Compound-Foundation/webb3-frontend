@@ -1,6 +1,6 @@
 import '../styles/main.scss';
 import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 
 import AlertBanner from '@components/AlertBanner';
 import ConnectWalletModal from '@components/ConnectWalletModal';

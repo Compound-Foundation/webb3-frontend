@@ -2,7 +2,7 @@ import { StaticJsonRpcProvider } from '@ethersproject/providers';
 import { ConnectionInfo } from 'ethers/lib/utils';
 import { setMulticallAddress } from 'ethers-multicall';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';

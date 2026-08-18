@@ -1,5 +1,5 @@
 import { Context, createContext, Dispatch, ReactNode, SetStateAction, useContext, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 
 import { MARKET_LOCAL_STORAGE_KEY, PREFERRED_CURRENCY_KEY } from '@helpers/constants';
 import { getMarkets, DEFAULT_MARKET } from '@helpers/markets';
