@@ -14,6 +14,7 @@ export const V3_API_URL = import.meta.env.VITE_V3_API_HOST || 'V3_API_HOST_NOT_C
 export const TIMESTAMP_API = 'https://timestamp.compound.xyz';
 export const TALLY_URL = 'https://www.tally.xyz';
 export const TALLY_GOV_URL = 'https://www.tally.xyz/gov/compound';
+export const REWARDS_PAUSE_FORUM_URL = 'https://www.comp.xyz/t/pausing-comet-rewards-top-ups/7879';
 
 export function getBlockExplorerUrl(chainId: number | undefined): string {
   if (chainId !== undefined) {

@@ -16,8 +16,6 @@ import optimismWETHRoots from 'comet/deployments/optimism/weth/roots.json';
 import polygonUSDCRoots from 'comet/deployments/polygon/usdc/roots.json';
 import polygonUSDTRoots from 'comet/deployments/polygon/usdt/roots.json';
 import scrollUSDCRoots from 'comet/deployments/scroll/usdc/roots.json';
-import sepoliaUSDCRoots from 'comet/deployments/sepolia/usdc/roots.json';
-import sepoliaWETHRoots from 'comet/deployments/sepolia/weth/roots.json';
 
 import { getMarketDescriptors } from '@helpers/markets';
 
@@ -107,20 +105,6 @@ describe('getMarketDescriptors', () => {
       'USDC',
       'Scroll',
       'USD Coin',
-    ]);
-  });
-  test('returns the correct market descriptors for sepolia USDC', () => {
-    expect(getMarketDescriptors(sepoliaUSDCRoots['comet'].toLowerCase(), 11155111)).toEqual([
-      'USDC',
-      'Sepolia',
-      'USD Coin',
-    ]);
-  });
-  test('returns the correct market descriptors for sepolia ETH', () => {
-    expect(getMarketDescriptors(sepoliaWETHRoots['comet'].toLowerCase(), 11155111)).toEqual([
-      'ETH',
-      'Sepolia',
-      'Ether',
     ]);
   });
 

@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 
 import '@testing-library/jest-dom';
 import { Web3 } from '@contexts/Web3Context';

@@ -24,8 +24,6 @@ import polygonUSDTRoots from 'comet/deployments/polygon/usdt/roots.json';
 import roninWETHRoots from 'comet/deployments/ronin/weth/roots.json';
 import roninWRONRoots from 'comet/deployments/ronin/wron/roots.json';
 import scrollUSDCRoots from 'comet/deployments/scroll/usdc/roots.json';
-import sepoliaUSDCRoots from 'comet/deployments/sepolia/usdc/roots.json';
-import sepoliaWETHRoots from 'comet/deployments/sepolia/weth/roots.json';
 import unichainUSDCRoots from 'comet/deployments/unichain/usdc/roots.json';
 import unichainWETHRoots from 'comet/deployments/unichain/weth/roots.json';
 
@@ -84,8 +82,6 @@ export const MARKETS: MarketData[] = [
       [42161, 'USDC.e', 'USD Coin (Bridged)', arbitrumBridgedUSDCRoots],
       [42161, 'ETH', 'Ether', arbitrumWETHRoots],
       [42161, 'USD₮0', 'Tether', arbitrumUSDTRoots],
-      [11155111, 'USDC', 'USD Coin', sepoliaUSDCRoots],
-      [11155111, 'ETH', 'Ether', sepoliaWETHRoots],
       [10, 'USDC', 'USD Coin', optimismUSDCRoots],
       [10, 'USDT', 'Tether', optimismUSDTRoots],
       [10, 'ETH', 'Ether', optimismWETHRoots],
