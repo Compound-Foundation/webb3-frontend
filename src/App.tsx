@@ -7,6 +7,7 @@ import ConnectWalletModal from '@components/ConnectWalletModal';
 import Footer from '@components/Footer';
 import Header from '@components/Header';
 import NetworkSwitchModal, { NetworkSwitchModalState } from '@components/NetworkSwitchModal';
+import { SafeAutoConnect } from "@components/SafeAutoConnect";
 import ScreeningErrorOverlay from '@components/ScreeningErrorOverlay';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import { CurrencyContextProvider } from '@contexts/CurrencyContext';
@@ -161,6 +162,7 @@ function App({ Component, pageProps }: any) {
       <RewardsStateContext.Provider value={rewardsState}>
         <ActionQueueContext.Provider value={actionQueue}>
           <CurrencyContextProvider>
+            <SafeAutoConnect/>
             <AlertBanner web3={web3} />
             <Header
               web3={web3}
