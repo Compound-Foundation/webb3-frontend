@@ -43,6 +43,9 @@ The application requires the following environment variables to be set in order 
 - `VITE_V3_API_HOST` - The host endpoint used for the v3 api. The Dashboard will function without the api but the Markets page and Rewards balances are rendered from data given by the v3 api.
 - `VITE_V3_RPC_PROVIDER_HOST` - An RPC host provider. This app was designed to work with the v3 api Node Proxy but any RPC provider should work. You should make sure your RPC provider supports all of the supported networks to function properly.
 - `VITE_V3_WALLET_CONNECT_PROJECT_ID` - A Wallet Connect project id used if you want the app to support Wallet Connect.
+- `VITE_SCREENING_ENDPOINT` - The wallet address screening endpoint (a Cloudflare Worker that lives in a separate repo). Screening is fail-closed, so in a deployed build an unset or unreachable endpoint blocks every connected wallet.
+
+On the local dev server (`yarn dev`), leaving `VITE_SCREENING_ENDPOINT` unset skips the screening call entirely, so you can connect a wallet locally without an endpoint. Set it (e.g. in `.env.local`) to a worker that allowlists your dev origin if you need to exercise screening locally. This applies to the dev server only — `vite build` always screens.
 
 ## Extensions
 
