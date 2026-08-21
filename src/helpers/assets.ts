@@ -147,6 +147,7 @@ export const hasAssetIcon = (symbol: string): boolean => {
     'deUSD',
     'pufETH',
     'wOETH',
+    'XAUt',
   ];
   return ICONS.includes(symbol);
 };
