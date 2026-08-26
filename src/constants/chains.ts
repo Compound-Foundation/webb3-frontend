@@ -483,9 +483,12 @@ export const CHAINS: {
     },
     unwrappedCollateralAssets: {},
     extraPriceFeeds: {
-      nativeTokenToUsd: '0x0B6074F21488B95945989E513EFEA070096d931D',
-      rewards: { COMP: '0x0B6074F21488B95945989E513EFEA070096d931D' }, //TODO: NEED COMP token address
-      otherBaseTokensToUsd: { WETH: '0x662Fdb0E7D95d89CD3458E4A3506296E48BB1F44' },
+      // The original Chainlink RON/USD and ETH/USD proxies were deprecated
+      // (aggregator zeroed) on 2026-08-26; these are the USD feeds the Ronin
+      // comets themselves now register on-chain (cWRONv3 base + WETH feeds).
+      nativeTokenToUsd: '0xB88e4078AAc88F10C0Ca71086ddCF512Ec54498a',
+      rewards: { COMP: '0xB88e4078AAc88F10C0Ca71086ddCF512Ec54498a' }, //TODO: NEED COMP token address
+      otherBaseTokensToUsd: { WETH: '0x5D173813B4505701e79E654b36A95E6c1FAD4448' },
     },
     testnet: false,
     walletRpcUrls: ['https://api.roninchain.com/rpc'],
