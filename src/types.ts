@@ -148,6 +148,8 @@ export type ProtocolState = {
   borrowAPR: bigint;
   collateralAssets: TokenWithState[];
   earnAPR: bigint;
+  // The market's total supplied base asset value in dollars, at PRICE_PRECISION
+  totalBaseSupplyUsd: bigint;
 };
 
 export type ProtocolAndAccountState = Omit<ProtocolState, 'baseAsset' | 'collateralAssets'> & {
@@ -346,6 +348,9 @@ export type MarketSummary = {
   };
   borrowAPR: bigint;
   supplyAPR: bigint;
+  // The USDC-terms rewards portion of supplyAPR from an institutional market's
+  // rewards program, when it is paying
+  institutionalSupplyRewardsAPR?: bigint;
   /**
    * Total borrow value in USD
    */
