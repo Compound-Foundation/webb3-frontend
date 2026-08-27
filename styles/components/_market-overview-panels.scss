@@ -197,6 +197,21 @@
     }
   }
 
+  &__net-earn-apr {
+    display: inline-flex;
+
+    // The info icon sits at the upper right of the rate value
+    .info-icon {
+      align-self: flex-start;
+      margin-left: 0.15rem;
+
+      .svg {
+        height: 0.85rem;
+        width: 0.85rem;
+      }
+    }
+  }
+
   &__utilization-container {
     display: flex;
     align-items: center;

@@ -5,6 +5,7 @@ import CircleMeter from '@components/CircleMeter';
 import DetailSheet from '@components/DetailSheet';
 import IconPair from '@components/IconPair';
 import { CaretDown, CheckMark } from '@components/Icons';
+import InstitutionalRewardsTooltip from '@components/InstitutionalRewardsTooltip';
 import PanelWithHeader from '@components/PanelWithHeader';
 import PanelWithNoHeader from '@components/PanelWithNoHeader';
 import { CHAINS, INACTIVE_CHAIN_IDS } from '@constants/chains';
@@ -323,7 +324,10 @@ const PanelRow = ({ marketSummary }: PanelRowProps) => {
         </div>
       </td>
       <td>
-        <div className="body text-color--1 L3">{netEarnAPR}%</div>
+        <div className="body text-color--1 L3 market-overview-panels__net-earn-apr">
+          {netEarnAPR}%
+          {marketSummary.institutionalSupplyRewardsAPR !== undefined && <InstitutionalRewardsTooltip />}
+        </div>
       </td>
       <td>
         <div className="body text-color--1 L3">{netBorrowAPR}%</div>

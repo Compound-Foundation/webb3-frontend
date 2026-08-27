@@ -78,6 +78,15 @@
         width: 0.75rem;
         height: 0.75rem;
       }
+
+      .info-icon {
+        margin-left: -0.1rem;
+
+        .svg {
+          height: 0.85rem;
+          width: 0.85rem;
+        }
+      }
     }
 
     .line-texture {

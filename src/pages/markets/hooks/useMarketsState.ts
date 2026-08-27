@@ -208,18 +208,22 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     console.error('Error fetching historical market data: ', e);
   }
 
+  const baseAssetWithState: ProtocolAndMarketsState['baseAsset'] = {
+    ...market.baseAsset,
+    balanceOfComet: baseAssetBalanceOfComet.toBigInt(),
+    price: baseAssetPrice,
+    baseAssetPriceInDollars: baseTokenPriceInDollars.toBigInt(),
+  };
+
   const state: ProtocolAndMarketsState = {
-    baseAsset: {
-      ...market.baseAsset,
-      balanceOfComet: baseAssetBalanceOfComet.toBigInt(),
-      price: baseAssetPrice,
-      baseAssetPriceInDollars: baseTokenPriceInDollars.toBigInt(),
-    },
+    baseAsset: baseAssetWithState,
     borrowAPR,
     borrowRates,
     collateralAssets,
     cometAddress: market.marketAddress,
     earnAPR,
+    totalBaseSupplyUsd:
+      (totalSupply * baseAssetWithState.baseAssetPriceInDollars) / 10n ** BigInt(baseAssetWithState.decimals),
     factorScale,
     marketHistory: marketHistoryAsBuckets,
     reserves: reserves.toBigInt(),
