@@ -1,10 +1,8 @@
-import { Web3 } from '@contexts/Web3Context';
-import { useAccount } from 'wagmi';
-
 import { DollarCircle } from '@components/Icons/DollarCircle';
 import { Grid } from '@components/Icons/Grid';
 import { Sparkle } from '@components/Icons/Sparkle';
 import { SimpleLink } from '@components/SimpleLink';
+import { Web3 } from '@contexts/Web3Context';
 
 import { RewardsBanner } from '../rewards/components/RewardsBanner';
 import { RewardsCard } from '../rewards/components/RewardsCard';
