@@ -316,6 +316,9 @@ export type MarketData = {
   bulkerAddress: string;
   fauceteerAddress?: string;
   rewardsAddress?: string;
+  // Overrides the base-asset part of the market's URL key (e.g. 'usdc-institutional' -> '?market=usdc-institutional-mainnet').
+  // Required when multiple markets on the same chain share a base asset symbol.
+  slug?: string;
   type: 'MarketData';
 };
 

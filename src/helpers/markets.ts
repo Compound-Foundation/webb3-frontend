@@ -9,6 +9,7 @@ import baseMainnetUSDSRoots from 'comet/deployments/base/usds/roots.json';
 import baseMainnetWETHRoots from 'comet/deployments/base/weth/roots.json';
 import lineaMainnetUSDCRoots from 'comet/deployments/linea/usdc/roots.json';
 import lineaWETHRoots from 'comet/deployments/linea/weth/roots.json';
+import mainnetInstitutionalUSDCRoots from 'comet/deployments/mainnet/institutional_usdc/roots.json';
 import mainnetUSDCRoots from 'comet/deployments/mainnet/usdc/roots.json';
 import mainnetUSDSRoots from 'comet/deployments/mainnet/usds/roots.json';
 import mainnetUSDTRoots from 'comet/deployments/mainnet/usdt/roots.json';
@@ -76,6 +77,7 @@ export const MARKETS: MarketData[] = [
       [1, 'wstETH', 'Lido Wrapped Staked ETH', mainnetWSTETHRoots],
       [1, 'USDS', 'USDS', mainnetUSDSRoots],
       [1, 'WBTC', 'Wrapped BTC', mainnetWBTCRoots],
+      [1, 'USDC', 'USDC Institutional', mainnetInstitutionalUSDCRoots, 'usdc-institutional'],
       [137, 'USDC.e', 'USD Coin (Bridged)', polygonUSDCRoots],
       [137, 'USDT0', 'Tether', polygonUSDTRoots],
       [42161, 'USDC', 'USD Coin', arbitrumNativeUSDCRoots],
@@ -98,8 +100,8 @@ export const MARKETS: MarketData[] = [
       [2020, 'WETH', 'Wrapped Ether', roninWETHRoots],
       [2020, 'RON', 'Ronin', roninWRONRoots],
       [59144, 'ETH', 'Ether', lineaWETHRoots],
-    ] as [number, string, string, { [x: string]: string }][]
-  ).map(([chainId, baseAsset, baseAssetName, root]) => {
+    ] as [number, string, string, { [x: string]: string }, string?][]
+  ).map(([chainId, baseAsset, baseAssetName, root, slug]) => {
     const chain: ChainInformation = CHAINS[chainId];
 
     return {
@@ -114,6 +116,7 @@ export const MARKETS: MarketData[] = [
       bulkerAddress: root['bulker'],
       fauceteerAddress: root['fauceteer'],
       rewardsAddress: root['rewards'],
+      slug,
       type: 'MarketData',
     } as MarketData;
   }),
