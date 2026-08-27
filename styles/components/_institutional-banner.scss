@@ -1,0 +1,54 @@
+@use '../abstracts/variables' as *;
+@use '../base/typography' as *;
+
+// Gradient values from the institutional market Figma designs
+.institutional-banner {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  display: flex;
+  overflow: hidden;
+  padding: 2rem 2rem;
+
+  // Padding-box layers (top to bottom): radial glow, a base-colored fade that blends the
+  // artwork's opaque left edge, the right-side artwork, base fill.
+  // Border-box layer: the linear gradient stroke (green at both ends, teal through the middle).
+  background:
+    radial-gradient(circle at 0% 100%, rgba(8, 138, 28, 0.25) 0%, rgba(25, 131, 110, 0) 20%) padding-box,
+    url('/images/institutional-banner-art.png') right center / auto 100% no-repeat padding-box,
+    linear-gradient(#09161c, #09161c) padding-box,
+    linear-gradient(90deg, #00d791 0%, #174149 35%, #174149 65%, #00d791 100%) border-box;
+  &__title {
+    align-items: center;
+    // The banner background is dark in both themes, so the title color must not follow the theme
+    color: #f5f7fa;
+    display: flex;
+    gap: 1rem;
+  }
+
+  &__new-badge {
+    background: #00d791;
+    border-radius: 0.5rem;
+    color: var(--ui--background);
+    padding: 0.25rem 0.75rem;
+  }
+
+  @media (max-width: $device--sm) {
+    padding: 1rem 1rem;
+    // The artwork spans the whole banner behind the title on small screens,
+    // dimmed by a scrim (heavier on the left) to keep the title legible
+    background:
+      radial-gradient(circle at 0% 100%, rgba(8, 138, 28, 0.25) 0%, rgba(25, 131, 110, 0) 20%) padding-box,
+      linear-gradient(90deg, rgba(9, 22, 28, 0.75) 0%, rgba(9, 22, 28, 0.35) 100%) padding-box,
+      url('/images/institutional-banner-art.png') right center / auto 100% no-repeat padding-box,
+      linear-gradient(#09161c, #09161c) padding-box,
+      linear-gradient(90deg, #00d791 0%, #174149 35%, #174149 65%, #00d791 100%) border-box;
+
+    &__title {
+      align-items: flex-start;
+      flex-direction: column;
+      line-height: 2.25rem;
+      font-size: #{$heading-font-size--emphasized--L2};
+    }
+  }
+}
