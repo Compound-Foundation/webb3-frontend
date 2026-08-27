@@ -5,6 +5,7 @@ import arbitrumWETHRoots from 'comet/deployments/arbitrum/weth/roots.json';
 import baseMainnetUSDbCRoots from 'comet/deployments/base/usdbc/roots.json';
 import baseMainnetUSDCRoots from 'comet/deployments/base/usdc/roots.json';
 import baseMainnetWETHRoots from 'comet/deployments/base/weth/roots.json';
+import mainnetInstitutionalUSDCRoots from 'comet/deployments/mainnet/institutional_usdc/roots.json';
 import mainnetUSDCRoots from 'comet/deployments/mainnet/usdc/roots.json';
 import mainnetUSDTRoots from 'comet/deployments/mainnet/usdt/roots.json';
 import mainnetWETHRoots from 'comet/deployments/mainnet/weth/roots.json';
@@ -105,6 +106,13 @@ describe('getMarketDescriptors', () => {
       'USDC',
       'Scroll',
       'USD Coin',
+    ]);
+  });
+  test('returns the correct market descriptors for mainnet institutional USDC', () => {
+    expect(getMarketDescriptors(mainnetInstitutionalUSDCRoots['comet'].toLowerCase(), 1)).toEqual([
+      'USDC',
+      'Ethereum',
+      'USDC Institutional',
     ]);
   });
 
