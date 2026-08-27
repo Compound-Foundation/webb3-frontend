@@ -6,8 +6,6 @@ import {
   ProtocolState,
   ProtocolAndAccountState,
   ProtocolAndMarketsState,
-  RewardAccountStateInfo,
-  RewardsState,
   StateType,
   TransactionActionType,
   HistoryItemType,
@@ -123,14 +121,6 @@ export const getMockState = (borrow: boolean, maybeAccount?: string): CometState
 
 export const getMockMarketState = (): MarketState => {
   return [StateType.Hydrated, mockProtocolMarketState];
-};
-
-export const getMockRewardsState = (maybeAccount?: string): RewardsState => {
-  if (maybeAccount !== undefined) {
-    return [StateType.Hydrated, [mockRewardsState]];
-  } else {
-    return [StateType.NoWallet, [mockRewardsState]];
-  }
 };
 
 const baseAssetWithState: BaseAssetWithState = {
@@ -351,28 +341,6 @@ const mockProtocolMarketState: ProtocolAndMarketsState = {
   marketHistory: [],
   type: 'ProtocolAndMarketState',
 };
-
-const mockRewardsState: RewardAccountStateInfo = [
-  '1',
-  {
-    chainInformation: CHAINS[1],
-    rewardsStates: [
-      {
-        chainId: 1,
-        comet: '0xcC861650dc6f25cB5Ab4185d4657a70c923FDb27',
-        cometRewards: '0x1B0e765F6224C21223AeA2af16c1C46E38885a40',
-        baseAsset: baseAssetWithState,
-        rewardAsset: COMP,
-        amountOwed: BigInt(100e18),
-        walletBalance: BigInt(100e18),
-        earnRewardsAPR,
-        borrowRewardsAPR,
-        supplyBalance: BigInt(0),
-        borrowBalance: BigInt(15_500_000.15e6),
-      },
-    ],
-  },
-];
 
 //Alysia TODO call /account/0xuser/transaction_history?limit=30&market[]=1_0xc3d688B66703497DAA19211EEdff47f25384cdc3,1_0xc3d688B66703497DAA19211EEdff47f25384cdc3,137_0xc3d688B66703497DAA19211EEdff47f25384cdc3&action_type[]=borrow,repay,withdraw,supply,claim,seized,liquidate,transfer to get the raw data from API
 export const mockTransactionHistoryResp = {

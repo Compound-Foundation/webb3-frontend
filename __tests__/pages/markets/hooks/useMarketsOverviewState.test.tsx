@@ -2,18 +2,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import { ReactNode } from 'react';
 
-import RewardsStateContext from '@contexts/RewardsStateContext';
 import { useMarketsOverviewState } from '@pages/markets/hooks/useMarketsOverviewState';
 import { StateType } from '@types';
 
 const Provider = ({ children }: { children: ReactNode }) => {
   const queryClient = new QueryClient();
 
-  return (
-    <QueryClientProvider client={queryClient}>
-      <RewardsStateContext.Provider value={[StateType.Hydrated, []]}>{children}</RewardsStateContext.Provider>
-    </QueryClientProvider>
-  );
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 };
 
 describe('useMarketsOverview', () => {

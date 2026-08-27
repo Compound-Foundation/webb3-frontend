@@ -2,7 +2,7 @@ import { ReactNode, useContext } from 'react';
 
 import { CircleExclamation, CircleMinus, CirclePlus, Close } from '@components/Icons';
 import { LoadSpinnerNew } from '@components/LoadSpinner';
-import { isUnwrappedCollateralAsset, CHAINS } from '@constants/chains';
+import { isUnwrappedCollateralAsset } from '@constants/chains';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import {
@@ -21,7 +21,6 @@ import {
   getValueInDollars,
   getValueInBaseAsset,
   formatValueInCurrency,
-  formatTokenBalance,
 } from '@helpers/numbers';
 import { ActionType, Action, BaseAssetWithAccountState, TokenWithAccountState, Currency, Transaction } from '@types';
 
@@ -72,14 +71,7 @@ const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
 
   const baseAssetDenominated = shouldShowValueInBaseAsset(symbol as Currency, currency);
   let currencyValue;
-  if (actionType === ActionType.ClaimRewards) {
-    currencyValue = formatTokenBalance(
-      asset.decimals + PRICE_PRECISION,
-      sanitizedAmount * asset.price,
-      true,
-      Currency.USD
-    );
-  } else if (baseAssetDenominated) {
+  if (baseAssetDenominated) {
     // for collateral value in base asset we need to consider the asset price when doing the conversion to USDC
     const valueToUse = getValueInBaseAsset(sanitizedAmount * asset.price, baseAsset);
     currencyValue = formatValueInCurrency(asset.decimals + PRICE_PRECISION, valueToUse, currency);
@@ -91,7 +83,7 @@ const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
   const [modifier, onClick, onDeleteClick] =
     type === ActionQueueItemType.display
       ? ['action-queue-item--display', noop, noop]
-      : ['L3', action[0] === ActionType.ClaimRewards ? noop : state[1].onClick, state[1].onDeleteClick];
+      : ['L3', state[1].onClick, state[1].onDeleteClick];
   let icon = iconForActionType(actionType, error);
   const [, market] = selectedMarket;
   let actionTypeString = displayTextForActionType(actionType);
@@ -111,10 +103,6 @@ const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
     subtext = <p className="L4 meta text-color--2">Approval Pending</p>;
   } else if (error) {
     subtext = <p className="L4 meta text-color--caution">{error}</p>;
-  } else if (actionType === ActionType.ClaimRewards) {
-    subtext = (
-      <p className="L4 meta text-color--2">{`${action[3].baseAsset.symbol} • ${CHAINS[action[3].chainId].name}`}</p>
-    );
   }
 
   return (
@@ -162,8 +150,6 @@ export function iconForActionType(actionType: ActionType, error?: string) {
     case ActionType.WithdrawCollateral:
     case ActionType.Withdraw:
       return <CircleMinus className="svg--supply" />;
-    case ActionType.ClaimRewards:
-      return <CirclePlus className="svg--claim" />;
   }
 }
 

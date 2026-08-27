@@ -10,21 +10,21 @@ export enum NetRatesTooltipView {
 
 export interface NetRatesTooltipProps {
   borrowAPR: bigint;
-  borrowRewardsAPR: bigint | undefined;
+  borrowRewardsAPR?: bigint;
   earnAPR: bigint;
-  earnRewardsAPR: bigint | undefined;
-  rewardsAsset: Token | undefined;
+  earnRewardsAPR?: bigint;
+  rewardsAsset?: Token;
   view: NetRatesTooltipView;
 }
 
 const NetRatesTooltip = ({
-  borrowAPR,
-  borrowRewardsAPR,
-  earnAPR,
-  earnRewardsAPR,
-  rewardsAsset,
-  view,
-}: NetRatesTooltipProps) => {
+   borrowAPR,
+   borrowRewardsAPR = 0n,
+   earnAPR,
+   earnRewardsAPR = 0n,
+   rewardsAsset,
+   view,
+ }: NetRatesTooltipProps) => {
   const netBorrowAPR = borrowRewardsAPR ? borrowAPR - borrowRewardsAPR : borrowAPR;
   const netSupplyAPR = earnRewardsAPR ? earnRewardsAPR + earnAPR : earnAPR;
 

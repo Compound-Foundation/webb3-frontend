@@ -248,10 +248,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
   const ratesTooltipContent = (
     <NetRatesTooltip
       borrowAPR={borrowAPR}
-      borrowRewardsAPR={borrowRewardsAPR}
       earnAPR={earnAPR}
-      earnRewardsAPR={earnRewardsAPR}
-      rewardsAsset={rewardsAsset}
       view={NetRatesTooltipView.All}
     />
   );

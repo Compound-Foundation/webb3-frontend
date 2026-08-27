@@ -10,7 +10,6 @@ import { getBulkerTrxData, BulkerTrxData } from '@helpers/bulkerActions';
 import { tryOrDecodeError } from '@helpers/functions';
 import { MAX_UINT256 } from '@helpers/numbers';
 import {
-  AccountRewardsState,
   Action,
   BaseAssetWithAccountState,
   MarketData,
@@ -47,13 +46,6 @@ export type WriteCometState = {
     market: MarketDataLoaded,
     address: string,
     amount: bigint,
-    description: string,
-    estimatedGas: number,
-    callback?: () => void
-  ) => Promise<void>;
-  claimReward: (
-    rewardsAccountState: AccountRewardsState,
-    address: string,
     description: string,
     estimatedGas: number,
     callback?: () => void
@@ -244,38 +236,6 @@ export function useWriteCometState(web3: Web3, addTransaction: AddTransaction): 
     [web3.write.provider, web3.write.account, web3.write.chainId, web3.read.chainId]
   );
 
-  const claimReward = useCallback(
-    async (
-      rewardsAccountState: AccountRewardsState,
-      address: string,
-      description: string,
-      estimatedGas: number,
-      callback?: () => void
-    ) => {
-      if (
-        web3.write.provider !== undefined &&
-        web3.write.chainId === web3.read.chainId &&
-        web3.write.account !== undefined
-      ) {
-        const sender = web3.write.account;
-        const signer = web3.write.provider.getSigner(sender).connectUnchecked();
-
-        const rewards = new Contract(rewardsAccountState.cometRewards, Rewards, signer);
-        addTransaction(
-          address,
-          description,
-          rewards.claim,
-          estimatedGas,
-          rewards.estimateGas.claim,
-          [rewardsAccountState.comet, sender, true],
-          0n,
-          callback
-        );
-      }
-    },
-    [web3.write.provider, web3.write.account, web3.write.chainId, web3.read.chainId]
-  );
-
   return {
     approve,
     allowOperator,
@@ -283,6 +243,5 @@ export function useWriteCometState(web3: Web3, addTransaction: AddTransaction): 
     withdraw,
     invokeBulker,
     drip,
-    claimReward,
   };
 }

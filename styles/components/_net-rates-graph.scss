@@ -15,6 +15,10 @@
     gap: 0.38rem;
     min-width: 5.4rem;
 
+    &__small {
+      width: 5.4rem;
+    }
+
     &__row {
       display: flex;
       justify-content: flex-end;

@@ -53,7 +53,7 @@
 @use 'components/panel-with-no-header';
 @use 'components/position-card';
 @use 'components/proposals';
-@use 'components/rewards';
+//@use 'components/rewards';
 @use 'components/screening-error-overlay';
 @use 'components/svg';
 @use 'components/theme-toggle';
@@ -67,6 +67,9 @@
 @use 'components/vote-transaction-modal';
 @use 'components/vote-wallet';
 @use 'components/wallet-trx-history-row';
+@use 'components/rewards-card';
+@use 'components/rewards-banner';
+@use 'components/rewards-faq';
 
 @use 'pages/home';
 @use 'pages/markets';
@@ -74,6 +77,7 @@
 @use 'pages/extension-list';
 @use 'pages/transactions';
 @use 'pages/vote';
+@use 'pages/rewards';
 
 .text-link:hover {
   opacity: 0.85;

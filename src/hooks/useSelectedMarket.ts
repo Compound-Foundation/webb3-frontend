@@ -71,16 +71,17 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
   const selectMarket = useCallback(
     async (desiredMarket: MarketData) => {
       const isMarketsPage = location.pathname.startsWith('/markets');
+      const isRewardsPage = location.pathname.startsWith('/rewards');
       const hasMarketQueryParam = searchParams.has('market');
 
       // On the /markets page, don't set the market query param
-      if (!isMarketsPage) {
+      if (!isMarketsPage && !isRewardsPage) {
         // Force update the market query parameter
         const newSearchParams = new URLSearchParams(searchParams);
         newSearchParams.set('market', shortMarketKey(desiredMarket));
 
         setSearchParams(newSearchParams, { replace: true });
-      } else if (hasMarketQueryParam) {
+      } else if (isMarketsPage && hasMarketQueryParam) {
         // Instead of updating query param, navigate to /markets/:marketId.
         const existingSearchParams = new URLSearchParams(searchParams);
         existingSearchParams.delete('market');
