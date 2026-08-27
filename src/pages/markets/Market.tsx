@@ -5,9 +5,9 @@ import IconPair from '@components/IconPair';
 import { ArrowLeft, ExternalLink } from '@components/Icons';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
-import { isV2Market } from '@helpers/markets';
+import { getMarket, isV2Market } from '@helpers/markets';
 import { formatTokenBalance, getTokenValue, PRICE_PRECISION } from '@helpers/numbers';
-import { getBlockExplorerUrlForAddress } from '@helpers/urls';
+import { getBlockExplorerUrlForAddress, INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
 import { CTokenWithMarketState, Currency, StateType, Token, TokenWithMarketState } from '@types';
 
 import AdditionalMarketDataPanel from './components/AdditionalMarketDataPanel';
@@ -37,6 +37,10 @@ const Market = ({ web3 }: MarketsProps) => {
     market !== undefined
       ? [market.chainInformation.name, market.chainInformation.chainId, market.baseAsset.symbol]
       : ['Connecting', -1, undefined];
+  // The configured market entry keeps the display name and institutional flags,
+  // which the hydrated market's on-chain base asset data doesn't carry
+  const configMarket = market !== undefined ? getMarket(market.chainInformation.chainId, market.marketAddress) : undefined;
+  const marketDisplayName = configMarket?.institutional ? configMarket.baseAsset.name : currentBaseToken;
   let assetRows: ReactNode = null;
   let marketOverviewPanel: ReactNode = null;
   let marketStatsPanel: ReactNode = null;
@@ -271,9 +275,12 @@ const Market = ({ web3 }: MarketsProps) => {
               </div>
               <div className="token-pair__info">
                 <h2 className="token-pair__names heading heading--emphasized text-color--1">
-                  {currentBaseToken}
+                  {marketDisplayName}
                   <span className="token-pair__names__divider">•</span>
                   <span className="token-pair__names__chain-name">{currentChainName}</span>
+                  {configMarket?.isNew && (
+                    <span className="token-pair__names__new-badge new-badge new-badge--large label">New</span>
+                  )}
                 </h2>
                 {v2Markets ? (
                   <div className="token-pair__address">
@@ -286,6 +293,16 @@ const Market = ({ web3 }: MarketsProps) => {
                   <></>
                 )}
               </div>
+              {configMarket?.institutional && (
+                <a
+                  className="button button--large token-pair__learn-more"
+                  href={INSTITUTIONAL_MARKET_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Learn More
+                </a>
+              )}
             </div>
           )}
           {marketStateData !== undefined && market !== undefined && (
