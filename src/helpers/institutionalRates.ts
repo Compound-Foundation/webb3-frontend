@@ -14,6 +14,10 @@ import { MarketData, MarketDataLoaded, Token } from '@types';
 // $1.5M -> 53.33%, ... $10M -> 8%, ... $20M+ -> 4%). To adjust the program, edit
 // the constants below. Dollar amounts are whole dollars.
 const REWARDS_BUDGET_DOLLARS_PER_YEAR = 800_000;
+
+// The date through which the boosted yield program applies, shown on the
+// whitelisted card. Update when the program is extended.
+export const INSTITUTIONAL_BOOST_END_DATE = new Date(2026, 11, 8); // December 8, 2026
 const LEVEL_STEP_DOLLARS = 500_000;
 const FIRST_LEVEL_DOLLARS = 500_000;
 const LAST_LEVEL_DOLLARS = 20_000_000;
