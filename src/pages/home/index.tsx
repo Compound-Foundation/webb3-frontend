@@ -39,6 +39,7 @@ import {
 
 import ActionModal from './components/ActionModal';
 import AssetRow from './components/AssetRow';
+import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadState } from './components/Masthead';
 import PositionCard, { PositionCardState } from './components/PositionCard';
 
@@ -482,6 +483,7 @@ const Home = ({
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
+      <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
       <div className="home__content grid-container">
         <div className="home__assets grid-column--7">
