@@ -143,9 +143,9 @@ const Rewards = () => {
             View your Rewards
           </SimpleLink>
         )}
-        <SimpleLink className={'button'} to={`https://app.merkl.xyz/?search=comp`}>
-          View rewards opportunities
-        </SimpleLink>
+        <button disabled={true} className={'button'}>
+          Live Shortly
+        </button>
       </div>
       <RewardsFaq
         title={'FAQ'}
