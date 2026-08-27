@@ -8,26 +8,13 @@ export function isSameToken(token1: Token, token2: Token): boolean {
 }
 
 export function isSameAction(action1: Action | PendingAction, action2: Action | PendingAction): boolean {
-  if (action1[0] === ActionType.ClaimRewards) {
-    return isSameClaimAction(action1, action2);
-  }
   return action1[0] === action2[0] && isSameToken(action1[1], action2[1]);
-}
-
-export function isSameClaimAction(action1: Action | PendingAction, action2: Action | PendingAction): boolean {
-  return (
-    action1[0] === ActionType.ClaimRewards &&
-    action2[0] === ActionType.ClaimRewards &&
-    action1[3].comet === action2[3].comet
-  );
 }
 
 export function displayTextForActionType(type: ActionType): string {
   switch (type) {
     case ActionType.Borrow:
       return 'Borrow';
-    case ActionType.ClaimRewards:
-      return 'Claim';
     case ActionType.Repay:
       return 'Repay';
     case ActionType.Supply:
@@ -59,9 +46,6 @@ export const calculateUpdatedBalances = (
 ): UpdatedBalances => {
   const tokensWithUpdatedBalances = actions.reduce((acc, action, index) => {
     const [actionType, asset, amount] = action;
-    if (actionType === ActionType.ClaimRewards) {
-      return acc;
-    }
     const dataForAsset: { balance: bigint; walletBalance: bigint } = acc[asset.address] || {
       balance: 0n,
       walletBalance: 0n,

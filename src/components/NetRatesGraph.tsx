@@ -11,15 +11,15 @@ export enum NetRatesGraphType {
 type NetRatesBorrowGraphState = {
   state: NetRatesGraphType.Borrow;
   borrowAPR: bigint;
-  borrowRewardsAPR: bigint | undefined;
-  rewardsAsset: Token | undefined;
+  borrowRewardsAPR?: bigint;
+  rewardsAsset?: Token;
 };
 
 type NetRatesEarnGraphState = {
   state: NetRatesGraphType.Earn;
   earnAPR: bigint;
-  earnRewardsAPR: bigint | undefined;
-  rewardsAsset: Token | undefined;
+  earnRewardsAPR?: bigint;
+  rewardsAsset?: Token;
 };
 
 type NetRatesGraphState = NetRatesBorrowGraphState | NetRatesEarnGraphState;
@@ -28,7 +28,7 @@ const NetRatesGraph = (state: NetRatesGraphState) => {
   const { rewardsAsset } = state;
   switch (state.state) {
     case NetRatesGraphType.Borrow: {
-      const { borrowAPR, borrowRewardsAPR } = state;
+      const { borrowAPR, borrowRewardsAPR = 0n } = state;
       const netBorrowAPR = borrowRewardsAPR ? borrowAPR - borrowRewardsAPR : borrowAPR;
 
       return (
@@ -78,7 +78,7 @@ const NetRatesGraph = (state: NetRatesGraphState) => {
       );
     }
     case NetRatesGraphType.Earn: {
-      const { earnAPR, earnRewardsAPR } = state;
+      const { earnAPR, earnRewardsAPR = 0n } = state;
       const netSupplyAPR = earnRewardsAPR ? earnRewardsAPR + earnAPR : earnAPR;
 
       //TODO: Here the net-rates-graph__graph has 2 top level divs :(

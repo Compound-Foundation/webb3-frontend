@@ -14,6 +14,7 @@ import Extension from './pages/extensions/Extension';
 import Home from './pages/home';
 import MarketOverview from './pages/markets';
 import Market from './pages/markets/Market';
+import Rewards from './pages/rewards';
 import TransactionHistory from './pages/transactions';
 import Vote from './pages/vote';
 
@@ -35,6 +36,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
               <Route path="/extensions" element={<App Component={ExtensionList} pageProps={{}} />} />
               <Route path="/vote" element={<App Component={Vote} pageProps={{}} />} />
               <Route path="/transactions" element={<App Component={TransactionHistory} pageProps={{}} />} />
+              <Route path="/rewards" element={<App Component={Rewards} pageProps={{}} />} />
             </Routes>
           </Web3Provider>
         </QueryClientProvider>
