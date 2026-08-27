@@ -10,8 +10,7 @@
   overflow: hidden;
   padding: 2rem 2rem;
 
-  // Padding-box layers (top to bottom): radial glow, a base-colored fade that blends the
-  // artwork's opaque left edge, the right-side artwork, base fill.
+  // Padding-box layers (top to bottom): radial glow, the right-side artwork, base fill.
   // Border-box layer: the linear gradient stroke (green at both ends, teal through the middle).
   background:
     radial-gradient(circle at 0% 100%, rgba(8, 138, 28, 0.25) 0%, rgba(25, 131, 110, 0) 20%) padding-box,
@@ -24,13 +23,6 @@
     color: #f5f7fa;
     display: flex;
     gap: 1rem;
-  }
-
-  &__new-badge {
-    background: #00d791;
-    border-radius: 0.5rem;
-    color: var(--ui--background);
-    padding: 0.25rem 0.75rem;
   }
 
   @media (max-width: $device--sm) {

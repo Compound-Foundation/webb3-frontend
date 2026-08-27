@@ -172,7 +172,7 @@ const MarketOption = ({ isCurrentMarket, market, pathname, onClick, loading }: M
         <span className="label text-color--1 L1">{market.baseAsset.symbol}</span>
         {loading && <span className="label label--secondary text-color--2">{APPROVE_IN_WALLET}</span>}
       </div>
-      {market.isNew && <span className="market-selector__option__new-badge label label--secondary">{NEW}</span>}
+      {market.isNew && <span className="new-badge label label--secondary">{NEW}</span>}
       {isCurrentMarket && <CheckMark className="svg--supply" />}
       {loading && <TailSpin className="svg--spin" />}
     </>

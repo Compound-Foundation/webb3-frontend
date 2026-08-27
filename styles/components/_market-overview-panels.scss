@@ -59,6 +59,14 @@
       margin-left: -0.75rem;
       margin-right: -0.75rem;
     }
+
+    // Collapsed cell borders paint straddling the cell boundary (half outside the cell),
+    // which breaks the institutional row's outline; with separate borders every cell
+    // paints its full border inside its own box. border-spacing stays 0, so this is
+    // visually a no-op for everything else in the table.
+    .assets-table {
+      border-collapse: separate;
+    }
   }
 
   &__table-header {
@@ -118,6 +126,54 @@
       border-top-right-radius: 0.5rem;
       border-bottom-right-radius: 0.5rem;
     }
+
+    // Institutional rows reuse the hero banner treatment: a base fill with a radial glow
+    // inside a gradient outline. Gradient borders can't combine border-image with
+    // border-radius, so the outline is painted per cell as a border-box background behind
+    // a transparent border (same trick as the hero banner) — backgrounds honor the cell
+    // radii, and the table's separate border model (above) keeps each cell's painted
+    // border fully inside its own box.
+    &--institutional {
+      --institutional-row-base: #09161c;
+      --institutional-row-outline: #174149;
+
+      height: 5rem;
+
+      td {
+        border-bottom: 1px solid transparent;
+        border-top: 1px solid transparent;
+        background:
+          linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
+          linear-gradient(var(--institutional-row-outline), var(--institutional-row-outline)) border-box;
+      }
+
+      td:first-child {
+        border-left: 1px solid transparent;
+        background:
+          radial-gradient(60% 220% at 0% 100%, rgba(8, 138, 28, 0.3) 0%, rgba(25, 131, 110, 0) 100%) padding-box,
+          linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
+          linear-gradient(90deg, #00d791 0%, var(--institutional-row-outline) 100%) border-box;
+      }
+
+      td:last-child {
+        border-right: 1px solid transparent;
+        background:
+          linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
+          linear-gradient(90deg, var(--institutional-row-outline) 0%, #00d791 100%) border-box;
+      }
+
+      &:hover {
+        --institutional-row-base: #0e222c;
+      }
+    }
+  }
+
+  &__table-divider-row td {
+    padding: 0;
+
+    .divider {
+      margin: 0.75rem 0;
+    }
   }
 
   &__market-container {
@@ -133,6 +189,12 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
+
+    .new-badge {
+      display: inline-block;
+      padding: 0.05rem 0.3rem;
+      margin-bottom: 0.25rem;
+    }
   }
 
   &__utilization-container {
@@ -225,6 +287,19 @@
       100% {
         fill: rgba($neutral--50, 0.3);
       }
+    }
+  }
+}
+
+.theme--light {
+  // Same radial glow and green outline ends; the base fill and the outline's
+  // mid color lighten per the designs
+  .market-overview-panels__table-row--institutional {
+    --institutional-row-base: #ebedf0;
+    --institutional-row-outline: #c1c1c1;
+
+    &:hover {
+      --institutional-row-base: #e0e4e9;
     }
   }
 }

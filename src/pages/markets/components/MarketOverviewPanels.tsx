@@ -9,7 +9,7 @@ import PanelWithHeader from '@components/PanelWithHeader';
 import PanelWithNoHeader from '@components/PanelWithNoHeader';
 import { CHAINS, INACTIVE_CHAIN_IDS } from '@constants/chains';
 import { assetIconForAssetSymbol, iconNameForChainId } from '@helpers/assets';
-import { getMarketDescriptors } from '@helpers/markets';
+import { getMarket, getMarketDescriptors } from '@helpers/markets';
 import { BASE_FACTOR, PRICE_PRECISION, formatValueInDollars } from '@helpers/numbers';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 
@@ -222,6 +222,12 @@ const Panel = ({ chainId, marketSummaries }: PanelProps) => {
     </div>
   );
 
+  // Institutional markets are pinned above the rest of the network's markets, regardless of sort
+  const isInstitutional = (marketSummary: MarketSummary) =>
+    getMarket(marketSummary.chainId, marketSummary.comet.address)?.institutional === true;
+  const institutionalSummaries = marketSummaries.filter(isInstitutional);
+  const standardSummaries = marketSummaries.filter((marketSummary) => !isInstitutional(marketSummary));
+
   return (
     <div className="market-overview-panels__tables-container">
       <PanelWithHeader header={headerWithLogo} className="assets-table-panel grid-column--12">
@@ -230,7 +236,17 @@ const Panel = ({ chainId, marketSummaries }: PanelProps) => {
             <table className="assets-table">
               <TableHead />
               <tbody>
-                {marketSummaries.map((marketSummary) => {
+                {institutionalSummaries.map((marketSummary) => {
+                  return <PanelRow key={marketSummary.comet.address} marketSummary={marketSummary} />;
+                })}
+                {institutionalSummaries.length > 0 && standardSummaries.length > 0 && (
+                  <tr className="market-overview-panels__table-divider-row">
+                    <td colSpan={8}>
+                      <div className="divider"></div>
+                    </td>
+                  </tr>
+                )}
+                {standardSummaries.map((marketSummary) => {
                   return <PanelRow key={marketSummary.comet.address} marketSummary={marketSummary} />;
                 })}
               </tbody>
@@ -247,6 +263,7 @@ type PanelRowProps = {
 };
 const PanelRow = ({ marketSummary }: PanelRowProps) => {
   const [assetSymbol, chainName, assetName] = getMarketDescriptors(marketSummary.comet.address, marketSummary.chainId);
+  const market = getMarket(marketSummary.chainId, marketSummary.comet.address);
 
   const getPercentage = (val: bigint) => {
     const percentage = Number((val * 10_000n) / BASE_FACTOR) / 100;
@@ -258,7 +275,7 @@ const PanelRow = ({ marketSummary }: PanelRowProps) => {
   const netBorrowAPR = getPercentage(marketSummary.borrowAPR);
 
   const shortMarketName = () => {
-    const name = assetSymbol === 'ETH' ? 'WETH' : assetSymbol;
+    const name = market?.slug ?? (assetSymbol === 'ETH' ? 'WETH' : assetSymbol);
     const chain = CHAINS[marketSummary.chainId].key;
 
     return `${name}-${chain}`.toLowerCase();
@@ -273,18 +290,25 @@ const PanelRow = ({ marketSummary }: PanelRowProps) => {
     scrollTo(0, 0);
   };
 
+  const rowModifier = market?.institutional ? ' market-overview-panels__table-row--institutional' : '';
+
   return (
     // The Link component doesn't work here because tr must be
     // a direct child of tbody and td must be a direct child of tr
-    <tr className="market-overview-panels__table-row" onClick={handleRowClick}>
+    <tr className={`market-overview-panels__table-row${rowModifier}`} onClick={handleRowClick}>
       <td>
         <div className="market-overview-panels__market-container">
           <IconPair
             className="icon-pair--reverse-draw"
             icon1={assetIconForAssetSymbol(assetSymbol)}
-            icon2={iconNameForChainId(marketSummary.chainId)}
+            icon2={market?.iconPair[0] ?? iconNameForChainId(marketSummary.chainId)}
           />
           <div className="market-overview-panels__asset-description-container">
+            {market?.isNew && (
+              <div className="L2">
+                <span className="new-badge label label--secondary">New</span>
+              </div>
+            )}
             <AssetName assetName={assetName} />
             <div className="label text-color--2 L2">
               {assetSymbol} ∙ {chainName}
