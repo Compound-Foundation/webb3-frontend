@@ -10,29 +10,46 @@ import { RewardsCard } from '../rewards/components/RewardsCard';
 
 import { RewardsFaq } from './components/RewardsFaq';
 
-const rewardsCards = [
-  {
-    title: 'See and claim your COMP rewards',
-    description: 'Connect your wallet in Merkl to see and claim in Merkl.',
-    icon: <DollarCircle />
-  },
-  {
-    title: 'Competitive APYs',
-    description: 'Increase your earning potential by using Compound and follow the new Compound Foundation X for the newest campaigns.',
-    icon: <Sparkle />
-  },
-  {
-    title: 'Onchain',
-    description: 'All verifiable and transparent distributions to wallets.',
-    icon: <Grid />
-  }
-];
-
-const faqLinkProps = {
+const linkProps = {
   className: 'rewards-faq-link',
   target: '_blank',
   rel: 'noopener noreferrer'
 } as const;
+
+const rewardsCards = [
+  {
+    title: 'See and claim your COMP rewards',
+    description: (
+      <>
+        Connect your wallet in Merkl to see and claim in Merkl.
+      </>
+    ),
+    icon: <DollarCircle />
+  },
+  {
+    title: 'Competitive APYs',
+    description: (
+      <>
+        Increase your earning potential by using Compound and follow the new{' '}
+        <a href={'https://x.com/Compound_xyz'} {...linkProps}>
+          Compound Foundation X
+        </a>{' '}
+        for the newest campaigns.
+      </>
+    ),
+    icon: <Sparkle />
+  },
+  {
+    title: 'Onchain',
+    description: (
+      <>
+        All verifiable and transparent distributions to wallets.
+      </>
+    ),
+    icon: <Grid />
+  }
+];
+
 
 const rewardsFaq = [
   {
@@ -40,10 +57,10 @@ const rewardsFaq = [
     question: 'What is Merkl?',
     answer: (
       <>
-        <a href={'https://app.merkl.xyz/'} {...faqLinkProps}>Merkl</a> is an independent, third-party DeFi incentives
+        <a href={'https://app.merkl.xyz/'} {...linkProps}>Merkl</a> is an independent, third-party DeFi incentives
         platform — not operated by Compound Foundation or Compound DAO — that helps protocols distribute token rewards
         to users based on on-chain activity. Learn more in{' '}
-        <a href={'https://docs.merkl.xyz/introduction'} {...faqLinkProps}>
+        <a href={'https://docs.merkl.xyz/introduction'} {...linkProps}>
           Merkl's documentation
         </a>.
       </>
@@ -54,7 +71,8 @@ const rewardsFaq = [
     question: 'How can I claim my COMP rewards?',
     answer: (
       <>
-        Go to the official Merkl app at <a href={'https://app.merkl.xyz/'} {...faqLinkProps}>app.merkl.xyz</a> (see "What's the official
+        Go to the official Merkl app at <a href={'https://app.merkl.xyz/'} {...linkProps}>app.merkl.xyz</a> (see "What's
+        the official
         Merkl link, and what happens once I leave the Compound app?" below), connect the wallet that holds or held your
         Compound position, and check whether you're eligible to claim. Always verify the URL before connecting your
         wallet.
