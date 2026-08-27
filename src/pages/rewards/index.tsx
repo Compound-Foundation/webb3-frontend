@@ -50,7 +50,6 @@ const rewardsCards = [
   }
 ];
 
-
 const rewardsFaq = [
   {
     id: '1',
@@ -72,8 +71,8 @@ const rewardsFaq = [
     answer: (
       <>
         Go to the official Merkl app at <a href={'https://app.merkl.xyz/'} {...linkProps}>app.merkl.xyz</a> (see "What's
-        the official
-        Merkl link, and what happens once I leave the Compound app?" below), connect the wallet that holds or held your
+        the official Merkl link, and what happens once I leave the Compound app?" on <a
+        href={'https://www.comp.xyz/'} {...linkProps}>forum</a>), connect the wallet that holds or held your
         Compound position, and check whether you're eligible to claim. Always verify the URL before connecting your
         wallet.
       </>
@@ -86,12 +85,13 @@ const rewardsFaq = [
       <>
         Yes. Each campaign has a fixed claim window: 60 days for V2, 180 days for V3, and 30 days for Seasons. Details
         per campaign: V2 Compound protocol was deprecated, but previously-accrued rewards are still claimable via a
-        dedicated Merkl V2 campaign. Claim deadline: 30 days from the campaign's snapshot end block (see "Snapshot
+        dedicated Merkl V2 campaign . Claim deadline: 30 days from the campaign's snapshot end block (see "Snapshot
         blocks" below); the claim window closes at the next block minted once that 30-day period has elapsed. Under the
         current program rules, claims are not possible after this period.
-        V3 rewards covers rewards accrued from the start block through the end block of each chain. Claim deadline: 180
-        days from each chain's snapshot end block; the claim window closes at the next block minted once that 180-day
-        period has elapsed. Under the current program rules, claims are not possible after this period.
+        V3 rewards covers rewards accrued from the start block through the end block of each chain where rewards accrual
+        was enabled. Claim deadline: 180 days from each chain's snapshot end block; the claim window closes at the next
+        block minted once that 180-day period has elapsed. Under the current program rules, claims are not possible
+        after this period.
       </>
     )
   },
@@ -101,7 +101,8 @@ const rewardsFaq = [
     answer: (
       <>
         No. You'll need to go to the Merkl app to see your claimable COMP amount (or check the relevant contract
-        directly for Mantle/Linea; see "Have all V3 chains migrated to Merkl?" above). Any estimated reward rates and/or
+        directly for Mantle/Linea; see "Have all V3 chains migrated to Merkl?" on <a
+        href={'https://www.comp.xyz/'} {...linkProps}>forum</a>). Any estimated reward rates and/or
         amounts displayed at app.compound.xyz are estimates only, with final reward amounts and other details displayed
         on the Merkl app.
       </>
@@ -112,7 +113,8 @@ const rewardsFaq = [
     question: 'Where can I find more information?',
     answer: (
       <>
-        You can find the discussion about the migration to the Merkl distribution system on the Compound Community Forum
+        You can find the discussion about the migration to the Merkl distribution system on the <a
+        href={'https://www.comp.xyz/'} {...linkProps}>Compound Community Forum</a>
       </>
     )
   }
@@ -144,7 +146,7 @@ const Rewards = () => {
           </SimpleLink>
         )}
         <button disabled={true} className={'button'}>
-          Live Shortly
+          Claiming: Coming Soon
         </button>
       </div>
       <RewardsFaq
