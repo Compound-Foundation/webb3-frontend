@@ -1,20 +1,22 @@
-import { useState, useRef, useContext, useEffect, Fragment } from 'react';
+import { useState, useRef, useContext, Fragment } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { iconNameForChainId } from '@helpers/assets';
-import { V2_ALERT_DISMISSED_KEY } from '@helpers/constants';
 import { areSameMarket, getMarketsByNetwork, isV2Market, V2_MARKET_KEY } from '@helpers/markets';
 import { V2_URL } from '@helpers/urls';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 import { MarketData, MarketDataLoaded, MarketsByNetwork } from '@types';
 
 import IconPair from './IconPair';
-import { ArrowRightNoDash, CaretDown, CheckMark, Close, MagnifyingGlass, TailSpin } from './Icons';
+import { ArrowRightNoDash, CaretDown, CheckMark, TailSpin } from './Icons';
 import MarketNetworkIcon from './MarketNetworkIcon';
 
 const APPROVE_IN_WALLET = 'Approve in wallet';
 const LEGACY = 'Legacy';
+const INSTITUTIONAL = 'Institutional';
+const MARKETS_SECTION = 'Markets';
+const NEW = 'New';
 
 const MarketSelector = () => {
   const [marketDropdownActive, setMarketDropdownActive] = useState<boolean>(false);
@@ -140,7 +142,7 @@ const SupportedNetworks = ({ marketsByNetwork, selectedChainId, setSelectedChain
               </div>
 
               <div className="market-selector__option__info--right">
-                <span className="label text-color--2 L1">{markets.length}</span>
+                <span className="label text-color--2 L1">{markets.filter((market) => !isV2Market(market)).length}</span>
               </div>
               <div className="market-selector__option__info market-selector__option--arrow">
                 <ArrowRightNoDash className="svg--icon--3 extension-list-row__arrow-select" />
@@ -170,6 +172,7 @@ const MarketOption = ({ isCurrentMarket, market, pathname, onClick, loading }: M
         <span className="label text-color--1 L1">{market.baseAsset.symbol}</span>
         {loading && <span className="label label--secondary text-color--2">{APPROVE_IN_WALLET}</span>}
       </div>
+      {market.isNew && <span className="market-selector__option__new-badge label label--secondary">{NEW}</span>}
       {isCurrentMarket && <CheckMark className="svg--supply" />}
       {loading && <TailSpin className="svg--spin" />}
     </>
@@ -206,32 +209,48 @@ type SupportedMarketsProps = {
 };
 
 const SupportedMarkets = ({ currentMarket, markets, pathname, onSelectMarket }: SupportedMarketsProps) => {
+  const institutionalMarkets = markets.filter((market: MarketData) => market.institutional);
+  const standardMarkets = markets.filter((market: MarketData) => !market.institutional);
+
+  const renderMarket = (market: MarketData, index: number) => {
+    const onClick = () => {
+      onSelectMarket(market);
+    };
+
+    const isCurrentMarket = currentMarket === undefined ? false : areSameMarket(currentMarket, market);
+    return (
+      <Fragment key={`${index}-${market.baseAsset}`}>
+        {market.baseAsset.symbol === V2_MARKET_KEY && (
+          <div className="legacy-wrapper">
+            <label className="label label--secondary text-color--2">{LEGACY}</label>
+          </div>
+        )}
+        <MarketOption
+          key={market.marketAddress}
+          isCurrentMarket={isCurrentMarket}
+          market={market}
+          pathname={pathname}
+          onClick={(pathname === '/' && isV2Market(market)) || isCurrentMarket ? () => undefined : onClick}
+          loading={false} // TODO(mykelp): This actually needs to be handled properly
+        />
+      </Fragment>
+    );
+  };
+
   return (
     <div className={`market-selector__options`}>
-      {markets.map((market: MarketData, index: number) => {
-        const onClick = () => {
-          onSelectMarket(market);
-        };
-
-        const isCurrentMarket = currentMarket === undefined ? false : areSameMarket(currentMarket, market);
-        return (
-          <Fragment key={`${index}-${market.baseAsset}`}>
-            {market.baseAsset.symbol === V2_MARKET_KEY && (
-              <div className="legacy-wrapper">
-                <label className="label label--secondary text-color--2">{LEGACY}</label>
-              </div>
-            )}
-            <MarketOption
-              key={market.marketAddress}
-              isCurrentMarket={isCurrentMarket}
-              market={market}
-              pathname={pathname}
-              onClick={(pathname === '/' && isV2Market(market)) || isCurrentMarket ? () => undefined : onClick}
-              loading={false} // TODO(mykelp): This actually needs to be handled properly
-            />
-          </Fragment>
-        );
-      })}
+      {institutionalMarkets.length > 0 && (
+        <>
+          <div className="legacy-wrapper">
+            <label className="label label--secondary text-color--2">{INSTITUTIONAL}</label>
+          </div>
+          {institutionalMarkets.map(renderMarket)}
+          <div className="legacy-wrapper">
+            <label className="label label--secondary text-color--2">{MARKETS_SECTION}</label>
+          </div>
+        </>
+      )}
+      {standardMarkets.map(renderMarket)}
     </div>
   );
 };

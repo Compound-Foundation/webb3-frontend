@@ -319,6 +319,10 @@ export type MarketData = {
   // Overrides the base-asset part of the market's URL key (e.g. 'usdc-institutional' -> '?market=usdc-institutional-mainnet').
   // Required when multiple markets on the same chain share a base asset symbol.
   slug?: string;
+  // Institutional markets are listed in their own section of the market selector
+  institutional?: boolean;
+  // Recently launched markets get a 'New' badge in the market selector
+  isNew?: boolean;
   type: 'MarketData';
 };
 

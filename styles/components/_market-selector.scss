@@ -67,6 +67,15 @@
     width: 100%;
     text-transform: none;
 
+    &__new-badge {
+      // One-off from the institutional market designs; not part of the compound-styles palette
+      background: #00d791;
+      border-radius: 0.375rem;
+      color: var(--ui--background);
+      margin-left: 0.375rem;
+      padding: 0.125rem 0.5rem;
+    }
+
     .svg {
       margin-left: auto;
 
