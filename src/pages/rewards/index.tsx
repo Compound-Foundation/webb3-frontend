@@ -1,3 +1,4 @@
+import { Web3 } from '@contexts/Web3Context';
 import { useAccount } from 'wagmi';
 
 import { DollarCircle } from '@components/Icons/DollarCircle';
@@ -120,8 +121,12 @@ const rewardsFaq = [
   }
 ];
 
-const Rewards = () => {
-  const { address, isConnected } = useAccount();
+interface RewardsProps {
+  web3: Web3;
+}
+
+const Rewards = ({ web3 }: RewardsProps) => {
+  const { account } = web3.write;
 
   return (
     <main className={'rewards'}>
@@ -140,8 +145,8 @@ const Rewards = () => {
         })}
       </section>
       <div className={'rewards-links'}>
-        {isConnected && (
-          <SimpleLink className={'button button-green'} to={`https://app.merkl.xyz/users/${address}`}>
+        {!!account && (
+          <SimpleLink className={'button button-green'} to={`https://app.merkl.xyz/users/${account}`}>
             View your Rewards
           </SimpleLink>
         )}

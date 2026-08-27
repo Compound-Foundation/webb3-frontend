@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 /**
  * A custom React hook that monitors a given CSS media query and updates its state when the query state changes.
@@ -9,14 +9,17 @@ import { useSyncExternalStore } from 'react';
  * Example usage:
  * const isLarge = useMediaQuery('(min-width: 1024px)')
  */
-export const useMediaQuery = (query: string) => {
-  const getSnapshot = () => window.matchMedia(query).matches;
+export const useMediaQuery = (query: string): boolean => {
+  const getSnapshot = useCallback(() => window.matchMedia(query).matches, [query]);
 
-  const subscribe = (callback: (e: MediaQueryListEvent) => void) => {
-    const mediaQueryList = window.matchMedia(query);
-    mediaQueryList.addEventListener('change', callback);
-    return () => mediaQueryList.removeEventListener('change', callback);
-  };
+  const subscribe = useCallback(
+    (callback: () => void) => {
+      const mediaQueryList = window.matchMedia(query);
+      mediaQueryList.addEventListener('change', callback);
+      return () => mediaQueryList.removeEventListener('change', callback);
+    },
+    [query],
+  );
 
   return useSyncExternalStore(subscribe, getSnapshot);
 };
