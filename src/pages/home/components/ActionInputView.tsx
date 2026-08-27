@@ -435,25 +435,24 @@ function getContent(
       onMaxButtonClicked = () => {
         const borrowBalance = baseAsset.balance < 0n ? -baseAsset.balance : 0n;
 
-        const maxBorrowableBaseAmount =
-          ((baseAsset.borrowCapacity - borrowBalance) * BASE_FACTOR) / collateralAsset.collateralFactor;
-        const maxBorrowableCollateralAmount =
-          (maxBorrowableBaseAmount * baseAsset.price * BigInt(10 ** collateralAsset.decimals)) /
-          (collateralAsset.price * BigInt(10 ** baseAsset.decimals));
+        // With no outstanding borrow the full balance is withdrawable. Only route
+        // through borrow capacity when a borrow must stay collateralized — that
+        // conversion truncates at base-token precision, which would strand dust
+        // (and read a dust balance as a max of 0).
+        let maxWithdrawableAmount = collateralAsset.balance;
+        if (borrowBalance > 0n) {
+          const maxBorrowableBaseAmount =
+            ((baseAsset.borrowCapacity - borrowBalance) * BASE_FACTOR) / collateralAsset.collateralFactor;
+          const maxBorrowableCollateralAmount =
+            (maxBorrowableBaseAmount * baseAsset.price * BigInt(10 ** collateralAsset.decimals)) /
+            (collateralAsset.price * BigInt(10 ** baseAsset.decimals));
+          if (maxBorrowableCollateralAmount < maxWithdrawableAmount) {
+            maxWithdrawableAmount = maxBorrowableCollateralAmount;
+          }
+        }
 
-        setPendingActionAmount(
-          maxBorrowableCollateralAmount < collateralAsset.balance
-            ? maxBorrowableCollateralAmount
-            : collateralAsset.balance
-        );
-        setInput(
-          stringFromBigInt(
-            maxBorrowableCollateralAmount < collateralAsset.balance
-              ? maxBorrowableCollateralAmount
-              : collateralAsset.balance,
-            collateralAsset.decimals
-          )
-        );
+        setPendingActionAmount(maxWithdrawableAmount);
+        setInput(stringFromBigInt(maxWithdrawableAmount, collateralAsset.decimals));
         setMaxClicked(true);
       };
     }
