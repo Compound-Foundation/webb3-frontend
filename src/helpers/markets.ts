@@ -117,7 +117,7 @@ export const MARKETS: MarketData[] = [
         isWrapped: WRAPPED_BASE_ASSETS.includes(baseAsset),
       },
       chainInformation: chain,
-      iconPair: [iconNameForChainId(chainId), baseAsset],
+      iconPair: [options?.institutional ? 'INSTITUTIONAL' : iconNameForChainId(chainId), baseAsset],
       marketAddress: root['comet'],
       bulkerAddress: root['bulker'],
       fauceteerAddress: root['fauceteer'],
