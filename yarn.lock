@@ -4477,9 +4477,9 @@ combined-stream@^1.0.8:
   dependencies:
     delayed-stream "~1.0.0"
 
-"comet@https://github.com/Compound-Foundation/comet.git#f766f51583c23acc33b2a7824654ef2029a96804":
+"comet@https://github.com/Compound-Foundation/comet.git#bff438e3bc4036004abae1e7318e12fe26414961":
   version "0.1.0"
-  resolved "https://github.com/Compound-Foundation/comet.git#f766f51583c23acc33b2a7824654ef2029a96804"
+  resolved "https://github.com/Compound-Foundation/comet.git#bff438e3bc4036004abae1e7318e12fe26414961"
   dependencies:
     "@flashbots/ethers-provider-bundle" "^0.5.0"
     "@openzeppelin/contracts" "4.8.3"

@@ -30,7 +30,7 @@
     "@tanstack/react-query": "^5.90.2",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
-    "comet": "https://github.com/Compound-Foundation/comet.git#f766f51583c23acc33b2a7824654ef2029a96804",
+    "comet": "https://github.com/Compound-Foundation/comet.git#bff438e3bc4036004abae1e7318e12fe26414961",
     "compound-styles": "https://github.com/compound-finance/compound-styles.git#d36cfe2a33fbc0b434da130b920a372b6dcad6d5",
     "date-fns": "^4.1.0",
     "eslint-plugin-import": "^2.32.0",
