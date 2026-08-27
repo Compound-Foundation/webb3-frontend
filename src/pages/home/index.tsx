@@ -13,6 +13,7 @@ import {
 import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
 import { institutionalSupplyRewards } from '@helpers/institutionalRates';
+import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
@@ -92,6 +93,7 @@ const Home = ({
   let isBulkerAllowed = false;
   // Institutional USDC-terms rewards; set below once market state is loaded
   let earnRewardsAPR: bigint | undefined, rewardsAsset: Token | undefined;
+  const whitelistStatus = institutionalWhitelistStatus(web3.read.account);
 
   if (cometState === StateType.Loading) {
     mastheadState = [StateType.Loading];
@@ -120,6 +122,7 @@ const Home = ({
         borrowAPR,
         earnAPR,
         earnRewardsAPR,
+        institutionalWhitelistStatus: whitelistStatus,
         rewardsAsset,
         theme,
       },
@@ -285,6 +288,7 @@ const Home = ({
         collateralValuePost: updatedDataPostActions.collateralValue,
         earnAPR,
         earnRewardsAPR,
+        institutionalWhitelistStatus: whitelistStatus,
         rewardsAsset,
         liquidationCapacity: liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
