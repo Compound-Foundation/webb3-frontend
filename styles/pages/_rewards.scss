@@ -16,6 +16,10 @@
   }
 }
 
+.rewards-faq-link {
+  color: $green--30;
+}
+
 .rewards-cards {
   display: flex;
   width: 100%;
@@ -69,5 +73,9 @@
   .button-green {
     color: $neutral--00;
     background: $green--30;
+  }
+
+  .rewards-faq-link {
+    color: $green--50;
   }
 }
