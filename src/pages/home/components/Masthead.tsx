@@ -48,6 +48,7 @@ type MastheadHydrated = [
     collateralValuePost: bigint;
     compare: boolean;
     earnAPR: bigint;
+    earnRewardsAPR?: bigint;
     liquidationCapacity: bigint;
     liquidationCapacityPost: bigint;
     pendingAction?: PendingAction;
@@ -213,6 +214,7 @@ function getContent(state: MastheadState): Content {
     collateralValuePost,
     compare,
     earnAPR,
+    earnRewardsAPR,
     liquidationCapacity,
     liquidationCapacityPost,
     pendingAction,
@@ -579,7 +581,7 @@ function getContent(state: MastheadState): Content {
             <div className="masthead__overview-details" onClick={() => setRatesDetailActive(true)}>
               <span className="meta text-color--3"> &#64; </span>
               <div className="masthead__overview-details__net-rate">
-                <span className="meta">{formatRateFactor(earnAPR)} Net APR</span>
+                <span className="meta">{formatRateFactor(earnAPR + (earnRewardsAPR || 0n))} Net APR</span>
                 <HoverUnder className="hover-under" long={true} theme={theme} />
               </div>
             </div>

@@ -1,7 +1,7 @@
-import { clsx } from 'clsx';
 import { ReactNode, useState } from 'react';
 
 import { FaqCross } from '@components/Icons/FaqCross';
+import { BREAKPOINT_SM_PX } from '@helpers/constants';
 import { useMediaQuery } from '@hooks/useMediaQuery';
 
 interface RewardsFaq {
@@ -19,7 +19,7 @@ export const RewardsFaq = (props: RewardsFaqProps) => {
   const { title, items } = props;
 
   const [openedIds, setOpenedIds] = useState<Set<string>>(new Set());
-  const isMobile = useMediaQuery('(min-width: 1121px)');
+  const isDesktop = useMediaQuery(`(min-width: ${BREAKPOINT_SM_PX}px)`);
 
   const leftItems = items.filter((_, i) => i % 2 === 0);
   const rightItems = items.filter((_, i) => i % 2 === 1);
@@ -55,15 +55,11 @@ export const RewardsFaq = (props: RewardsFaqProps) => {
 
           <label
             htmlFor={`rewards-faq-trigger-${id}`}
-            className={clsx('rewards-faq-summary', {
-              'rewards-faq-summary__open': isOpen,
-            })}
+            className={`rewards-faq-summary${isOpen ? ' rewards-faq-summary__open' : ''}`}
           >
             {question}
             <FaqCross
-              className={clsx('rewards-faq-summary__icon', {
-                'rewards-faq-summary__icon-open': isOpen,
-              })}
+              className={`rewards-faq-summary__icon${isOpen ? ' rewards-faq-summary__icon-open' : ''}`}
             />
           </label>
 
@@ -82,16 +78,11 @@ export const RewardsFaq = (props: RewardsFaqProps) => {
   return (
     <div className="rewards-faq">
       <h3 className="rewards-faq-title">{title}</h3>
-      {isMobile
+      {isDesktop
         ? (
           <div className="rewards-faq-content with-margin-bottom">
-            <div className="rewards-faq-column">
-              {getColumn(leftItems)}
-            </div>
-
-            <div className="rewards-faq-column">
-              {getColumn(rightItems)}
-            </div>
+            <div className="rewards-faq-column">{getColumn(leftItems)}</div>
+            <div className="rewards-faq-column">{getColumn(rightItems)}</div>
           </div>
         )
         : (

@@ -39,7 +39,7 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
     tx.state === TransactionState.Pending ? tx : undefined
   );
 
-  const hideMarketSelector = ['/vote', '/markets'].some((path) => window.location.pathname.includes(path));
+  const hideMarketSelector = ['/vote', '/markets', '/rewards'].some((path) => window.location.pathname.includes(path));
 
   const { state } = useTransactionHistory(web3, RECENT_NUM);
   const [transactionsStateType, transactionsState] = state;
@@ -252,7 +252,6 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
           )}
 
           <div className="header__wallet-menu__buttons">
-            <label className="label L2 text-color--2 header__wallet-menu__buttons__label">COMP Distribution</label>
             <div className="header__wallet-menu__buttons__wrapper">
               <button
                 className="button button--x-large"

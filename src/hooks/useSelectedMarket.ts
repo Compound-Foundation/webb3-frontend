@@ -81,7 +81,7 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
         newSearchParams.set('market', shortMarketKey(desiredMarket));
 
         setSearchParams(newSearchParams, { replace: true });
-      } else if (hasMarketQueryParam) {
+      } else if (isMarketsPage && hasMarketQueryParam) {
         // Instead of updating query param, navigate to /markets/:marketId.
         const existingSearchParams = new URLSearchParams(searchParams);
         existingSearchParams.delete('market');

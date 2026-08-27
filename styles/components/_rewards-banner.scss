@@ -8,7 +8,7 @@
   align-items: center;
   border-radius: 0.5rem;
   padding: 1.6875rem 2.125rem;
-  background-image: url(../../public/images/merkl-dark-bg.avif);
+  background-image: url(/images/merkl-dark-bg.avif);
   background-size: 100% 100%;
   background-repeat: no-repeat;
   transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -18,14 +18,14 @@
   @media (max-width: $device--sm) {
     margin-top: 2rem;
     align-items: start;
-    background-image: url(../../public/images/merkl-dark-bg-tablet.avif);
+    background-image: url(/images/merkl-dark-bg-tablet.avif);
   }
 
   @media (max-width: 36rem) {
     margin-top: 3rem;
     margin-bottom: 0.5rem;
     padding: 1rem;
-    background-image: url(../../public/images/merkl-dark-bg-mobile.avif);
+    background-image: url(/images/merkl-dark-bg-mobile.avif);
   }
 }
 
@@ -62,14 +62,14 @@
 
 .theme--light {
   .rewards-banner {
-    background-image: url(../../public/images/merkl-light-bg.avif);
+    background-image: url(/images/merkl-light-bg.avif);
 
     @media (max-width: $device--sm) {
-      background-image: url(../../public/images/merkl-light-bg-tablet.avif);
+      background-image: url(/images/merkl-light-bg-tablet.avif);
     }
 
     @media (max-width: 36rem) {
-      background-image: url(../../public/images/merkl-light-bg-mobile.avif);
+      background-image: url(/images/merkl-light-bg-mobile.avif);
     }
   }
 

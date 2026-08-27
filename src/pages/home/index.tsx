@@ -230,6 +230,7 @@ const Home = ({
         collateralValuePost: updatedDataPostActions.collateralValue,
         compare,
         earnAPR,
+        earnRewardsAPR: 0n,
         liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
         pendingAction,
