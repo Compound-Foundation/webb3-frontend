@@ -324,7 +324,7 @@ const Market = ({ web3 }: MarketsProps) => {
         {v2Markets ? marketOverviewPanel : marketRatesPanel}
         {interestRateModelPanel}
         {assetRows}
-        {additionalMarketDataPanel}
+        {!configMarket?.institutional && additionalMarketDataPanel}
       </main>
     </>
   );
