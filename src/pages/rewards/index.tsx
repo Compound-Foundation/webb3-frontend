@@ -14,49 +14,98 @@ const rewardsCards = [
   {
     title: 'See and claim your COMP rewards',
     description: 'Connect your wallet in Merkl to see and claim in Merkl.',
-    icon: <DollarCircle />,
+    icon: <DollarCircle />
   },
   {
     title: 'Competitive APYs',
     description: 'Increase your earning potential by using Compound and follow the new Compound Foundation X for the newest campaigns.',
-    icon: <Sparkle/>
+    icon: <Sparkle />
   },
   {
     title: 'Onchain',
     description: 'All verifiable and transparent distributions to wallets.',
-    icon: <Grid/>
+    icon: <Grid />
   }
 ];
 
+const faqLinkProps = {
+  className: 'rewards-faq-link',
+  target: '_blank',
+  rel: 'noopener noreferrer'
+} as const;
+
 const rewardsFaq = [
   {
-    id:'1',
-    question: 'Why was claiming moved to Merkl?',
-    answer: 'Increase your earning potential by using Compound and follow the new Compound Foundation X for the newest campaigns.'
+    id: '1',
+    question: 'What is Merkl?',
+    answer: (
+      <>
+        <a href={'https://app.merkl.xyz/'} {...faqLinkProps}>Merkl</a> is an independent, third-party DeFi incentives
+        platform — not operated by Compound Foundation or Compound DAO — that helps protocols distribute token rewards
+        to users based on on-chain activity. Learn more in{' '}
+        <a href={'https://docs.merkl.xyz/introduction'} {...faqLinkProps}>
+          Merkl's documentation
+        </a>.
+      </>
+    )
   },
   {
-    id:'2',
-    question: 'Has my reward earning logic changed?',
-    answer: 'No. Compound calculates your rewards exactly as before based on your supply and borrow positions. Merkl is used strictly for distribution and claiming.'
+    id: '2',
+    question: 'How can I claim my COMP rewards?',
+    answer: (
+      <>
+        Go to the official Merkl app at <a href={'https://app.merkl.xyz/'} {...faqLinkProps}>app.merkl.xyz</a> (see "What's the official
+        Merkl link, and what happens once I leave the Compound app?" below), connect the wallet that holds or held your
+        Compound position, and check whether you're eligible to claim. Always verify the URL before connecting your
+        wallet.
+      </>
+    )
   },
   {
-    id:'3',
-    question: 'How do I claim my COMP rewards?',
-    answer: '"View your Rewards" above, connect your active wallet on Merkl, and claim your available COMP tokens.'
-  },
-  {
-    id:'4',
+    id: '3',
     question: 'Do rewards expire?',
-    answer: 'Yes. Merkl reward distributions run on defined epoch schedules with expiration windows. Make sure to claim regularly before windows close.'
+    answer: (
+      <>
+        Yes. Each campaign has a fixed claim window: 60 days for V2, 180 days for V3, and 30 days for Seasons. Details
+        per campaign: V2 Compound protocol was deprecated, but previously-accrued rewards are still claimable via a
+        dedicated Merkl V2 campaign. Claim deadline: 30 days from the campaign's snapshot end block (see "Snapshot
+        blocks" below); the claim window closes at the next block minted once that 30-day period has elapsed. Under the
+        current program rules, claims are not possible after this period.
+        V3 rewards covers rewards accrued from the start block through the end block of each chain. Claim deadline: 180
+        days from each chain's snapshot end block; the claim window closes at the next block minted once that 180-day
+        period has elapsed. Under the current program rules, claims are not possible after this period.
+      </>
+    )
+  },
+  {
+    id: '4',
+    question: 'Can I see my claimable rewards at app.compound.xyz?',
+    answer: (
+      <>
+        No. You'll need to go to the Merkl app to see your claimable COMP amount (or check the relevant contract
+        directly for Mantle/Linea; see "Have all V3 chains migrated to Merkl?" above). Any estimated reward rates and/or
+        amounts displayed at app.compound.xyz are estimates only, with final reward amounts and other details displayed
+        on the Merkl app.
+      </>
+    )
+  },
+  {
+    id: '5',
+    question: 'Where can I find more information?',
+    answer: (
+      <>
+        You can find the discussion about the migration to the Merkl distribution system on the Compound Community Forum
+      </>
+    )
   }
-]
+];
 
 const Rewards = () => {
   const { address, isConnected } = useAccount();
 
   return (
     <main className={'rewards'}>
-      <RewardsBanner/>
+      <RewardsBanner />
       <section className={'rewards-cards'}>
         {rewardsCards.map((card) => {
           const { title, description, icon } = card;
@@ -67,7 +116,7 @@ const Rewards = () => {
               title={title}
               description={description}
             />
-          )
+          );
         })}
       </section>
       <div className={'rewards-links'}>

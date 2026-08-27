@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { useState } from 'react';
+import { ReactNode, useState } from 'react';
 
 import { FaqCross } from '@components/Icons/FaqCross';
 import { useMediaQuery } from '@hooks/useMediaQuery';
@@ -7,7 +7,7 @@ import { useMediaQuery } from '@hooks/useMediaQuery';
 interface RewardsFaq {
   id: string;
   question: string;
-  answer: string;
+  answer: ReactNode;
 }
 
 interface RewardsFaqProps {
