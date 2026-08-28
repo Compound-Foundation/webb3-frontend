@@ -76,10 +76,10 @@
       width: auto;
     }
 
+    // Sized by its L4 meta classes to match the breakdown labels; the color is
+    // the dark theme's text--2 fixed, since the card stays dark in both themes
     &__subtitle {
-      color: #97a3b7;
-      font-size: 0.8125rem;
-      margin: 0.125rem 0 0;
+      color: #7a8a99;
     }
 
     &__link {

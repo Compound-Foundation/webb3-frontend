@@ -10,6 +10,9 @@ type BoostedSupplyRatesProps = {
   // The institutional program's boost on top of the floating rate, at FACTOR_PRECISION
   boostAPR: bigint;
   whitelistStatus: InstitutionalWhitelistStatus;
+  // Whether the connected account is currently supplying to the market; the
+  // whitelist card copy speaks to what the account is earning when it is
+  hasSupplyPosition?: boolean;
 };
 
 /**
@@ -18,35 +21,61 @@ type BoostedSupplyRatesProps = {
  * interest and the boosted portion, and a whitelist card that either confirms
  * the connected address is whitelisted or invites it to get whitelisted.
  */
-const BoostedSupplyRates = ({ earnAPR, boostAPR, whitelistStatus }: BoostedSupplyRatesProps) => {
+const BoostedSupplyRates = ({
+  earnAPR,
+  boostAPR,
+  whitelistStatus,
+  hasSupplyPosition = false,
+}: BoostedSupplyRatesProps) => {
   const totalAPR = earnAPR + boostAPR;
   // Segment widths are proportional to each component's share of the total,
   // floored so a small base rate still reads as a visible segment
   const boostShare = totalAPR > 0n ? Number((boostAPR * 100n) / totalAPR) : 0;
   const baseShare = 100 - boostShare;
 
-  const whitelistCard =
-    whitelistStatus === InstitutionalWhitelistStatus.Whitelisted ? (
+  let whitelistCard: JSX.Element;
+  if (whitelistStatus === InstitutionalWhitelistStatus.Whitelisted) {
+    whitelistCard = (
       <div className="boosted-supply-rates__whitelist-card">
-        <img
-          className="boosted-supply-rates__whitelist-card__badge"
-          src="/images/whitelist-badge.png"
-          alt=""
-        />
+        <img className="boosted-supply-rates__whitelist-card__badge" src="/images/whitelist-badge.svg" alt="" />
         <div>
-          <p className="L3 body body--emphasized">You are earning boosted yield</p>
-          <p className="boosted-supply-rates__whitelist-card__subtitle L4">
-            Boosted yield applies until{' '}
-            {INSTITUTIONAL_BOOST_END_DATE.toLocaleDateString('en-US', {
-              month: 'long',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-            .
+          <p className="L3 body body--emphasized">
+            {hasSupplyPosition ? 'You are whitelisted' : 'You are earning boosted yield'}
+          </p>
+          <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">
+            {hasSupplyPosition
+              ? 'You are currently earning with the net supply APR'
+              : `Boosted yield applies until ${INSTITUTIONAL_BOOST_END_DATE.toLocaleDateString('en-US', {
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}.`}
           </p>
         </div>
       </div>
-    ) : (
+    );
+  } else if (hasSupplyPosition && whitelistStatus === InstitutionalWhitelistStatus.NotWhitelisted) {
+    whitelistCard = (
+      <div className="boosted-supply-rates__whitelist-card">
+        <img className="boosted-supply-rates__whitelist-card__badge" src="/images/whitelist-coins.svg" alt="" />
+        <div>
+          <p className="L3 body body--emphasized">You are not whitelisted yet</p>
+          <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">
+            You are currently earning with the base interest.
+          </p>
+          <a
+            className="boosted-supply-rates__whitelist-card__link L4"
+            href={INSTITUTIONAL_MARKET_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Learn how to get whitelisted
+          </a>
+        </div>
+      </div>
+    );
+  } else {
+    whitelistCard = (
       <div className="boosted-supply-rates__whitelist-card">
         <div>
           <p className="L3 body body--emphasized">Get whitelisted to access the Net Earn APR</p>
@@ -61,6 +90,7 @@ const BoostedSupplyRates = ({ earnAPR, boostAPR, whitelistStatus }: BoostedSuppl
         </div>
       </div>
     );
+  }
 
   return (
     <div className="boosted-supply-rates">
