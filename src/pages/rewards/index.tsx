@@ -84,7 +84,7 @@ const rewardsFaq = [
       <>
         Yes. Each campaign has a fixed claim window: 60 days for V2, 180 days for V3, and 30 days for Seasons. Details
         per campaign: V2 Compound protocol was deprecated, but previously-accrued rewards are still claimable via a
-        dedicated Merkl V2 campaign . Claim deadline: 30 days from the campaign's snapshot end block (see "Snapshot
+        dedicated Merkl V2 campaign. Claim deadline: 60 days from the campaign's snapshot end block (see "Snapshot
         blocks" on <a href={'https://www.comp.xyz/'} {...linkProps}>forum</a>); the claim window closes at the next block minted once that 30-day period has elapsed. Under the
         current program rules, claims are not possible after this period.
         V3 rewards covers rewards accrued from the start block through the end block of each chain where rewards accrual
