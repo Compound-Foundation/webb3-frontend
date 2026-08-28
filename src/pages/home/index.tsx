@@ -258,6 +258,8 @@ const Home = ({
         compare,
         earnAPR,
         earnRewardsAPR,
+        institutionalBoostAPR: market?.institutional ? earnRewardsAPR : undefined,
+        institutionalWhitelistStatus: whitelistStatus,
         liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
         pendingAction,
