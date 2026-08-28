@@ -6,6 +6,7 @@ import Tooltip from '@components/Tooltip';
 import NetRatesTooltip, { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { sanitizedAmountForAction } from '@helpers/actions';
+import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import {
   displayValue,
   formatRateFactor,
@@ -49,6 +50,8 @@ type MastheadHydrated = [
     compare: boolean;
     earnAPR: bigint;
     earnRewardsAPR?: bigint;
+    institutionalBoostAPR?: bigint;
+    institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
     liquidationCapacity: bigint;
     liquidationCapacityPost: bigint;
     pendingAction?: PendingAction;
@@ -215,6 +218,8 @@ function getContent(state: MastheadState): Content {
     compare,
     earnAPR,
     earnRewardsAPR,
+    institutionalBoostAPR,
+    institutionalWhitelistStatus,
     liquidationCapacity,
     liquidationCapacityPost,
     pendingAction,
@@ -260,6 +265,10 @@ function getContent(state: MastheadState): Content {
   const netRatesTooltipProps = {
     borrowAPR,
     earnAPR,
+    earnRewardsAPR,
+    institutionalBoostAPR,
+    institutionalWhitelistStatus,
+    institutionalSupplying: baseAssetToUse.balance > 0n,
   };
 
   let ratesTooltipContent = <NetRatesTooltip {...netRatesTooltipProps} view={NetRatesTooltipView.Borrow} />;
@@ -575,8 +584,15 @@ function getContent(state: MastheadState): Content {
             content={ratesTooltipContent}
             width={400}
             hideArrow={true}
+            interactive={true}
             x={tooltipLeftAlign.current?.getBoundingClientRect().left}
-            y={tooltipLeftAlign.current?.getBoundingClientRect().bottom}
+            // Overlap the trigger slightly so the pointer can cross from the
+            // rate text onto the tooltip without a gap breaking the hover
+            y={
+              tooltipLeftAlign.current !== null
+                ? tooltipLeftAlign.current.getBoundingClientRect().bottom - 18
+                : undefined
+            }
           >
             <div className="masthead__overview-details" onClick={() => setRatesDetailActive(true)}>
               <span className="meta text-color--3"> &#64; </span>
