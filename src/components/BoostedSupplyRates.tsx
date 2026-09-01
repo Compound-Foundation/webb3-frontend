@@ -13,6 +13,9 @@ type BoostedSupplyRatesProps = {
   // Whether the connected account is currently supplying to the market; the
   // whitelist card copy speaks to what the account is earning when it is
   hasSupplyPosition?: boolean;
+  // Label for the boosted portion of the rate (e.g. "Whitelisted Extra APY" on
+  // the markets page)
+  boostLabel?: string;
 };
 
 /**
@@ -26,6 +29,7 @@ const BoostedSupplyRates = ({
   boostAPR,
   whitelistStatus,
   hasSupplyPosition = false,
+  boostLabel = 'Boosted APR',
 }: BoostedSupplyRatesProps) => {
   const totalAPR = earnAPR + boostAPR;
   // Segment widths are proportional to each component's share of the total,
@@ -112,7 +116,7 @@ const BoostedSupplyRates = ({
         <span className="L4 meta">
           <Bolt className="boosted-supply-rates__labels__bolt" />
           <span className="boosted-supply-rates__labels__value">{formatRateFactor(boostAPR)}</span>
-          <span className="text-color--2"> Boosted APR</span>
+          <span className="text-color--2"> {boostLabel}</span>
         </span>
       </div>
       {whitelistCard}

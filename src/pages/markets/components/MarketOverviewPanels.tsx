@@ -5,16 +5,18 @@ import CircleMeter from '@components/CircleMeter';
 import DetailSheet from '@components/DetailSheet';
 import IconPair from '@components/IconPair';
 import { CaretDown, CheckMark } from '@components/Icons';
-import InstitutionalRewardsTooltip from '@components/InstitutionalRewardsTooltip';
 import PanelWithHeader from '@components/PanelWithHeader';
 import PanelWithNoHeader from '@components/PanelWithNoHeader';
 import { CHAINS, INACTIVE_CHAIN_IDS } from '@constants/chains';
 import { assetIconForAssetSymbol, iconNameForChainId } from '@helpers/assets';
+import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, getMarketDescriptors } from '@helpers/markets';
 import { BASE_FACTOR, PRICE_PRECISION, formatValueInDollars } from '@helpers/numbers';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 
 import { LatestMarketSummaries, MarketSummary } from '../../../types';
+
+import InstitutionalRateInfo from './InstitutionalRateInfo';
 
 const SORT_BY_OPTIONS = [
   'Utilization',
@@ -28,8 +30,9 @@ const SORT_ORDER_OPTIONS = ['Ascending', 'Descending'] as const;
 
 type MarketOverviewPanelsProps = {
   latestMarketSummaries: LatestMarketSummaries;
+  institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
 };
-const MarketOverviewPanels = ({ latestMarketSummaries }: MarketOverviewPanelsProps) => {
+const MarketOverviewPanels = ({ latestMarketSummaries, institutionalWhitelistStatus }: MarketOverviewPanelsProps) => {
   const [sortBy, setSortBy] = useState<(typeof SORT_BY_OPTIONS)[number]>('Utilization');
   const [sortOrder, setSortOrder] = useState<(typeof SORT_ORDER_OPTIONS)[number]>('Ascending');
   const [sortByDropdownActive, setSortByDropdownActive] = useState<boolean>(false);
@@ -135,7 +138,12 @@ const MarketOverviewPanels = ({ latestMarketSummaries }: MarketOverviewPanelsPro
         return (
           <>
             {coreChainIds.map((chainId) => (
-              <Panel key={chainId} chainId={chainId} marketSummaries={marketSummariesByChain[chainId]} />
+              <Panel
+                key={chainId}
+                chainId={chainId}
+                marketSummaries={marketSummariesByChain[chainId]}
+                institutionalWhitelistStatus={institutionalWhitelistStatus}
+              />
             ))}
 
             {inactiveChainIds.length > 0 && (
@@ -153,7 +161,12 @@ const MarketOverviewPanels = ({ latestMarketSummaries }: MarketOverviewPanelsPro
 
             {showInactive &&
               inactiveChainIds.map((chainId) => (
-                <Panel key={chainId} chainId={chainId} marketSummaries={marketSummariesByChain[chainId]} />
+                <Panel
+                key={chainId}
+                chainId={chainId}
+                marketSummaries={marketSummariesByChain[chainId]}
+                institutionalWhitelistStatus={institutionalWhitelistStatus}
+              />
               ))}
           </>
         );
@@ -212,8 +225,9 @@ function Dropdown<T extends string>({ options, currentOption, active, setOption,
 type PanelProps = {
   chainId: number;
   marketSummaries: LatestMarketSummaries;
+  institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
 };
-const Panel = ({ chainId, marketSummaries }: PanelProps) => {
+const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: PanelProps) => {
   const chainName = CHAINS[chainId].name;
 
   const headerWithLogo = (
@@ -238,7 +252,13 @@ const Panel = ({ chainId, marketSummaries }: PanelProps) => {
               <TableHead />
               <tbody>
                 {institutionalSummaries.map((marketSummary) => {
-                  return <PanelRow key={marketSummary.comet.address} marketSummary={marketSummary} />;
+                  return (
+                    <PanelRow
+                      key={marketSummary.comet.address}
+                      marketSummary={marketSummary}
+                      institutionalWhitelistStatus={institutionalWhitelistStatus}
+                    />
+                  );
                 })}
                 {institutionalSummaries.length > 0 && standardSummaries.length > 0 && (
                   <tr className="market-overview-panels__table-divider-row">
@@ -261,8 +281,9 @@ const Panel = ({ chainId, marketSummaries }: PanelProps) => {
 
 type PanelRowProps = {
   marketSummary: MarketSummary;
+  institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
 };
-const PanelRow = ({ marketSummary }: PanelRowProps) => {
+const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps) => {
   const [assetSymbol, chainName, assetName] = getMarketDescriptors(marketSummary.comet.address, marketSummary.chainId);
   const market = getMarket(marketSummary.chainId, marketSummary.comet.address);
 
@@ -326,7 +347,9 @@ const PanelRow = ({ marketSummary }: PanelRowProps) => {
       <td>
         <div className="body text-color--1 L3 market-overview-panels__net-earn-apr">
           {netEarnAPR}%
-          {marketSummary.institutionalSupplyRewardsAPR !== undefined && <InstitutionalRewardsTooltip />}
+          {marketSummary.institutionalSupplyRewardsAPR !== undefined && (
+            <InstitutionalRateInfo marketSummary={marketSummary} whitelistStatus={institutionalWhitelistStatus} />
+          )}
         </div>
       </td>
       <td>
