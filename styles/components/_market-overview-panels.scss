@@ -200,15 +200,10 @@
   &__net-earn-apr {
     display: inline-flex;
 
-    // The info icon sits at the upper right of the rate value
+    // The info icon sits vertically centered beside the rate value
     .info-icon {
-      align-self: flex-start;
-      margin-left: 0.15rem;
-
-      .svg {
-        height: 0.85rem;
-        width: 0.85rem;
-      }
+      align-self: center;
+      margin-left: 0.25rem;
     }
   }
 
