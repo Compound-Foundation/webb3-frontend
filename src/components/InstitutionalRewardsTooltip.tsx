@@ -1,6 +1,6 @@
 import { INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
 
-import { InfoSolid } from './Icons';
+import { InfoCircle } from './Icons';
 import { SimpleLink } from './SimpleLink';
 import Tooltip from './Tooltip';
 
@@ -22,7 +22,7 @@ const InstitutionalRewardsTooltip = () => (
     }
   >
     <span className="info-icon" onClick={(e) => e.stopPropagation()}>
-      <InfoSolid />
+      <InfoCircle />
     </span>
   </Tooltip>
 );
