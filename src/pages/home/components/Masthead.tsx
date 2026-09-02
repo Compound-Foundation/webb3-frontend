@@ -25,7 +25,6 @@ import {
   Currency,
   PendingAction,
   StateType,
-  Token,
   TokenWithAccountState,
   Transaction,
 } from '@types';
