@@ -71,6 +71,12 @@
       width: auto;
     }
 
+    // The card stays dark in both themes and can render outside the tooltip's
+    // color scope (mobile detail sheet), so text colors are fixed
+    &__title {
+      color: #f5f7fa;
+    }
+
     // Sized by its L4 meta classes to match the breakdown labels; the color is
     // the dark theme's text--2 fixed, since the card stays dark in both themes
     &__subtitle {
