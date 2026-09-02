@@ -9,6 +9,7 @@ import PanelWithHeader from '@components/PanelWithHeader';
 import PanelWithNoHeader from '@components/PanelWithNoHeader';
 import { CHAINS, INACTIVE_CHAIN_IDS } from '@constants/chains';
 import { assetIconForAssetSymbol, iconNameForChainId } from '@helpers/assets';
+import { institutionalBoostCapReached } from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, getMarketDescriptors } from '@helpers/markets';
 import { BASE_FACTOR, PRICE_PRECISION, formatValueInDollars } from '@helpers/numbers';
@@ -326,9 +327,12 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
             icon2={market?.iconPair[0] ?? iconNameForChainId(marketSummary.chainId)}
           />
           <div className="market-overview-panels__asset-description-container">
-            {market?.isNew && (
-              <div className="L2">
-                <span className="new-badge label label--secondary">New</span>
+            {(market?.isNew || (market?.institutional && institutionalBoostCapReached(marketSummary.totalSupplyValue))) && (
+              <div className="L2 market-overview-panels__badges">
+                {market?.isNew && <span className="new-badge label label--secondary">New</span>}
+                {market?.institutional && institutionalBoostCapReached(marketSummary.totalSupplyValue) && (
+                  <span className="cap-reached-badge label label--secondary">Cap Reached</span>
+                )}
               </div>
             )}
             <AssetName assetName={assetName} />

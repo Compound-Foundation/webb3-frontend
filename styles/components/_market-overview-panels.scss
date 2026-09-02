@@ -190,11 +190,17 @@
     flex-direction: column;
     justify-content: center;
 
-    .new-badge {
+    .new-badge,
+    .cap-reached-badge {
       display: inline-block;
       padding: 0.05rem 0.3rem;
       margin-bottom: 0.25rem;
     }
+  }
+
+  &__badges {
+    display: flex;
+    gap: 0.375rem;
   }
 
   &__net-earn-apr {
