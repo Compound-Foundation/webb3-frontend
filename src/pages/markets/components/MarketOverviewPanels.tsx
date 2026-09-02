@@ -9,7 +9,6 @@ import PanelWithHeader from '@components/PanelWithHeader';
 import PanelWithNoHeader from '@components/PanelWithNoHeader';
 import { CHAINS, INACTIVE_CHAIN_IDS } from '@constants/chains';
 import { assetIconForAssetSymbol, iconNameForChainId } from '@helpers/assets';
-import { institutionalBoostCapReached } from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, getMarketDescriptors } from '@helpers/markets';
 import { BASE_FACTOR, PRICE_PRECISION, formatValueInDollars } from '@helpers/numbers';
@@ -291,7 +290,6 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
   const [assetSymbol, chainName, assetName] = getMarketDescriptors(marketSummary.comet.address, marketSummary.chainId);
   const market = getMarket(marketSummary.chainId, marketSummary.comet.address);
   const showNewBadge = market?.isNew === true;
-  const showCapBadge = market?.institutional === true && institutionalBoostCapReached(marketSummary.totalSupplyValue);
 
   const getPercentage = (val: bigint) => {
     const percentage = Number((val * 10_000n) / BASE_FACTOR) / 100;
@@ -332,10 +330,9 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
             icon2={market?.iconPair[0] ?? iconNameForChainId(marketSummary.chainId)}
           />
           <div className="market-overview-panels__asset-description-container">
-            {(showNewBadge || showCapBadge) && (
+            {showNewBadge && (
               <div className="L2 market-overview-panels__badges">
-                {showNewBadge && <span className="new-badge label label--secondary">New</span>}
-                {showCapBadge && <span className="cap-reached-badge label label--secondary">Cap Reached</span>}
+                <span className="new-badge label label--secondary">New</span>
               </div>
             )}
             <AssetName assetName={assetName} />

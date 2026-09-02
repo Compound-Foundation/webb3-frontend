@@ -31,15 +31,6 @@ const LAST_LEVEL_DOLLARS = 20_000_000;
 const DOLLAR_SCALE = 10n ** BigInt(PRICE_PRECISION);
 
 /**
- * Whether the market has grown past the boost program's last level, after
- * which the reward rate no longer steps down.
- * @param totalSuppliedUsd the market's total supplied value in dollars, at PRICE_PRECISION
- */
-export function institutionalBoostCapReached(totalSuppliedUsd: bigint): boolean {
-  return totalSuppliedUsd >= BigInt(LAST_LEVEL_DOLLARS) * DOLLAR_SCALE;
-}
-
-/**
  * The USDC-terms reward supply rate the program pays at a given market size.
  * @param totalSuppliedUsd the market's total supplied value in dollars, at PRICE_PRECISION
  * @returns the reward supply rate, at FACTOR_PRECISION
