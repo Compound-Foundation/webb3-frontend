@@ -73,6 +73,10 @@
     background-image: url('/images/assets/asset_ETHEREUM.svg');
   }
 
+  &--INSTITUTIONAL {
+    background-image: url('/images/assets/asset_INSTITUTIONAL.svg');
+  }
+
   &--LBTC {
     background-image: url('/images/assets/asset_LBTC.png');
   }
@@ -330,6 +334,10 @@
 .theme--light {
   .asset--ETHEREUM {
     background-image: url('/images/assets/asset_ETHEREUM_light.svg');
+  }
+
+  .asset--INSTITUTIONAL {
+    background-image: url('/images/assets/asset_INSTITUTIONAL_light.svg');
   }
 
   .asset--POLYGON {

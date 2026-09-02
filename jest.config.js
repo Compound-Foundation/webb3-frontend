@@ -32,7 +32,8 @@ export default {
   },
   transformIgnorePatterns: ['<rootDir>/node_modules/(?!(msw|react-router|cookie-es)/)'],
   setupFilesAfterEnv: ['<rootDir>/setup.jest.ts', '<rootDir>/setupTests.ts'],
-  testPathIgnorePatterns: ['<rootDir>/__tests__/mocks/'],
+  // .claude/ holds Claude Code worktrees (checkouts of other branches) whose test files must not run here
+  testPathIgnorePatterns: ['<rootDir>/__tests__/mocks/', '<rootDir>/.claude/'],
   moduleNameMapper: {
     '\\.(scss|css)$': 'identity-obj-proxy', // Mock SCSS imports for CSS Modules (if you use them)
     '^@components(.*)$': '<rootDir>/src/components$1',

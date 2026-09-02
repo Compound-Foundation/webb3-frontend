@@ -6,6 +6,7 @@ import Tooltip from '@components/Tooltip';
 import NetRatesTooltip, { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { sanitizedAmountForAction } from '@helpers/actions';
+import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import {
   displayValue,
   formatRateFactor,
@@ -24,7 +25,6 @@ import {
   Currency,
   PendingAction,
   StateType,
-  Token,
   TokenWithAccountState,
   Transaction,
 } from '@types';
@@ -49,6 +49,8 @@ type MastheadHydrated = [
     compare: boolean;
     earnAPR: bigint;
     earnRewardsAPR?: bigint;
+    institutionalBoostAPR?: bigint;
+    institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
     liquidationCapacity: bigint;
     liquidationCapacityPost: bigint;
     pendingAction?: PendingAction;
@@ -215,6 +217,8 @@ function getContent(state: MastheadState): Content {
     compare,
     earnAPR,
     earnRewardsAPR,
+    institutionalBoostAPR,
+    institutionalWhitelistStatus,
     liquidationCapacity,
     liquidationCapacityPost,
     pendingAction,
@@ -260,6 +264,9 @@ function getContent(state: MastheadState): Content {
   const netRatesTooltipProps = {
     borrowAPR,
     earnAPR,
+    earnRewardsAPR,
+    institutionalBoostAPR,
+    institutionalWhitelistStatus,
   };
 
   let ratesTooltipContent = <NetRatesTooltip {...netRatesTooltipProps} view={NetRatesTooltipView.Borrow} />;
@@ -300,6 +307,7 @@ function getContent(state: MastheadState): Content {
     let buttons: ReactNode;
 
     if (!hasActions) {
+      const anchorRect = tooltipLeftAlign.current?.getBoundingClientRect();
       overviewDetails = (
         <Tooltip
           content={ratesTooltipContent}
@@ -569,14 +577,19 @@ function getContent(state: MastheadState): Content {
     ratesTooltipContent = <NetRatesTooltip {...netRatesTooltipProps} view={NetRatesTooltipView.Supply} />;
 
     if (!hasActions) {
+      const anchorRect = tooltipLeftAlign.current?.getBoundingClientRect();
       overviewDetails =
         baseAssetToUse.balance > 0n ? (
           <Tooltip
             content={ratesTooltipContent}
             width={400}
             hideArrow={true}
-            x={tooltipLeftAlign.current?.getBoundingClientRect().left}
-            y={tooltipLeftAlign.current?.getBoundingClientRect().bottom}
+            interactive={true}
+            touchToggle={false}
+            x={anchorRect?.left}
+            // Overlap the trigger slightly so the pointer can cross from the
+            // rate text onto the tooltip without a gap breaking the hover
+            y={anchorRect !== undefined ? anchorRect.bottom - 18 : undefined}
           >
             <div className="masthead__overview-details" onClick={() => setRatesDetailActive(true)}>
               <span className="meta text-color--3"> &#64; </span>

@@ -120,25 +120,9 @@
     margin-right: 0.5rem;
   }
 
+  // Base icon styles live in the shared .info-icon component
   &__info-icon {
-    align-items: center;
-    cursor: pointer;
-    display: inline-flex;
     margin-left: 0.5rem;
-
-    .svg {
-      height: 1rem;
-      width: 1rem;
-    }
-
-    .svg__path {
-      fill: var(--text--2);
-      transition: fill 120ms linear;
-    }
-
-    &:hover .svg__path {
-      fill: var(--text--1);
-    }
   }
 
   &.active {

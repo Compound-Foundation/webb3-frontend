@@ -199,6 +199,9 @@ const formatCometStateHydrated = (
     borrowAPR: cometResponse.borrowAPR.toBigInt(),
     collateralAssets: collateralAssets,
     earnAPR: cometResponse.earnAPR.toBigInt(),
+    totalBaseSupplyUsd:
+      (cometResponse.totalSupply.toBigInt() * baseAssetDollarPrice.toBigInt()) /
+      10n ** BigInt(cometResponse.baseAsset.decimals.toNumber()),
     baseAsset: {
       address: cometResponse.baseAsset.baseAsset,
       symbol: getAssetDisplaySymbol(
@@ -322,6 +325,9 @@ const formatCometStateNoWallet = (
       ),
     })),
     earnAPR: cometResponse.earnAPR.toBigInt(),
+    totalBaseSupplyUsd:
+      (cometResponse.totalSupply.toBigInt() * baseAssetDollarPrice.toBigInt()) /
+      10n ** BigInt(cometResponse.baseAsset.decimals.toNumber()),
     baseAsset: {
       address: cometResponse.baseAsset.baseAsset,
       symbol: getAssetDisplaySymbol(
