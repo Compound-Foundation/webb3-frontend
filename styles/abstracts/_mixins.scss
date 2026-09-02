@@ -18,3 +18,18 @@
     --extension-icon-url-#{$icon-name}: url('#{$extension-icons-path}/#{$icon-name}.svg');
   }
 }
+
+// Institutional card surface: bottom-left green glow, left-to-right dark scrim,
+// the banner artwork on the right, dark base fill, and the green gradient
+// stroke drawn behind a transparent 1px border. Used by the whitelist cards
+// and banners; the hero banner and markets row keep their own variants.
+@mixin institutional-card-surface($glow-size: 60px 80px) {
+  border: 1px solid transparent;
+  overflow: hidden;
+  background:
+    radial-gradient($glow-size at 0% 100%, rgba(8, 138, 28, 0.3) 0%, rgba(25, 131, 110, 0) 100%) padding-box,
+    linear-gradient(90deg, rgba(9, 22, 28, 0.9) 0%, rgba(9, 22, 28, 0.45) 100%) padding-box,
+    url('/images/institutional-banner-art.png') right center / auto 100% no-repeat padding-box,
+    linear-gradient(#09161c, #09161c) padding-box,
+    linear-gradient(90deg, #00d791 0%, #174149 35%, #174149 65%, #00d791 100%) border-box;
+}

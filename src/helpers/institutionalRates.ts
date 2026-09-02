@@ -18,6 +18,12 @@ const REWARDS_BUDGET_DOLLARS_PER_YEAR = 800_000;
 // The date through which the boosted yield program applies, shown on the
 // whitelisted card. Update when the program is extended.
 export const INSTITUTIONAL_BOOST_END_DATE = new Date(2026, 11, 8); // December 8, 2026
+// Display form of the end date, formatted once at module load
+export const INSTITUTIONAL_BOOST_END_DATE_LABEL = INSTITUTIONAL_BOOST_END_DATE.toLocaleDateString('en-US', {
+  month: 'long',
+  day: 'numeric',
+  year: 'numeric',
+});
 const LEVEL_STEP_DOLLARS = 500_000;
 const FIRST_LEVEL_DOLLARS = 500_000;
 const LAST_LEVEL_DOLLARS = 20_000_000;
