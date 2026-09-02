@@ -1,5 +1,5 @@
 import { Bolt } from '@components/Icons';
-import { INSTITUTIONAL_BOOST_END_DATE } from '@helpers/institutionalRates';
+import { INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { formatRateFactor } from '@helpers/numbers';
 import { INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
@@ -45,7 +45,7 @@ const BoostedSupplyRates = ({
   if (whitelistStatus === InstitutionalWhitelistStatus.Whitelisted) {
     whitelistCard = (
       <div className="boosted-supply-rates__whitelist-card">
-        <img className="boosted-supply-rates__whitelist-card__badge" src="/images/whitelist-badge.svg" alt="" />
+        <img className="boosted-supply-rates__whitelist-card__badge" src="/images/whitelist-badge.png" alt="" />
         <div>
           <p className="L3 body body--emphasized">
             {hasSupplyPosition ? 'You are whitelisted' : 'You are earning boosted yield'}
@@ -53,11 +53,7 @@ const BoostedSupplyRates = ({
           <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">
             {hasSupplyPosition
               ? 'You are currently earning with the net supply APR'
-              : `Boosted yield applies until ${INSTITUTIONAL_BOOST_END_DATE.toLocaleDateString('en-US', {
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}.`}
+              : `Boosted yield applies until ${INSTITUTIONAL_BOOST_END_DATE_LABEL}.`}
           </p>
         </div>
       </div>
@@ -65,7 +61,7 @@ const BoostedSupplyRates = ({
   } else if (hasSupplyPosition && whitelistStatus === InstitutionalWhitelistStatus.NotWhitelisted) {
     whitelistCard = (
       <div className="boosted-supply-rates__whitelist-card">
-        <img className="boosted-supply-rates__whitelist-card__badge" src="/images/whitelist-coins.svg" alt="" />
+        <img className="boosted-supply-rates__whitelist-card__badge" src="/images/whitelist-coins.png" alt="" />
         <div>
           <p className="L3 body body--emphasized">You are not whitelisted yet</p>
           <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">

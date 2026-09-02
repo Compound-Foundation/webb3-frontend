@@ -10,6 +10,11 @@ type TooltipCoordinates = {
 // Minimum distance (px) kept between the tooltip and the viewport edges.
 const VIEWPORT_MARGIN = 8;
 
+// .tooltip--hide-arrow shifts the rendered tooltip down by 20px (see
+// _tooltip.scss). Interactive tooltips must stay in contact with their trigger
+// for the pointer to cross onto them, so placement math compensates for it.
+const HIDE_ARROW_SHIFT_PX = 20;
+
 const Tooltip = ({
   width,
   children,
@@ -19,6 +24,7 @@ const Tooltip = ({
   mini = false,
   disabled = false,
   interactive = false,
+  touchToggle = true,
   yOffset = 20,
   x,
   y,
@@ -31,6 +37,10 @@ const Tooltip = ({
   mini?: boolean;
   disabled?: boolean;
   interactive?: boolean;
+  // Interactive tooltips toggle on tap by default (suppressing the trigger's
+  // own click); pass false when the trigger provides its own touch experience
+  // (e.g. a DetailSheet opened by onClick)
+  touchToggle?: boolean;
   yOffset?: number;
   x?: number;
   y?: number;
@@ -65,8 +75,10 @@ const Tooltip = ({
         }
       } else if (yCoords < -yOffset) {
         // If the tooltip would get cut off above the screen, then move it
-        // below the hovered element instead.
-        yCoords = triggerEl.bottom;
+        // below the hovered element instead. For interactive hide-arrow
+        // tooltips, cancel the CSS downshift so the tooltip stays flush with
+        // the trigger and the pointer can cross without the hover breaking.
+        yCoords = interactive && hideArrow ? triggerEl.bottom - HIDE_ARROW_SHIFT_PX : triggerEl.bottom;
         below = true;
       }
       // The caret flips to whichever edge faces the trigger.
@@ -140,11 +152,12 @@ const Tooltip = ({
         : cloneElement(children, {
             onMouseOver: handleMouseOver,
             onMouseOut: handleMouseOut,
-            ...(interactive && {
-              onTouchStart: () => (touchMoved.current = false),
-              onTouchMove: () => (touchMoved.current = true),
-              onTouchEnd: handleTouchEnd,
-            }),
+            ...(interactive &&
+              touchToggle && {
+                onTouchStart: () => (touchMoved.current = false),
+                onTouchMove: () => (touchMoved.current = true),
+                onTouchEnd: handleTouchEnd,
+              }),
           })}
       {disabled || (
         <Portal>

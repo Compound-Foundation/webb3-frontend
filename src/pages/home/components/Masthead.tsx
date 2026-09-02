@@ -308,6 +308,7 @@ function getContent(state: MastheadState): Content {
     let buttons: ReactNode;
 
     if (!hasActions) {
+      const anchorRect = tooltipLeftAlign.current?.getBoundingClientRect();
       overviewDetails = (
         <Tooltip
           content={ratesTooltipContent}
@@ -577,6 +578,7 @@ function getContent(state: MastheadState): Content {
     ratesTooltipContent = <NetRatesTooltip {...netRatesTooltipProps} view={NetRatesTooltipView.Supply} />;
 
     if (!hasActions) {
+      const anchorRect = tooltipLeftAlign.current?.getBoundingClientRect();
       overviewDetails =
         baseAssetToUse.balance > 0n ? (
           <Tooltip
@@ -584,14 +586,11 @@ function getContent(state: MastheadState): Content {
             width={400}
             hideArrow={true}
             interactive={true}
-            x={tooltipLeftAlign.current?.getBoundingClientRect().left}
+            touchToggle={false}
+            x={anchorRect?.left}
             // Overlap the trigger slightly so the pointer can cross from the
             // rate text onto the tooltip without a gap breaking the hover
-            y={
-              tooltipLeftAlign.current !== null
-                ? tooltipLeftAlign.current.getBoundingClientRect().bottom - 18
-                : undefined
-            }
+            y={anchorRect !== undefined ? anchorRect.bottom - 18 : undefined}
           >
             <div className="masthead__overview-details" onClick={() => setRatesDetailActive(true)}>
               <span className="meta text-color--3"> &#64; </span>

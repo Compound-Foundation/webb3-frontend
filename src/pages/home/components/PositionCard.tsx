@@ -263,7 +263,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
       <div className="position-card__row position-card__row--divider">
         <div className="divider"></div>
       </div>
-      <Tooltip content={ratesTooltipContent} width={400} hideArrow={true} interactive={true} yOffset={0}>
+      <Tooltip content={ratesTooltipContent} width={400} hideArrow={true} interactive={true} touchToggle={false} yOffset={0}>
         <div className="position-card__rates" onClick={() => setRatesDetailActive(true)}>
           <div className="position-card__rates__info position-card__rates__info--left">
             <label className="L2 label text-color--2">Net Borrow APR</label>

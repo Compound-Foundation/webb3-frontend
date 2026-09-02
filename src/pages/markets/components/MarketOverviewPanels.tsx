@@ -241,8 +241,11 @@ const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: Panel
   // Institutional markets are pinned above the rest of the network's markets, regardless of sort
   const isInstitutional = (marketSummary: MarketSummary) =>
     getMarket(marketSummary.chainId, marketSummary.comet.address)?.institutional === true;
-  const institutionalSummaries = marketSummaries.filter(isInstitutional);
-  const standardSummaries = marketSummaries.filter((marketSummary) => !isInstitutional(marketSummary));
+  const institutionalSummaries: MarketSummary[] = [];
+  const standardSummaries: MarketSummary[] = [];
+  for (const marketSummary of marketSummaries) {
+    (isInstitutional(marketSummary) ? institutionalSummaries : standardSummaries).push(marketSummary);
+  }
 
   return (
     <div className="market-overview-panels__tables-container">
@@ -287,6 +290,8 @@ type PanelRowProps = {
 const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps) => {
   const [assetSymbol, chainName, assetName] = getMarketDescriptors(marketSummary.comet.address, marketSummary.chainId);
   const market = getMarket(marketSummary.chainId, marketSummary.comet.address);
+  const showNewBadge = market?.isNew === true;
+  const showCapBadge = market?.institutional === true && institutionalBoostCapReached(marketSummary.totalSupplyValue);
 
   const getPercentage = (val: bigint) => {
     const percentage = Number((val * 10_000n) / BASE_FACTOR) / 100;
@@ -327,12 +332,10 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
             icon2={market?.iconPair[0] ?? iconNameForChainId(marketSummary.chainId)}
           />
           <div className="market-overview-panels__asset-description-container">
-            {(market?.isNew || (market?.institutional && institutionalBoostCapReached(marketSummary.totalSupplyValue))) && (
+            {(showNewBadge || showCapBadge) && (
               <div className="L2 market-overview-panels__badges">
-                {market?.isNew && <span className="new-badge label label--secondary">New</span>}
-                {market?.institutional && institutionalBoostCapReached(marketSummary.totalSupplyValue) && (
-                  <span className="cap-reached-badge label label--secondary">Cap Reached</span>
-                )}
+                {showNewBadge && <span className="new-badge label label--secondary">New</span>}
+                {showCapBadge && <span className="cap-reached-badge label label--secondary">Cap Reached</span>}
               </div>
             )}
             <AssetName assetName={assetName} />
