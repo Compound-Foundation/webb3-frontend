@@ -19,8 +19,6 @@ export interface NetRatesTooltipProps {
   // breakdown and whitelist card instead of the standard earn graph
   institutionalBoostAPR?: bigint;
   institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
-  // Whether the connected account is currently supplying to the market
-  institutionalSupplying?: boolean;
   // Label override for the boosted portion of the rate
   institutionalBoostLabel?: string;
   rewardsAsset?: Token;
@@ -34,7 +32,6 @@ const NetRatesTooltip = ({
    earnRewardsAPR = 0n,
    institutionalBoostAPR,
    institutionalWhitelistStatus,
-   institutionalSupplying = false,
    institutionalBoostLabel,
    rewardsAsset,
    view,
@@ -75,7 +72,6 @@ const NetRatesTooltip = ({
         earnAPR={earnAPR}
         boostAPR={boostAPR}
         whitelistStatus={institutionalWhitelistStatus ?? InstitutionalWhitelistStatus.NoWallet}
-        hasSupplyPosition={institutionalSupplying}
         boostLabel={institutionalBoostLabel}
       />
     ) : null;

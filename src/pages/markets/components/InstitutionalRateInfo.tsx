@@ -35,10 +35,6 @@ const InstitutionalRateInfo = ({
           earnAPR={marketSummary.supplyAPR - boostAPR}
           institutionalBoostAPR={boostAPR}
           institutionalWhitelistStatus={whitelistStatus}
-          // The markets page has no position context: whitelisted accounts see
-          // the "earning with the net supply APR" card, everyone else the
-          // get-whitelisted invitation
-          institutionalSupplying={whitelistStatus === InstitutionalWhitelistStatus.Whitelisted}
           institutionalBoostLabel="Whitelisted Extra APY"
           view={NetRatesTooltipView.Supply}
         />

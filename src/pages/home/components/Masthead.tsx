@@ -267,7 +267,6 @@ function getContent(state: MastheadState): Content {
     earnRewardsAPR,
     institutionalBoostAPR,
     institutionalWhitelistStatus,
-    institutionalSupplying: baseAssetToUse.balance > 0n,
   };
 
   let ratesTooltipContent = <NetRatesTooltip {...netRatesTooltipProps} view={NetRatesTooltipView.Borrow} />;
