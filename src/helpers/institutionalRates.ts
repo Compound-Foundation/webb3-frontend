@@ -37,11 +37,7 @@ const DOLLAR_SCALE = 10n ** BigInt(PRICE_PRECISION);
  */
 export function institutionalSupplyRewardRate(totalSuppliedUsd: bigint): bigint {
   if (totalSuppliedUsd < BigInt(FIRST_LEVEL_DOLLARS) * DOLLAR_SCALE) {
-    // TEMP FOR TEAM TESTING — REVERT BEFORE PROD DEPLOY OR MERGE.
-    // Pays the first-level rate below the first level so the reward UI is
-    // visible on the shared build while the market is at ~$0 TVL.
-    // Production behavior: return 0n here (no reward below the first level).
-    return (BigInt(REWARDS_BUDGET_DOLLARS_PER_YEAR) * 10n ** BigInt(FACTOR_PRECISION)) / BigInt(FIRST_LEVEL_DOLLARS);
+    return 0n;
   }
   const cappedUsd = BigInt(LAST_LEVEL_DOLLARS) * DOLLAR_SCALE;
   const suppliedUsd = totalSuppliedUsd < cappedUsd ? totalSuppliedUsd : cappedUsd;

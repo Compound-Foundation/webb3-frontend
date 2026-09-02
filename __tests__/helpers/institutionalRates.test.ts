@@ -22,10 +22,8 @@ const comp: Token = { address: '0xcomp', decimals: 18, name: 'Compound', symbol:
 
 describe('institutionalSupplyRewardRate', () => {
   test('pays nothing below the first level', () => {
-    // TEMP FOR TEAM TESTING — REVERT BEFORE PROD DEPLOY OR MERGE.
-    // Production expectation is 0n for both (no reward below the first level).
-    expect(institutionalSupplyRewardRate(dollars(0))).toEqual(rate(1.6));
-    expect(institutionalSupplyRewardRate(dollars(499_999))).toEqual(rate(1.6));
+    expect(institutionalSupplyRewardRate(dollars(0))).toEqual(0n);
+    expect(institutionalSupplyRewardRate(dollars(499_999))).toEqual(0n);
   });
 
   test('pays the rate of the largest level reached', () => {
@@ -49,8 +47,7 @@ describe('institutionalSupplyRewardRate', () => {
 
 describe('institutionalNetSupplyRate', () => {
   test('adds the reward rate on top of the floating rate for institutional markets', () => {
-    // TEMP FOR TEAM TESTING — REVERT BEFORE PROD DEPLOY OR MERGE. Production expectation: rate(0.03).
-    expect(institutionalNetSupplyRate(institutionalMarket, rate(0.03), dollars(0))).toEqual(rate(1.63));
+    expect(institutionalNetSupplyRate(institutionalMarket, rate(0.03), dollars(0))).toEqual(rate(0.03));
     expect(institutionalNetSupplyRate(institutionalMarket, rate(0.03), dollars(500_000))).toEqual(rate(1.63));
     expect(institutionalNetSupplyRate(institutionalMarket, rate(0.03), dollars(10_000_000))).toEqual(rate(0.11));
     expect(institutionalNetSupplyRate(institutionalMarket, rate(0.2), dollars(5_000_000))).toEqual(rate(0.36));
@@ -80,17 +77,15 @@ describe('institutionalSupplyRewards', () => {
   });
 
   test('passes rewards through unchanged while the program is not paying', () => {
-    // TEMP FOR TEAM TESTING — REVERT BEFORE PROD DEPLOY OR MERGE.
-    // Production expectation: pass-through unchanged with isInstitutionalReward false.
     expect(institutionalSupplyRewards(institutionalMarket, undefined, undefined, usdc, dollars(0))).toEqual({
-      earnRewardsAPR: rate(1.6),
-      rewardsAsset: usdc,
-      isInstitutionalReward: true,
+      earnRewardsAPR: undefined,
+      rewardsAsset: undefined,
+      isInstitutionalReward: false,
     });
     expect(institutionalSupplyRewards(institutionalMarket, rate(0.01), comp, usdc, dollars(499_999))).toEqual({
-      earnRewardsAPR: rate(1.61),
-      rewardsAsset: usdc,
-      isInstitutionalReward: true,
+      earnRewardsAPR: rate(0.01),
+      rewardsAsset: comp,
+      isInstitutionalReward: false,
     });
   });
 
