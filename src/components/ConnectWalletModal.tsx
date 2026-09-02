@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 
-import {Ronin} from "@components/Icons/Ronin";
-import { Connector, ConnectorType } from '@contexts/Web3Context';
+import { Connector } from '@contexts/Web3Context';
 import { getShortAddress } from '@helpers/address';
 import { getLedgerAddresses } from '@helpers/Ledger';
 import { TERMS_URL } from '@helpers/urls';
+import type { DiscoveredWallet } from '@helpers/walletConnectors';
 import useDisableScroll from '@hooks/useDisableScroll';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 
 import { ArrowLeft, ArrowRight, CircleClose, Wallet } from './Icons';
-import { BraveWallet } from './Icons/BraveWallet';
 import { BrowserWallets } from './Icons/BrowserWallets';
 import { Coinbase } from './Icons/Coinbase';
 import { LedgerWallet } from './Icons/LedgerWallet';
@@ -20,6 +19,39 @@ export type ConnectWalletModalProps = {
   isOpen?: boolean;
   onRequestClose: () => void;
   onSelectConnector: (connector: Connector) => void;
+  /** Wallets that announced themselves over EIP-6963. */
+  detectedWallets: DiscoveredWallet[];
+  /** Show the generic `window.ethereum` row for wallets that don't announce. */
+  showLegacyInjected: boolean;
+};
+
+/**
+ * A wallet discovered over EIP-6963, rendered with the name and icon it announced.
+ * The icon is a data URI supplied by the wallet, so we fall back to a generic mark if
+ * it fails to decode.
+ */
+const DetectedWalletRow = ({ wallet, onSelect }: { wallet: DiscoveredWallet; onSelect: () => void }) => {
+  const [iconFailed, setIconFailed] = useState(false);
+  const showIcon = wallet.icon !== undefined && !iconFailed;
+
+  return (
+    <div className="connect-wallet-item" onClick={onSelect}>
+      {showIcon ? (
+        <img
+          className="connect-wallet-item__symbol"
+          src={wallet.icon}
+          alt=""
+          onError={() => setIconFailed(true)}
+        />
+      ) : (
+        <BrowserWallets className="connect-wallet-item__symbol" />
+      )}
+      <div className="connect-wallet-item__info">
+        <div className="heading heading--emphasized">{wallet.name}</div>
+      </div>
+      <ArrowRight />
+    </div>
+  );
 };
 
 enum ConnectWalletModalSteps {
@@ -29,7 +61,13 @@ enum ConnectWalletModalSteps {
   SelectLedgerAddresses = 'select-ledger-address',
 }
 
-const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector }: ConnectWalletModalProps) => {
+const ConnectWalletModal = ({
+  isOpen = false,
+  onRequestClose,
+  onSelectConnector,
+  detectedWallets,
+  showLegacyInjected,
+}: ConnectWalletModalProps) => {
   const [modalStep, setModalStep] = useState(ConnectWalletModalSteps.ChooseWalletConnector);
   const [selectedLedgerPath, setSelectedLedgerPath] = useState<'live' | 'legacy'>('live');
   const [selectedAddress, setSelectedAddress] = useState<[string, string] | undefined>();
@@ -76,8 +114,6 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
 
   const isLedgerAvailable = 'usb' in navigator;
 
-  const isUsingBrave = (window.ethereum as { isBraveWallet: boolean })?.isBraveWallet;
-
   const attemptLedgerConnect = () => {
     getLedgerAddresses()
       .then((result) => {
@@ -92,42 +128,51 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
 
   switch (modalStep) {
     case ConnectWalletModalSteps.ChooseWalletConnector: {
-      const braveWalletConnector = (
-        <div
-          className="connect-wallet-item mobile-hide"
-          onClick={() => {
-            onSelectConnector([ConnectorType.Metamask]);
-            onClose();
-          }}
-        >
-          <BraveWallet className="connect-wallet-item__symbol" />
-          <div className="connect-wallet-item__info">
-            <div className="heading heading--emphasized">Brave Wallet</div>
-            <div className="meta text-color--2">And other browser wallets</div>
-          </div>
+      const selectConnector = (id: string) => {
+        onSelectConnector({ kind: 'connector', id });
+        onClose();
+      };
 
-          <ArrowRight />
-        </div>
-      );
+      // Wallets that announced over EIP-6963, each by the name and icon it gave us.
+      const detectedRows = detectedWallets.map((wallet) => (
+        <DetectedWalletRow key={wallet.id} wallet={wallet} onSelect={() => selectConnector(wallet.id)} />
+      ));
 
-      const metamaskConnector = (
+      // Only reached when nothing announced: a mobile in-app browser, or an extension
+      // predating EIP-6963.
+      const legacyInjectedRow = (
         <div
           className="connect-wallet-item connect-wallet-item--browser-wallet"
-          onClick={() => {
-            onSelectConnector([ConnectorType.Metamask]);
-            onClose();
-          }}
+          onClick={() => selectConnector('injected')}
         >
           <BrowserWallets className="connect-wallet-item__symbol" />
           <div className="connect-wallet-item__info">
-            <div className="heading heading--emphasized mobile-hide">Metamask</div>
-            <div className="heading heading--emphasized mobile-only">Wallet Browser</div>
-            <div className="meta text-color--2 mobile-hide">And other browser wallets</div>
+            <div className="heading heading--emphasized">Browser Wallet</div>
+            <div className="meta text-color--2 mobile-hide">The wallet built into this browser</div>
             <div className="meta text-color--2 mobile-only">MetaMask Mobile, Brave, etc</div>
           </div>
           <ArrowRight />
         </div>
       );
+
+      const noWalletDetectedRow = (
+        <div className="connect-wallet-item connect-wallet-item--disabled">
+          <BrowserWallets className="connect-wallet-item__symbol" />
+          <div className="connect-wallet-item__info">
+            <div className="heading heading--emphasized">No browser wallet detected</div>
+            <div className="meta text-color--2">Install one, or use an option below</div>
+          </div>
+        </div>
+      );
+
+      let browserWalletRows;
+      if (detectedRows.length > 0) {
+        browserWalletRows = detectedRows;
+      } else if (showLegacyInjected) {
+        browserWalletRows = legacyInjectedRow;
+      } else {
+        browserWalletRows = noWalletDetectedRow;
+      }
 
       return (
         <div className={`modal modal--connect-wallet${isOpen ? ' modal--active' : ''}`}>
@@ -148,7 +193,7 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
             </div>
 
             <div className="connect-wallet-items L4">
-              {isUsingBrave ? braveWalletConnector : metamaskConnector}
+              {browserWalletRows}
 
               <div
                 className={`connect-wallet-item mobile-hide${
@@ -169,10 +214,7 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
               </div>
               <div
                 className="connect-wallet-item"
-                onClick={() => {
-                  onSelectConnector([ConnectorType.WalletConnect]);
-                  onClose();
-                }}
+                onClick={() => selectConnector('walletConnect')}
               >
                 <WalletConnect className="connect-wallet-item__symbol" />
                 <div className="connect-wallet-item__info">
@@ -182,27 +224,11 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
               </div>
               <div
                 className="connect-wallet-item"
-                onClick={() => {
-                  onSelectConnector([ConnectorType.WalletLink]);
-                  onClose();
-                }}
+                onClick={() => selectConnector('coinbaseWalletSDK')}
               >
                 <Coinbase className="connect-wallet-item__symbol" />
                 <div className="connect-wallet-item__info">
                   <div className="heading heading--emphasized">Coinbase Wallet</div>
-                </div>
-                <ArrowRight />
-              </div>
-              <div
-                className="connect-wallet-item"
-                onClick={() => {
-                  onSelectConnector([ConnectorType.Ronin]);
-                  onClose();
-                }}
-              >
-                <Ronin className="connect-wallet-item__symbol" />
-                <div className="connect-wallet-item__info">
-                  <div className="heading heading--emphasized">Ronin</div>
                 </div>
                 <ArrowRight />
               </div>
@@ -391,7 +417,8 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
                 disabled={selectedAddress === undefined}
                 onClick={() => {
                   if (selectedAddress !== undefined) {
-                    onSelectConnector([ConnectorType.Ledger, selectedAddress]);
+                    const [path, address] = selectedAddress;
+                    onSelectConnector({ kind: 'ledger', path, address });
                     onClose();
                   }
                 }}

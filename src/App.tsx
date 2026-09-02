@@ -1,6 +1,7 @@
 import '../styles/main.scss';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
+import { useConnect } from 'wagmi';
 
 import AlertBanner from '@components/AlertBanner';
 import ConnectWalletModal from '@components/ConnectWalletModal';
@@ -13,6 +14,7 @@ import { CurrencyContextProvider } from '@contexts/CurrencyContext';
 import { initializeContext, getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { useWeb3Context } from '@contexts/Web3Context';
 import { estimateGasForActions, getKeyForActions, initialEstimatedGasMap } from '@helpers/gasEstimator';
+import { getDiscoveredWallets, shouldShowLegacyInjected } from '@helpers/walletConnectors';
 import { useActionQueue } from '@hooks/useActionQueue';
 import { useCometState } from '@hooks/useCometState';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
@@ -33,6 +35,13 @@ function App({ Component, pageProps }: any) {
   const SelectedMarketContext = getSelectedMarketContext();
 
   const location = useLocation();
+
+  // EIP-6963 announcements can arrive after mount, so wagmi appends to `connectors` as
+  // wallets show up; recompute the modal's list when it changes.
+  const { connectors } = useConnect();
+  const detectedWallets = useMemo(() => getDiscoveredWallets(connectors), [connectors]);
+  const showLegacyInjected = useMemo(() => shouldShowLegacyInjected(connectors), [connectors]);
+
   const { transactions, addTransaction, clearTransactions } = useTransactionManager(web3);
   const { theme, setTheme } = useThemeManager();
   const themeRef = useRef(theme);
@@ -181,6 +190,8 @@ function App({ Component, pageProps }: any) {
                 web3.connectWallet(connector);
                 setShowConnectWalletModal(false);
               }}
+              detectedWallets={detectedWallets}
+              showLegacyInjected={showLegacyInjected}
             />
             <NetworkSwitchModal state={networkSwitchState} onSwitchNetwork={handleSwitchNetwork} />
             <div className="app-content">

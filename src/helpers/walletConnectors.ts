@@ -1,0 +1,70 @@
+import type { Connector as WagmiConnector } from 'wagmi';
+
+/**
+ * Connector ids we register ourselves in `wagmiConfig`. Everything else in
+ * `useConnect().connectors` got there through wagmi's EIP-6963 discovery, which
+ * turns each announced provider into `injected({ target: { id: info.rdns, ... } })`
+ * — so a discovered connector's id *is* the wallet's RDNS.
+ */
+export const CONFIGURED_CONNECTOR_IDS: ReadonlySet<string> = new Set([
+  'injected',
+  'walletConnect',
+  'coinbaseWalletSDK',
+  'ledger',
+]);
+
+export type DiscoveredWallet = {
+  /** The wallet's EIP-6963 RDNS, e.g. `io.metamask`. */
+  id: string;
+  name: string;
+  icon?: string;
+};
+
+/** Wallets that announced themselves over EIP-6963. */
+export function getDiscoveredWallets(connectors: readonly WagmiConnector[]): DiscoveredWallet[] {
+  return connectors
+    .filter((connector) => connector.type === 'injected' && !CONFIGURED_CONNECTOR_IDS.has(connector.id))
+    .map((connector) => ({ id: connector.id, name: connector.name, icon: connector.icon }));
+}
+
+/**
+ * Mobile in-app browsers and pre-6963 extensions set `window.ethereum` without
+ * announcing. We fall back to the generic `injected()` connector for them, but only
+ * when nothing announced — otherwise it duplicates a wallet already listed by name,
+ * and connects to whichever extension won the race for `window.ethereum`.
+ */
+export function shouldShowLegacyInjected(connectors: readonly WagmiConnector[]): boolean {
+  if (getDiscoveredWallets(connectors).length > 0) return false;
+  return typeof window !== 'undefined' && window.ethereum != null;
+}
+
+// Pre-6963 the stored value was a JSON-encoded `[ConnectorType]` tuple.
+const LEGACY_CONNECTOR_IDS: Record<string, string | null> = {
+  Metamask: 'injected',
+  WalletConnect: 'walletConnect',
+  WalletLink: 'coinbaseWalletSDK',
+  Ronin: 'com.roninchain.wallet',
+  // Ledger can't autoconnect — it needs a path and address chosen first.
+  Ledger: null,
+};
+
+/**
+ * Resolve a stored preference to a connector id, or `null` when the caller should
+ * drop the stored value and stay disconnected.
+ */
+export function migrateStoredConnectorId(raw: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Not JSON, so it's already a bare connector id.
+    return raw.length > 0 ? raw : null;
+  }
+
+  if (Array.isArray(parsed) && typeof parsed[0] === 'string') {
+    return LEGACY_CONNECTOR_IDS[parsed[0]] ?? null;
+  }
+  // A bare id that happens to parse as JSON (a number, `null`, an object) is not
+  // something we ever wrote.
+  return typeof parsed === 'string' && parsed.length > 0 ? parsed : null;
+}

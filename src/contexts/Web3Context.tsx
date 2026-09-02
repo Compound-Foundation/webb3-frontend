@@ -6,6 +6,7 @@ import {
   SetStateAction,
   useCallback,
   useEffect,
+  useRef,
   useState,
   useContext,
 } from 'react';
@@ -24,10 +25,9 @@ import { CONNECTOR_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { isLedgerConnector } from '@helpers/Ledger';
 import { DEFAULT_MARKET } from '@helpers/markets';
+import { migrateStoredConnectorId } from '@helpers/walletConnectors';
 import { useAddressScreening, ScreeningStatus } from '@hooks/useAddressScreening';
 import { useDisconnectBlockedWallet } from '@hooks/useDisconnectBlockedWallet';
-
-import { WALLECT_CONNECT_PROJECT_ID } from '../../envVars';
 
 export const Web3Context = createContext<Web3 | undefined>(undefined);
 
@@ -68,20 +68,15 @@ export function useWeb3Context() {
   return context;
 }
 
-export enum ConnectorType {
-  Metamask = 'Metamask',
-  WalletConnect = 'WalletConnect',
-  WalletLink = 'WalletLink',
-  Ledger = 'Ledger',
-  Ronin = 'Ronin',
-}
-
+/**
+ * A wallet choice. `id` is any wagmi connector id: one we registered ourselves
+ * (`injected`, `walletConnect`, `coinbaseWalletSDK`) or, for a wallet discovered over
+ * EIP-6963, its RDNS. Ledger is its own variant because it alone needs parameters set
+ * before `connect()`.
+ */
 export type Connector =
-  | [ConnectorType.Metamask]
-  | [ConnectorType.WalletConnect]
-  | [ConnectorType.WalletLink]
-  | [ConnectorType.Ledger, [string, string]]
-  | [ConnectorType.Ronin];
+  | { kind: 'connector'; id: string }
+  | { kind: 'ledger'; path: string; address: string };
 
 export type ReadWeb3 = {
   connector: undefined;
@@ -113,14 +108,6 @@ export type Web3 = {
 
 type Web3ProviderProps = {
   children?: ReactNode;
-};
-
-const connectorsMap = {
-  [ConnectorType.Metamask]: { id: 'injected' },
-  [ConnectorType.WalletConnect]: { id: 'walletConnect', options: { projectId: WALLECT_CONNECT_PROJECT_ID } },
-  [ConnectorType.WalletLink]: { id: 'coinbaseWalletSDK' },
-  [ConnectorType.Ledger]: { id: 'ledger' },
-  [ConnectorType.Ronin]: { id: 'com.roninchain.wallet' },
 };
 
 export const Web3Provider = ({ children }: Web3ProviderProps) => {
@@ -162,33 +149,52 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
     };
   }
 
-  // Initial activation of readWeb3 connector and grabbing of preferred connector type from local storage
+  // Reconnect to the previously chosen wallet. EIP-6963 announcements can land after
+  // mount, so a connector we can't find on the first pass may still show up: we hold the
+  // stored id through the first miss and only discard it if it's still missing once
+  // wagmi has appended a later batch of announcements.
+  const reconnectSettled = useRef(false);
+  const reconnectAttempted = useRef(false);
   useEffect(() => {
-    const storedConnectorString = window.localStorage.getItem(CONNECTOR_LOCALSTORAGE_KEY);
-    if (storedConnectorString !== null && !searchParams.has('account') && !isConnected) {
-      try {
-        const storedConnectorType = JSON.parse(storedConnectorString)[0];
-        const storedConnector = [storedConnectorType] as Connector;
+    if (reconnectSettled.current || searchParams.has('account') || isConnected) return;
 
-        if (storedConnector[0] !== connector?.[0]) {
-          connectWallet(storedConnector);
-        }
-      } catch (error) {
-        console.error('Error parsing stored connector:', error);
-        window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
-      }
+    const storedValue = window.localStorage.getItem(CONNECTOR_LOCALSTORAGE_KEY);
+    if (storedValue === null) {
+      reconnectSettled.current = true;
+      return;
     }
-  }, []);
 
-  // Listen to changes in ConnectorType
+    const storedId = migrateStoredConnectorId(storedValue);
+    if (storedId === null) {
+      window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
+      reconnectSettled.current = true;
+      return;
+    }
+
+    const storedConnector = connectors.find((c) => c.id === storedId);
+    if (!storedConnector) {
+      // First miss: the wallet may not have announced yet, so wait for the next batch.
+      if (!reconnectAttempted.current) {
+        reconnectAttempted.current = true;
+        return;
+      }
+      window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
+      reconnectSettled.current = true;
+      return;
+    }
+
+    reconnectSettled.current = true;
+    connectWallet({ kind: 'connector', id: storedId });
+  }, [connectors, isConnected]);
+
+  // Persist the chosen wallet so we can reconnect on the next visit.
   useEffect(() => {
     if (connector !== null) {
-      if (connector[0] === ConnectorType.Ledger) {
-        // If the user uses ledger lets, let's wipe out their connector type
-        // to force them to choose again on next since ledger can't autoconnect.
+      if (connector.kind === 'ledger') {
+        // Ledger can't autoconnect, so wipe the preference to force a fresh choice.
         window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
       } else {
-        window.localStorage.setItem(CONNECTOR_LOCALSTORAGE_KEY, JSON.stringify(connector));
+        window.localStorage.setItem(CONNECTOR_LOCALSTORAGE_KEY, connector.id);
       }
     }
   }, [connector]);
@@ -245,32 +251,29 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
     [writeWeb3.provider, writeWeb3.chainId]
   );
 
-  // Create function to connect to a specific wallet type
+  // Create function to connect to a specific wallet
   const connectWallet = async (newConnector: Connector) => {
-    if (newConnector !== connector) {
-      setConnector(newConnector);
-      const [connectorType] = newConnector;
-      const connectorConfig = connectorsMap[connectorType];
-      const connector = connectors.find((c) => c.id === connectorConfig.id);
-      if (!connector) throw new Error(`Connector ${connectorType} not found`);
-      if (connectorType === ConnectorType.Ledger) {
-        const [, [pathString, address]] = newConnector;
+    const targetId = newConnector.kind === 'ledger' ? 'ledger' : newConnector.id;
+    setConnector(newConnector);
 
-        if (isLedgerConnector(connector)) {
-          connector.setLedgerParams({ pathString, address });
-        }
+    const wagmiConnector = connectors.find((c) => c.id === targetId);
+    if (!wagmiConnector) throw new Error(`Connector ${targetId} not found`);
 
-        try {
-          connect({ connector });
-        } catch (error) {
-          console.error('Error connecting Ledger:', error);
-        }
-      } else {
-        try {
-          connect({ connector });
-        } catch (error) {
-          console.error('Error connecting wallet:', error);
-        }
+    if (newConnector.kind === 'ledger') {
+      if (isLedgerConnector(wagmiConnector)) {
+        wagmiConnector.setLedgerParams({ pathString: newConnector.path, address: newConnector.address });
+      }
+
+      try {
+        connect({ connector: wagmiConnector });
+      } catch (error) {
+        console.error('Error connecting Ledger:', error);
+      }
+    } else {
+      try {
+        connect({ connector: wagmiConnector });
+      } catch (error) {
+        console.error('Error connecting wallet:', error);
       }
     }
   };
