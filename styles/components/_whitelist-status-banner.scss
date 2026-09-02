@@ -1,3 +1,4 @@
+@use '../abstracts/mixins' as *;
 @use '../abstracts/variables' as *;
 
 // Slim full-width banner on the institutional market detail page. Shares the
@@ -5,19 +6,12 @@
 // artwork and the green gradient stroke.
 .whitelist-status-banner {
   align-items: center;
-  border: 1px solid transparent;
+  @include institutional-card-surface;
   border-radius: 0.75rem;
   display: flex;
   gap: 1rem;
   justify-content: space-between;
-  overflow: hidden;
   padding: 0.75rem 1.25rem;
-  background:
-    radial-gradient(60px 80px at 0% 100%, rgba(8, 138, 28, 0.3) 0%, rgba(25, 131, 110, 0) 100%) padding-box,
-    linear-gradient(90deg, rgba(9, 22, 28, 0.9) 0%, rgba(9, 22, 28, 0.45) 100%) padding-box,
-    url('/images/institutional-banner-art.png') right center / auto 100% no-repeat padding-box,
-    linear-gradient(#09161c, #09161c) padding-box,
-    linear-gradient(90deg, #00d791 0%, #174149 35%, #174149 65%, #00d791 100%) border-box;
 
   &__lead {
     align-items: center;

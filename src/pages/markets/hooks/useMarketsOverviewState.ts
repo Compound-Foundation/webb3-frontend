@@ -3,7 +3,7 @@ import { getAddress } from 'ethers/lib/utils';
 
 import { isNonStablecoinMarket } from '@helpers/baseAssetPrice';
 import { convertApiResponse } from '@helpers/functions';
-import { institutionalNetSupplyRate } from '@helpers/institutionalRates';
+import { institutionalSupplyRewardRate } from '@helpers/institutionalRates';
 import { filterLegacyCollateralSymbols } from '@helpers/legacyCollateral';
 import { getMarket, getMarketDescriptors } from '@helpers/markets';
 import { BASE_FACTOR, FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
@@ -51,11 +51,13 @@ const getState = async (includeTestnets = false): Promise<MarketOverviewState> =
     // Institutional markets add USDC-terms rewards on top of the supply rate for their current size
     .map((marketSummary: MarketSummary): MarketSummary => {
       const market = getMarket(marketSummary.chainId, marketSummary.comet.address);
-      const supplyAPR = institutionalNetSupplyRate(market, marketSummary.supplyAPR, marketSummary.totalSupplyValue);
-      const institutionalSupplyRewardsAPR = supplyAPR - marketSummary.supplyAPR;
+      if (!market?.institutional) {
+        return marketSummary;
+      }
+      const institutionalSupplyRewardsAPR = institutionalSupplyRewardRate(marketSummary.totalSupplyValue);
       return {
         ...marketSummary,
-        supplyAPR,
+        supplyAPR: marketSummary.supplyAPR + institutionalSupplyRewardsAPR,
         ...(institutionalSupplyRewardsAPR > 0n ? { institutionalSupplyRewardsAPR } : {}),
       };
     });
