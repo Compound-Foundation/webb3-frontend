@@ -1,5 +1,3 @@
-import { ReactNode } from 'react';
-
 import { formatRateFactor } from '@helpers/numbers';
 import { Token } from '@types';
 
@@ -22,8 +20,6 @@ type NetRatesEarnGraphState = {
   earnAPR: bigint;
   earnRewardsAPR?: bigint;
   rewardsAsset?: Token;
-  // Optional annotation rendered next to the rewards rate below the rewards bar
-  rewardsInfo?: ReactNode;
 };
 
 type NetRatesGraphState = NetRatesBorrowGraphState | NetRatesEarnGraphState;
@@ -108,7 +104,6 @@ const NetRatesGraph = (state: NetRatesGraphState) => {
                 <div className="net-rates-graph__reward__asset">
                   <span className={`asset asset--${rewardsAsset?.symbol}`}></span>
                   <p className="L3 meta text-color--1">{formatRateFactor(earnRewardsAPR)}</p>
-                  {state.rewardsInfo}
                 </div>
               </div>
             )}

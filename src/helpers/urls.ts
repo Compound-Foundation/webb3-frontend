@@ -16,6 +16,7 @@ export const TALLY_URL = 'https://www.tally.xyz';
 export const TALLY_GOV_URL = 'https://www.tally.xyz/gov/compound';
 export const REWARDS_PAUSE_FORUM_URL = 'https://www.comp.xyz/t/pausing-comet-rewards-top-ups/7879';
 export const INSTITUTIONAL_MARKET_URL = 'https://www.compound.xyz/institutional-market';
+export const INSTITUTIONAL_REGISTER_URL = 'https://www.compound.xyz/institutional-market#supply';
 
 export function getBlockExplorerUrl(chainId: number | undefined): string {
   if (chainId !== undefined) {

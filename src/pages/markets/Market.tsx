@@ -6,6 +6,7 @@ import { ArrowLeft, ExternalLink } from '@components/Icons';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
 import { institutionalSupplyRewards } from '@helpers/institutionalRates';
+import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, isV2Market } from '@helpers/markets';
 import { formatTokenBalance, getTokenValue, PRICE_PRECISION } from '@helpers/numbers';
 import { getBlockExplorerUrlForAddress, INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
@@ -20,6 +21,7 @@ import MarketOverviewPanel, { MarketOverviewPanelView } from './components/Marke
 import MarketRatesPanel from './components/MarketRatesPanel';
 import MarketStatsPanel from './components/MarketStatsPanel';
 import RateModelPanel from './components/RateModelPanel';
+import WhitelistStatusBanner from './components/WhitelistStatusBanner';
 import { useMarketsState } from './hooks/useMarketsState';
 
 type MarketsProps = {
@@ -48,6 +50,7 @@ const Market = ({ web3 }: MarketsProps) => {
   let marketRatesPanel: ReactNode = null;
   let interestRateModelPanel: ReactNode = null;
   let additionalMarketDataPanel: ReactNode = null;
+  let whitelistStatusBanner: ReactNode = null;
   let debtOutstandingFormatted = '';
   let collateralValueFormatted = '';
   let collateralHistoryPanel: ReactNode = null;
@@ -150,6 +153,14 @@ const Market = ({ web3 }: MarketsProps) => {
       baseAsset,
       marketStateData.totalBaseSupplyUsd,
     );
+
+    // While the boost is paying, a banner describes the connected account's
+    // access to it
+    if (isInstitutionalReward) {
+      whitelistStatusBanner = (
+        <WhitelistStatusBanner whitelistStatus={institutionalWhitelistStatus(web3.read.account)} />
+      );
+    }
 
     assetRows = (
       <CollateralAssetsPanel>
@@ -323,6 +334,7 @@ const Market = ({ web3 }: MarketsProps) => {
         {marketStatsPanel}
         {v2Markets ? marketOverviewPanel : marketRatesPanel}
         {interestRateModelPanel}
+        {whitelistStatusBanner}
         {assetRows}
         {!configMarket?.institutional && additionalMarketDataPanel}
       </main>

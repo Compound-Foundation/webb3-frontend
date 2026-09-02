@@ -1,4 +1,4 @@
-import InstitutionalRewardsTooltip from '@components/InstitutionalRewardsTooltip';
+import BoostedSupplyRates from '@components/BoostedSupplyRates';
 import NetRatesGraph, { NetRatesGraphType } from '@components/NetRatesGraph';
 import PanelWithHeader from '@components/PanelWithHeader';
 import { formatRateFactor } from '@helpers/numbers';
@@ -113,19 +113,19 @@ const MarketRatesPanelView = ({
     />
   );
 
-  const netEarnRateGraph = (
-    <NetRatesGraph
-      state={NetRatesGraphType.Earn}
-      earnAPR={earnAPR}
-      earnRewardsAPR={earnRewardsAPR}
-      rewardsAsset={rewardsAsset}
-      rewardsInfo={
-        institutionalRewardsAPR !== undefined && institutionalRewardsAPR > 0n ? (
-          <InstitutionalRewardsTooltip />
-        ) : undefined
-      }
-    />
-  );
+  // Institutional markets show the base/boost breakdown bar; the whitelist
+  // status renders as a standalone banner on the page instead of a card here
+  const netEarnRateGraph =
+    institutionalRewardsAPR !== undefined && institutionalRewardsAPR > 0n ? (
+      <BoostedSupplyRates earnAPR={earnAPR} boostAPR={institutionalRewardsAPR} showWhitelistCard={false} />
+    ) : (
+      <NetRatesGraph
+        state={NetRatesGraphType.Earn}
+        earnAPR={earnAPR}
+        earnRewardsAPR={earnRewardsAPR}
+        rewardsAsset={rewardsAsset}
+      />
+    );
 
   return (
     <PanelWithHeader header="Market Rates" secondaryHeader="Net of Rewards" className="grid-column--6">
