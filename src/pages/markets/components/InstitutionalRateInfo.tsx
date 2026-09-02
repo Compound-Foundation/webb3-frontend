@@ -1,4 +1,4 @@
-import { InfoCircle } from '@components/Icons';
+import { Bolt } from '@components/Icons';
 import Tooltip from '@components/Tooltip';
 import NetRatesTooltip, { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
@@ -45,7 +45,7 @@ const InstitutionalRateInfo = ({
       }
     >
       <span className="info-icon" onClick={(e) => e.stopPropagation()}>
-        <InfoCircle />
+        <Bolt />
       </span>
     </Tooltip>
   );

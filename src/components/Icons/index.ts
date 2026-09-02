@@ -18,7 +18,6 @@ export * from './Copy';
 export * from './ExternalLink';
 export * from './Github';
 export * from './HoverUnder';
-export * from './InfoCircle';
 export * from './MagnifyingGlass';
 export * from './Minus';
 export * from './Nav/Dashboard';
