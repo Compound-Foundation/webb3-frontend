@@ -47,7 +47,7 @@ const BoostedSupplyRates = ({
       <div className="boosted-supply-rates__whitelist-card">
         <img className="boosted-supply-rates__whitelist-card__badge" src="/images/whitelist-badge.png" alt="" />
         <div>
-          <p className="L3 body body--emphasized">
+          <p className="boosted-supply-rates__whitelist-card__title L3 body body--emphasized">
             {hasSupplyPosition ? 'You are whitelisted' : 'You are earning boosted yield'}
           </p>
           <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">
@@ -63,7 +63,7 @@ const BoostedSupplyRates = ({
       <div className="boosted-supply-rates__whitelist-card">
         <img className="boosted-supply-rates__whitelist-card__badge" src="/images/whitelist-coins.png" alt="" />
         <div>
-          <p className="L3 body body--emphasized">You are not whitelisted yet</p>
+          <p className="boosted-supply-rates__whitelist-card__title L3 body body--emphasized">You are not whitelisted yet</p>
           <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">
             You are currently earning with the base interest.
           </p>
@@ -82,7 +82,7 @@ const BoostedSupplyRates = ({
     whitelistCard = (
       <div className="boosted-supply-rates__whitelist-card">
         <div>
-          <p className="L3 body body--emphasized">Get whitelisted to access the Net Earn APR</p>
+          <p className="boosted-supply-rates__whitelist-card__title L3 body body--emphasized">Get whitelisted to access the Net Earn APR</p>
           <a
             className="boosted-supply-rates__whitelist-card__link L4"
             href={INSTITUTIONAL_MARKET_URL}

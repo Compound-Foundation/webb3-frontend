@@ -52,9 +52,17 @@ const Tooltip = ({
   const tooltipRef = useRef<null | HTMLSpanElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const touchMoved = useRef(false);
+  // Set by a touch on triggers that opted out of the tap-to-toggle behavior:
+  // the browser still synthesizes mouseover after the tap, which must not open
+  // the hover tooltip on top of the trigger's own touch experience
+  const suppressSynthesizedHover = useRef(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleMouseOver = (e: any) => {
+    if (suppressSynthesizedHover.current) {
+      suppressSynthesizedHover.current = false;
+      return;
+    }
     if (!disabled && tooltipRef.current) {
       triggerRef.current = e.currentTarget;
       setShowTooltip(true);
@@ -153,11 +161,17 @@ const Tooltip = ({
             onMouseOver: handleMouseOver,
             onMouseOut: handleMouseOut,
             ...(interactive &&
-              touchToggle && {
-                onTouchStart: () => (touchMoved.current = false),
-                onTouchMove: () => (touchMoved.current = true),
-                onTouchEnd: handleTouchEnd,
-              }),
+              (touchToggle
+                ? {
+                    onTouchStart: () => (touchMoved.current = false),
+                    onTouchMove: () => (touchMoved.current = true),
+                    onTouchEnd: handleTouchEnd,
+                  }
+                : {
+                    // Let the tap through to the trigger's own handlers, but
+                    // swallow the synthesized hover that would follow it
+                    onTouchStart: () => (suppressSynthesizedHover.current = true),
+                  })),
           })}
       {disabled || (
         <Portal>
