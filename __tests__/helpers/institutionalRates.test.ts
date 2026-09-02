@@ -1,5 +1,4 @@
 import {
-  institutionalBoostCapReached,
   institutionalNetSupplyRate,
   institutionalSupplyRewardRate,
   institutionalSupplyRewards,
@@ -45,15 +44,6 @@ describe('institutionalSupplyRewardRate', () => {
 
   test('holds the last level rate as the market grows past it', () => {
     expect(institutionalSupplyRewardRate(dollars(100_000_000))).toEqual(rate(0.04));
-  });
-});
-
-describe('institutionalBoostCapReached', () => {
-  test('reached only at the last level and above', () => {
-    expect(institutionalBoostCapReached(dollars(0))).toBe(false);
-    expect(institutionalBoostCapReached(dollars(19_999_999))).toBe(false);
-    expect(institutionalBoostCapReached(dollars(20_000_000))).toBe(true);
-    expect(institutionalBoostCapReached(dollars(100_000_000))).toBe(true);
   });
 });
 
