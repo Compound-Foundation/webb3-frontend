@@ -9,13 +9,16 @@ type BoostedSupplyRatesProps = {
   earnAPR: bigint;
   // The institutional program's boost on top of the floating rate, at FACTOR_PRECISION
   boostAPR: bigint;
-  whitelistStatus: InstitutionalWhitelistStatus;
+  whitelistStatus?: InstitutionalWhitelistStatus;
   // Whether the connected account is currently supplying to the market; the
   // whitelist card copy speaks to what the account is earning when it is
   hasSupplyPosition?: boolean;
   // Label for the boosted portion of the rate (e.g. "Whitelisted Extra APY" on
   // the markets page)
   boostLabel?: string;
+  // The market detail page shows the bar and labels alone; its whitelist
+  // status renders as a standalone banner instead
+  showWhitelistCard?: boolean;
 };
 
 /**
@@ -27,9 +30,10 @@ type BoostedSupplyRatesProps = {
 const BoostedSupplyRates = ({
   earnAPR,
   boostAPR,
-  whitelistStatus,
+  whitelistStatus = InstitutionalWhitelistStatus.NoWallet,
   hasSupplyPosition = false,
   boostLabel = 'Boosted APR',
+  showWhitelistCard = true,
 }: BoostedSupplyRatesProps) => {
   const totalAPR = earnAPR + boostAPR;
   // Segment widths are proportional to each component's share of the total,
@@ -119,7 +123,7 @@ const BoostedSupplyRates = ({
           <span className="text-color--2"> {boostLabel}</span>
         </span>
       </div>
-      {whitelistCard}
+      {showWhitelistCard && whitelistCard}
     </div>
   );
 };

@@ -64,6 +64,7 @@
     overflow: hidden;
     padding: 0.625rem 0.875rem;
     background:
+      radial-gradient(60px 80px at 0% 100%, rgba(8, 138, 28, 0.3) 0%, rgba(25, 131, 110, 0) 100%) padding-box,
       linear-gradient(90deg, rgba(9, 22, 28, 0.9) 0%, rgba(9, 22, 28, 0.45) 100%) padding-box,
       url('/images/institutional-banner-art.png') right center / auto 100% no-repeat padding-box,
       linear-gradient(#09161c, #09161c) padding-box,
