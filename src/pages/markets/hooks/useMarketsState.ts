@@ -8,7 +8,7 @@ import type { Web3 } from '@contexts/Web3Context';
 import Comet from '@helpers/abis/Comet';
 import ERC20 from '@helpers/abis/ERC20';
 import { adjustCollateralPrice, getBaseAssetPriceFeed } from '@helpers/baseAssetPrice';
-import { getRemappedPriceFeed } from '@helpers/deprecatedMarkets';
+import { getHardcodedFeedPrice, getRemappedPriceFeed } from '@helpers/deprecatedMarkets';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
@@ -158,9 +158,10 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
   const numAssets = market.collateralAssets.length;
 
   const prices = combinedCalls.slice(0, numAssets).map((price, index) => {
-    // If we found the deprecated feed, then let's ignore it.
+    // If we found a deprecated feed, ignore the dummy call's result and use
+    // the hardcoded price for that feed instead (0 for the wUSDM feeds).
     if (ignoredCollateralPriceIndex === index) {
-      return 0n;
+      return getHardcodedFeedPrice(market.collateralAssets[index].priceFeed);
     }
     return price.toBigInt();
   });
