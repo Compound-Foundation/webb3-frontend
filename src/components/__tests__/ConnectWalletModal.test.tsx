@@ -17,9 +17,11 @@ const METAMASK: DiscoveredWallet = {
 };
 const RONIN: DiscoveredWallet = { id: 'com.roninchain.wallet', name: 'Ronin Wallet' };
 
+const CONFLICTED_METAMASK = { id: 'io.metamask', name: 'MetaMask' };
+
 const renderModal = (props: Partial<React.ComponentProps<typeof ConnectWalletModal>> = {}) => {
   const onSelectConnector = jest.fn();
-  render(
+  const { container } = render(
     <ConnectWalletModal
       isOpen
       onRequestClose={jest.fn()}
@@ -30,7 +32,7 @@ const renderModal = (props: Partial<React.ComponentProps<typeof ConnectWalletMod
       {...props}
     />,
   );
-  return { onSelectConnector };
+  return { onSelectConnector, container };
 };
 
 describe('ConnectWalletModal', () => {
@@ -136,6 +138,38 @@ describe('ConnectWalletModal', () => {
     expect(screen.getByText('MetaMask hidden for your safety')).toBeInTheDocument();
     expect(screen.getByText('Ronin Wallet')).toBeInTheDocument();
     expect(screen.queryByText('No browser wallet detected')).not.toBeInTheDocument();
+  });
+
+  test('a warning row also suppresses the legacy browser wallet row', () => {
+    // Offering bare `window.ethereum` while an impersonator is present would
+    // reintroduce the race EIP-6963 exists to fix.
+    renderModal({ showLegacyInjected: true, conflictedWallets: [CONFLICTED_METAMASK] });
+
+    expect(screen.getByText('MetaMask hidden for your safety')).toBeInTheDocument();
+    expect(screen.queryByText('Browser Wallet')).not.toBeInTheDocument();
+  });
+
+  test('warning rows render above the wallets that are still offered', () => {
+    const { container } = renderModal({
+      detectedWallets: [RONIN],
+      conflictedWallets: [CONFLICTED_METAMASK],
+    });
+
+    const headings = [...container.querySelectorAll('.connect-wallet-item__info .heading')].map(
+      (node) => node.textContent,
+    );
+    expect(headings.indexOf('MetaMask hidden for your safety')).toBeLessThan(
+      headings.indexOf('Ronin Wallet'),
+    );
+  });
+
+  test('hides the fixed Coinbase row when its rdns is impersonated', () => {
+    // The Coinbase SDK routes to the extension when installed, so that row is tainted
+    // by the same conflict — leaving it would contradict the warning above it.
+    renderModal({ conflictedWallets: [{ id: 'com.coinbase.wallet', name: 'Base (formerly Coinbase Wallet)' }] });
+
+    expect(screen.queryByText('Coinbase Wallet')).not.toBeInTheDocument();
+    expect(screen.getByText('WalletConnect')).toBeInTheDocument();
   });
 
   test('renders a wallet that announced no icon at all', () => {

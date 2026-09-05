@@ -4,7 +4,7 @@ import { Connector } from '@contexts/Web3Context';
 import { getShortAddress } from '@helpers/address';
 import { getLedgerAddresses } from '@helpers/Ledger';
 import { TERMS_URL } from '@helpers/urls';
-import type { DiscoveredWallet } from '@helpers/walletConnectors';
+import { COINBASE_RDNS, type ConflictedWallet, type DiscoveredWallet } from '@helpers/walletConnectors';
 import useDisableScroll from '@hooks/useDisableScroll';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 
@@ -24,13 +24,13 @@ export type ConnectWalletModalProps = {
   /** Show the generic `window.ethereum` row for wallets that don't announce. */
   showLegacyInjected: boolean;
   /** Known wallets hidden because two providers announced their rdns this session. */
-  conflictedWallets: { id: string; name: string }[];
+  conflictedWallets: ConflictedWallet[];
 };
 
 /**
- * A wallet discovered over EIP-6963, rendered with the name and icon it announced.
- * The icon is a data URI supplied by the wallet, so we fall back to a generic mark if
- * it fails to decode.
+ * A wallet discovered over EIP-6963, rendered under the name our allowlist assigns it
+ * (never the announced one) and the icon it announced. That icon is a wallet-supplied
+ * data URI, so we fall back to a generic mark if it fails to decode.
  */
 const DetectedWalletRow = ({ wallet, onSelect }: { wallet: DiscoveredWallet; onSelect: () => void }) => {
   const [iconFailed, setIconFailed] = useState(false);
@@ -62,7 +62,7 @@ const DetectedWalletRow = ({ wallet, onSelect }: { wallet: DiscoveredWallet; onS
  * is the real wallet.
  */
 const ConflictedWalletRow = ({ name }: { name: string }) => (
-  <div className="connect-wallet-item connect-wallet-item--disabled">
+  <div className="connect-wallet-item connect-wallet-item--disabled connect-wallet-item--warning">
     <CircleExclamation className="connect-wallet-item__symbol" />
     <div className="connect-wallet-item__info">
       <div className="heading heading--emphasized">{name} hidden for your safety</div>
@@ -153,7 +153,7 @@ const ConnectWalletModal = ({
         onClose();
       };
 
-      // Wallets that announced over EIP-6963, each by the name and icon it gave us.
+      // Wallets that announced over EIP-6963, each under the name our allowlist gives it.
       const detectedRows = detectedWallets.map((wallet) => (
         <DetectedWalletRow key={wallet.id} wallet={wallet} onSelect={() => selectConnector(wallet.id)} />
       ));
@@ -191,6 +191,8 @@ const ConnectWalletModal = ({
         </div>
       );
 
+      // A conflict also suppresses the legacy row: offering bare `window.ethereum` while
+      // an impersonator is present reintroduces exactly the race EIP-6963 fixed.
       let browserWalletRows;
       if (detectedRows.length > 0 || conflictedRows.length > 0) {
         browserWalletRows = [...conflictedRows, ...detectedRows];
@@ -199,6 +201,10 @@ const ConnectWalletModal = ({
       } else {
         browserWalletRows = noWalletDetectedRow;
       }
+
+      // The Coinbase SDK routes to the extension when one is installed, so a conflict on
+      // its rdns taints this fixed row too — hide it rather than contradict the warning.
+      const coinbaseConflicted = conflictedWallets.some((wallet) => wallet.id === COINBASE_RDNS);
 
       return (
         <div className={`modal modal--connect-wallet${isOpen ? ' modal--active' : ''}`}>
@@ -248,16 +254,18 @@ const ConnectWalletModal = ({
                 </div>
                 <ArrowRight />
               </div>
-              <div
-                className="connect-wallet-item"
-                onClick={() => selectConnector('coinbaseWalletSDK')}
-              >
-                <Coinbase className="connect-wallet-item__symbol" />
-                <div className="connect-wallet-item__info">
-                  <div className="heading heading--emphasized">Coinbase Wallet</div>
+              {coinbaseConflicted ? null : (
+                <div
+                  className="connect-wallet-item"
+                  onClick={() => selectConnector('coinbaseWalletSDK')}
+                >
+                  <Coinbase className="connect-wallet-item__symbol" />
+                  <div className="connect-wallet-item__info">
+                    <div className="heading heading--emphasized">Coinbase Wallet</div>
+                  </div>
+                  <ArrowRight />
                 </div>
-                <ArrowRight />
-              </div>
+              )}
             </div>
             {terms}
           </div>

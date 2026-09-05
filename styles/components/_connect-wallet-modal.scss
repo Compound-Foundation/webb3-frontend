@@ -50,6 +50,9 @@
   }
 
   &--disabled {
+    // Nothing happens on click, so don't offer a pointer that promises otherwise.
+    cursor: default;
+
     &:hover {
       background: unset;
 
@@ -58,6 +61,20 @@
           fill: var(--icon--1);
         }
       }
+    }
+  }
+
+  // The warning glyph carries its own 16x16 size attributes, unlike the square wallet
+  // icons, so it needs an explicit box to line up with the 40px rows around it.
+  &--warning {
+    .connect-wallet-item__symbol {
+      width: 24px;
+      height: 24px;
+      margin: 0 8px;
+    }
+
+    .svg__path {
+      fill: var(--data--caution);
     }
   }
 }

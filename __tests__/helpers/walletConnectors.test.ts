@@ -106,6 +106,17 @@ describe('KNOWN_WALLETS', () => {
   test('legacy Ronin migration target stays on the allowlist', () => {
     expect(KNOWN_WALLETS['com.roninchain.wallet']).toBe('Ronin Wallet');
   });
+
+  // A typo in a hand-typed rdns silently makes a real wallet undiscoverable, and the
+  // lookup is deliberately case-sensitive, so pin the shape of every key.
+  test.each(Object.keys(KNOWN_WALLETS))('%s is a well-formed rdns', (rdns) => {
+    expect(rdns).toBe(rdns.trim().toLowerCase());
+    expect(rdns).toContain('.');
+  });
+
+  test('holds the wallets we reviewed, so a deletion has to be deliberate', () => {
+    expect(Object.keys(KNOWN_WALLETS)).toHaveLength(24);
+  });
 });
 
 describe('shouldShowLegacyInjected', () => {
@@ -152,4 +163,11 @@ describe('migrateStoredConnectorId', () => {
   test.each([['["Unknown"]'], ['[]'], ['{}'], ['null'], ['42'], ['']])('drops %s', (raw) => {
     expect(migrateStoredConnectorId(raw)).toBeNull();
   });
+
+  test.each([['["constructor"]'], ['["toString"]'], ['["__proto__"]']])(
+    'drops %s rather than resolving it through the prototype chain',
+    (raw) => {
+      expect(migrateStoredConnectorId(raw)).toBeNull();
+    },
+  );
 });

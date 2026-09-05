@@ -81,6 +81,16 @@ export type DiscoveredWallet = {
   icon?: string;
 };
 
+/** A known wallet withheld because two providers announced its RDNS. */
+export type ConflictedWallet = { id: string; name: string };
+
+/**
+ * Claimed by our configured Coinbase SDK connector, which is why it never appears as a
+ * discovered row. The SDK routes to the extension when one is installed, so a conflict
+ * here also taints the fixed Coinbase row and the modal hides that too.
+ */
+export const COINBASE_RDNS = 'com.coinbase.wallet';
+
 /** Announced wallets that pass the allowlist and are not conflicted, curated for display. */
 export function getDiscoveredWallets(
   connectors: readonly WagmiConnector[],
@@ -98,9 +108,7 @@ export function getDiscoveredWallets(
  * silent: those wallets were never shown, and naming them would let an attacker put
  * arbitrary self-chosen names into our warning copy.
  */
-export function getConflictedKnownWallets(
-  conflictedRdns: ReadonlySet<string>,
-): { id: string; name: string }[] {
+export function getConflictedKnownWallets(conflictedRdns: ReadonlySet<string>): ConflictedWallet[] {
   return [...conflictedRdns].flatMap((rdns) => {
     const name = curatedName(rdns);
     return name === undefined ? [] : [{ id: rdns, name }];
@@ -144,7 +152,11 @@ export function migrateStoredConnectorId(raw: string): string | null {
   }
 
   if (Array.isArray(parsed) && typeof parsed[0] === 'string') {
-    return LEGACY_CONNECTOR_IDS[parsed[0]] ?? null;
+    // Own-property lookup, as in `curatedName`: a stored `["constructor"]` would
+    // otherwise resolve to a function through the prototype chain.
+    return Object.prototype.hasOwnProperty.call(LEGACY_CONNECTOR_IDS, parsed[0])
+      ? LEGACY_CONNECTOR_IDS[parsed[0]]
+      : null;
   }
   // A bare id that happens to parse as JSON (a number, `null`, an object) is not
   // something we ever wrote.
