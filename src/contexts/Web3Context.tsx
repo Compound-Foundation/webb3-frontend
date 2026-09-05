@@ -22,6 +22,7 @@ import {
 
 import { CHAINS } from '@constants/chains';
 import { CONNECTOR_LOCALSTORAGE_KEY } from '@helpers/constants';
+import { getConflictedRdns, useConflictedRdns } from '@helpers/eip6963Security';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { isLedgerConnector } from '@helpers/Ledger';
 import { DEFAULT_MARKET } from '@helpers/markets';
@@ -171,6 +172,14 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
       return;
     }
 
+    // Two providers claimed this rdns, so we can't know which one the user chose last
+    // time. Drop the preference; the modal explains via the warning row.
+    if (getConflictedRdns().has(storedId)) {
+      window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
+      reconnectSettled.current = true;
+      return;
+    }
+
     const storedConnector = connectors.find((c) => c.id === storedId);
     if (!storedConnector) {
       // First miss: the wallet may not have announced yet, so wait for the next batch.
@@ -198,6 +207,17 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
       }
     }
   }, [connector]);
+
+  // The impersonation signal can arrive after connection: the impostor announces
+  // first, we connect to it, then the real wallet announces. Sever the session rather
+  // than keep signing with a provider we can no longer trust.
+  const conflictedRdns = useConflictedRdns();
+  useEffect(() => {
+    if (writeConnector !== undefined && conflictedRdns.has(writeConnector.id)) {
+      disconnect();
+      window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
+    }
+  }, [conflictedRdns, writeConnector, disconnect]);
 
   // Create functions to switch desired network
   const switchReadNetwork = useCallback(async (desiredChainId: number): Promise<boolean> => {
