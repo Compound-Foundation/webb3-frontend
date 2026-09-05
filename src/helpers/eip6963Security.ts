@@ -30,14 +30,23 @@ function onAnnounce(event: Event) {
   const detail = (event as CustomEvent<unknown>).detail;
   if (!isAnnouncedDetail(detail)) return;
 
-  // Wagmi's store holds this same object, so freezing here stops any later script from
-  // swapping `detail.provider` or rewriting `detail.info`. The provider itself stays
-  // mutable: wallets legitimately reassign `selectedAddress`/`chainId` on it.
+  // Wagmi's store holds this same object, so freezing here stops any script that runs
+  // AFTER us from swapping `detail.provider` or rewriting `detail.info`. It is not a
+  // guarantee against a listener registered before ours, which sees the object first —
+  // starting the watcher ahead of `createConfig` is the most we can do about that.
+  // The provider itself stays mutable: wallets legitimately reassign
+  // `selectedAddress`/`chainId` on it, and freezing it would break them.
+  // Each freeze is guarded separately so an exotic (throwing Proxy) outer object still
+  // leaves `info` frozen.
   try {
     Object.freeze(detail);
+  } catch {
+    // Unfreezable, but still trackable below.
+  }
+  try {
     Object.freeze(detail.info);
   } catch {
-    // An exotic object (a throwing Proxy) that can't be frozen can still be tracked.
+    // Same.
   }
 
   const { rdns, uuid } = detail.info;
@@ -53,7 +62,15 @@ function onAnnounce(event: Event) {
   const next = new Set(conflictedSnapshot);
   next.add(rdns);
   conflictedSnapshot = Object.freeze(next);
-  conflictListeners.forEach((listener) => listener());
+  conflictListeners.forEach((listener) => {
+    // One subscriber throwing must not swallow the conflict for the others — this is
+    // the notification that makes the UI warn and the live session disconnect.
+    try {
+      listener();
+    } catch (error) {
+      console.error('EIP-6963 conflict listener failed:', error);
+    }
+  });
 }
 
 /**

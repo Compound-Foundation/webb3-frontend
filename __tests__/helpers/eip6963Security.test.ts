@@ -21,6 +21,20 @@ function announce(rdns: string, uuid: string) {
   return detail;
 }
 
+// Listeners registered by a test to play the part of a wallet, removed after it so no
+// phantom announcement leaks into the next test's `loadWatcher()`.
+const walletListeners: (() => void)[] = [];
+
+function walletAnnouncingOnRequest(rdns: string, uuid: string) {
+  const listener = () => announce(rdns, uuid);
+  window.addEventListener('eip6963:requestProvider', listener);
+  walletListeners.push(() => window.removeEventListener('eip6963:requestProvider', listener));
+}
+
+afterEach(() => {
+  walletListeners.splice(0).forEach((remove) => remove());
+});
+
 describe('eip6963Security', () => {
   test('same rdns announced under two uuids is conflicted, and subscribers hear it once', () => {
     const watcher = loadWatcher();
@@ -72,7 +86,42 @@ describe('eip6963Security', () => {
       new CustomEvent('eip6963:announceProvider', { detail: { info: { rdns: 42, uuid: 'u' } } }),
     );
 
-    expect(watcher.getConflictedRdns().size).toBe(0);
+    // A malformed announcement must not poison the rdns->uuid map: a real pair still
+    // conflicts afterwards.
+    announce('io.metamask', 'uuid-1');
+    announce('io.metamask', 'uuid-2');
+    expect(watcher.getConflictedRdns().has('io.metamask')).toBe(true);
+  });
+
+  test('an unsubscribed listener stops hearing conflicts', () => {
+    const watcher = loadWatcher();
+    const listener = jest.fn();
+    const unsubscribe = watcher.subscribeToConflicts(listener);
+
+    unsubscribe();
+    announce('io.metamask', 'uuid-1');
+    announce('io.metamask', 'uuid-2');
+
+    expect(watcher.getConflictedRdns().has('io.metamask')).toBe(true);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  test('one listener throwing does not stop the others hearing the conflict', () => {
+    const watcher = loadWatcher();
+    const thrower = jest.fn(() => {
+      throw new Error('subscriber exploded');
+    });
+    const survivor = jest.fn();
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    watcher.subscribeToConflicts(thrower);
+    watcher.subscribeToConflicts(survivor);
+
+    announce('io.metamask', 'uuid-1');
+    announce('io.metamask', 'uuid-2');
+
+    expect(thrower).toHaveBeenCalledTimes(1);
+    expect(survivor).toHaveBeenCalledTimes(1);
+    jest.restoreAllMocks();
   });
 
   test('snapshot reference is stable until a conflict changes it', () => {
@@ -87,9 +136,20 @@ describe('eip6963Security', () => {
     expect(watcher.getConflictedRdns()).toBe(watcher.getConflictedRdns());
   });
 
-  test('startEip6963Watcher is idempotent', () => {
-    const watcher = loadWatcher();
+  test('startEip6963Watcher registers its announce listener only once', () => {
+    const addSpy = jest.spyOn(window, 'addEventListener');
+
+    const watcher = loadWatcher(); // starts the watcher
     watcher.startEip6963Watcher(); // second call must not double-register
+
+    const registrations = addSpy.mock.calls.filter(([type]) => type === 'eip6963:announceProvider');
+    expect(registrations).toHaveLength(1);
+    addSpy.mockRestore();
+  });
+
+  test('notifies subscribers once even after a repeated start', () => {
+    const watcher = loadWatcher();
+    watcher.startEip6963Watcher();
 
     const listener = jest.fn();
     watcher.subscribeToConflicts(listener);
@@ -102,8 +162,7 @@ describe('eip6963Security', () => {
   test('requests re-announcement on start, so it hears wallets that announced first', () => {
     // A wallet that announced before the watcher started re-announces (same uuid, per
     // spec) when it hears eip6963:requestProvider.
-    const wallet = (rdns: string, uuid: string) => () => announce(rdns, uuid);
-    window.addEventListener('eip6963:requestProvider', wallet('io.metamask', 'uuid-early'));
+    walletAnnouncingOnRequest('io.metamask', 'uuid-early');
 
     const watcher = loadWatcher();
     announce('io.metamask', 'uuid-impostor');
