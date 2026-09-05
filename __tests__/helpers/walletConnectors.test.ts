@@ -48,6 +48,13 @@ describe('getDiscoveredWallets', () => {
     expect(getDiscoveredWallets([...CONFIGURED, UNLISTED], NO_CONFLICTS)).toEqual([]);
   });
 
+  test.each(['constructor', 'toString', 'hasOwnProperty', '__proto__'])(
+    'drops an rdns of %s, which only exists on the prototype chain',
+    (rdns) => {
+      expect(getDiscoveredWallets([connector(rdns, 'injected')], NO_CONFLICTS)).toEqual([]);
+    },
+  );
+
   test('displays our curated name, never the announced one', () => {
     expect(getDiscoveredWallets([SPOOFED_NAME], NO_CONFLICTS)).toEqual([
       { id: 'io.rabby', name: 'Rabby', icon: undefined },
@@ -84,6 +91,10 @@ describe('getConflictedKnownWallets', () => {
 
   test('stays silent about conflicted rdns we do not list', () => {
     expect(getConflictedKnownWallets(new Set(['com.evil.fake']))).toEqual([]);
+  });
+
+  test('stays silent about a conflicted rdns that only exists on the prototype chain', () => {
+    expect(getConflictedKnownWallets(new Set(['constructor', 'toString']))).toEqual([]);
   });
 
   test('is empty with no conflicts', () => {

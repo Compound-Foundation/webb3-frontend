@@ -59,6 +59,14 @@ function sanitizeIcon(icon: string | undefined): string | undefined {
   return icon !== undefined && SAFE_ICON_PATTERN.test(icon) ? icon : undefined;
 }
 
+/**
+ * Own-property lookup, never `in`: an rdns like `constructor` or `toString` would
+ * otherwise pass the allowlist through the prototype chain and resolve to a function.
+ */
+function curatedName(rdns: string): string | undefined {
+  return Object.prototype.hasOwnProperty.call(KNOWN_WALLETS, rdns) ? KNOWN_WALLETS[rdns] : undefined;
+}
+
 /** Connectors that got into wagmi through EIP-6963 discovery, before any filtering. */
 function announcedConnectors(connectors: readonly WagmiConnector[]): WagmiConnector[] {
   return connectors.filter(
@@ -78,13 +86,11 @@ export function getDiscoveredWallets(
   connectors: readonly WagmiConnector[],
   conflictedRdns: ReadonlySet<string>,
 ): DiscoveredWallet[] {
-  return announcedConnectors(connectors)
-    .filter((connector) => connector.id in KNOWN_WALLETS && !conflictedRdns.has(connector.id))
-    .map((connector) => ({
-      id: connector.id,
-      name: KNOWN_WALLETS[connector.id],
-      icon: sanitizeIcon(connector.icon),
-    }));
+  return announcedConnectors(connectors).flatMap((connector) => {
+    const name = curatedName(connector.id);
+    if (name === undefined || conflictedRdns.has(connector.id)) return [];
+    return [{ id: connector.id, name, icon: sanitizeIcon(connector.icon) }];
+  });
 }
 
 /**
@@ -95,9 +101,10 @@ export function getDiscoveredWallets(
 export function getConflictedKnownWallets(
   conflictedRdns: ReadonlySet<string>,
 ): { id: string; name: string }[] {
-  return [...conflictedRdns]
-    .filter((rdns) => rdns in KNOWN_WALLETS)
-    .map((rdns) => ({ id: rdns, name: KNOWN_WALLETS[rdns] }));
+  return [...conflictedRdns].flatMap((rdns) => {
+    const name = curatedName(rdns);
+    return name === undefined ? [] : [{ id: rdns, name }];
+  });
 }
 
 /**

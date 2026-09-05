@@ -34,7 +34,7 @@ const renderModal = (props: Partial<React.ComponentProps<typeof ConnectWalletMod
 };
 
 describe('ConnectWalletModal', () => {
-  test('renders a row per EIP-6963 wallet, using its announced name', () => {
+  test('renders a row per EIP-6963 wallet, using the curated name it was given', () => {
     renderModal({ detectedWallets: [METAMASK, RONIN] });
 
     expect(screen.getByText('MetaMask')).toBeInTheDocument();
