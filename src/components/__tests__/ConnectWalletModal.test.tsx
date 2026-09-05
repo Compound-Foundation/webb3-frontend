@@ -26,6 +26,7 @@ const renderModal = (props: Partial<React.ComponentProps<typeof ConnectWalletMod
       onSelectConnector={onSelectConnector}
       detectedWallets={[]}
       showLegacyInjected={false}
+      conflictedWallets={[]}
       {...props}
     />,
   );
@@ -56,6 +57,7 @@ describe('ConnectWalletModal', () => {
         onSelectConnector={jest.fn()}
         detectedWallets={[]}
         showLegacyInjected
+        conflictedWallets={[]}
       />,
     );
     expect(screen.getByText('Browser Wallet')).toBeInTheDocument();
@@ -113,6 +115,27 @@ describe('ConnectWalletModal', () => {
     expect(screen.queryByRole('presentation', { hidden: true })).not.toBeInTheDocument();
     // The wallet is still selectable, just without its own artwork.
     expect(screen.getByText('MetaMask')).toBeInTheDocument();
+  });
+
+  test('warns about a conflicted wallet instead of listing it', async () => {
+    const { onSelectConnector } = renderModal({
+      conflictedWallets: [{ id: 'io.metamask', name: 'MetaMask' }],
+    });
+
+    expect(screen.getByText('MetaMask hidden for your safety')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('MetaMask hidden for your safety'));
+    expect(onSelectConnector).not.toHaveBeenCalled();
+  });
+
+  test('a warning row suppresses the no-wallet row but not detected wallets', () => {
+    renderModal({
+      detectedWallets: [RONIN],
+      conflictedWallets: [{ id: 'io.metamask', name: 'MetaMask' }],
+    });
+
+    expect(screen.getByText('MetaMask hidden for your safety')).toBeInTheDocument();
+    expect(screen.getByText('Ronin Wallet')).toBeInTheDocument();
+    expect(screen.queryByText('No browser wallet detected')).not.toBeInTheDocument();
   });
 
   test('renders a wallet that announced no icon at all', () => {

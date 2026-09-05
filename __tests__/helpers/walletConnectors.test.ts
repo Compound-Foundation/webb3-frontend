@@ -1,7 +1,9 @@
 import type { Connector as WagmiConnector } from 'wagmi';
 
 import {
+  getConflictedKnownWallets,
   getDiscoveredWallets,
+  KNOWN_WALLETS,
   migrateStoredConnectorId,
   shouldShowLegacyInjected,
 } from '@helpers/walletConnectors';
@@ -19,20 +21,79 @@ const LEDGER = connector('ledger', 'ledger', 'Ledger');
 
 const CONFIGURED = [GENERIC_INJECTED, WALLET_CONNECT, COINBASE, LEDGER];
 
+// Announces an rdns we do not list; must never render.
+const UNLISTED = connector('com.evil.fake', 'injected', 'Totally Legit Wallet');
+// Announced name differs from our curated one; the curated name must win.
+const SPOOFED_NAME = connector('io.rabby', 'injected', 'MetaMask');
+
+const NO_CONFLICTS: ReadonlySet<string> = new Set();
+
 describe('getDiscoveredWallets', () => {
-  test('returns wallets announced over EIP-6963, with their name and icon', () => {
-    expect(getDiscoveredWallets([...CONFIGURED, METAMASK, RABBY])).toEqual([
+  test('returns allowlisted wallets with curated names and their announced icon', () => {
+    expect(getDiscoveredWallets([...CONFIGURED, METAMASK, RABBY], NO_CONFLICTS)).toEqual([
       { id: 'io.metamask', name: 'MetaMask', icon: 'data:image/svg+xml;base64,AAAA' },
       { id: 'io.rabby', name: 'Rabby', icon: undefined },
     ]);
   });
 
   test('excludes every connector we configure ourselves', () => {
-    expect(getDiscoveredWallets(CONFIGURED)).toEqual([]);
+    expect(getDiscoveredWallets(CONFIGURED, NO_CONFLICTS)).toEqual([]);
   });
 
   test('is empty when no connectors exist at all', () => {
-    expect(getDiscoveredWallets([])).toEqual([]);
+    expect(getDiscoveredWallets([], NO_CONFLICTS)).toEqual([]);
+  });
+
+  test('drops wallets whose rdns is not on the allowlist', () => {
+    expect(getDiscoveredWallets([...CONFIGURED, UNLISTED], NO_CONFLICTS)).toEqual([]);
+  });
+
+  test('displays our curated name, never the announced one', () => {
+    expect(getDiscoveredWallets([SPOOFED_NAME], NO_CONFLICTS)).toEqual([
+      { id: 'io.rabby', name: 'Rabby', icon: undefined },
+    ]);
+  });
+
+  test('drops a wallet whose rdns is conflicted', () => {
+    const conflicted = new Set(['io.metamask']);
+    expect(getDiscoveredWallets([METAMASK, RABBY], conflicted)).toEqual([
+      { id: 'io.rabby', name: 'Rabby', icon: undefined },
+    ]);
+  });
+
+  test.each([
+    ['data:image/png;base64,AA', 'data:image/png;base64,AA'],
+    ['data:image/svg+xml;base64,AA', 'data:image/svg+xml;base64,AA'],
+    ['data:image/webp,payload', 'data:image/webp,payload'],
+    ['https://evil.example/pixel.png', undefined],
+    ['data:text/html;base64,AA', undefined],
+    // eslint-disable-next-line no-script-url
+    ['javascript:alert(1)', undefined],
+  ])('icon %s becomes %s', (icon, expected) => {
+    const [wallet] = getDiscoveredWallets([connector('io.metamask', 'injected', 'x', icon)], NO_CONFLICTS);
+    expect(wallet.icon).toBe(expected);
+  });
+});
+
+describe('getConflictedKnownWallets', () => {
+  test('names conflicted allowlisted wallets with the curated name', () => {
+    expect(getConflictedKnownWallets(new Set(['io.metamask']))).toEqual([
+      { id: 'io.metamask', name: 'MetaMask' },
+    ]);
+  });
+
+  test('stays silent about conflicted rdns we do not list', () => {
+    expect(getConflictedKnownWallets(new Set(['com.evil.fake']))).toEqual([]);
+  });
+
+  test('is empty with no conflicts', () => {
+    expect(getConflictedKnownWallets(new Set())).toEqual([]);
+  });
+});
+
+describe('KNOWN_WALLETS', () => {
+  test('legacy Ronin migration target stays on the allowlist', () => {
+    expect(KNOWN_WALLETS['com.roninchain.wallet']).toBe('Ronin Wallet');
   });
 });
 
@@ -49,6 +110,11 @@ describe('shouldShowLegacyInjected', () => {
   test('is false when a wallet announced, even with window.ethereum present', () => {
     (window as { ethereum?: unknown }).ethereum = {};
     expect(shouldShowLegacyInjected([...CONFIGURED, METAMASK])).toBe(false);
+  });
+
+  test('stays false when a wallet announced but was filtered off the allowlist', () => {
+    (window as { ethereum?: unknown }).ethereum = {};
+    expect(shouldShowLegacyInjected([...CONFIGURED, UNLISTED])).toBe(false);
   });
 
   test('is false when there is no injected provider at all', () => {

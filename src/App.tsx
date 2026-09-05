@@ -13,8 +13,13 @@ import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import { CurrencyContextProvider } from '@contexts/CurrencyContext';
 import { initializeContext, getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { useWeb3Context } from '@contexts/Web3Context';
+import { useConflictedRdns } from '@helpers/eip6963Security';
 import { estimateGasForActions, getKeyForActions, initialEstimatedGasMap } from '@helpers/gasEstimator';
-import { getDiscoveredWallets, shouldShowLegacyInjected } from '@helpers/walletConnectors';
+import {
+  getConflictedKnownWallets,
+  getDiscoveredWallets,
+  shouldShowLegacyInjected,
+} from '@helpers/walletConnectors';
 import { useActionQueue } from '@hooks/useActionQueue';
 import { useCometState } from '@hooks/useCometState';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
@@ -39,7 +44,12 @@ function App({ Component, pageProps }: any) {
   // EIP-6963 announcements can arrive after mount, so wagmi appends to `connectors` as
   // wallets show up; recompute the modal's list when it changes.
   const { connectors } = useConnect();
-  const detectedWallets = useMemo(() => getDiscoveredWallets(connectors), [connectors]);
+  const conflictedRdns = useConflictedRdns();
+  const detectedWallets = useMemo(
+    () => getDiscoveredWallets(connectors, conflictedRdns),
+    [connectors, conflictedRdns],
+  );
+  const conflictedWallets = useMemo(() => getConflictedKnownWallets(conflictedRdns), [conflictedRdns]);
   const showLegacyInjected = useMemo(() => shouldShowLegacyInjected(connectors), [connectors]);
 
   const { transactions, addTransaction, clearTransactions } = useTransactionManager(web3);
@@ -192,6 +202,7 @@ function App({ Component, pageProps }: any) {
               }}
               detectedWallets={detectedWallets}
               showLegacyInjected={showLegacyInjected}
+              conflictedWallets={conflictedWallets}
             />
             <NetworkSwitchModal state={networkSwitchState} onSwitchNetwork={handleSwitchNetwork} />
             <div className="app-content">

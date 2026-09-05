@@ -13,6 +13,59 @@ export const CONFIGURED_CONNECTOR_IDS: ReadonlySet<string> = new Set([
   'ledger',
 ]);
 
+/**
+ * Hard allowlist of wallets we render from EIP-6963 discovery, keyed by announced
+ * RDNS. The value is the display name we use — never the announced one, so a listed
+ * wallet cannot spoof its label. RDNS values are self-attested (EIP-6963 security
+ * considerations), so an unlisted announcement is not shown at all; those users still
+ * have the WalletConnect and Coinbase rows.
+ */
+export const KNOWN_WALLETS: Readonly<Record<string, string>> = Object.freeze({
+  'com.anchorage.connect': 'Anchorage Digital',
+  'app.backpack': 'Backpack',
+  'org.base.account': 'Base Account',
+  'com.binance.wallet': 'Binance Wallet',
+  'com.bitget.web3': 'Bitget Wallet',
+  'com.brave.wallet': 'Brave Wallet',
+  'com.bybit': 'Bybit Wallet',
+  // Claimed by our configured Coinbase SDK connector, so it never appears as a
+  // discovered row; listed so a conflict on it still raises the warning.
+  'com.coinbase.wallet': 'Base (formerly Coinbase Wallet)',
+  'app.core.extension': 'Core Wallet',
+  'com.enkrypt': 'Enkrypt',
+  'io.gate.wallet': 'Gate Wallet',
+  'com.gemini.wallet': 'Gemini Wallet',
+  'io.metamask': 'MetaMask',
+  'com.okex.wallet': 'OKX Wallet',
+  'so.onekey.app.wallet': 'OneKey',
+  'app.phantom': 'Phantom',
+  'io.rabby': 'Rabby',
+  'me.rainbow': 'Rainbow',
+  'com.roninchain.wallet': 'Ronin Wallet',
+  'xyz.talisman': 'Talisman',
+  'com.trustwallet.app': 'Trust Wallet',
+  'org.uniswap': 'Uniswap Wallet',
+  'io.zerion.wallet': 'Zerion',
+  'io.zilpay': 'ZilPay',
+});
+
+// The spec requires a data-URI icon; anything else — notably a remote URL, which would
+// leak the user's IP to the wallet's server the moment the list renders — is dropped
+// and the row falls back to the generic mark. `<img>` rendering already stops SVG
+// script execution; this closes the non-image and remote-fetch vectors.
+const SAFE_ICON_PATTERN = /^data:image\/(png|jpe?g|gif|webp|svg\+xml)[;,]/;
+
+function sanitizeIcon(icon: string | undefined): string | undefined {
+  return icon !== undefined && SAFE_ICON_PATTERN.test(icon) ? icon : undefined;
+}
+
+/** Connectors that got into wagmi through EIP-6963 discovery, before any filtering. */
+function announcedConnectors(connectors: readonly WagmiConnector[]): WagmiConnector[] {
+  return connectors.filter(
+    (connector) => connector.type === 'injected' && !CONFIGURED_CONNECTOR_IDS.has(connector.id),
+  );
+}
+
 export type DiscoveredWallet = {
   /** The wallet's EIP-6963 RDNS, e.g. `io.metamask`. */
   id: string;
@@ -20,21 +73,43 @@ export type DiscoveredWallet = {
   icon?: string;
 };
 
-/** Wallets that announced themselves over EIP-6963. */
-export function getDiscoveredWallets(connectors: readonly WagmiConnector[]): DiscoveredWallet[] {
-  return connectors
-    .filter((connector) => connector.type === 'injected' && !CONFIGURED_CONNECTOR_IDS.has(connector.id))
-    .map((connector) => ({ id: connector.id, name: connector.name, icon: connector.icon }));
+/** Announced wallets that pass the allowlist and are not conflicted, curated for display. */
+export function getDiscoveredWallets(
+  connectors: readonly WagmiConnector[],
+  conflictedRdns: ReadonlySet<string>,
+): DiscoveredWallet[] {
+  return announcedConnectors(connectors)
+    .filter((connector) => connector.id in KNOWN_WALLETS && !conflictedRdns.has(connector.id))
+    .map((connector) => ({
+      id: connector.id,
+      name: KNOWN_WALLETS[connector.id],
+      icon: sanitizeIcon(connector.icon),
+    }));
+}
+
+/**
+ * Conflicted rdns values we can name for the warning row. Unlisted conflicts stay
+ * silent: those wallets were never shown, and naming them would let an attacker put
+ * arbitrary self-chosen names into our warning copy.
+ */
+export function getConflictedKnownWallets(
+  conflictedRdns: ReadonlySet<string>,
+): { id: string; name: string }[] {
+  return [...conflictedRdns]
+    .filter((rdns) => rdns in KNOWN_WALLETS)
+    .map((rdns) => ({ id: rdns, name: KNOWN_WALLETS[rdns] }));
 }
 
 /**
  * Mobile in-app browsers and pre-6963 extensions set `window.ethereum` without
  * announcing. We fall back to the generic `injected()` connector for them, but only
  * when nothing announced — otherwise it duplicates a wallet already listed by name,
- * and connects to whichever extension won the race for `window.ethereum`.
+ * and connects to whichever extension won the race for `window.ethereum`. Announcements
+ * we filtered out keep it hidden too, since the legacy row would reintroduce exactly
+ * that `window.ethereum` race.
  */
 export function shouldShowLegacyInjected(connectors: readonly WagmiConnector[]): boolean {
-  if (getDiscoveredWallets(connectors).length > 0) return false;
+  if (announcedConnectors(connectors).length > 0) return false;
   return typeof window !== 'undefined' && window.ethereum != null;
 }
 

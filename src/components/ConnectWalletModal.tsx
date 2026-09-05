@@ -8,7 +8,7 @@ import type { DiscoveredWallet } from '@helpers/walletConnectors';
 import useDisableScroll from '@hooks/useDisableScroll';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 
-import { ArrowLeft, ArrowRight, CircleClose, Wallet } from './Icons';
+import { ArrowLeft, ArrowRight, CircleClose, CircleExclamation, Wallet } from './Icons';
 import { BrowserWallets } from './Icons/BrowserWallets';
 import { Coinbase } from './Icons/Coinbase';
 import { LedgerWallet } from './Icons/LedgerWallet';
@@ -23,6 +23,8 @@ export type ConnectWalletModalProps = {
   detectedWallets: DiscoveredWallet[];
   /** Show the generic `window.ethereum` row for wallets that don't announce. */
   showLegacyInjected: boolean;
+  /** Known wallets hidden because two providers announced their rdns this session. */
+  conflictedWallets: { id: string; name: string }[];
 };
 
 /**
@@ -54,6 +56,23 @@ const DetectedWalletRow = ({ wallet, onSelect }: { wallet: DiscoveredWallet; onS
   );
 };
 
+/**
+ * Shown in place of a known wallet whose rdns was announced by two different providers
+ * — an impersonation signal. Deliberately not clickable: we cannot tell which announcer
+ * is the real wallet.
+ */
+const ConflictedWalletRow = ({ name }: { name: string }) => (
+  <div className="connect-wallet-item connect-wallet-item--disabled">
+    <CircleExclamation className="connect-wallet-item__symbol" />
+    <div className="connect-wallet-item__info">
+      <div className="heading heading--emphasized">{name} hidden for your safety</div>
+      <div className="meta text-color--2">
+        Multiple extensions claimed to be {name}. Review your browser extensions.
+      </div>
+    </div>
+  </div>
+);
+
 enum ConnectWalletModalSteps {
   ChooseWalletConnector = 'choose-wallet-connector',
   PlugLedgerIn = 'plugin-ledger',
@@ -67,6 +86,7 @@ const ConnectWalletModal = ({
   onSelectConnector,
   detectedWallets,
   showLegacyInjected,
+  conflictedWallets,
 }: ConnectWalletModalProps) => {
   const [modalStep, setModalStep] = useState(ConnectWalletModalSteps.ChooseWalletConnector);
   const [selectedLedgerPath, setSelectedLedgerPath] = useState<'live' | 'legacy'>('live');
@@ -138,6 +158,12 @@ const ConnectWalletModal = ({
         <DetectedWalletRow key={wallet.id} wallet={wallet} onSelect={() => selectConnector(wallet.id)} />
       ));
 
+      // Warnings render above the wallet list so a hidden wallet is explained, not
+      // silently missing.
+      const conflictedRows = conflictedWallets.map((wallet) => (
+        <ConflictedWalletRow key={wallet.id} name={wallet.name} />
+      ));
+
       // Only reached when nothing announced: a mobile in-app browser, or an extension
       // predating EIP-6963.
       const legacyInjectedRow = (
@@ -166,8 +192,8 @@ const ConnectWalletModal = ({
       );
 
       let browserWalletRows;
-      if (detectedRows.length > 0) {
-        browserWalletRows = detectedRows;
+      if (detectedRows.length > 0 || conflictedRows.length > 0) {
+        browserWalletRows = [...conflictedRows, ...detectedRows];
       } else if (showLegacyInjected) {
         browserWalletRows = legacyInjectedRow;
       } else {
