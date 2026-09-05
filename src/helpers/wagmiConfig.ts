@@ -3,6 +3,7 @@ import { type Chain } from 'wagmi/chains';
 import { injected, walletConnect, coinbaseWallet } from 'wagmi/connectors';
 
 import { CHAINS } from '@constants/chains';
+import { startEip6963Watcher } from '@helpers/eip6963Security';
 import { ledgerConnector } from '@helpers/Ledger';
 
 import { WALLECT_CONNECT_PROJECT_ID } from '../../envVars';
@@ -23,6 +24,10 @@ const supportedChains = Object.values(CHAINS).map(
 ) as unknown as readonly [Chain, ...Chain[]];
 
 const transports = Object.fromEntries(supportedChains.map((chain) => [chain.id, http()]));
+
+// Register before wagmi's own discovery listener so every announcement is frozen and
+// checked for RDNS conflicts before wagmi stores it.
+startEip6963Watcher();
 
 export const config = createConfig({
   chains: supportedChains,
