@@ -1,15 +1,20 @@
 import { useMemo } from 'react';
 import { useConnect } from 'wagmi';
 
+import { useConflictedRdns } from '@helpers/eip6963Security';
 import {
+  getConflictedKnownWallets,
   getDiscoveredWallets,
   shouldShowLegacyInjected,
+  type ConflictedWallet,
   type DiscoveredWallet,
 } from '@helpers/walletConnectors';
 
 export type WalletRows = {
-  /** Wallets that announced themselves over EIP-6963. */
+  /** Allowlisted wallets that announced themselves over EIP-6963. */
   detected: DiscoveredWallet[];
+  /** Known wallets withheld because two providers announced their RDNS. */
+  conflicted: ConflictedWallet[];
   /** Whether to offer the generic `window.ethereum` row for wallets that don't announce. */
   showLegacy: boolean;
 };
@@ -25,12 +30,14 @@ export type WalletRows = {
  */
 export function useWalletRows(): WalletRows {
   const { connectors } = useConnect();
+  const conflictedRdns = useConflictedRdns();
 
   return useMemo(
     () => ({
-      detected: getDiscoveredWallets(connectors),
+      detected: getDiscoveredWallets(connectors, conflictedRdns),
+      conflicted: getConflictedKnownWallets(conflictedRdns),
       showLegacy: shouldShowLegacyInjected(connectors),
     }),
-    [connectors],
+    [connectors, conflictedRdns],
   );
 }

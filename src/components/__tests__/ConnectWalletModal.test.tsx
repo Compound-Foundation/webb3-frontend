@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
-import type { DiscoveredWallet } from '@helpers/walletConnectors';
+import type { ConflictedWallet, DiscoveredWallet } from '@helpers/walletConnectors';
 import { useWalletRows } from '@hooks/useWalletRows';
 
 import ConnectWalletModal from '../ConnectWalletModal';
@@ -12,7 +12,8 @@ jest.mock('@helpers/Ledger', () => ({
 }));
 
 // The row-derivation helpers keep their own unit tests; here we stub the hook so these
-// cases drive the component directly.
+// cases drive the component directly. COINBASE_RDNS stays real, so the Coinbase-row test
+// is still pinned to the value the component actually compares against.
 jest.mock('@hooks/useWalletRows', () => ({
   useWalletRows: jest.fn(),
 }));
@@ -26,23 +27,34 @@ const METAMASK: DiscoveredWallet = {
 };
 const RONIN: DiscoveredWallet = { id: 'com.roninchain.wallet', name: 'Ronin Wallet' };
 
+const CONFLICTED_METAMASK = { id: 'io.metamask', name: 'MetaMask' };
+
 type WalletRowsOverrides = {
   detectedWallets?: DiscoveredWallet[];
   showLegacyInjected?: boolean;
+  conflictedWallets?: ConflictedWallet[];
 };
 
-const renderModal = ({ detectedWallets = [], showLegacyInjected = false }: WalletRowsOverrides = {}) => {
-  mockedUseWalletRows.mockReturnValue({ detected: detectedWallets, showLegacy: showLegacyInjected });
+const renderModal = ({
+  detectedWallets = [],
+  showLegacyInjected = false,
+  conflictedWallets = [],
+}: WalletRowsOverrides = {}) => {
+  mockedUseWalletRows.mockReturnValue({
+    detected: detectedWallets,
+    conflicted: conflictedWallets,
+    showLegacy: showLegacyInjected,
+  });
 
   const onSelectConnector = jest.fn();
-  const { unmount } = render(
+  const { container, unmount } = render(
     <ConnectWalletModal isOpen onRequestClose={jest.fn()} onSelectConnector={onSelectConnector} />,
   );
-  return { onSelectConnector, unmount };
+  return { onSelectConnector, container, unmount };
 };
 
 describe('ConnectWalletModal', () => {
-  test('renders a row per EIP-6963 wallet, using its announced name', () => {
+  test('renders a row per EIP-6963 wallet, using the curated name it was given', () => {
     renderModal({ detectedWallets: [METAMASK, RONIN] });
 
     expect(screen.getByText('MetaMask')).toBeInTheDocument();
@@ -114,6 +126,59 @@ describe('ConnectWalletModal', () => {
     expect(screen.queryByRole('presentation', { hidden: true })).not.toBeInTheDocument();
     // The wallet is still selectable, just without its own artwork.
     expect(screen.getByText('MetaMask')).toBeInTheDocument();
+  });
+
+  test('warns about a conflicted wallet instead of listing it', async () => {
+    const { onSelectConnector } = renderModal({
+      conflictedWallets: [{ id: 'io.metamask', name: 'MetaMask' }],
+    });
+
+    expect(screen.getByText('MetaMask hidden for your safety')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('MetaMask hidden for your safety'));
+    expect(onSelectConnector).not.toHaveBeenCalled();
+  });
+
+  test('a warning row suppresses the no-wallet row but not detected wallets', () => {
+    renderModal({
+      detectedWallets: [RONIN],
+      conflictedWallets: [{ id: 'io.metamask', name: 'MetaMask' }],
+    });
+
+    expect(screen.getByText('MetaMask hidden for your safety')).toBeInTheDocument();
+    expect(screen.getByText('Ronin Wallet')).toBeInTheDocument();
+    expect(screen.queryByText('No browser wallet detected')).not.toBeInTheDocument();
+  });
+
+  test('a warning row also suppresses the legacy browser wallet row', () => {
+    // Offering bare `window.ethereum` while an impersonator is present would
+    // reintroduce the race EIP-6963 exists to fix.
+    renderModal({ showLegacyInjected: true, conflictedWallets: [CONFLICTED_METAMASK] });
+
+    expect(screen.getByText('MetaMask hidden for your safety')).toBeInTheDocument();
+    expect(screen.queryByText('Browser Wallet')).not.toBeInTheDocument();
+  });
+
+  test('warning rows render above the wallets that are still offered', () => {
+    const { container } = renderModal({
+      detectedWallets: [RONIN],
+      conflictedWallets: [CONFLICTED_METAMASK],
+    });
+
+    const headings = [...container.querySelectorAll('.connect-wallet-item__info .heading')].map(
+      (node) => node.textContent,
+    );
+    expect(headings.indexOf('MetaMask hidden for your safety')).toBeLessThan(
+      headings.indexOf('Ronin Wallet'),
+    );
+  });
+
+  test('hides the fixed Coinbase row when its rdns is impersonated', () => {
+    // The Coinbase SDK routes to the extension when installed, so that row is tainted
+    // by the same conflict — leaving it would contradict the warning above it.
+    renderModal({ conflictedWallets: [{ id: 'com.coinbase.wallet', name: 'Base (formerly Coinbase Wallet)' }] });
+
+    expect(screen.queryByText('Coinbase Wallet')).not.toBeInTheDocument();
+    expect(screen.getByText('WalletConnect')).toBeInTheDocument();
   });
 
   test('renders a wallet that announced no icon at all', () => {

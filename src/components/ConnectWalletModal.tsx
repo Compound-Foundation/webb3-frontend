@@ -4,12 +4,12 @@ import { Connector } from '@contexts/Web3Context';
 import { getShortAddress } from '@helpers/address';
 import { getLedgerAddresses } from '@helpers/Ledger';
 import { TERMS_URL } from '@helpers/urls';
-import type { DiscoveredWallet } from '@helpers/walletConnectors';
+import { COINBASE_RDNS, type DiscoveredWallet } from '@helpers/walletConnectors';
 import useDisableScroll from '@hooks/useDisableScroll';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 import { useWalletRows } from '@hooks/useWalletRows';
 
-import { ArrowLeft, ArrowRight, CircleClose, Wallet } from './Icons';
+import { ArrowLeft, ArrowRight, CircleClose, CircleExclamation, Wallet } from './Icons';
 import { BrowserWallets } from './Icons/BrowserWallets';
 import { Coinbase } from './Icons/Coinbase';
 import { LedgerWallet } from './Icons/LedgerWallet';
@@ -23,9 +23,9 @@ export type ConnectWalletModalProps = {
 };
 
 /**
- * A wallet discovered over EIP-6963, rendered with the name and icon it announced.
- * The icon is a data URI supplied by the wallet, so we fall back to a generic mark if
- * it fails to decode.
+ * A wallet discovered over EIP-6963, rendered under the name our allowlist assigns it
+ * (never the announced one) and the icon it announced. That icon is a wallet-supplied
+ * data URI, so we fall back to a generic mark if it fails to decode.
  */
 const DetectedWalletRow = ({ wallet, onSelect }: { wallet: DiscoveredWallet; onSelect: () => void }) => {
   const [iconFailed, setIconFailed] = useState(false);
@@ -51,6 +51,23 @@ const DetectedWalletRow = ({ wallet, onSelect }: { wallet: DiscoveredWallet; onS
   );
 };
 
+/**
+ * Shown in place of a known wallet whose rdns was announced by two different providers
+ * — an impersonation signal. Deliberately not clickable: we cannot tell which announcer
+ * is the real wallet.
+ */
+const ConflictedWalletRow = ({ name }: { name: string }) => (
+  <div className="connect-wallet-item connect-wallet-item--disabled connect-wallet-item--warning">
+    <CircleExclamation className="connect-wallet-item__symbol" />
+    <div className="connect-wallet-item__info">
+      <div className="heading heading--emphasized">{name} hidden for your safety</div>
+      <div className="meta text-color--2">
+        Multiple extensions claimed to be {name}. Review your browser extensions.
+      </div>
+    </div>
+  </div>
+);
+
 enum ConnectWalletModalSteps {
   ChooseWalletConnector = 'choose-wallet-connector',
   PlugLedgerIn = 'plugin-ledger',
@@ -59,7 +76,11 @@ enum ConnectWalletModalSteps {
 }
 
 const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector }: ConnectWalletModalProps) => {
-  const { detected: detectedWallets, showLegacy: showLegacyInjected } = useWalletRows();
+  const {
+    detected: detectedWallets,
+    conflicted: conflictedWallets,
+    showLegacy: showLegacyInjected,
+  } = useWalletRows();
   const [modalStep, setModalStep] = useState(ConnectWalletModalSteps.ChooseWalletConnector);
   const [selectedLedgerPath, setSelectedLedgerPath] = useState<'live' | 'legacy'>('live');
   const [selectedAddress, setSelectedAddress] = useState<[string, string] | undefined>();
@@ -125,9 +146,15 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
         onClose();
       };
 
-      // Wallets that announced over EIP-6963, each by the name and icon it gave us.
+      // Wallets that announced over EIP-6963, each under the name our allowlist gives it.
       const detectedRows = detectedWallets.map((wallet) => (
         <DetectedWalletRow key={wallet.id} wallet={wallet} onSelect={() => selectConnector(wallet.id)} />
+      ));
+
+      // Warnings render above the wallet list so a hidden wallet is explained, not
+      // silently missing.
+      const conflictedRows = conflictedWallets.map((wallet) => (
+        <ConflictedWalletRow key={wallet.id} name={wallet.name} />
       ));
 
       // Only reached when nothing announced: a mobile in-app browser, or an extension
@@ -157,14 +184,20 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
         </div>
       );
 
+      // A conflict also suppresses the legacy row: offering bare `window.ethereum` while
+      // an impersonator is present reintroduces exactly the race EIP-6963 fixed.
       let browserWalletRows;
-      if (detectedRows.length > 0) {
-        browserWalletRows = detectedRows;
+      if (detectedRows.length > 0 || conflictedRows.length > 0) {
+        browserWalletRows = [...conflictedRows, ...detectedRows];
       } else if (showLegacyInjected) {
         browserWalletRows = legacyInjectedRow;
       } else {
         browserWalletRows = noWalletDetectedRow;
       }
+
+      // The Coinbase SDK routes to the extension when one is installed, so a conflict on
+      // its rdns taints this fixed row too — hide it rather than contradict the warning.
+      const coinbaseConflicted = conflictedWallets.some((wallet) => wallet.id === COINBASE_RDNS);
 
       return (
         <div className={`modal modal--connect-wallet${isOpen ? ' modal--active' : ''}`}>
@@ -214,16 +247,18 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
                 </div>
                 <ArrowRight />
               </div>
-              <div
-                className="connect-wallet-item"
-                onClick={() => selectConnector('coinbaseWalletSDK')}
-              >
-                <Coinbase className="connect-wallet-item__symbol" />
-                <div className="connect-wallet-item__info">
-                  <div className="heading heading--emphasized">Coinbase Wallet</div>
+              {coinbaseConflicted ? null : (
+                <div
+                  className="connect-wallet-item"
+                  onClick={() => selectConnector('coinbaseWalletSDK')}
+                >
+                  <Coinbase className="connect-wallet-item__symbol" />
+                  <div className="connect-wallet-item__info">
+                    <div className="heading heading--emphasized">Coinbase Wallet</div>
+                  </div>
+                  <ArrowRight />
                 </div>
-                <ArrowRight />
-              </div>
+              )}
             </div>
             {terms}
           </div>
