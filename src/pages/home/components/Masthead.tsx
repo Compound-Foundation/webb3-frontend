@@ -313,8 +313,8 @@ function getContent(state: MastheadState): Content {
           content={ratesTooltipContent}
           width={400}
           hideArrow={true}
-          x={tooltipLeftAlign.current?.getBoundingClientRect().left}
-          y={tooltipLeftAlign.current?.getBoundingClientRect().bottom}
+          x={anchorRect?.left}
+          y={anchorRect?.bottom}
         >
           <div className="masthead__overview-details" onClick={() => setRatesDetailActive(true)}>
             <span className="meta text-color--3"> &#64; </span>
