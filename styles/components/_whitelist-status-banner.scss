@@ -1,0 +1,74 @@
+@use '../abstracts/mixins' as *;
+@use '../abstracts/variables' as *;
+
+// Slim full-width banner on the institutional market detail page. Shares the
+// institutional banner's look: dark base in both themes with the right-side
+// artwork and the green gradient stroke.
+.whitelist-status-banner {
+  align-items: center;
+  @include institutional-card-surface;
+  border-radius: 0.75rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+
+  &__lead {
+    align-items: center;
+    display: flex;
+    gap: 1rem;
+
+    // The approved-pill variant packs the pill and title closer together
+    &--badged {
+      gap: 0.5rem;
+    }
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    height: 2.75rem;
+    width: auto;
+  }
+
+  // Tighter than the default pill to match the banner design
+  .new-badge {
+    padding: 0.125rem 0.3125rem;
+  }
+
+  p {
+    margin: 0;
+  }
+
+  // The banner background is dark in both themes, so text must not follow the theme
+  &__title {
+    color: #f5f7fa;
+  }
+
+  &__detail {
+    color: #7a8a99;
+  }
+
+  // Stacked title + detail (pre-login variant) sit closer together than the
+  // typography default for adjacent body paragraphs
+  &__title + &__detail {
+    margin-top: 0.25rem;
+  }
+
+  &__link {
+    color: #00d791;
+    text-decoration: underline;
+  }
+
+  &__register {
+    background: rgba(13, 24, 33, 0.85);
+    border: 1px solid #2a3a45;
+    color: #f5f7fa;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  // Match the panels' small-screen edge bleed so the banner stays aligned with them
+  @media (max-width: $device--sm) {
+    margin: -0.25rem -0.75rem;
+  }
+}

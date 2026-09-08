@@ -1,0 +1,15 @@
+@use '../abstracts/variables' as *;
+
+// Green 'New' pill for recently launched markets (market selector, markets table, hero banner).
+// The text stays dark ink in both themes — the pill fill never changes.
+.new-badge {
+  background: #00d791;
+  border-radius: 0.375rem;
+  color: $neutral--100;
+  padding: 0.125rem 0.5rem;
+
+  &--large {
+    border-radius: 0.5rem;
+    padding: 0.25rem 0.75rem;
+  }
+}

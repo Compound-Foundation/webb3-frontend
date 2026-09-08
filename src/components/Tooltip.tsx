@@ -7,13 +7,13 @@ type TooltipCoordinates = {
   y: number;
 };
 
-// Grace period (ms) before an interactive tooltip hides after the pointer leaves
-// the trigger, giving the user time to move onto the tooltip to click its content.
-// Generous enough that a slow pointer can cross the gap between trigger and tooltip.
-const HIDE_DELAY_MS = 300;
-
 // Minimum distance (px) kept between the tooltip and the viewport edges.
 const VIEWPORT_MARGIN = 8;
+
+// .tooltip--hide-arrow shifts the rendered tooltip down by 20px (see
+// _tooltip.scss). Interactive tooltips must stay in contact with their trigger
+// for the pointer to cross onto them, so placement math compensates for it.
+const HIDE_ARROW_SHIFT_PX = 20;
 
 const Tooltip = ({
   width,
@@ -24,6 +24,7 @@ const Tooltip = ({
   mini = false,
   disabled = false,
   interactive = false,
+  touchToggle = true,
   yOffset = 20,
   x,
   y,
@@ -36,6 +37,10 @@ const Tooltip = ({
   mini?: boolean;
   disabled?: boolean;
   interactive?: boolean;
+  // Interactive tooltips toggle on tap by default (suppressing the trigger's
+  // own click); pass false when the trigger provides its own touch experience
+  // (e.g. a DetailSheet opened by onClick)
+  touchToggle?: boolean;
   yOffset?: number;
   x?: number;
   y?: number;
@@ -45,23 +50,21 @@ const Tooltip = ({
   const [placement, setPlacement] = useState<'above' | 'below'>('above');
   const [caretLeft, setCaretLeft] = useState<number | undefined>(undefined);
   const tooltipRef = useRef<null | HTMLSpanElement>(null);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const touchMoved = useRef(false);
-
-  const clearHideTimer = () => {
-    if (hideTimer.current !== null) {
-      clearTimeout(hideTimer.current);
-      hideTimer.current = null;
-    }
-  };
-
-  useEffect(() => clearHideTimer, []);
+  // Set by a touch on triggers that opted out of the tap-to-toggle behavior:
+  // the browser still synthesizes mouseover after the tap, which must not open
+  // the hover tooltip on top of the trigger's own touch experience
+  const suppressSynthesizedHover = useRef(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleMouseOver = (e: any) => {
+    if (suppressSynthesizedHover.current) {
+      suppressSynthesizedHover.current = false;
+      return;
+    }
     if (!disabled && tooltipRef.current) {
-      clearHideTimer();
+      triggerRef.current = e.currentTarget;
       setShowTooltip(true);
       const triggerEl = e.currentTarget.getBoundingClientRect();
 
@@ -80,8 +83,10 @@ const Tooltip = ({
         }
       } else if (yCoords < -yOffset) {
         // If the tooltip would get cut off above the screen, then move it
-        // below the hovered element instead.
-        yCoords = triggerEl.bottom;
+        // below the hovered element instead. For interactive hide-arrow
+        // tooltips, cancel the CSS downshift so the tooltip stays flush with
+        // the trigger and the pointer can cross without the hover breaking.
+        yCoords = interactive && hideArrow ? triggerEl.bottom - HIDE_ARROW_SHIFT_PX : triggerEl.bottom;
         below = true;
       }
       // The caret flips to whichever edge faces the trigger.
@@ -104,15 +109,18 @@ const Tooltip = ({
       });
     }
   };
-  const handleMouseOut = () => {
-    // For interactive tooltips, delay hiding so the pointer can travel from the
-    // trigger onto the tooltip (where onMouseOver cancels the pending hide).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleMouseOut = (e?: any) => {
+    // For interactive tooltips, keep showing while the pointer is moving within
+    // the trigger or onto the tooltip itself (they render flush against each
+    // other); hide immediately as soon as it leaves both.
     if (interactive) {
-      clearHideTimer();
-      hideTimer.current = setTimeout(() => setShowTooltip(false), HIDE_DELAY_MS);
-    } else {
-      setShowTooltip(false);
+      const next: Node | null = e?.relatedTarget instanceof Node ? e.relatedTarget : null;
+      if (next !== null && (tooltipRef.current?.contains(next) || triggerRef.current?.contains(next))) {
+        return;
+      }
     }
+    setShowTooltip(false);
   };
 
   // Touch support for interactive tooltips: hover never fires on touch devices,
@@ -152,11 +160,18 @@ const Tooltip = ({
         : cloneElement(children, {
             onMouseOver: handleMouseOver,
             onMouseOut: handleMouseOut,
-            ...(interactive && {
-              onTouchStart: () => (touchMoved.current = false),
-              onTouchMove: () => (touchMoved.current = true),
-              onTouchEnd: handleTouchEnd,
-            }),
+            ...(interactive &&
+              (touchToggle
+                ? {
+                    onTouchStart: () => (touchMoved.current = false),
+                    onTouchMove: () => (touchMoved.current = true),
+                    onTouchEnd: handleTouchEnd,
+                  }
+                : {
+                    // Let the tap through to the trigger's own handlers, but
+                    // swallow the synthesized hover that would follow it
+                    onTouchStart: () => (suppressSynthesizedHover.current = true),
+                  })),
           })}
       {disabled || (
         <Portal>
@@ -175,7 +190,6 @@ const Tooltip = ({
               } as React.CSSProperties
             }
             {...(interactive && {
-              onMouseOver: clearHideTimer,
               onMouseOut: handleMouseOut,
               // Clicks on tooltip content are portal-rendered but still bubble up
               // the React tree to the trigger's ancestors (e.g. the rewards

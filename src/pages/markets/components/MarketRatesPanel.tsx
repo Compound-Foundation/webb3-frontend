@@ -1,3 +1,4 @@
+import BoostedSupplyRates from '@components/BoostedSupplyRates';
 import NetRatesGraph, { NetRatesGraphType } from '@components/NetRatesGraph';
 import PanelWithHeader from '@components/PanelWithHeader';
 import { formatRateFactor } from '@helpers/numbers';
@@ -13,6 +14,9 @@ type MarketRatesPanelHydrated = [
     earnAPR: bigint;
     earnRewardsAPR?: bigint;
     rewardsAsset?: Token;
+    // Set when earnRewardsAPR is an institutional market's USDC-terms program
+    // reward, which annotates the net earn rate with a tooltip
+    institutionalRewardsAPR?: bigint;
   }
 ];
 
@@ -24,6 +28,7 @@ type PanelContent = {
   earnAPR: bigint;
   earnRewardsAPR?: bigint;
   rewardsAsset?: Token;
+  institutionalRewardsAPR?: bigint;
 };
 
 const defaultPanelContent = {
@@ -32,6 +37,7 @@ const defaultPanelContent = {
   earnAPR: 0n,
   earnRewardsAPR: undefined,
   rewardsAsset: undefined,
+  institutionalRewardsAPR: undefined,
 };
 
 function getMarketRatesPanelContent(state: MarketRatesPanelState): PanelContent {
@@ -89,7 +95,14 @@ const LoadingView = () => {
   );
 };
 
-const MarketRatesPanelView = ({ borrowAPR, borrowRewardsAPR, earnAPR, earnRewardsAPR }: PanelContent) => {
+const MarketRatesPanelView = ({
+  borrowAPR,
+  borrowRewardsAPR,
+  earnAPR,
+  earnRewardsAPR,
+  rewardsAsset,
+  institutionalRewardsAPR,
+}: PanelContent) => {
   const netBorrowAPR = borrowRewardsAPR ? borrowAPR - borrowRewardsAPR : borrowAPR;
   const netSupplyAPR = earnRewardsAPR ? earnRewardsAPR + earnAPR : earnAPR;
 
@@ -100,12 +113,19 @@ const MarketRatesPanelView = ({ borrowAPR, borrowRewardsAPR, earnAPR, earnReward
     />
   );
 
-  const netEarnRateGraph = (
-    <NetRatesGraph
-      state={NetRatesGraphType.Earn}
-      earnAPR={earnAPR}
-    />
-  );
+  // Institutional markets show the base/boost breakdown bar; the whitelist
+  // status renders as a standalone banner on the page instead of a card here
+  const netEarnRateGraph =
+    institutionalRewardsAPR !== undefined && institutionalRewardsAPR > 0n ? (
+      <BoostedSupplyRates earnAPR={earnAPR} boostAPR={institutionalRewardsAPR} showWhitelistCard={false} />
+    ) : (
+      <NetRatesGraph
+        state={NetRatesGraphType.Earn}
+        earnAPR={earnAPR}
+        earnRewardsAPR={earnRewardsAPR}
+        rewardsAsset={rewardsAsset}
+      />
+    );
 
   return (
     <PanelWithHeader header="Market Rates" secondaryHeader="Net of Rewards" className="grid-column--6">
