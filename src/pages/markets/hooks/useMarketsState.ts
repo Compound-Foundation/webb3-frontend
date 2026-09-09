@@ -8,7 +8,7 @@ import type { Web3 } from '@contexts/Web3Context';
 import Comet from '@helpers/abis/Comet';
 import ERC20 from '@helpers/abis/ERC20';
 import { adjustCollateralPrice, getBaseAssetPriceFeed } from '@helpers/baseAssetPrice';
-import { getRemappedPriceFeed } from '@helpers/deprecatedMarkets';
+import { getHardcodedFeedPrice, getRemappedPriceFeed } from '@helpers/deprecatedMarkets';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
@@ -158,9 +158,10 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
   const numAssets = market.collateralAssets.length;
 
   const prices = combinedCalls.slice(0, numAssets).map((price, index) => {
-    // If we found the deprecated feed, then let's ignore it.
+    // If we found a deprecated feed, ignore the dummy call's result and use
+    // the hardcoded price for that feed instead (0 for the wUSDM feeds).
     if (ignoredCollateralPriceIndex === index) {
-      return 0n;
+      return getHardcodedFeedPrice(market.collateralAssets[index].priceFeed);
     }
     return price.toBigInt();
   });
@@ -208,18 +209,22 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     console.error('Error fetching historical market data: ', e);
   }
 
+  const baseAssetWithState: ProtocolAndMarketsState['baseAsset'] = {
+    ...market.baseAsset,
+    balanceOfComet: baseAssetBalanceOfComet.toBigInt(),
+    price: baseAssetPrice,
+    baseAssetPriceInDollars: baseTokenPriceInDollars.toBigInt(),
+  };
+
   const state: ProtocolAndMarketsState = {
-    baseAsset: {
-      ...market.baseAsset,
-      balanceOfComet: baseAssetBalanceOfComet.toBigInt(),
-      price: baseAssetPrice,
-      baseAssetPriceInDollars: baseTokenPriceInDollars.toBigInt(),
-    },
+    baseAsset: baseAssetWithState,
     borrowAPR,
     borrowRates,
     collateralAssets,
     cometAddress: market.marketAddress,
     earnAPR,
+    totalBaseSupplyUsd:
+      (totalSupply * baseAssetWithState.baseAssetPriceInDollars) / 10n ** BigInt(baseAssetWithState.decimals),
     factorScale,
     marketHistory: marketHistoryAsBuckets,
     reserves: reserves.toBigInt(),

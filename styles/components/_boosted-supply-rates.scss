@@ -1,0 +1,94 @@
+@use '../abstracts/mixins' as *;
+@use '../abstracts/variables' as *;
+
+.boosted-supply-rates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding-top: 0.5rem;
+
+  &__bar {
+    display: flex;
+    gap: 0.1875rem;
+    height: 1.375rem;
+
+    &__segment {
+      border-radius: 0.3125rem;
+      // Keeps a small component visible even when its share of the total rounds low
+      min-width: 2rem;
+
+      &--base {
+        background-color: var(--data--supply);
+      }
+
+      &--boost {
+        background-color: var(--data--warning);
+      }
+    }
+  }
+
+  &__labels {
+    display: flex;
+    justify-content: space-between;
+
+    &__value {
+      color: var(--text--1);
+      font-weight: 500;
+    }
+
+    &__bolt {
+      height: 0.75rem;
+      width: auto;
+      margin-right: 0.125rem;
+      vertical-align: -0.06rem;
+
+      .svg__path {
+        fill: none;
+        stroke: var(--text--1);
+      }
+    }
+
+    .meta + .meta {
+      margin-top: 0;
+    }
+  }
+
+  // Shares the institutional banner's look: dark base in both themes with the
+  // right-side artwork and the green gradient stroke
+  &__whitelist-card {
+    align-items: center;
+    @include institutional-card-surface;
+    border-radius: 0.625rem;
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.375rem;
+    padding: 0.625rem 0.875rem;
+
+    &__badge {
+      flex-shrink: 0;
+      // The badge art is a portrait-oriented seal; scale by height only
+      height: 2.25rem;
+      width: auto;
+    }
+
+    // The card stays dark in both themes and can render outside the tooltip's
+    // color scope (mobile detail sheet), so text colors are fixed
+    &__title {
+      color: #f5f7fa;
+    }
+
+    // Sized by its L4 meta classes to match the breakdown labels; the color is
+    // the dark theme's text--2 fixed, since the card stays dark in both themes
+    &__subtitle {
+      color: #7a8a99;
+    }
+
+    &__link {
+      color: #00d791;
+      display: inline-block;
+      font-size: 0.8125rem;
+      margin-top: 0.125rem;
+      text-decoration: underline;
+    }
+  }
+}

@@ -6,6 +6,9 @@ export function getIsDeprecatedwUSDMMarket(
 ): boolean {
   if (
     (chainInformation.chainId === 1 && BaseAssetConfig.symbol === 'USDT') ||
+    // Not wUSDM: mainnet cWBTCv3's pumpBTC collateral feed was deprecated on
+    // 2026-09-03, and its price is handled by the same deprecated-feed paths.
+    (chainInformation.chainId === 1 && BaseAssetConfig.symbol === 'WBTC') ||
     (chainInformation.chainId === 42161 && BaseAssetConfig.symbol === 'USDC') ||
     (chainInformation.chainId === 10 && BaseAssetConfig.symbol === 'USDC') ||
     (chainInformation.chainId === 10 && BaseAssetConfig.symbol === 'USDT')
@@ -20,6 +23,10 @@ export function getRemappedPriceFeed(priceFeedAddress: string): string {
   if (priceFeedAddress === '0xe3a409eD15CD53aFdEFdd191ad945cEC528A2496') {
     // ethereum
     return '0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5';
+  } else if (priceFeedAddress === '0x351a133Fd850ea81ed8a782016e308aCBADDec91') {
+    // ethereum: deprecated pumpBTC / BTC feed; remap to the live BTC / USD feed
+    // as a dummy call whose result is discarded (see getHardcodedFeedPrice).
+    return '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c';
   } else if (priceFeedAddress === '0x13cDFB7db5e2F58e122B2e789b59dE13645349C4') {
     // arb
     return '0xb2a824043730fe05f3da2efafa1cbbe83fa548d6';
@@ -32,4 +39,16 @@ export function getRemappedPriceFeed(priceFeedAddress: string): string {
   }
 
   return '';
+}
+
+// Price to report for a deprecated feed whose on-chain reads revert.
+export function getHardcodedFeedPrice(priceFeedAddress: string): bigint {
+  if (priceFeedAddress === '0x351a133Fd850ea81ed8a782016e308aCBADDec91') {
+    // pumpBTC / BTC exchange rate feed on mainnet cWBTCv3, deprecated by
+    // Chainlink on 2026-09-03. The market is deprecated and empty, so report
+    // the feed's last published answer (1.02447384 BTC, 8 decimals).
+    return 102447384n;
+  }
+
+  return 0n;
 }

@@ -148,6 +148,8 @@ export type ProtocolState = {
   borrowAPR: bigint;
   collateralAssets: TokenWithState[];
   earnAPR: bigint;
+  // The market's total supplied base asset value in dollars, at PRICE_PRECISION
+  totalBaseSupplyUsd: bigint;
 };
 
 export type ProtocolAndAccountState = Omit<ProtocolState, 'baseAsset' | 'collateralAssets'> & {
@@ -316,6 +318,13 @@ export type MarketData = {
   bulkerAddress: string;
   fauceteerAddress?: string;
   rewardsAddress?: string;
+  // Overrides the base-asset part of the market's URL key (e.g. 'usdc-institutional' -> '?market=usdc-institutional-mainnet').
+  // Required when multiple markets on the same chain share a base asset symbol.
+  slug?: string;
+  // Institutional markets are listed in their own section of the market selector
+  institutional?: boolean;
+  // Recently launched markets get a 'New' badge in the market selector
+  isNew?: boolean;
   type: 'MarketData';
 };
 
@@ -339,6 +348,9 @@ export type MarketSummary = {
   };
   borrowAPR: bigint;
   supplyAPR: bigint;
+  // The USDC-terms rewards portion of supplyAPR from an institutional market's
+  // rewards program, when it is paying
+  institutionalSupplyRewardsAPR?: bigint;
   /**
    * Total borrow value in USD
    */

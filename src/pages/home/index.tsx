@@ -12,6 +12,8 @@ import {
 } from '@helpers/actions';
 import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
+import { institutionalSupplyRewards } from '@helpers/institutionalRates';
+import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
@@ -39,6 +41,7 @@ import {
 
 import ActionModal from './components/ActionModal';
 import AssetRow from './components/AssetRow';
+import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadState } from './components/Masthead';
 import PositionCard, { PositionCardState } from './components/PositionCard';
 
@@ -88,13 +91,25 @@ const Home = ({
   let mastheadState: MastheadState;
   let positionCardState: PositionCardState;
   let isBulkerAllowed = false;
+  // Institutional USDC-terms rewards; set below once market state is loaded
+  let earnRewardsAPR: bigint | undefined, rewardsAsset: Token | undefined;
+  const whitelistStatus = institutionalWhitelistStatus(web3.read.account);
 
   if (cometState === StateType.Loading) {
     mastheadState = [StateType.Loading];
     assetRows = [0, 0, 0, 0, 0, 0].map((_, index) => <AssetRow key={index} state={[StateType.Loading]} />);
     positionCardState = [StateType.Loading];
   } else if (cometState === StateType.NoWallet) {
-    const { baseAsset, borrowAPR, collateralAssets, earnAPR } = state[1];
+    const { baseAsset, borrowAPR, collateralAssets, earnAPR, totalBaseSupplyUsd } = state[1];
+
+    // Institutional markets pay USDC-terms rewards on top of the regular supply rate
+    ({ earnRewardsAPR, rewardsAsset } = institutionalSupplyRewards(
+      selectedMarket[1],
+      earnRewardsAPR,
+      rewardsAsset,
+      baseAsset,
+      totalBaseSupplyUsd,
+    ));
 
     mastheadState = [StateType.NoWallet, { baseAsset, earnAPR }];
     assetRows = collateralAssets
@@ -106,6 +121,9 @@ const Home = ({
         baseAsset,
         borrowAPR,
         earnAPR,
+        earnRewardsAPR,
+        institutionalWhitelistStatus: whitelistStatus,
+        rewardsAsset,
         theme,
       },
     ];
@@ -113,6 +131,15 @@ const Home = ({
     const market = selectedMarket[1] as MarketDataLoaded; // It must be loaded if in StateType.Hydrated
     const { baseAsset, borrowAPR, collateralAssets, collateralValue, earnAPR, liquidationCapacity } = state[1];
     isBulkerAllowed = state[1].isBulkerAllowed;
+
+    // Institutional markets pay USDC-terms rewards on top of the regular supply rate
+    ({ earnRewardsAPR, rewardsAsset } = institutionalSupplyRewards(
+      market,
+      earnRewardsAPR,
+      rewardsAsset,
+      baseAsset,
+      state[1].totalBaseSupplyUsd,
+    ));
     const actions = getActions(baseAsset, collateralAssets);
     const actionsForCompare = compare ? [] : actions;
     const updatedDataPostActions = calculateUpdatedBalances(baseAsset, collateralAssets, actionsForCompare);
@@ -230,7 +257,9 @@ const Home = ({
         collateralValuePost: updatedDataPostActions.collateralValue,
         compare,
         earnAPR,
-        earnRewardsAPR: 0n,
+        earnRewardsAPR,
+        institutionalBoostAPR: market?.institutional ? earnRewardsAPR : undefined,
+        institutionalWhitelistStatus: whitelistStatus,
         liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
         pendingAction,
@@ -260,6 +289,9 @@ const Home = ({
         collateralValue: collateralValue,
         collateralValuePost: updatedDataPostActions.collateralValue,
         earnAPR,
+        earnRewardsAPR,
+        institutionalWhitelistStatus: whitelistStatus,
+        rewardsAsset,
         liquidationCapacity: liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
         pendingAction,
@@ -482,6 +514,7 @@ const Home = ({
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
+      <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
       <div className="home__content grid-container">
         <div className="home__assets grid-column--7">
