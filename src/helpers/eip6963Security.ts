@@ -12,11 +12,24 @@ import { useSyncExternalStore } from 'react';
 type AnnouncedDetail = { info: { rdns: string; uuid: string }; provider: unknown };
 
 const announcedUuidByRdns = new Map<string, string>();
-// Frozen snapshot, replaced (never mutated) on change, so useSyncExternalStore sees a
-// stable reference between conflicts.
+// Frozen snapshots, replaced (never mutated) on change, so useSyncExternalStore sees a
+// stable reference between changes.
 let conflictedSnapshot: ReadonlySet<string> = Object.freeze(new Set<string>());
+let announcedSnapshot: ReadonlySet<string> = Object.freeze(new Set<string>());
 const conflictListeners = new Set<() => void>();
 let started = false;
+
+function notifyListeners() {
+  conflictListeners.forEach((listener) => {
+    // One subscriber throwing must not swallow the change for the others — this is the
+    // notification that makes the UI warn and the live session disconnect.
+    try {
+      listener();
+    } catch (error) {
+      console.error('EIP-6963 listener failed:', error);
+    }
+  });
+}
 
 function isAnnouncedDetail(detail: unknown): detail is AnnouncedDetail {
   if (detail === null || typeof detail !== 'object') return false;
@@ -53,6 +66,10 @@ function onAnnounce(event: Event) {
   const knownUuid = announcedUuidByRdns.get(rdns);
   if (knownUuid === undefined) {
     announcedUuidByRdns.set(rdns, uuid);
+    const nextAnnounced = new Set(announcedSnapshot);
+    nextAnnounced.add(rdns);
+    announcedSnapshot = Object.freeze(nextAnnounced);
+    notifyListeners();
     return;
   }
   // Re-announcements reuse the page-lifetime uuid; a different uuid means two distinct
@@ -62,15 +79,7 @@ function onAnnounce(event: Event) {
   const next = new Set(conflictedSnapshot);
   next.add(rdns);
   conflictedSnapshot = Object.freeze(next);
-  conflictListeners.forEach((listener) => {
-    // One subscriber throwing must not swallow the conflict for the others — this is
-    // the notification that makes the UI warn and the live session disconnect.
-    try {
-      listener();
-    } catch (error) {
-      console.error('EIP-6963 conflict listener failed:', error);
-    }
-  });
+  notifyListeners();
 }
 
 /**
@@ -92,6 +101,16 @@ export function getConflictedRdns(): ReadonlySet<string> {
   return conflictedSnapshot;
 }
 
+/**
+ * Every rdns announced this page load, conflicted or not, allowlisted or not. This is
+ * the announcement source itself, unlike wagmi's connector list, which drops any rdns a
+ * configured connector already claims (the Coinbase SDK claims `com.coinbase.wallet`).
+ * Callers deciding "did anything announce at all" must use this.
+ */
+export function getAnnouncedRdns(): ReadonlySet<string> {
+  return announcedSnapshot;
+}
+
 export function subscribeToConflicts(listener: () => void): () => void {
   conflictListeners.add(listener);
   return () => {
@@ -101,4 +120,8 @@ export function subscribeToConflicts(listener: () => void): () => void {
 
 export function useConflictedRdns(): ReadonlySet<string> {
   return useSyncExternalStore(subscribeToConflicts, getConflictedRdns, getConflictedRdns);
+}
+
+export function useAnnouncedRdns(): ReadonlySet<string> {
+  return useSyncExternalStore(subscribeToConflicts, getAnnouncedRdns, getAnnouncedRdns);
 }

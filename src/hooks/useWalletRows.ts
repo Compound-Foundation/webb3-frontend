@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useConnect } from 'wagmi';
 
-import { useConflictedRdns } from '@helpers/eip6963Security';
+import { useAnnouncedRdns, useConflictedRdns } from '@helpers/eip6963Security';
 import {
   getConflictedKnownWallets,
   getDiscoveredWallets,
@@ -31,13 +31,14 @@ export type WalletRows = {
 export function useWalletRows(): WalletRows {
   const { connectors } = useConnect();
   const conflictedRdns = useConflictedRdns();
+  const announcedRdns = useAnnouncedRdns();
 
   return useMemo(
     () => ({
       detected: getDiscoveredWallets(connectors, conflictedRdns),
       conflicted: getConflictedKnownWallets(conflictedRdns),
-      showLegacy: shouldShowLegacyInjected(connectors),
+      showLegacy: shouldShowLegacyInjected(announcedRdns),
     }),
-    [connectors, conflictedRdns],
+    [connectors, conflictedRdns, announcedRdns],
   );
 }

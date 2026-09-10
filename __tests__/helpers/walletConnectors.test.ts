@@ -3,8 +3,11 @@ import type { Connector as WagmiConnector } from 'wagmi';
 import {
   getConflictedKnownWallets,
   getDiscoveredWallets,
+  isAllowedConnectorId,
+  isConnectorConflicted,
   KNOWN_WALLETS,
-  migrateStoredConnectorId,
+  migrateStoredConnectorIds,
+  rdnsForConnectorId,
   shouldShowLegacyInjected,
 } from '@helpers/walletConnectors';
 
@@ -126,48 +129,128 @@ describe('shouldShowLegacyInjected', () => {
 
   test('is true when nothing announced but window.ethereum is present', () => {
     (window as { ethereum?: unknown }).ethereum = {};
-    expect(shouldShowLegacyInjected(CONFIGURED)).toBe(true);
+    expect(shouldShowLegacyInjected(new Set())).toBe(true);
   });
 
   test('is false when a wallet announced, even with window.ethereum present', () => {
     (window as { ethereum?: unknown }).ethereum = {};
-    expect(shouldShowLegacyInjected([...CONFIGURED, METAMASK])).toBe(false);
+    expect(shouldShowLegacyInjected(new Set(['io.metamask']))).toBe(false);
   });
 
   test('stays false when a wallet announced but was filtered off the allowlist', () => {
     (window as { ethereum?: unknown }).ethereum = {};
-    expect(shouldShowLegacyInjected([...CONFIGURED, UNLISTED])).toBe(false);
+    expect(shouldShowLegacyInjected(new Set(['com.evil.fake']))).toBe(false);
+  });
+
+  // Wagmi never creates a discovered connector for an rdns a configured connector
+  // claims, so keying off its connector list showed this user a duplicate legacy row
+  // alongside the fixed Coinbase row for the very same extension.
+  test('is false for a Coinbase-extension-only user, whose rdns wagmi never surfaces', () => {
+    (window as { ethereum?: unknown }).ethereum = {};
+    expect(shouldShowLegacyInjected(new Set(['com.coinbase.wallet']))).toBe(false);
   });
 
   test('is false when there is no injected provider at all', () => {
-    expect(shouldShowLegacyInjected(CONFIGURED)).toBe(false);
+    expect(shouldShowLegacyInjected(new Set())).toBe(false);
   });
 });
 
-describe('migrateStoredConnectorId', () => {
+describe('rdnsForConnectorId', () => {
+  test('maps the Coinbase SDK connector id to the rdns it claims', () => {
+    expect(rdnsForConnectorId('coinbaseWalletSDK')).toBe('com.coinbase.wallet');
+  });
+
+  test('leaves a discovered connector id alone, since it is already an rdns', () => {
+    expect(rdnsForConnectorId('io.metamask')).toBe('io.metamask');
+  });
+
+  test.each(['constructor', 'toString', '__proto__'])(
+    'does not resolve %s through the prototype chain',
+    (id) => {
+      expect(rdnsForConnectorId(id)).toBe(id);
+    },
+  );
+});
+
+describe('isAllowedConnectorId', () => {
+  test.each(['injected', 'walletConnect', 'coinbaseWalletSDK', 'io.metamask', 'io.rabby'])(
+    'allows %s',
+    (id) => {
+      expect(isAllowedConnectorId(id)).toBe(true);
+    },
+  );
+
+  test.each(['com.evil.fake', '["Metam', '', 'constructor', '__proto__'])('rejects %s', (id) => {
+    expect(isAllowedConnectorId(id)).toBe(false);
+  });
+});
+
+describe('isConnectorConflicted', () => {
+  test('a discovered connector is conflicted when its own rdns is', () => {
+    expect(isConnectorConflicted('io.metamask', new Set(['io.metamask']))).toBe(true);
+  });
+
+  // The live session reports 'coinbaseWalletSDK', never the rdns, so without the map an
+  // impersonation of com.coinbase.wallet left the session signing away.
+  test('the Coinbase SDK connector is conflicted when its claimed rdns is', () => {
+    expect(isConnectorConflicted('coinbaseWalletSDK', new Set(['com.coinbase.wallet']))).toBe(true);
+  });
+
+  // Bare window.ethereum resolves to whichever extension won the race, which may be
+  // either side of the impersonation.
+  test('the generic injected connector is conflicted by any conflict at all', () => {
+    expect(isConnectorConflicted('injected', new Set(['io.metamask']))).toBe(true);
+  });
+
+  test('is false for an unrelated wallet', () => {
+    expect(isConnectorConflicted('io.rabby', new Set(['io.metamask']))).toBe(false);
+  });
+
+  test.each(['injected', 'coinbaseWalletSDK', 'io.metamask'])(
+    '%s is not conflicted when nothing conflicts',
+    (id) => {
+      expect(isConnectorConflicted(id, NO_CONFLICTS)).toBe(false);
+    },
+  );
+});
+
+describe('migrateStoredConnectorIds', () => {
   test.each([
-    ['io.metamask', 'io.metamask'],
-    ['injected', 'injected'],
-    ['["Metamask"]', 'injected'],
-    ['["WalletConnect"]', 'walletConnect'],
-    ['["WalletLink"]', 'coinbaseWalletSDK'],
-    ['["Ronin"]', 'com.roninchain.wallet'],
+    ['io.metamask', ['io.metamask']],
+    ['injected', ['injected']],
+    ['["WalletConnect"]', ['walletConnect']],
+    ['["WalletLink"]', ['coinbaseWalletSDK']],
+    ['["Ronin"]', ['com.roninchain.wallet']],
   ])('maps %s to %s', (raw, expected) => {
-    expect(migrateStoredConnectorId(raw)).toBe(expected);
+    expect(migrateStoredConnectorIds(raw)).toEqual(expected);
+  });
+
+  // The normal state of every returning MetaMask user. Resolving straight to 'injected'
+  // routed them around every rdns-keyed check, so the announced wallet comes first.
+  test('prefers announced MetaMask over the generic connector for a legacy Metamask value', () => {
+    expect(migrateStoredConnectorIds('["Metamask"]')).toEqual(['io.metamask', 'injected']);
   });
 
   test('drops Ledger, which cannot autoconnect', () => {
-    expect(migrateStoredConnectorId('["Ledger"]')).toBeNull();
+    expect(migrateStoredConnectorIds('["Ledger"]')).toEqual([]);
   });
 
   test.each([['["Unknown"]'], ['[]'], ['{}'], ['null'], ['42'], ['']])('drops %s', (raw) => {
-    expect(migrateStoredConnectorId(raw)).toBeNull();
+    expect(migrateStoredConnectorIds(raw)).toEqual([]);
   });
 
-  test.each([['["constructor"]'], ['["toString"]'], ['["__proto__"]']])(
+  // localStorage is writable by any content script, so a stored id is untrusted input.
+  test.each([['com.evil.fake'], ['["Metam'], ['"com.evil.fake"']])(
+    'drops %s rather than accepting it as a connector id',
+    (raw) => {
+      expect(migrateStoredConnectorIds(raw)).toEqual([]);
+    },
+  );
+
+  test.each([['["constructor"]'], ['["toString"]'], ['["__proto__"]'], ['constructor']])(
     'drops %s rather than resolving it through the prototype chain',
     (raw) => {
-      expect(migrateStoredConnectorId(raw)).toBeNull();
+      expect(migrateStoredConnectorIds(raw)).toEqual([]);
     },
   );
 });

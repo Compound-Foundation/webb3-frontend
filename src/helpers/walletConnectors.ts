@@ -118,43 +118,99 @@ export function getConflictedKnownWallets(conflictedRdns: ReadonlySet<string>): 
  * and connects to whichever extension won the race for `window.ethereum`. Announcements
  * we filtered out keep it hidden too, since the legacy row would reintroduce exactly
  * that `window.ethereum` race.
+ *
+ * Takes the watcher's announced set rather than wagmi's connectors: wagmi never creates
+ * a discovered connector for an rdns a configured connector already claims, so a user
+ * whose only wallet is the Coinbase extension would otherwise look like "nothing
+ * announced" and get this row *plus* the fixed Coinbase row for the same wallet.
  */
-export function shouldShowLegacyInjected(connectors: readonly WagmiConnector[]): boolean {
-  if (announcedConnectors(connectors).length > 0) return false;
+export function shouldShowLegacyInjected(announcedRdns: ReadonlySet<string>): boolean {
+  if (announcedRdns.size > 0) return false;
   return typeof window !== 'undefined' && window.ethereum != null;
 }
 
-// Pre-6963 the stored value was a JSON-encoded `[ConnectorType]` tuple.
-const LEGACY_CONNECTOR_IDS: Record<string, string | null> = {
-  Metamask: 'injected',
-  WalletConnect: 'walletConnect',
-  WalletLink: 'coinbaseWalletSDK',
-  Ronin: 'com.roninchain.wallet',
+/**
+ * The rdns a wagmi connector id speaks for. Discovered connectors use their rdns as the
+ * id already; the connectors we configure ourselves do not, so an impersonation of
+ * `com.coinbase.wallet` has to be matched against the Coinbase SDK's own id or the
+ * conflict checks silently pass a live session through.
+ */
+const CONNECTOR_RDNS: Readonly<Record<string, string>> = Object.freeze({
+  coinbaseWalletSDK: COINBASE_RDNS,
+});
+
+export function rdnsForConnectorId(id: string): string {
+  return Object.prototype.hasOwnProperty.call(CONNECTOR_RDNS, id) ? CONNECTOR_RDNS[id] : id;
+}
+
+/** Connector ids we configure ourselves, none of which is an rdns. */
+const CONFIGURED_CONNECTOR_IDS: readonly string[] = ['injected', 'walletConnect', 'coinbaseWalletSDK'];
+
+/**
+ * Whether a connector id is one we would ever connect to. Announcements are
+ * self-attested and `localStorage` is writable by any content script, so a stored id is
+ * untrusted input: without this, a hostile extension that announces `com.evil.wallet`
+ * and writes that id gets auto-connected on the next load, with no row ever rendered.
+ */
+export function isAllowedConnectorId(id: string): boolean {
+  return (
+    CONFIGURED_CONNECTOR_IDS.includes(id) || Object.prototype.hasOwnProperty.call(KNOWN_WALLETS, id)
+  );
+}
+
+/**
+ * Whether connecting through this id is unsafe because two providers claimed the rdns
+ * it speaks for. The generic `injected` connector is tainted by *any* conflict: it
+ * resolves to whichever extension won the race for `window.ethereum`, which may be
+ * either side of the impersonation.
+ */
+export function isConnectorConflicted(id: string, conflictedRdns: ReadonlySet<string>): boolean {
+  if (conflictedRdns.size === 0) return false;
+  if (id === CONFIGURED_INJECTED_ID) return true;
+  return conflictedRdns.has(rdnsForConnectorId(id));
+}
+
+/**
+ * Pre-6963 the stored value was a JSON-encoded `[ConnectorType]` tuple. Each maps to
+ * candidates in preference order: `Metamask` was stored by every returning MetaMask
+ * user and used to mean bare `window.ethereum`, so prefer the announced MetaMask and
+ * fall back to the generic connector only when nothing announced. Resolving it to
+ * `injected` outright would route those users around every rdns-keyed protection.
+ */
+const LEGACY_CONNECTOR_IDS: Record<string, readonly string[]> = {
+  Metamask: ['io.metamask', 'injected'],
+  WalletConnect: ['walletConnect'],
+  WalletLink: ['coinbaseWalletSDK'],
+  Ronin: ['com.roninchain.wallet'],
   // Ledger can't autoconnect — it needs a path and address chosen first.
-  Ledger: null,
+  Ledger: [],
 };
 
 /**
- * Resolve a stored preference to a connector id, or `null` when the caller should
- * drop the stored value and stay disconnected.
+ * Resolve a stored preference to connector ids in preference order, the caller taking
+ * the first that resolves against the connectors present. Empty means the caller should
+ * drop the stored value and stay disconnected — including for anything not on the
+ * allowlist, since `localStorage` is writable by any content script.
  */
-export function migrateStoredConnectorId(raw: string): string | null {
+export function migrateStoredConnectorIds(raw: string): readonly string[] {
+  const allowed = (ids: readonly string[]) => ids.filter(isAllowedConnectorId);
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
     // Not JSON, so it's already a bare connector id.
-    return raw.length > 0 ? raw : null;
+    return allowed([raw]);
   }
 
   if (Array.isArray(parsed) && typeof parsed[0] === 'string') {
     // Own-property lookup, as in `curatedName`: a stored `["constructor"]` would
     // otherwise resolve to a function through the prototype chain.
     return Object.prototype.hasOwnProperty.call(LEGACY_CONNECTOR_IDS, parsed[0])
-      ? LEGACY_CONNECTOR_IDS[parsed[0]]
-      : null;
+      ? allowed(LEGACY_CONNECTOR_IDS[parsed[0]])
+      : [];
   }
   // A bare id that happens to parse as JSON (a number, `null`, an object) is not
   // something we ever wrote.
-  return typeof parsed === 'string' && parsed.length > 0 ? parsed : null;
+  return typeof parsed === 'string' ? allowed([parsed]) : [];
 }

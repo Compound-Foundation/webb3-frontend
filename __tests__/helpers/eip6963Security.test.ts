@@ -38,10 +38,13 @@ afterEach(() => {
 describe('eip6963Security', () => {
   test('same rdns announced under two uuids is conflicted, and subscribers hear it once', () => {
     const watcher = loadWatcher();
+    announce('io.metamask', 'uuid-real');
+
+    // Subscribed after the first announcement, so this counts conflict notifications
+    // only — the store also notifies when a brand new rdns appears.
     const listener = jest.fn();
     watcher.subscribeToConflicts(listener);
 
-    announce('io.metamask', 'uuid-real');
     announce('io.metamask', 'uuid-fake');
     announce('io.metamask', 'uuid-fake'); // already conflicted: no second notification
 
@@ -113,10 +116,12 @@ describe('eip6963Security', () => {
     });
     const survivor = jest.fn();
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    announce('io.metamask', 'uuid-1');
+
+    // Subscribed after the first announcement so these count the conflict only.
     watcher.subscribeToConflicts(thrower);
     watcher.subscribeToConflicts(survivor);
 
-    announce('io.metamask', 'uuid-1');
     announce('io.metamask', 'uuid-2');
 
     expect(thrower).toHaveBeenCalledTimes(1);
@@ -147,16 +152,59 @@ describe('eip6963Security', () => {
     addSpy.mockRestore();
   });
 
-  test('notifies subscribers once even after a repeated start', () => {
+  test('notifies subscribers once per change even after a repeated start', () => {
     const watcher = loadWatcher();
     watcher.startEip6963Watcher();
 
     const listener = jest.fn();
     watcher.subscribeToConflicts(listener);
+    announce('io.metamask', 'uuid-1'); // new rdns
+    announce('io.metamask', 'uuid-2'); // conflict
+
+    // Twice, not four times: a repeated start must not double-register the handler.
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  test('tracks every announced rdns, conflicted or not, allowlisted or not', () => {
+    const watcher = loadWatcher();
+
     announce('io.metamask', 'uuid-1');
-    announce('io.metamask', 'uuid-2');
+    announce('com.evil.fake', 'uuid-2');
+    announce('io.metamask', 'uuid-impostor');
+
+    expect([...watcher.getAnnouncedRdns()].sort()).toEqual(['com.evil.fake', 'io.metamask']);
+  });
+
+  // The Coinbase extension announces, but wagmi drops it because the configured SDK
+  // connector claims that rdns — so this set is the only honest "did anything announce".
+  test('tracks an rdns that wagmi would never surface as a connector', () => {
+    const watcher = loadWatcher();
+
+    announce('com.coinbase.wallet', 'uuid-1');
+
+    expect(watcher.getAnnouncedRdns().has('com.coinbase.wallet')).toBe(true);
+  });
+
+  test('notifies subscribers on a first announcement, not only on conflicts', () => {
+    const watcher = loadWatcher();
+    const listener = jest.fn();
+    watcher.subscribeToConflicts(listener);
+
+    announce('io.metamask', 'uuid-1');
 
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  test('announced snapshot reference is stable until a new rdns appears', () => {
+    const watcher = loadWatcher();
+
+    announce('io.metamask', 'uuid-1');
+    const before = watcher.getAnnouncedRdns();
+    announce('io.metamask', 'uuid-1'); // re-announcement, nothing new
+    expect(watcher.getAnnouncedRdns()).toBe(before);
+
+    announce('io.rabby', 'uuid-2');
+    expect(watcher.getAnnouncedRdns()).not.toBe(before);
   });
 
   test('requests re-announcement on start, so it hears wallets that announced first', () => {

@@ -38,6 +38,8 @@ const DetectedWalletRow = ({ wallet, onSelect }: { wallet: DiscoveredWallet; onS
           className="connect-wallet-item__symbol"
           src={wallet.icon}
           alt=""
+          width={40}
+          height={40}
           onError={() => setIconFailed(true)}
         />
       ) : (
