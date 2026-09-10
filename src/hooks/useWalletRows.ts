@@ -5,6 +5,7 @@ import { useAnnouncedRdns, useConflictedRdns } from '@helpers/eip6963Security';
 import {
   getConflictedKnownWallets,
   getDiscoveredWallets,
+  hasUnnamedConflict,
   shouldShowLegacyInjected,
   type ConflictedWallet,
   type DiscoveredWallet,
@@ -15,6 +16,8 @@ export type WalletRows = {
   detected: DiscoveredWallet[];
   /** Known wallets withheld because two providers announced their RDNS. */
   conflicted: ConflictedWallet[];
+  /** A conflict we deliberately will not name, which still needs explaining. */
+  unnamedConflict: boolean;
   /** Whether to offer the generic `window.ethereum` row for wallets that don't announce. */
   showLegacy: boolean;
 };
@@ -37,6 +40,7 @@ export function useWalletRows(): WalletRows {
     () => ({
       detected: getDiscoveredWallets(connectors, conflictedRdns),
       conflicted: getConflictedKnownWallets(conflictedRdns),
+      unnamedConflict: hasUnnamedConflict(conflictedRdns),
       showLegacy: shouldShowLegacyInjected(announcedRdns),
     }),
     [connectors, conflictedRdns, announcedRdns],

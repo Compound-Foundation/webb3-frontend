@@ -57,14 +57,23 @@ const DetectedWalletRow = ({ wallet, onSelect }: { wallet: DiscoveredWallet; onS
  * Shown in place of a known wallet whose rdns was announced by two different providers
  * — an impersonation signal. Deliberately not clickable: we cannot tell which announcer
  * is the real wallet.
+ *
+ * Without a `name` this is the unlisted-conflict variant. We never print an unlisted
+ * rdns, since that name is attacker-chosen, but the conflict still taints bare
+ * `window.ethereum` and can sever a live session — so it has to be explained rather
+ * than leaving the user with an unexplained disconnect.
  */
-const ConflictedWalletRow = ({ name }: { name: string }) => (
+const ConflictedWalletRow = ({ name }: { name?: string }) => (
   <div className="connect-wallet-item connect-wallet-item--disabled connect-wallet-item--warning">
     <CircleExclamation className="connect-wallet-item__symbol" />
     <div className="connect-wallet-item__info">
-      <div className="heading heading--emphasized">{name} hidden for your safety</div>
+      <div className="heading heading--emphasized">
+        {name === undefined ? 'Browser wallets hidden for your safety' : `${name} hidden for your safety`}
+      </div>
       <div className="meta text-color--2">
-        Multiple extensions claimed to be {name}. Review your browser extensions.
+        {name === undefined
+          ? 'Two extensions claimed the same wallet identity. Review your browser extensions.'
+          : `Multiple extensions claimed to be ${name}. Review your browser extensions.`}
       </div>
     </div>
   </div>
@@ -81,6 +90,7 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
   const {
     detected: detectedWallets,
     conflicted: conflictedWallets,
+    unnamedConflict,
     showLegacy: showLegacyInjected,
   } = useWalletRows();
   const [modalStep, setModalStep] = useState(ConnectWalletModalSteps.ChooseWalletConnector);
@@ -155,9 +165,12 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
 
       // Warnings render above the wallet list so a hidden wallet is explained, not
       // silently missing.
-      const conflictedRows = conflictedWallets.map((wallet) => (
-        <ConflictedWalletRow key={wallet.id} name={wallet.name} />
-      ));
+      const conflictedRows = [
+        ...conflictedWallets.map((wallet) => <ConflictedWalletRow key={wallet.id} name={wallet.name} />),
+        // A conflict on an rdns we do not list is never named, but it still hides the
+        // legacy row and can sever a session, so it gets the unnamed variant.
+        ...(unnamedConflict ? [<ConflictedWalletRow key="unnamed-conflict" />] : []),
+      ];
 
       // Only reached when nothing announced: a mobile in-app browser, or an extension
       // predating EIP-6963.

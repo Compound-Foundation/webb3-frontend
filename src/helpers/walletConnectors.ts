@@ -112,6 +112,16 @@ export function getConflictedKnownWallets(conflictedRdns: ReadonlySet<string>): 
 }
 
 /**
+ * Whether some conflict exists that `getConflictedKnownWallets` will not name. Those
+ * conflicts still taint the generic `injected` connector — bare `window.ethereum` may
+ * resolve to either impersonator — so a session can be severed over one. Without this
+ * the modal would explain nothing, and the user would see an unexplained disconnect.
+ */
+export function hasUnnamedConflict(conflictedRdns: ReadonlySet<string>): boolean {
+  return [...conflictedRdns].some((rdns) => curatedName(rdns) === undefined);
+}
+
+/**
  * Mobile in-app browsers and pre-6963 extensions set `window.ethereum` without
  * announcing. We fall back to the generic `injected()` connector for them, but only
  * when nothing announced — otherwise it duplicates a wallet already listed by name,

@@ -33,16 +33,19 @@ type WalletRowsOverrides = {
   detectedWallets?: DiscoveredWallet[];
   showLegacyInjected?: boolean;
   conflictedWallets?: ConflictedWallet[];
+  unnamedConflict?: boolean;
 };
 
 const renderModal = ({
   detectedWallets = [],
   showLegacyInjected = false,
   conflictedWallets = [],
+  unnamedConflict = false,
 }: WalletRowsOverrides = {}) => {
   mockedUseWalletRows.mockReturnValue({
     detected: detectedWallets,
     conflicted: conflictedWallets,
+    unnamedConflict,
     showLegacy: showLegacyInjected,
   });
 
@@ -156,6 +159,27 @@ describe('ConnectWalletModal', () => {
 
     expect(screen.getByText('MetaMask hidden for your safety')).toBeInTheDocument();
     expect(screen.queryByText('Browser Wallet')).not.toBeInTheDocument();
+  });
+
+  // An unlisted conflict still taints bare `window.ethereum`, so it can sever a live
+  // session. Explaining it is what stops that being an unexplained disconnect.
+  test('explains a conflict on an rdns it will not name', () => {
+    renderModal({ unnamedConflict: true, showLegacyInjected: true });
+
+    expect(screen.getByText('Browser wallets hidden for your safety')).toBeInTheDocument();
+    expect(screen.queryByText('Browser Wallet')).not.toBeInTheDocument();
+    expect(screen.queryByText('No browser wallet detected')).not.toBeInTheDocument();
+  });
+
+  test('the unnamed warning row carries no wallet identity at all', () => {
+    const { container } = renderModal({ unnamedConflict: true });
+
+    const warningRow = container.querySelector('.connect-wallet-item--warning');
+    // Fixed copy with nothing interpolated: an unlisted rdns is attacker-chosen, so it
+    // must never reach our warning text.
+    expect(warningRow?.textContent).toBe(
+      'Browser wallets hidden for your safetyTwo extensions claimed the same wallet identity. Review your browser extensions.',
+    );
   });
 
   test('warning rows render above the wallets that are still offered', () => {
