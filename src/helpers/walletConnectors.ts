@@ -153,6 +153,21 @@ export function rdnsForConnectorId(id: string): string {
   return Object.prototype.hasOwnProperty.call(CONNECTOR_RDNS, id) ? CONNECTOR_RDNS[id] : id;
 }
 
+/** The parts of a wagmi connector that identify which wallet it speaks for. */
+type ConnectorIdentity = { id: string; rdns?: string | readonly string[] | undefined };
+
+/**
+ * Every rdns a connector claims. Prefer the connector's own `rdns` — it is declared by
+ * the connector itself, so it stays right without us maintaining a map — and note it
+ * may be an array (`createConnector.d.ts:33`), which a bare `rdns ?? id` would compare
+ * as an object and never match. Discovered connectors declare no `rdns` because their
+ * id already is one.
+ */
+export function rdnsForConnector(connector: ConnectorIdentity): readonly string[] {
+  if (connector.rdns === undefined) return [rdnsForConnectorId(connector.id)];
+  return typeof connector.rdns === 'string' ? [connector.rdns] : connector.rdns;
+}
+
 /** Connector ids we configure ourselves, none of which is an rdns. */
 const CONFIGURED_CONNECTOR_IDS: readonly string[] = ['injected', 'walletConnect', 'coinbaseWalletSDK'];
 
@@ -174,10 +189,16 @@ export function isAllowedConnectorId(id: string): boolean {
  * resolves to whichever extension won the race for `window.ethereum`, which may be
  * either side of the impersonation.
  */
-export function isConnectorConflicted(id: string, conflictedRdns: ReadonlySet<string>): boolean {
+export function isConnectorConflicted(
+  connector: ConnectorIdentity | string,
+  conflictedRdns: ReadonlySet<string>,
+): boolean {
   if (conflictedRdns.size === 0) return false;
-  if (id === CONFIGURED_INJECTED_ID) return true;
-  return conflictedRdns.has(rdnsForConnectorId(id));
+  // A stored preference is only ever an id; a live session gives us the whole connector,
+  // whose declared rdns is authoritative.
+  const identity = typeof connector === 'string' ? { id: connector } : connector;
+  if (identity.id === CONFIGURED_INJECTED_ID) return true;
+  return rdnsForConnector(identity).some((rdns) => conflictedRdns.has(rdns));
 }
 
 /**

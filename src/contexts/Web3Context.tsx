@@ -228,7 +228,9 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
   // first, we connect to it, then the real wallet announces. Sever the session rather
   // than keep signing with a provider we can no longer trust.
   useEffect(() => {
-    if (writeConnector !== undefined && isConnectorConflicted(writeConnector.id, conflictedRdns)) {
+    // The whole connector, not just its id: its own declared `rdns` is what says which
+    // wallet the live session actually speaks for.
+    if (writeConnector !== undefined && isConnectorConflicted(writeConnector, conflictedRdns)) {
       disconnect();
       window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
     }

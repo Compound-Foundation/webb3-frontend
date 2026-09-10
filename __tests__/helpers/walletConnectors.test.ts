@@ -206,6 +206,25 @@ describe('isConnectorConflicted', () => {
     expect(isConnectorConflicted('io.rabby', new Set(['io.metamask']))).toBe(false);
   });
 
+  // A live session hands us the connector, whose own declared rdns is authoritative and
+  // needs no entry in our map.
+  test('reads the rdns a connector declares for itself', () => {
+    const connector = { id: 'coinbaseWalletSDK', rdns: 'com.coinbase.wallet' };
+    expect(isConnectorConflicted(connector, new Set(['com.coinbase.wallet']))).toBe(true);
+  });
+
+  // `rdns` is typed `string | readonly string[]`, so a bare `rdns ?? id` would compare
+  // an array against the set and never match.
+  test('handles a connector that declares several rdns values', () => {
+    const connector = { id: 'multi', rdns: ['com.example.one', 'com.example.two'] };
+    expect(isConnectorConflicted(connector, new Set(['com.example.two']))).toBe(true);
+    expect(isConnectorConflicted(connector, new Set(['com.example.three']))).toBe(false);
+  });
+
+  test('falls back to the id for a discovered connector, which declares no rdns', () => {
+    expect(isConnectorConflicted({ id: 'io.metamask' }, new Set(['io.metamask']))).toBe(true);
+  });
+
   test.each(['injected', 'coinbaseWalletSDK', 'io.metamask'])(
     '%s is not conflicted when nothing conflicts',
     (id) => {
