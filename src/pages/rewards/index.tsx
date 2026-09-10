@@ -148,9 +148,9 @@ const Rewards = ({ web3 }: RewardsProps) => {
             View your Rewards
           </SimpleLink>
         )}
-        <button disabled={true} className={'button'}>
-          Claiming: Coming Soon
-        </button>
+        <SimpleLink className={'button'} to={`https://app.merkl.xyz/?search=Compound+Legacy+Rewards&status=PAST`}>
+          Live Campaigns
+        </SimpleLink>
       </div>
       <RewardsFaq
         title={'FAQ'}
