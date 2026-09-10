@@ -149,7 +149,7 @@ const Rewards = ({ web3 }: RewardsProps) => {
           </SimpleLink>
         )}
         <SimpleLink className={'button'} to={`https://app.merkl.xyz/?search=comp`}>
-          Live shortly
+          Live Campaigns
         </SimpleLink>
       </div>
       <RewardsFaq
