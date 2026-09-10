@@ -15,6 +15,7 @@ import {
   useAccount,
   useConnect,
   useDisconnect,
+  useReconnect,
   useSwitchChain,
   useConnectorClient,
   Connector as WagmiConnector,
@@ -127,6 +128,7 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
 
   const { address: account, chainId: writeChainId, connector: writeConnector, isConnected } = useAccount();
   const { connectAsync, connectors } = useConnect();
+  const { reconnect } = useReconnect();
   const { disconnect } = useDisconnect();
   const { switchChain } = useSwitchChain();
 
@@ -207,11 +209,19 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
       return connectors.some((c) => c.id === id);
     };
 
+    // Iterate the candidates, not the connectors, so the stored preference order wins.
     const targetId = candidates.find(isUsableTarget);
-    if (targetId === undefined) return;
+    const target = connectors.find((c) => c.id === targetId);
+    if (target === undefined) return;
 
     reconnectSettled.current = true;
-    connectWallet({ kind: 'connector', id: targetId });
+    // Wagmi's `reconnect`, not `connect`: it checks `isAuthorized()` first and calls
+    // `connect({ isReconnecting: true })`, which reads accounts passively via
+    // `eth_accounts`. A plain connect would take the `wallet_requestPermissions` /
+    // `eth_requestAccounts` branch (`connectors/injected.js:68-107`) and pop a wallet
+    // prompt on every page load. Restricting it to this one connector keeps the
+    // allowlist and conflict checks above authoritative.
+    reconnect({ connectors: [target] });
   }, [connectors, isConnected, conflictedRdns, announcedRdns]);
 
   // The impersonation signal can arrive after connection: the impostor announces
