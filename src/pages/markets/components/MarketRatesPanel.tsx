@@ -16,9 +16,7 @@ type MarketRatesPanelHydrated = [
     earnAPR: bigint;
     earnRewardsAPR?: bigint;
     rewardsAssetSymbol?: string;
-    // Set when earnRewardsAPR is an institutional market's USDC-terms program
-    // reward, which annotates the net earn rate with a tooltip
-    institutionalRewardsAPR?: bigint;
+    isInstitutional?: boolean;
   }
 ];
 
@@ -30,7 +28,7 @@ type PanelContent = {
   earnAPR: bigint;
   earnRewardsAPR?: bigint;
   rewardsAssetSymbol?: string;
-  institutionalRewardsAPR?: bigint;
+  isInstitutional?: boolean;
 };
 
 const defaultPanelContent: PanelContent = {
@@ -39,7 +37,7 @@ const defaultPanelContent: PanelContent = {
   earnAPR: 0n,
   earnRewardsAPR: undefined,
   rewardsAssetSymbol: undefined,
-  institutionalRewardsAPR: undefined,
+  isInstitutional: false,
 };
 
 function getMarketRatesPanelContent(state: MarketRatesPanelState): PanelContent {
@@ -99,14 +97,14 @@ const LoadingView = () => {
 
 const MarketRatesPanelView = ({
   borrowAPR,
-  borrowRewardsAPR,
+  borrowRewardsAPR = 0n,
   earnAPR,
-  earnRewardsAPR,
+  earnRewardsAPR = 0n,
   rewardsAssetSymbol,
-  institutionalRewardsAPR
+  isInstitutional,
 }: PanelContent) => {
-  const netBorrowAPR = borrowRewardsAPR ? borrowAPR - borrowRewardsAPR : borrowAPR;
-  const netSupplyAPR = earnRewardsAPR ? earnAPR + earnRewardsAPR : earnAPR;
+  const netBorrowAPR = borrowAPR - borrowRewardsAPR;
+  const netSupplyAPR = earnAPR + earnRewardsAPR;
 
   const netBorrowRateGraph = (
     <NetRatesGraph
@@ -120,8 +118,8 @@ const MarketRatesPanelView = ({
   // Institutional markets show the base/boost breakdown bar; the whitelist
   // status renders as a standalone banner on the page instead of a card here
   const netEarnRateGraph =
-    institutionalRewardsAPR !== undefined && institutionalRewardsAPR > 0n ? (
-      <BoostedSupplyRates earnAPR={earnAPR} boostAPR={institutionalRewardsAPR} showWhitelistCard={false} />
+    isInstitutional && earnRewardsAPR > 0n ? (
+      <BoostedSupplyRates earnAPR={earnAPR} boostAPR={earnRewardsAPR} showWhitelistCard={false} />
     ) : (
       <NetRatesGraph
         state={NetRatesGraphType.Earn}

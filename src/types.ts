@@ -303,8 +303,6 @@ export type RewardsTokenState = {
   cometRewards: string;
   baseAsset: BaseAsset;
   rewardAsset: Token & { price: bigint };
-  earnRewardsAPR: bigint;
-  borrowRewardsAPR: bigint;
 };
 
 export type AccountRewardsState = RewardsTokenState & {

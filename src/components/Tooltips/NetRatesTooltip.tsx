@@ -65,7 +65,7 @@ const NetRatesTooltip = ({
   );
 
   const boostedBreakdown =
-    isInstitutional !== undefined ? (
+    isInstitutional ? (
       <BoostedSupplyRates
         earnAPR={earnAPR}
         boostAPR={earnRewardsAPR}

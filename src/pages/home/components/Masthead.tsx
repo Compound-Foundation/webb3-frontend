@@ -3,7 +3,7 @@ import { Dispatch, ReactNode, useRef, useState } from 'react';
 import DetailSheet from '@components/DetailSheet';
 import { Compare, HoverUnder } from '@components/Icons';
 import Tooltip from '@components/Tooltip';
-import NetRatesTooltip, { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
+import NetRatesTooltip, { NetRatesTooltipProps, NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { sanitizedAmountForAction } from '@helpers/actions';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
@@ -44,14 +44,13 @@ type MastheadHydrated = [
     baseAsset: BaseAssetWithAccountState;
     baseAssetPost: BaseAssetWithAccountState;
     borrowAPR: bigint;
-    borrowRewardsAPR: bigint | undefined;
+    borrowRewardsAPR?: bigint;
     collateralAssets: TokenWithAccountState[];
     collateralValue: bigint;
     collateralValuePost: bigint;
     compare: boolean;
     earnAPR: bigint;
     earnRewardsAPR?: bigint;
-    institutionalBoostAPR?: bigint;
     institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
     liquidationCapacity: bigint;
     liquidationCapacityPost: bigint;
@@ -222,7 +221,6 @@ function getContent(state: MastheadState): Content {
     compare,
     earnAPR,
     earnRewardsAPR,
-    institutionalBoostAPR,
     institutionalWhitelistStatus,
     liquidationCapacity,
     liquidationCapacityPost,
@@ -230,6 +228,7 @@ function getContent(state: MastheadState): Content {
     rewardsAssetSymbol,
     theme,
     transaction,
+    isInstitutional,
     onSupplyAction,
     onWithdrawAction,
     setCompare,
@@ -273,9 +272,9 @@ function getContent(state: MastheadState): Content {
     earnAPR,
     earnRewardsAPR,
     rewardsAssetSymbol,
-    institutionalBoostAPR,
     institutionalWhitelistStatus,
-  };
+    isInstitutional,
+  } satisfies Omit<NetRatesTooltipProps, 'view'>;
 
   let ratesTooltipContent = <NetRatesTooltip {...netRatesTooltipProps} view={NetRatesTooltipView.Borrow} />;
 

@@ -124,7 +124,7 @@ const Market = ({ web3 }: MarketsProps) => {
               interestRateModel: modelState,
               reserveFactor: token.reserveFactor,
               reserves: token.reserves,
-              rewardsAsset: 'COMP',
+              rewardsAssetSymbol: 'COMP',
               totalBorrow: token.totalBorrow,
               totalSupply: token.totalSupply,
               withHeader: true,
@@ -184,9 +184,9 @@ const Market = ({ web3 }: MarketsProps) => {
             borrowAPR,
             borrowRewardsAPR: borrowRewardsAPR,
             earnAPR,
-            earnRewardsAPR: isInstitutional ? undefined : supplyRewardsAPR,
+            earnRewardsAPR: supplyRewardsAPR,
             rewardsAssetSymbol,
-            institutionalRewardsAPR: isInstitutional ? supplyRewardsAPR : undefined,
+            isInstitutional: isInstitutional,
           },
         ]}
       />

@@ -123,7 +123,7 @@ const NetRatesGraph = (state: NetRatesGraphState) => {
               </p>
             </div>
 
-            {earnRewardsAPR !== undefined && formatRateFactor(earnRewardsAPR) !== '0.00%' && (
+            {earnRewardsAPR > 0n && (
               <div
                 className='net-rates-graph__graph'
                 style={{ width: (Number(earnRewardsAPR) / Number(netSupplyAPR)) * 100 + '%' }}

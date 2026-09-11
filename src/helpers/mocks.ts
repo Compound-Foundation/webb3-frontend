@@ -377,8 +377,6 @@ const mockRewardsState: RewardAccountStateInfo = [
         rewardAsset: COMP,
         amountOwed: BigInt(100e18),
         walletBalance: BigInt(100e18),
-        earnRewardsAPR,
-        borrowRewardsAPR,
         supplyBalance: BigInt(0),
         borrowBalance: BigInt(15_500_000.15e6),
       },

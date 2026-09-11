@@ -5,7 +5,7 @@ import { useSearchParams } from 'react-router';
 import type { Web3 } from '@contexts/Web3Context';
 import { convertApiResponse } from '@helpers/functions';
 import { getMarketsByNetwork } from '@helpers/markets';
-import { FACTOR_PRECISION, PRICE_PRECISION, REWARDS_API_REFRESH_INTERVAL } from '@helpers/numbers';
+import { PRICE_PRECISION, REWARDS_API_REFRESH_INTERVAL } from '@helpers/numbers';
 import { getAccountRewardsStateEndpoint, getMarketRewardsStateEndpoint } from '@helpers/urls';
 import {
   AccountRewardsState,
@@ -28,6 +28,7 @@ type RewardsStateResponse = {
     priceFeed: string;
     symbol: string;
   };
+  /** @deprecated should npt be used anymore */
   borrowRewardsApr: string;
   comet: {
     address: string;
@@ -35,6 +36,7 @@ type RewardsStateResponse = {
   cometRewards: {
     address: string;
   };
+  /** @deprecated should npt be used anymore */
   earnRewardsApr: string;
   rewardAsset: { address: string; decimals: number; description: string; price: string; symbol: string };
 };
@@ -158,8 +160,6 @@ function sanitizeRewardState(rewardState: RewardsStateResponse) {
   // Floor to be safe. The API may return more decimal places than we need
   const minBorrow = BigInt(Math.floor(Number(rewardState.baseAsset.minBorrow) * 10 ** rewardState.baseAsset.decimals));
   const rewardAssetPrice = BigInt(Math.floor(Number(rewardState.rewardAsset.price) * 10 ** PRICE_PRECISION));
-  const borrowRewardsAPR = BigInt(Math.floor(Number(rewardState.borrowRewardsApr) * 10 ** FACTOR_PRECISION));
-  const earnRewardsAPR = BigInt(Math.floor(Number(rewardState.earnRewardsApr) * 10 ** FACTOR_PRECISION));
 
   return {
     baseAsset: {
@@ -180,8 +180,6 @@ function sanitizeRewardState(rewardState: RewardsStateResponse) {
       price: rewardAssetPrice,
       symbol: rewardState.rewardAsset.symbol,
     },
-    borrowRewardsAPR: borrowRewardsAPR,
-    earnRewardsAPR: earnRewardsAPR
   };
 }
 

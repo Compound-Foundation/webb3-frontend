@@ -44,7 +44,7 @@ type PanelContent = {
   reserveFactor: string;
   reserves: string;
   reservesPercentage?: string;
-  rewardsAsset?: string;
+  rewardsAssetSymbol?: string;
   totalBorrow: string;
   totalSupply: string;
   withHeader?: boolean;
@@ -140,7 +140,7 @@ function getMarketOverviewPanelContent(state: MarketOverviewPanelState): PanelCo
       reserves: formatTokenBalance(PRICE_PRECISION + baseAsset.decimals, reserves * price, true, currency),
       reserveFactor: formatRateFactor(reserveFactor ?? 0n),
       reservesPercentage,
-      rewardsAsset: rewardsAsset === undefined ? undefined : rewardsAsset.symbol,
+      rewardsAssetSymbol: rewardsAsset?.symbol,
       totalBorrow: formatTokenBalance(PRICE_PRECISION + baseAsset.decimals, totalBorrow * price, true, currency),
       totalSupply: formatTokenBalance(PRICE_PRECISION + baseAsset.decimals, totalSupply * price, true, currency),
     };
@@ -197,7 +197,7 @@ export const MarketOverviewPanelView = ({
   interestRateModel,
   reserveFactor,
   reserves,
-  rewardsAsset,
+  rewardsAssetSymbol,
   totalBorrow,
   totalSupply,
   withHeader = false,
@@ -205,13 +205,14 @@ export const MarketOverviewPanelView = ({
   const zeroIsNotALimit = borrowCap == '$0.00' ? 'No Limit' : borrowCap;
   const stats = (
     <div className="market-overview__stats">
+      asdassadasdasdasdasdsa
       <MarketOverviewPanelItem label={'Total Earning'} value={totalSupply} />
       <MarketOverviewPanelItem asset={baseAsset.symbol} label={'Earn APR'} value={earnAPR} />
-      <MarketOverviewPanelItem asset={rewardsAsset} label={'Earn Distribution'} value={earnRewardsAPR} />
+      <MarketOverviewPanelItem asset={rewardsAssetSymbol} label={'Earn Distribution'} value={earnRewardsAPR} />
       <MarketOverviewPanelItem label={'Reserves'} value={reserves} />
       <MarketOverviewPanelItem label={'Total Borrowing'} value={totalBorrow} />
       <MarketOverviewPanelItem asset={baseAsset.symbol} label={'Borrow APR'} value={borrowAPR} />
-      <MarketOverviewPanelItem asset={rewardsAsset} label={'Borrow Distribution'} value={borrowRewardsAPR} />
+      <MarketOverviewPanelItem asset={rewardsAssetSymbol} label={'Borrow Distribution'} value={borrowRewardsAPR} />
       <MarketOverviewPanelItem label={'Borrow Cap'} value={zeroIsNotALimit} />
       <MarketOverviewPanelItem label={'Collateral Factor'} value={collateralFactor} />
       <MarketOverviewPanelItem label={'Reserve Factor'} value={reserveFactor} />

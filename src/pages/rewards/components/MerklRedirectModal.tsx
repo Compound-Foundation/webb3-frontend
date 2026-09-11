@@ -8,14 +8,15 @@ interface MerklRedirectModalContextValue {
   setIsOpen: Dispatch<SetStateAction<boolean>>;
 }
 
-const MerklRedirectModalContext = createContext<MerklRedirectModalContextValue | null>(null);
-
-export const useMerklRedirectModal = () => {
-  const ctx = useContext(MerklRedirectModalContext);
-  if (!ctx) {
+const MerklRedirectModalContext = createContext<MerklRedirectModalContextValue>({
+  isOpen: false,
+  setIsOpen: () => {
     throw new Error('useMerklRedirectModal must be used within a MerklRedirectModalProvider');
   }
-  return ctx;
+});
+
+export const useMerklRedirectModal = (): MerklRedirectModalContextValue => {
+  return useContext(MerklRedirectModalContext);
 };
 
 export const MerklRedirectModalProvider = ({ children }: { children: ReactNode }) => {
