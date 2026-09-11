@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 
-import {Ronin} from "@components/Icons/Ronin";
-import { Connector, ConnectorType } from '@contexts/Web3Context';
+import { Connector } from '@contexts/Web3Context';
 import { getShortAddress } from '@helpers/address';
 import { getLedgerAddresses } from '@helpers/Ledger';
 import { TERMS_URL } from '@helpers/urls';
+import { COINBASE_RDNS, type DiscoveredWallet } from '@helpers/walletConnectors';
 import useDisableScroll from '@hooks/useDisableScroll';
 import useOnClickOutside from '@hooks/useOnClickOutside';
+import { useWalletRows } from '@hooks/useWalletRows';
 
-import { ArrowLeft, ArrowRight, CircleClose, Wallet } from './Icons';
-import { BraveWallet } from './Icons/BraveWallet';
+import { ArrowLeft, ArrowRight, CircleClose, CircleExclamation, Wallet } from './Icons';
 import { BrowserWallets } from './Icons/BrowserWallets';
 import { Coinbase } from './Icons/Coinbase';
 import { LedgerWallet } from './Icons/LedgerWallet';
@@ -22,6 +22,63 @@ export type ConnectWalletModalProps = {
   onSelectConnector: (connector: Connector) => void;
 };
 
+/**
+ * A wallet discovered over EIP-6963, rendered under the name our allowlist assigns it
+ * (never the announced one) and the icon it announced. That icon is a wallet-supplied
+ * data URI, so we fall back to a generic mark if it fails to decode.
+ */
+const DetectedWalletRow = ({ wallet, onSelect }: { wallet: DiscoveredWallet; onSelect: () => void }) => {
+  const [iconFailed, setIconFailed] = useState(false);
+  const showIcon = wallet.icon !== undefined && !iconFailed;
+
+  return (
+    <div className="connect-wallet-item" onClick={onSelect}>
+      {showIcon ? (
+        <img
+          className="connect-wallet-item__symbol"
+          src={wallet.icon}
+          alt=""
+          width={40}
+          height={40}
+          onError={() => setIconFailed(true)}
+        />
+      ) : (
+        <BrowserWallets className="connect-wallet-item__symbol" />
+      )}
+      <div className="connect-wallet-item__info">
+        <div className="heading heading--emphasized">{wallet.name}</div>
+      </div>
+      <ArrowRight />
+    </div>
+  );
+};
+
+/**
+ * Shown in place of a known wallet whose rdns was announced by two different providers
+ * — an impersonation signal. Deliberately not clickable: we cannot tell which announcer
+ * is the real wallet.
+ *
+ * Without a `name` this is the unlisted-conflict variant. We never print an unlisted
+ * rdns, since that name is attacker-chosen, but the conflict still taints bare
+ * `window.ethereum` and can sever a live session — so it has to be explained rather
+ * than leaving the user with an unexplained disconnect.
+ */
+const ConflictedWalletRow = ({ name }: { name?: string }) => (
+  <div className="connect-wallet-item connect-wallet-item--disabled connect-wallet-item--warning">
+    <CircleExclamation className="connect-wallet-item__symbol" />
+    <div className="connect-wallet-item__info">
+      <div className="heading heading--emphasized">
+        {name === undefined ? 'Browser wallets hidden for your safety' : `${name} hidden for your safety`}
+      </div>
+      <div className="meta text-color--2">
+        {name === undefined
+          ? 'Two extensions claimed the same wallet identity. Review your browser extensions.'
+          : `Multiple extensions claimed to be ${name}. Review your browser extensions.`}
+      </div>
+    </div>
+  </div>
+);
+
 enum ConnectWalletModalSteps {
   ChooseWalletConnector = 'choose-wallet-connector',
   PlugLedgerIn = 'plugin-ledger',
@@ -30,6 +87,12 @@ enum ConnectWalletModalSteps {
 }
 
 const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector }: ConnectWalletModalProps) => {
+  const {
+    detected: detectedWallets,
+    conflicted: conflictedWallets,
+    unnamedConflict,
+    showLegacy: showLegacyInjected,
+  } = useWalletRows();
   const [modalStep, setModalStep] = useState(ConnectWalletModalSteps.ChooseWalletConnector);
   const [selectedLedgerPath, setSelectedLedgerPath] = useState<'live' | 'legacy'>('live');
   const [selectedAddress, setSelectedAddress] = useState<[string, string] | undefined>();
@@ -76,8 +139,6 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
 
   const isLedgerAvailable = 'usb' in navigator;
 
-  const isUsingBrave = (window.ethereum as { isBraveWallet: boolean })?.isBraveWallet;
-
   const attemptLedgerConnect = () => {
     getLedgerAddresses()
       .then((result) => {
@@ -92,42 +153,66 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
 
   switch (modalStep) {
     case ConnectWalletModalSteps.ChooseWalletConnector: {
-      const braveWalletConnector = (
-        <div
-          className="connect-wallet-item mobile-hide"
-          onClick={() => {
-            onSelectConnector([ConnectorType.Metamask]);
-            onClose();
-          }}
-        >
-          <BraveWallet className="connect-wallet-item__symbol" />
-          <div className="connect-wallet-item__info">
-            <div className="heading heading--emphasized">Brave Wallet</div>
-            <div className="meta text-color--2">And other browser wallets</div>
-          </div>
+      const selectConnector = (id: string) => {
+        onSelectConnector({ kind: 'connector', id });
+        onClose();
+      };
 
-          <ArrowRight />
-        </div>
-      );
+      // Wallets that announced over EIP-6963, each under the name our allowlist gives it.
+      const detectedRows = detectedWallets.map((wallet) => (
+        <DetectedWalletRow key={wallet.id} wallet={wallet} onSelect={() => selectConnector(wallet.id)} />
+      ));
 
-      const metamaskConnector = (
+      // Warnings render above the wallet list so a hidden wallet is explained, not
+      // silently missing.
+      const conflictedRows = [
+        ...conflictedWallets.map((wallet) => <ConflictedWalletRow key={wallet.id} name={wallet.name} />),
+        // A conflict on an rdns we do not list is never named, but it still hides the
+        // legacy row and can sever a session, so it gets the unnamed variant.
+        ...(unnamedConflict ? [<ConflictedWalletRow key="unnamed-conflict" />] : []),
+      ];
+
+      // Only reached when nothing announced: a mobile in-app browser, or an extension
+      // predating EIP-6963.
+      const legacyInjectedRow = (
         <div
           className="connect-wallet-item connect-wallet-item--browser-wallet"
-          onClick={() => {
-            onSelectConnector([ConnectorType.Metamask]);
-            onClose();
-          }}
+          onClick={() => selectConnector('injected')}
         >
           <BrowserWallets className="connect-wallet-item__symbol" />
           <div className="connect-wallet-item__info">
-            <div className="heading heading--emphasized mobile-hide">Metamask</div>
-            <div className="heading heading--emphasized mobile-only">Wallet Browser</div>
-            <div className="meta text-color--2 mobile-hide">And other browser wallets</div>
+            <div className="heading heading--emphasized">Browser Wallet</div>
+            <div className="meta text-color--2 mobile-hide">The wallet built into this browser</div>
             <div className="meta text-color--2 mobile-only">MetaMask Mobile, Brave, etc</div>
           </div>
           <ArrowRight />
         </div>
       );
+
+      const noWalletDetectedRow = (
+        <div className="connect-wallet-item connect-wallet-item--disabled">
+          <BrowserWallets className="connect-wallet-item__symbol" />
+          <div className="connect-wallet-item__info">
+            <div className="heading heading--emphasized">No browser wallet detected</div>
+            <div className="meta text-color--2">Install one, or use an option below</div>
+          </div>
+        </div>
+      );
+
+      // A conflict also suppresses the legacy row: offering bare `window.ethereum` while
+      // an impersonator is present reintroduces exactly the race EIP-6963 fixed.
+      let browserWalletRows;
+      if (detectedRows.length > 0 || conflictedRows.length > 0) {
+        browserWalletRows = [...conflictedRows, ...detectedRows];
+      } else if (showLegacyInjected) {
+        browserWalletRows = legacyInjectedRow;
+      } else {
+        browserWalletRows = noWalletDetectedRow;
+      }
+
+      // The Coinbase SDK routes to the extension when one is installed, so a conflict on
+      // its rdns taints this fixed row too — hide it rather than contradict the warning.
+      const coinbaseConflicted = conflictedWallets.some((wallet) => wallet.id === COINBASE_RDNS);
 
       return (
         <div className={`modal modal--connect-wallet${isOpen ? ' modal--active' : ''}`}>
@@ -148,7 +233,7 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
             </div>
 
             <div className="connect-wallet-items L4">
-              {isUsingBrave ? braveWalletConnector : metamaskConnector}
+              {browserWalletRows}
 
               <div
                 className={`connect-wallet-item mobile-hide${
@@ -169,10 +254,7 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
               </div>
               <div
                 className="connect-wallet-item"
-                onClick={() => {
-                  onSelectConnector([ConnectorType.WalletConnect]);
-                  onClose();
-                }}
+                onClick={() => selectConnector('walletConnect')}
               >
                 <WalletConnect className="connect-wallet-item__symbol" />
                 <div className="connect-wallet-item__info">
@@ -180,32 +262,18 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
                 </div>
                 <ArrowRight />
               </div>
-              <div
-                className="connect-wallet-item"
-                onClick={() => {
-                  onSelectConnector([ConnectorType.WalletLink]);
-                  onClose();
-                }}
-              >
-                <Coinbase className="connect-wallet-item__symbol" />
-                <div className="connect-wallet-item__info">
-                  <div className="heading heading--emphasized">Coinbase Wallet</div>
+              {coinbaseConflicted ? null : (
+                <div
+                  className="connect-wallet-item"
+                  onClick={() => selectConnector('coinbaseWalletSDK')}
+                >
+                  <Coinbase className="connect-wallet-item__symbol" />
+                  <div className="connect-wallet-item__info">
+                    <div className="heading heading--emphasized">Coinbase Wallet</div>
+                  </div>
+                  <ArrowRight />
                 </div>
-                <ArrowRight />
-              </div>
-              <div
-                className="connect-wallet-item"
-                onClick={() => {
-                  onSelectConnector([ConnectorType.Ronin]);
-                  onClose();
-                }}
-              >
-                <Ronin className="connect-wallet-item__symbol" />
-                <div className="connect-wallet-item__info">
-                  <div className="heading heading--emphasized">Ronin</div>
-                </div>
-                <ArrowRight />
-              </div>
+              )}
             </div>
             {terms}
           </div>
@@ -391,7 +459,8 @@ const ConnectWalletModal = ({ isOpen = false, onRequestClose, onSelectConnector 
                 disabled={selectedAddress === undefined}
                 onClick={() => {
                   if (selectedAddress !== undefined) {
-                    onSelectConnector([ConnectorType.Ledger, selectedAddress]);
+                    const [path, address] = selectedAddress;
+                    onSelectConnector({ kind: 'ledger', path, address });
                     onClose();
                   }
                 }}

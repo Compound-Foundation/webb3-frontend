@@ -40,8 +40,12 @@
       }
     }
   }
+  // Wallet icons are announced by the wallet itself, so the box is ours to fix: a
+  // non-square or dimensionless SVG would otherwise set its own row's geometry.
   &__symbol {
     width: 40px;
+    height: 40px;
+    object-fit: contain;
     border-radius: 5px;
   }
   &__info {
@@ -50,6 +54,9 @@
   }
 
   &--disabled {
+    // Nothing happens on click, so don't offer a pointer that promises otherwise.
+    cursor: default;
+
     &:hover {
       background: unset;
 
@@ -58,6 +65,44 @@
           fill: var(--icon--1);
         }
       }
+    }
+  }
+
+  // The warning glyph carries its own 16x16 size attributes, unlike the square wallet
+  // icons, so it needs an explicit box to line up with the 40px rows around it.
+  &--warning {
+    .connect-wallet-item__symbol {
+      width: 24px;
+      height: 24px;
+      margin: 0 8px;
+    }
+
+    // `&:hover` as well as `&`: the conflicted row also carries `--disabled`, whose
+    // own `:hover` rule is more specific than a bare `--warning` selector and would
+    // otherwise grey the caution glyph out on hover.
+    &,
+    &:hover {
+      .svg__path {
+        fill: var(--data--caution);
+      }
+    }
+  }
+}
+
+// The row count is not fixed — it grows with however many wallets announced over
+// EIP-6963 — so cap the modal to the viewport and let it scroll. The page behind it is
+// scroll-locked while it is open, so without this the overflow is simply unreachable.
+.modal--connect-wallet {
+  .modal__content {
+    max-height: calc(100vh - 4rem);
+    max-height: calc(100dvh - 4rem);
+    overflow-y: auto;
+  }
+
+  @media (max-width: $device--sm) {
+    .modal__content {
+      max-height: calc(100vh - 1rem);
+      max-height: calc(100dvh - 1rem);
     }
   }
 }
