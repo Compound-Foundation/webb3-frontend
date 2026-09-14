@@ -14,3 +14,5 @@ export const TRX_HISTORY_NO_FURTHER_ITEMS = 'webb3-transactions-loading-done';
 export const PREFERRED_CURRENCY_KEY = 'webb3-preferred-currency';
 
 export const BREAKPOINT_SM_PX = 1120;
+
+export const DAYS_PER_YEAR = 365n;

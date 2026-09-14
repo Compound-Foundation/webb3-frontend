@@ -357,9 +357,11 @@ export type MarketData = {
   type: 'MarketData';
   rewardsOverwrite?: {
     rewardsAssetSymbol: string;
-    borrowRewardsAPR: bigint;
-    supplyRewardsAPR: bigint;
-  }
+    supplyCompPerDay: bigint;
+    borrowCompPerDay: bigint;
+    borrowRewardsAPR?: bigint;
+    supplyRewardsAPR?: bigint;
+  };
 };
 
 export type MarketDataLoaded = Omit<MarketData, 'baseAsset' | 'type'> & {
@@ -384,7 +386,7 @@ export type MarketSummary = {
   supplyAPR: bigint;
   borrowRewardsAPR: bigint;
   supplyRewardsAPR: bigint;
-  rewardAssetSymbol?: string;
+  rewardsAssetSymbol?: string;
   /**
    * Total borrow value in USD
    */

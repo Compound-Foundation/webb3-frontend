@@ -9,7 +9,7 @@ import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, isV2Market } from '@helpers/markets';
 import { formatTokenBalance, getTokenValue, PRICE_PRECISION } from '@helpers/numbers';
 import { getBlockExplorerUrlForAddress, INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
-import { CTokenWithMarketState, Currency, StateType, Token, TokenWithMarketState } from '@types';
+import { CTokenWithMarketState, Currency, StateType, TokenWithMarketState } from '@types';
 
 import AdditionalMarketDataPanel from './components/AdditionalMarketDataPanel';
 import AssetsTableRow from './components/AssetsTableRow';

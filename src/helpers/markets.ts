@@ -74,22 +74,22 @@ export const MARKETS: MarketData[] = [
       [1, 'USDC', 'USD Coin', mainnetUSDCRoots, {
         rewardsOverwrite: {
           rewardsAssetSymbol: "COMP",
-          borrowRewardsAPR: 2579905919404118n,
-          supplyRewardsAPR: 2043544116605595n,
+          supplyCompPerDay: 55n * 10n ** 18n,
+          borrowCompPerDay: 55n * 10n ** 18n,
         }
       }],
       [1, 'ETH', 'Ether', mainnetWETHRoots, {
         rewardsOverwrite: {
           rewardsAssetSymbol: "COMP",
-          borrowRewardsAPR: 2540730861894757n,
-          supplyRewardsAPR: 802367647857447n,
+          supplyCompPerDay: 10n * 10n ** 18n,
+          borrowCompPerDay: 20n * 10n ** 18n,
         }
       }],
       [1, 'USDT', 'Tether', mainnetUSDTRoots, {
         rewardsOverwrite: {
           rewardsAssetSymbol: "COMP",
-          borrowRewardsAPR: 2382069454439632n,
-          supplyRewardsAPR: 1851220117801404n,
+          supplyCompPerDay: 30n * 10n ** 18n,
+          borrowCompPerDay: 30n * 10n ** 18n,
         }
       }],
       [1, 'wstETH', 'Lido Wrapped Staked ETH', mainnetWSTETHRoots],

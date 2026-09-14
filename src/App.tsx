@@ -75,7 +75,7 @@ function App({ Component, pageProps }: any) {
     }
   }, [location.pathname]);
 
-  const cometState = useCometState(web3, selectedMarketState.selectedMarket, transactions);
+  const cometState = useCometState(web3, selectedMarketState.selectedMarket, transactions, rewardsState);
   initializeContext(selectedMarketState);
 
   const handleRequestNetworkSwitch = (fromChainId: number, toChainId: number, description?: string) => {

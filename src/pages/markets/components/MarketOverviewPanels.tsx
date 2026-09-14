@@ -300,8 +300,8 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
 
   const utilization = formatRateFactor(marketSummary.utilization);
 
-  const netEarnAPR = formatRateFactor(marketSummary.supplyAPR);
-  const netBorrowAPR = formatRateFactor(marketSummary.borrowAPR);
+  const netEarnAPR = formatRateFactor(marketSummary.supplyAPR + marketSummary.supplyRewardsAPR);
+  const netBorrowAPR = formatRateFactor(marketSummary.borrowAPR - marketSummary.borrowRewardsAPR);
 
   const hasEarnRewards = marketSummary.supplyRewardsAPR > 0n;
   const hasBorrowRewards = marketSummary.borrowRewardsAPR > 0n;
@@ -369,7 +369,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
               view={NetRatesTooltipView.Supply}
               earnAPR={marketSummary.supplyAPR}
               earnRewardsAPR={marketSummary.supplyRewardsAPR}
-              rewardsAssetSymbol={marketSummary.rewardAssetSymbol}
+              rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
             />
           }
         </div>
@@ -382,7 +382,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
               view={NetRatesTooltipView.Borrow}
               borrowAPR={marketSummary.borrowAPR}
               borrowRewardsAPR={marketSummary.borrowRewardsAPR}
-              rewardsAssetSymbol={marketSummary.rewardAssetSymbol}
+              rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
             />
           }
         </div>
