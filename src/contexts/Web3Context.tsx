@@ -6,6 +6,7 @@ import {
   SetStateAction,
   useCallback,
   useEffect,
+  useRef,
   useState,
   useContext,
 } from 'react';
@@ -14,6 +15,7 @@ import {
   useAccount,
   useConnect,
   useDisconnect,
+  useReconnect,
   useSwitchChain,
   useConnectorClient,
   Connector as WagmiConnector,
@@ -21,13 +23,17 @@ import {
 
 import { CHAINS } from '@constants/chains';
 import { CONNECTOR_LOCALSTORAGE_KEY } from '@helpers/constants';
+import { useAnnouncedRdns, useConflictedRdns } from '@helpers/eip6963Security';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { isLedgerConnector } from '@helpers/Ledger';
 import { DEFAULT_MARKET } from '@helpers/markets';
+import {
+  isAllowedConnectorId,
+  isConnectorConflicted,
+  migrateStoredConnectorIds,
+} from '@helpers/walletConnectors';
 import { useAddressScreening, ScreeningStatus } from '@hooks/useAddressScreening';
 import { useDisconnectBlockedWallet } from '@hooks/useDisconnectBlockedWallet';
-
-import { WALLECT_CONNECT_PROJECT_ID } from '../../envVars';
 
 export const Web3Context = createContext<Web3 | undefined>(undefined);
 
@@ -68,20 +74,15 @@ export function useWeb3Context() {
   return context;
 }
 
-export enum ConnectorType {
-  Metamask = 'Metamask',
-  WalletConnect = 'WalletConnect',
-  WalletLink = 'WalletLink',
-  Ledger = 'Ledger',
-  Ronin = 'Ronin',
-}
-
+/**
+ * A wallet choice. `id` is any wagmi connector id: one we registered ourselves
+ * (`injected`, `walletConnect`, `coinbaseWalletSDK`) or, for a wallet discovered over
+ * EIP-6963, its RDNS. Ledger is its own variant because it alone needs parameters set
+ * before `connect()`.
+ */
 export type Connector =
-  | [ConnectorType.Metamask]
-  | [ConnectorType.WalletConnect]
-  | [ConnectorType.WalletLink]
-  | [ConnectorType.Ledger, [string, string]]
-  | [ConnectorType.Ronin];
+  | { kind: 'connector'; id: string }
+  | { kind: 'ledger'; path: string; address: string };
 
 export type ReadWeb3 = {
   connector: undefined;
@@ -115,23 +116,19 @@ type Web3ProviderProps = {
   children?: ReactNode;
 };
 
-const connectorsMap = {
-  [ConnectorType.Metamask]: { id: 'injected' },
-  [ConnectorType.WalletConnect]: { id: 'walletConnect', options: { projectId: WALLECT_CONNECT_PROJECT_ID } },
-  [ConnectorType.WalletLink]: { id: 'coinbaseWalletSDK' },
-  [ConnectorType.Ledger]: { id: 'ledger' },
-  [ConnectorType.Ronin]: { id: 'com.roninchain.wallet' },
-};
-
 export const Web3Provider = ({ children }: Web3ProviderProps) => {
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
-  const [connector, setConnector] = useState<Connector | null>(null);
+  // Only the setter is read: the preference is written to localStorage by
+  // `connectWallet` once a connect actually succeeds, not from this state. `setConnector`
+  // stays on the context as part of its public surface.
+  const [, setConnector] = useState<Connector | null>(null);
   const [desiredWriteNetwork, setDesiredWriteNetwork] = useState<undefined | number>();
   const [readChainId, setReadChainId] = useState<number>(DEFAULT_MARKET.chainInformation.chainId);
 
   const { address: account, chainId: writeChainId, connector: writeConnector, isConnected } = useAccount();
-  const { connect, connectors } = useConnect();
+  const { connectAsync, connectors } = useConnect();
+  const { reconnect } = useReconnect();
   const { disconnect } = useDisconnect();
   const { switchChain } = useSwitchChain();
 
@@ -162,36 +159,82 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
     };
   }
 
-  // Initial activation of readWeb3 connector and grabbing of preferred connector type from local storage
+  // Reconnect to the previously chosen wallet.
+  const conflictedRdns = useConflictedRdns();
+  const announcedRdns = useAnnouncedRdns();
+  const reconnectSettled = useRef(false);
   useEffect(() => {
-    const storedConnectorString = window.localStorage.getItem(CONNECTOR_LOCALSTORAGE_KEY);
-    if (storedConnectorString !== null && !searchParams.has('account') && !isConnected) {
-      try {
-        const storedConnectorType = JSON.parse(storedConnectorString)[0];
-        const storedConnector = [storedConnectorType] as Connector;
+    // Once the user is connected the latch is closed for good: leaving it armed lets a
+    // later disconnect — including one made from inside the wallet, which flips
+    // `isConnected` without touching our key — re-run this and fire an unsolicited
+    // connect right after a deliberate disconnect.
+    if (isConnected) reconnectSettled.current = true;
+    if (reconnectSettled.current || searchParams.has('account')) return;
 
-        if (storedConnector[0] !== connector?.[0]) {
-          connectWallet(storedConnector);
-        }
-      } catch (error) {
-        console.error('Error parsing stored connector:', error);
-        window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
-      }
+    const storedValue = window.localStorage.getItem(CONNECTOR_LOCALSTORAGE_KEY);
+    if (storedValue === null) {
+      reconnectSettled.current = true;
+      return;
     }
-  }, []);
 
-  // Listen to changes in ConnectorType
+    // Untrusted input: any content script can write this key. Anything not on the
+    // allowlist resolves to no candidates at all.
+    const candidates = migrateStoredConnectorIds(storedValue);
+    if (candidates.length === 0) {
+      window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
+      reconnectSettled.current = true;
+      return;
+    }
+
+    // Two providers claimed the rdns this id speaks for, so we can't know which one the
+    // user chose last time. Drop the preference; the modal explains via the warning row.
+    if (candidates.every((id) => isConnectorConflicted(id, conflictedRdns))) {
+      window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
+      reconnectSettled.current = true;
+      return;
+    }
+
+    // EIP-6963 announcements can land at any point after mount, so a connector missing
+    // now may still show up and this effect reruns when it does. We deliberately never
+    // discard the stored id over a miss: there is no batch we can call the last one, and
+    // a preference for a wallet the user has since uninstalled costs only a dead
+    // localStorage key, overwritten as soon as they connect to anything else.
+    const isUsableTarget = (id: string) => {
+      if (isConnectorConflicted(id, conflictedRdns)) return false;
+      // Same rule as the legacy row: bare `window.ethereum` is only safe when nothing
+      // announced. Otherwise a migrated `Metamask` preference would connect through
+      // whichever extension won the race, purely because the real one had not announced
+      // by the time this effect first ran.
+      if (id === 'injected' && announcedRdns.size > 0) return false;
+      return connectors.some((c) => c.id === id);
+    };
+
+    // Iterate the candidates, not the connectors, so the stored preference order wins.
+    const targetId = candidates.find(isUsableTarget);
+    const target = connectors.find((c) => c.id === targetId);
+    if (target === undefined) return;
+
+    reconnectSettled.current = true;
+    // Wagmi's `reconnect`, not `connect`: it checks `isAuthorized()` first and calls
+    // `connect({ isReconnecting: true })`, which reads accounts passively via
+    // `eth_accounts`. A plain connect would take the `wallet_requestPermissions` /
+    // `eth_requestAccounts` branch (`connectors/injected.js:68-107`) and pop a wallet
+    // prompt on every page load. Restricting it to this one connector keeps the
+    // allowlist and conflict checks above authoritative.
+    reconnect({ connectors: [target] });
+  }, [connectors, isConnected, conflictedRdns, announcedRdns]);
+
+  // The impersonation signal can arrive after connection: the impostor announces
+  // first, we connect to it, then the real wallet announces. Sever the session rather
+  // than keep signing with a provider we can no longer trust.
   useEffect(() => {
-    if (connector !== null) {
-      if (connector[0] === ConnectorType.Ledger) {
-        // If the user uses ledger lets, let's wipe out their connector type
-        // to force them to choose again on next since ledger can't autoconnect.
-        window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
-      } else {
-        window.localStorage.setItem(CONNECTOR_LOCALSTORAGE_KEY, JSON.stringify(connector));
-      }
+    // The whole connector, not just its id: its own declared `rdns` is what says which
+    // wallet the live session actually speaks for.
+    if (writeConnector !== undefined && isConnectorConflicted(writeConnector, conflictedRdns)) {
+      disconnect();
+      window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
     }
-  }, [connector]);
+  }, [conflictedRdns, writeConnector, disconnect]);
 
   // Create functions to switch desired network
   const switchReadNetwork = useCallback(async (desiredChainId: number): Promise<boolean> => {
@@ -245,38 +288,60 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
     [writeWeb3.provider, writeWeb3.chainId]
   );
 
-  // Create function to connect to a specific wallet type
+  // Create function to connect to a specific wallet
   const connectWallet = async (newConnector: Connector) => {
-    if (newConnector !== connector) {
-      setConnector(newConnector);
-      const [connectorType] = newConnector;
-      const connectorConfig = connectorsMap[connectorType];
-      const connector = connectors.find((c) => c.id === connectorConfig.id);
-      if (!connector) throw new Error(`Connector ${connectorType} not found`);
-      if (connectorType === ConnectorType.Ledger) {
-        const [, [pathString, address]] = newConnector;
+    const targetId = newConnector.kind === 'ledger' ? 'ledger' : newConnector.id;
 
-        if (isLedgerConnector(connector)) {
-          connector.setLedgerParams({ pathString, address });
-        }
+    // An explicit choice settles the reconnect latch either way, so a failed or
+    // rejected attempt can't leave it armed to fire again later in the session.
+    reconnectSettled.current = true;
 
-        try {
-          connect({ connector });
-        } catch (error) {
-          console.error('Error connecting Ledger:', error);
-        }
-      } else {
-        try {
-          connect({ connector });
-        } catch (error) {
-          console.error('Error connecting wallet:', error);
-        }
+    // Vetted before any state changes: an id off the allowlist, or one whose rdns two
+    // providers are claiming, must never reach `connect()`.
+    if (newConnector.kind === 'connector') {
+      if (!isAllowedConnectorId(targetId) || isConnectorConflicted(targetId, conflictedRdns)) {
+        console.error(`Refusing to connect to ${targetId}`);
+        return;
       }
+    }
+
+    const wagmiConnector = connectors.find((c) => c.id === targetId);
+    if (!wagmiConnector) {
+      // Reachable when an extension is disabled mid-session, and both call sites treat
+      // this as fire-and-forget — so log rather than throw an unhandled rejection.
+      console.error(`Connector ${targetId} not found`);
+      return;
+    }
+
+    // Ledger alone needs a path and address set before it can open a session.
+    if (newConnector.kind === 'ledger' && isLedgerConnector(wagmiConnector)) {
+      wagmiConnector.setLedgerParams({ pathString: newConnector.path, address: newConnector.address });
+    }
+
+    try {
+      // `connectAsync` rejects; `connect` is a TanStack `mutate` that swallows the
+      // rejection internally, which made this catch dead code.
+      await connectAsync({ connector: wagmiConnector });
+    } catch (error) {
+      // A rejected prompt must leave no trace: persisting on intent would fire an
+      // unsolicited popup next load for a wallet the user explicitly declined.
+      console.error(`Error connecting wallet (${targetId}):`, error);
+      return;
+    }
+
+    setConnector(newConnector);
+    if (newConnector.kind === 'ledger') {
+      // Ledger can't autoconnect, so wipe the preference to force a fresh choice.
+      window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
+    } else {
+      window.localStorage.setItem(CONNECTOR_LOCALSTORAGE_KEY, newConnector.id);
     }
   };
 
   const disconnectWallet = async () => {
+    reconnectSettled.current = true;
     disconnect();
+    setConnector(null);
     window.localStorage.removeItem(CONNECTOR_LOCALSTORAGE_KEY);
   };
 

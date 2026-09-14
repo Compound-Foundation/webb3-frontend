@@ -33,6 +33,7 @@ function App({ Component, pageProps }: any) {
   const SelectedMarketContext = getSelectedMarketContext();
 
   const location = useLocation();
+
   const { transactions, addTransaction, clearTransactions } = useTransactionManager(web3);
   const { theme, setTheme } = useThemeManager();
   const themeRef = useRef(theme);
