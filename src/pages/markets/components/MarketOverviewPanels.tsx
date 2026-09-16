@@ -7,14 +7,16 @@ import IconPair from '@components/IconPair';
 import { CaretDown, CheckMark } from '@components/Icons';
 import PanelWithHeader from '@components/PanelWithHeader';
 import PanelWithNoHeader from '@components/PanelWithNoHeader';
+import { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
 import { CHAINS, INACTIVE_CHAIN_IDS } from '@constants/chains';
 import { assetIconForAssetSymbol, iconNameForChainId } from '@helpers/assets';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, getMarketDescriptors } from '@helpers/markets';
-import { BASE_FACTOR, PRICE_PRECISION, formatValueInDollars } from '@helpers/numbers';
+import { formatRateFactor, formatValueInDollars, PRICE_PRECISION } from '@helpers/numbers';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 
 import { LatestMarketSummaries, MarketSummary } from '../../../types';
+import { BoostedRateInfo } from '../BoostedRateInfo';
 
 import InstitutionalRateInfo from './InstitutionalRateInfo';
 
@@ -227,6 +229,7 @@ type PanelProps = {
   marketSummaries: LatestMarketSummaries;
   institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
 };
+
 const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: PanelProps) => {
   const chainName = CHAINS[chainId].name;
 
@@ -271,7 +274,10 @@ const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: Panel
                   </tr>
                 )}
                 {standardSummaries.map((marketSummary) => {
-                  return <PanelRow key={marketSummary.comet.address} marketSummary={marketSummary} />;
+                  return <PanelRow
+                    key={marketSummary.comet.address}
+                    marketSummary={marketSummary}
+                  />;
                 })}
               </tbody>
             </table>
@@ -286,19 +292,19 @@ type PanelRowProps = {
   marketSummary: MarketSummary;
   institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
 };
+
 const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps) => {
   const [assetSymbol, chainName, assetName] = getMarketDescriptors(marketSummary.comet.address, marketSummary.chainId);
   const market = getMarket(marketSummary.chainId, marketSummary.comet.address);
   const showNewBadge = market?.isNew === true;
 
-  const getPercentage = (val: bigint) => {
-    const percentage = Number((val * 10_000n) / BASE_FACTOR) / 100;
-    return percentage.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  };
+  const utilization = formatRateFactor(marketSummary.utilization);
 
-  const utilization = getPercentage(marketSummary.utilization);
-  const netEarnAPR = getPercentage(marketSummary.supplyAPR);
-  const netBorrowAPR = getPercentage(marketSummary.borrowAPR);
+  const netEarnAPR = formatRateFactor(marketSummary.supplyAPR + marketSummary.supplyRewardsAPR);
+  const netBorrowAPR = formatRateFactor(marketSummary.borrowAPR - marketSummary.borrowRewardsAPR);
+
+  const hasEarnRewards = marketSummary.supplyRewardsAPR > 0n;
+  const hasBorrowRewards = marketSummary.borrowRewardsAPR > 0n;
 
   const shortMarketName = () => {
     const name = market?.slug ?? (assetSymbol === 'ETH' ? 'WETH' : assetSymbol);
@@ -306,6 +312,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
 
     return `${name}-${chain}`.toLowerCase();
   };
+
   const marketPath = `/markets/${shortMarketName()}`;
 
   const navigate = useNavigate();
@@ -345,19 +352,40 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
       <td>
         <div className="market-overview-panels__utilization-container">
           <CircleMeter percentageFill={utilization.toString()} />
-          <div className="body text-color--1 L3">{utilization}%</div>
+          <div className="body text-color--1 L3">{utilization}</div>
         </div>
       </td>
       <td>
-        <div className="body text-color--1 L3 market-overview-panels__net-earn-apr">
-          {netEarnAPR}%
-          {marketSummary.institutionalSupplyRewardsAPR !== undefined && (
-            <InstitutionalRateInfo marketSummary={marketSummary} whitelistStatus={institutionalWhitelistStatus} />
+        <div className="market-overview-panels__apr-container">
+          <div className="body text-color--1 L3">{netEarnAPR}</div>
+          {marketSummary.isInstitutional && (
+            <InstitutionalRateInfo
+              marketSummary={marketSummary}
+              whitelistStatus={institutionalWhitelistStatus}
+            />
           )}
+          {(hasEarnRewards && !marketSummary.isInstitutional) &&
+            <BoostedRateInfo
+              view={NetRatesTooltipView.Supply}
+              earnAPR={marketSummary.supplyAPR}
+              earnRewardsAPR={marketSummary.supplyRewardsAPR}
+              rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
+            />
+          }
         </div>
       </td>
       <td>
-        <div className="body text-color--1 L3">{netBorrowAPR}%</div>
+        <div className="market-overview-panels__apr-container">
+          <div className="body text-color--1 L3">{netBorrowAPR}</div>
+          {(hasBorrowRewards && !marketSummary.isInstitutional) &&
+            <BoostedRateInfo 
+              view={NetRatesTooltipView.Borrow}
+              borrowAPR={marketSummary.borrowAPR}
+              borrowRewardsAPR={marketSummary.borrowRewardsAPR}
+              rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
+            />
+          }
+        </div>
       </td>
       <td>
         <div className="body text-color--1 L3">
@@ -420,7 +448,7 @@ const TableHead = () => {
       <tr className="assets-table__row assets-table__row--header market-overview-panels__table-header L2">
         <th className="label">Market</th>
         <th className="label">Utilization</th>
-        <th className="label">Net Earn APR</th>
+        <th className="label">Net Supply APR</th>
         <th className="label">Net Borrow APR</th>
         <th className="label">Total Earning</th>
         <th className="label">Total Borrowing</th>

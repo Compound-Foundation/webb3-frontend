@@ -36,12 +36,15 @@ type PanelContent = {
   baseAssetPrice: string;
   borrowAPR: string;
   borrowCap: string;
+  borrowRewardsAPR: string;
   collateralFactor: string;
   earnAPR: string;
+  earnRewardsAPR: string;
   interestRateModel: InterestRateModelState;
   reserveFactor: string;
   reserves: string;
   reservesPercentage?: string;
+  rewardsAssetSymbol?: string;
   totalBorrow: string;
   totalSupply: string;
   withHeader?: boolean;
@@ -119,8 +122,10 @@ function getMarketOverviewPanelContent(state: MarketOverviewPanelState): PanelCo
       baseAssetPrice: formatTokenBalance(PRICE_PRECISION, baseAssetPriceInDollars, false, Currency.USD),
       borrowAPR: formatRateFactor(borrowAPR),
       borrowCap: borrowCap,
+      borrowRewardsAPR: formatRateFactor(borrowRewardsAPR ?? 0n),
       collateralFactor: formatRateFactor(collateralFactor ?? 0n),
       earnAPR: formatRateFactor(earnAPR),
+      earnRewardsAPR: formatRateFactor(earnRewardsAPR ?? 0n),
       interestRateModel: [
         StateType.Hydrated,
         {
@@ -135,6 +140,7 @@ function getMarketOverviewPanelContent(state: MarketOverviewPanelState): PanelCo
       reserves: formatTokenBalance(PRICE_PRECISION + baseAsset.decimals, reserves * price, true, currency),
       reserveFactor: formatRateFactor(reserveFactor ?? 0n),
       reservesPercentage,
+      rewardsAssetSymbol: rewardsAsset?.symbol,
       totalBorrow: formatTokenBalance(PRICE_PRECISION + baseAsset.decimals, totalBorrow * price, true, currency),
       totalSupply: formatTokenBalance(PRICE_PRECISION + baseAsset.decimals, totalSupply * price, true, currency),
     };
@@ -184,11 +190,14 @@ export const MarketOverviewPanelView = ({
   baseAssetPrice,
   borrowAPR,
   borrowCap,
+  borrowRewardsAPR,
   collateralFactor,
   earnAPR,
+  earnRewardsAPR,
   interestRateModel,
   reserveFactor,
   reserves,
+  rewardsAssetSymbol,
   totalBorrow,
   totalSupply,
   withHeader = false,
@@ -196,11 +205,14 @@ export const MarketOverviewPanelView = ({
   const zeroIsNotALimit = borrowCap == '$0.00' ? 'No Limit' : borrowCap;
   const stats = (
     <div className="market-overview__stats">
+      asdassadasdasdasdasdsa
       <MarketOverviewPanelItem label={'Total Earning'} value={totalSupply} />
       <MarketOverviewPanelItem asset={baseAsset.symbol} label={'Earn APR'} value={earnAPR} />
+      <MarketOverviewPanelItem asset={rewardsAssetSymbol} label={'Earn Distribution'} value={earnRewardsAPR} />
       <MarketOverviewPanelItem label={'Reserves'} value={reserves} />
       <MarketOverviewPanelItem label={'Total Borrowing'} value={totalBorrow} />
       <MarketOverviewPanelItem asset={baseAsset.symbol} label={'Borrow APR'} value={borrowAPR} />
+      <MarketOverviewPanelItem asset={rewardsAssetSymbol} label={'Borrow Distribution'} value={borrowRewardsAPR} />
       <MarketOverviewPanelItem label={'Borrow Cap'} value={zeroIsNotALimit} />
       <MarketOverviewPanelItem label={'Collateral Factor'} value={collateralFactor} />
       <MarketOverviewPanelItem label={'Reserve Factor'} value={reserveFactor} />

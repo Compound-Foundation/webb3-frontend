@@ -3,7 +3,7 @@ import { Dispatch, ReactNode, useRef, useState } from 'react';
 import DetailSheet from '@components/DetailSheet';
 import { Compare, HoverUnder } from '@components/Icons';
 import Tooltip from '@components/Tooltip';
-import NetRatesTooltip, { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
+import NetRatesTooltip, { NetRatesTooltipProps, NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { sanitizedAmountForAction } from '@helpers/actions';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
@@ -25,8 +25,9 @@ import {
   Currency,
   PendingAction,
   StateType,
+  Token,
   TokenWithAccountState,
-  Transaction,
+  Transaction
 } from '@types';
 
 import { iconForActionType } from './ActionQueueItem';
@@ -43,22 +44,24 @@ type MastheadHydrated = [
     baseAsset: BaseAssetWithAccountState;
     baseAssetPost: BaseAssetWithAccountState;
     borrowAPR: bigint;
+    borrowRewardsAPR?: bigint;
     collateralAssets: TokenWithAccountState[];
     collateralValue: bigint;
     collateralValuePost: bigint;
     compare: boolean;
     earnAPR: bigint;
     earnRewardsAPR?: bigint;
-    institutionalBoostAPR?: bigint;
     institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
     liquidationCapacity: bigint;
     liquidationCapacityPost: bigint;
     pendingAction?: PendingAction;
+    rewardsAssetSymbol?: string;
     theme: Theme;
     transaction?: Transaction;
     onSupplyAction: (pendingAction?: PendingAction) => void;
     onWithdrawAction: (pendingAction?: PendingAction) => void;
     setCompare: Dispatch<boolean>;
+    isInstitutional: boolean;
   }
 ];
 export type MastheadState = MastheadLoading | MastheadNoWallet | MastheadHydrated;
@@ -211,19 +214,21 @@ function getContent(state: MastheadState): Content {
     baseAsset,
     baseAssetPost,
     borrowAPR,
+    borrowRewardsAPR,
     collateralAssets,
     collateralValue,
     collateralValuePost,
     compare,
     earnAPR,
     earnRewardsAPR,
-    institutionalBoostAPR,
     institutionalWhitelistStatus,
     liquidationCapacity,
     liquidationCapacityPost,
     pendingAction,
+    rewardsAssetSymbol,
     theme,
     transaction,
+    isInstitutional,
     onSupplyAction,
     onWithdrawAction,
     setCompare,
@@ -263,11 +268,13 @@ function getContent(state: MastheadState): Content {
 
   const netRatesTooltipProps = {
     borrowAPR,
+    borrowRewardsAPR,
     earnAPR,
     earnRewardsAPR,
-    institutionalBoostAPR,
+    rewardsAssetSymbol,
     institutionalWhitelistStatus,
-  };
+    isInstitutional,
+  } satisfies Omit<NetRatesTooltipProps, 'view'>;
 
   let ratesTooltipContent = <NetRatesTooltip {...netRatesTooltipProps} view={NetRatesTooltipView.Borrow} />;
 
@@ -319,7 +326,7 @@ function getContent(state: MastheadState): Content {
           <div className="masthead__overview-details" onClick={() => setRatesDetailActive(true)}>
             <span className="meta text-color--3"> &#64; </span>
             <div className="masthead__overview-details__net-rate">
-              <span className="meta">{formatRateFactor(borrowAPR)} Net APR</span>
+              <span className="meta">{formatRateFactor(borrowAPR - (borrowRewardsAPR || 0n))} Net APR</span>
               <HoverUnder className="hover-under" long={true} theme={theme} />
             </div>
           </div>

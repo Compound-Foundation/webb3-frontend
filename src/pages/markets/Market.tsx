@@ -5,7 +5,6 @@ import IconPair from '@components/IconPair';
 import { ArrowLeft, ExternalLink } from '@components/Icons';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
-import { institutionalSupplyRewards } from '@helpers/institutionalRates';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, isV2Market } from '@helpers/markets';
 import { formatTokenBalance, getTokenValue, PRICE_PRECISION } from '@helpers/numbers';
@@ -118,12 +117,14 @@ const Market = ({ web3 }: MarketsProps) => {
               baseAssetPrice: token.price,
               borrowAPR: token.borrowAPR,
               borrowCap: token.borrowCap,
+              borrowRewardsAPR: token.borrowRewardsAPR,
               collateralFactor: token.collateralFactor,
               earnAPR: token.supplyAPR,
+              earnRewardsAPR: token.supplyRewardsAPR,
               interestRateModel: modelState,
               reserveFactor: token.reserveFactor,
               reserves: token.reserves,
-              rewardsAsset: 'COMP',
+              rewardsAssetSymbol: 'COMP',
               totalBorrow: token.totalBorrow,
               totalSupply: token.totalSupply,
               withHeader: true,
@@ -135,6 +136,7 @@ const Market = ({ web3 }: MarketsProps) => {
   } else if (marketStateData?.type === 'ProtocolAndMarketState') {
     const {
       borrowAPR,
+      borrowRewardsAPR,
       borrowRates,
       earnAPR,
       baseAsset,
@@ -144,19 +146,14 @@ const Market = ({ web3 }: MarketsProps) => {
       totalBorrow,
       totalSupply,
       utilization,
+      isInstitutional,
+      supplyRewardsAPR,
+      rewardsAssetSymbol,
     } = marketStateData;
-    // Institutional markets pay USDC-terms rewards on top of the regular supply rate
-    const { earnRewardsAPR, rewardsAsset, isInstitutionalReward } = institutionalSupplyRewards(
-      market,
-      undefined,
-      undefined,
-      baseAsset,
-      marketStateData.totalBaseSupplyUsd,
-    );
 
     // While the boost is paying, a banner describes the connected account's
     // access to it
-    if (isInstitutionalReward) {
+    if (isInstitutional && supplyRewardsAPR > 0n) {
       whitelistStatusBanner = (
         <WhitelistStatusBanner whitelistStatus={institutionalWhitelistStatus(web3.read.account)} />
       );
@@ -182,11 +179,14 @@ const Market = ({ web3 }: MarketsProps) => {
         state={[
           StateType.Hydrated,
           {
+            chainId: market.chainInformation.chainId,
+            marketAddress: market.marketAddress,
             borrowAPR,
+            borrowRewardsAPR: borrowRewardsAPR,
             earnAPR,
-            earnRewardsAPR,
-            rewardsAsset,
-            institutionalRewardsAPR: isInstitutionalReward ? earnRewardsAPR : undefined,
+            earnRewardsAPR: supplyRewardsAPR,
+            rewardsAssetSymbol,
+            isInstitutional: isInstitutional,
           },
         ]}
       />

@@ -7,8 +7,9 @@ import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
 import { getBaseAssetPriceFeed, getBaseAssetDollarPrice, adjustCollateralPrice } from '@helpers/baseAssetPrice';
 import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
+import { institutionalSupplyRewardRate } from '@helpers/institutionalRates';
 import { shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
-import { REFRESH_INTERVAL, getCapacity, getCollateralValue, MAX_UINT256 } from '@helpers/numbers';
+import { REFRESH_INTERVAL, getCapacity, getCollateralValue, MAX_UINT256, getRewardsAPR } from '@helpers/numbers';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
 import { CometStateResponse, CometWithAccountStateQuery, CometWithAccountStateResponse } from '@helpers/sleuth/types';
@@ -22,6 +23,7 @@ import {
   MarketDataLoaded,
   MarketDataState,
   ProtocolAndAccountState,
+  RewardsState,
   StateType,
   TokenWithAccountState,
   Transaction,
@@ -29,7 +31,12 @@ import {
 
 import { getSleuthOptions, queryCometData, sanitizeCollateralAssetName } from './useSelectedMarket';
 
-export function useCometState(web3: Web3, marketState: MarketDataState, transactions: Transaction[]): CometState {
+export function useCometState(
+  web3: Web3,
+  marketState: MarketDataState,
+  transactions: Transaction[],
+  rewards: RewardsState
+): CometState {
   const [state, setState] = useState<CometState>([StateType.Loading, undefined]);
   const { waitFor } = useWaiter<Transaction[]>(transactions);
   const marketRef = useRef(marketState);
@@ -48,7 +55,8 @@ export function useCometState(web3: Web3, marketState: MarketDataState, transact
       if (
         !!marketStateData &&
         web3.read.provider !== undefined &&
-        web3.read.chainId === marketStateData?.chainInformation.chainId
+        web3.read.chainId === marketStateData?.chainInformation.chainId &&
+        rewards[0] !== StateType.Loading
       ) {
         let newState: CometState;
         if (account) {
@@ -57,12 +65,12 @@ export function useCometState(web3: Web3, marketState: MarketDataState, transact
             marketStateData,
             account
           );
-          newState = formatCometStateHydrated(cometResponse, marketStateData);
+          newState = formatCometStateHydrated(cometResponse, marketStateData, rewards);
           const ethcallProvider = new Provider(web3.read.provider, marketStateData.chainInformation.chainId);
           await maybeHydrateStEthCollateral(newState, marketStateData, account, ethcallProvider);
         } else {
           const cometResponse = await queryCometData(web3.read.provider.connection, marketStateData);
-          newState = formatCometStateNoWallet(cometResponse, marketStateData);
+          newState = formatCometStateNoWallet(cometResponse, marketStateData, rewards);
         }
 
         // Only update state if chainId has not changed since the start of this callback
@@ -84,6 +92,7 @@ export function useCometState(web3: Web3, marketState: MarketDataState, transact
       marketState[1]?.marketAddress,
       marketState[1]?.chainInformation.chainId,
       transactions,
+      rewards
     ]
   );
 
@@ -160,7 +169,8 @@ export const queryCometDataWithAccount = (
 
 const formatCometStateHydrated = (
   cometResponse: CometWithAccountStateResponse,
-  market: MarketData | MarketDataLoaded
+  market: MarketData | MarketDataLoaded,
+  rewards: RewardsState,
 ): CometStateHydrated => {
   const wrappedNativeTokenSymbol = `W${market.chainInformation.nativeToken.symbol}`;
 
@@ -194,14 +204,16 @@ const formatCometStateHydrated = (
   });
 
   const baseAssetDollarPrice = getBaseAssetDollarPrice(cometResponse, market);
+  
+  const totalBaseSupplyInDollars = (cometResponse.totalSupply.toBigInt() * baseAssetDollarPrice.toBigInt()) /
+      10n ** BigInt(cometResponse.baseAsset.decimals.toNumber());
+
+  const totalBaseBorrowInDollars = (cometResponse.totalBorrow.toBigInt() * baseAssetDollarPrice.toBigInt()) /
+    10n ** BigInt(cometResponse.baseAsset.decimals.toNumber());
 
   const state: ProtocolAndAccountState = {
-    borrowAPR: cometResponse.borrowAPR.toBigInt(),
     collateralAssets: collateralAssets,
-    earnAPR: cometResponse.earnAPR.toBigInt(),
-    totalBaseSupplyUsd:
-      (cometResponse.totalSupply.toBigInt() * baseAssetDollarPrice.toBigInt()) /
-      10n ** BigInt(cometResponse.baseAsset.decimals.toNumber()),
+    totalBaseSupplyUsd: totalBaseSupplyInDollars,
     baseAsset: {
       address: cometResponse.baseAsset.baseAsset,
       symbol: getAssetDisplaySymbol(
@@ -247,6 +259,50 @@ const formatCometStateHydrated = (
       collateralAssets
     ),
     isBulkerAllowed: cometResponse.bulkerAllowance.gt(0),
+    borrowAPR: cometResponse.borrowAPR.toBigInt(),
+    earnAPR: cometResponse.earnAPR.toBigInt(),
+    ...((() => {
+      if (market?.rewardsOverwrite) {
+        const rewardState = rewards[1]
+          ?.find(([id]) => +id === +market.chainInformation.chainId)?.[1]
+          ?.rewardsStates.find((state) => state.comet === market.marketAddress);
+
+        const rewardsAssetPrice = rewardState?.rewardAsset.price ?? 0n;
+
+        return {
+          borrowRewardsAPR:
+            market.rewardsOverwrite.borrowRewardsAPR ??
+            (() =>
+              getRewardsAPR(
+                market.rewardsOverwrite.borrowCompPerDay,
+                rewardsAssetPrice,
+                totalBaseBorrowInDollars,
+              ))(),
+          supplyRewardsAPR:
+            market.rewardsOverwrite.supplyRewardsAPR ??
+            (() =>
+              getRewardsAPR(
+                market.rewardsOverwrite.supplyCompPerDay,
+                rewardsAssetPrice,
+                totalBaseSupplyInDollars
+              ))(),
+          rewardsAssetSymbol: market.rewardsOverwrite.rewardsAssetSymbol
+        };
+      }
+
+      if (market?.institutional) {
+        return {
+          borrowRewardsAPR: 0n,
+          supplyRewardsAPR: institutionalSupplyRewardRate(totalBaseSupplyInDollars),
+          isInstitutional: true
+        };
+      }
+
+      return {
+        borrowRewardsAPR: 0n,
+        supplyRewardsAPR: 0n,
+      };
+    })())
   };
 
   return [StateType.Hydrated, state];
@@ -298,11 +354,18 @@ const maybeHydrateStEthCollateral = async (
 
 const formatCometStateNoWallet = (
   cometResponse: CometStateResponse,
-  market: MarketData | MarketDataLoaded
+  market: MarketData | MarketDataLoaded,
+  rewards: RewardsState
 ): CometStateNoWallet => {
   const baseAssetDollarPrice = getBaseAssetDollarPrice(cometResponse, market);
+
+  const totalBaseSupplyInDollars = (cometResponse.totalSupply.toBigInt() * baseAssetDollarPrice.toBigInt()) /
+    10n ** BigInt(cometResponse.baseAsset.decimals.toNumber());
+
+  const totalBaseBorrowInDollars = (cometResponse.totalBorrow.toBigInt() * baseAssetDollarPrice.toBigInt()) /
+    10n ** BigInt(cometResponse.baseAsset.decimals.toNumber());
+
   const state = {
-    borrowAPR: cometResponse.borrowAPR.toBigInt(),
     collateralAssets: cometResponse.collateralAssets.map((assetInfo) => ({
       address: assetInfo.collateralAsset,
       priceFeed: assetInfo.priceFeed,
@@ -324,10 +387,7 @@ const formatCometStateNoWallet = (
         assetInfo.price.toBigInt()
       ),
     })),
-    earnAPR: cometResponse.earnAPR.toBigInt(),
-    totalBaseSupplyUsd:
-      (cometResponse.totalSupply.toBigInt() * baseAssetDollarPrice.toBigInt()) /
-      10n ** BigInt(cometResponse.baseAsset.decimals.toNumber()),
+    totalBaseSupplyUsd: totalBaseSupplyInDollars,
     baseAsset: {
       address: cometResponse.baseAsset.baseAsset,
       symbol: getAssetDisplaySymbol(
@@ -347,6 +407,50 @@ const formatCometStateNoWallet = (
       price: cometResponse.baseAsset.price.toBigInt(),
       baseAssetPriceInDollars: baseAssetDollarPrice.toBigInt(),
     },
+    borrowAPR: cometResponse.borrowAPR.toBigInt(),
+    earnAPR: cometResponse.earnAPR.toBigInt(),
+    ...((() => {
+      if (market?.rewardsOverwrite) {
+        const rewardState = rewards[1]
+          ?.find(([id]) => +id === +market.chainInformation.chainId)?.[1]
+          ?.rewardsStates.find((state) => state.comet === market.marketAddress);
+
+        const rewardsAssetPrice = rewardState?.rewardAsset.price ?? 0n;
+
+        return {
+          borrowRewardsAPR:
+            market.rewardsOverwrite.borrowRewardsAPR ??
+            (() =>
+              getRewardsAPR(
+                market.rewardsOverwrite.borrowCompPerDay,
+                rewardsAssetPrice,
+                totalBaseBorrowInDollars,
+              ))(),
+          supplyRewardsAPR:
+            market.rewardsOverwrite.supplyRewardsAPR ??
+            (() =>
+              getRewardsAPR(
+                market.rewardsOverwrite.supplyCompPerDay,
+                rewardsAssetPrice,
+                totalBaseSupplyInDollars
+              ))(),
+          rewardsAssetSymbol: market.rewardsOverwrite.rewardsAssetSymbol
+        };
+      }
+
+      if (market?.institutional) {
+        return {
+          borrowRewardsAPR: 0n,
+          supplyRewardsAPR: institutionalSupplyRewardRate(totalBaseSupplyInDollars),
+          isInstitutional: true
+        };
+      }
+
+      return {
+        borrowRewardsAPR: 0n,
+        supplyRewardsAPR: 0n,
+      };
+    })())
   };
 
   return [StateType.NoWallet, state];

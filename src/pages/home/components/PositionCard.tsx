@@ -56,6 +56,8 @@ type PositionCardNoWallet = [
     institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
     rewardsAsset?: Token;
     theme: Theme;
+    rewardsAssetSymbol?: string;
+    isInstitutional?: boolean;
   }
 ];
 type PositionCardHydrated = [
@@ -76,7 +78,7 @@ type PositionCardHydrated = [
     liquidationCapacity: bigint;
     liquidationCapacityPost: bigint;
     pendingAction?: PendingAction;
-    rewardsAsset?: Token;
+    rewardsAssetSymbol?: string;
     theme: Theme;
     transaction?: Transaction;
     onClearClicked: () => void;
@@ -88,6 +90,7 @@ type PositionCardHydrated = [
     onPendingActionUpdateAmount: (amount?: bigint) => void;
     onSelectAction: (action: Action) => void;
     onSubmitClicked: () => void;
+    isInstitutional?: boolean;
   }
 ];
 
@@ -246,14 +249,25 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
     return defaultPanelState;
   }
 
-  const { borrowAPR, borrowRewardsAPR, earnAPR, earnRewardsAPR, institutionalWhitelistStatus, theme } = state[1];
+  const {
+    borrowAPR,
+    borrowRewardsAPR,
+    earnAPR,
+    earnRewardsAPR,
+    rewardsAssetSymbol,
+    institutionalWhitelistStatus,
+    theme,
+    isInstitutional
+  } = state[1];
 
   const ratesTooltipContent = (
     <NetRatesTooltip
       borrowAPR={borrowAPR}
+      borrowRewardsAPR={borrowRewardsAPR}
       earnAPR={earnAPR}
       earnRewardsAPR={earnRewardsAPR}
-      institutionalBoostAPR={market?.institutional ? earnRewardsAPR : undefined}
+      isInstitutional={isInstitutional}
+      rewardsAssetSymbol={rewardsAssetSymbol}
       institutionalWhitelistStatus={institutionalWhitelistStatus}
       view={NetRatesTooltipView.All}
     />

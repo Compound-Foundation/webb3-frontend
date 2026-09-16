@@ -1,4 +1,4 @@
-import { Bolt } from '@components/Icons';
+import { Lightning } from '@components/Icons/Lightning';
 import Tooltip from '@components/Tooltip';
 import NetRatesTooltip, { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
@@ -19,7 +19,6 @@ const InstitutionalRateInfo = ({
   marketSummary,
   whitelistStatus = InstitutionalWhitelistStatus.NoWallet,
 }: InstitutionalRateInfoProps) => {
-  const boostAPR = marketSummary.institutionalSupplyRewardsAPR ?? 0n;
 
   return (
     <Tooltip
@@ -32,8 +31,9 @@ const InstitutionalRateInfo = ({
       content={
         <NetRatesTooltip
           borrowAPR={0n}
-          earnAPR={marketSummary.supplyAPR - boostAPR}
-          institutionalBoostAPR={boostAPR}
+          earnAPR={marketSummary.supplyAPR}
+          earnRewardsAPR={marketSummary.supplyRewardsAPR}
+          isInstitutional={marketSummary.isInstitutional}
           institutionalWhitelistStatus={whitelistStatus}
           institutionalBoostLabel="Whitelisted Extra APY"
           view={NetRatesTooltipView.Supply}
@@ -41,7 +41,7 @@ const InstitutionalRateInfo = ({
       }
     >
       <span className="info-icon" onClick={(e) => e.stopPropagation()}>
-        <Bolt />
+        <Lightning/>
       </span>
     </Tooltip>
   );

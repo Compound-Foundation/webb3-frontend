@@ -141,6 +141,8 @@ function bulkerActionStringForAction(market: MarketDataLoaded, action: Action): 
         return BulkerActions.ACTION_SUPPLY_STETH;
       }
       return BulkerActions.ACTION_SUPPLY_ASSET;
+    case ActionType.ClaimRewards:
+      return BulkerActions.ACTION_CLAIM_REWARD;
     default:
       throw new Error(`Bulker action ${type} not supported`);
   }
@@ -175,6 +177,13 @@ function bulkerActionCallDataForAction(market: MarketDataLoaded, sender: string,
         ['address', 'address', 'address', 'uint'],
         [market.marketAddress, sender, action[1].address, action[2]]
       );
+    case ActionType.ClaimRewards: {
+      const [, , , rewardState] = action;
+      return defaultAbiCoder.encode(
+        ['address', 'address', 'address', 'bool'],
+        [rewardState.comet, rewardState.cometRewards, sender, true]
+      );
+    }
     default:
       throw new Error(`Bulker action ${type} not supported`);
   }
