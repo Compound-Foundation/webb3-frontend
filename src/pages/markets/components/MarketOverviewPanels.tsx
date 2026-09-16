@@ -448,7 +448,7 @@ const TableHead = () => {
       <tr className="assets-table__row assets-table__row--header market-overview-panels__table-header L2">
         <th className="label">Market</th>
         <th className="label">Utilization</th>
-        <th className="label">Net Earn APR</th>
+        <th className="label">Net Supply APR</th>
         <th className="label">Net Borrow APR</th>
         <th className="label">Total Earning</th>
         <th className="label">Total Borrowing</th>

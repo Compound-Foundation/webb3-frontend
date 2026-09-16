@@ -136,7 +136,7 @@ const NetRatesGraph = (state: NetRatesGraphState) => {
                       yOffset={12}
                       content={
                         <p className='net-rates-graph__tooltip-text'>
-                          Boosted by Compound: Net Earn APR equals the base interest rate ({formatRateFactor(earnAPR)})
+                          Boosted by Compound: Net Supply APR equals the base interest rate ({formatRateFactor(earnAPR)})
                           plus the COMP reward est. rate ({formatRateFactor(earnRewardsAPR)}).
                         </p>
                       }
