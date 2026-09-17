@@ -4497,9 +4497,9 @@ commander@^9.4.0:
   resolved "https://registry.yarnpkg.com/commander/-/commander-9.5.0.tgz#bc08d1eb5cedf7ccb797a96199d41c7bc3e60d30"
   integrity sha512-KRs7WVDKg86PWiuAqhDrAQnTXZKraVcCc6vFdL14qrZ/DcWwuRo7VoiYXalXO7S5GKpqYiVEwCbgFDfxNHKJBQ==
 
-"compound-styles@https://github.com/compound-finance/compound-styles.git#d36cfe2a33fbc0b434da130b920a372b6dcad6d5":
+"compound-styles@https://github.com/Compound-Foundation/compound-styles.git#d36cfe2a33fbc0b434da130b920a372b6dcad6d5":
   version "0.0.1"
-  resolved "https://github.com/compound-finance/compound-styles.git#d36cfe2a33fbc0b434da130b920a372b6dcad6d5"
+  resolved "https://github.com/Compound-Foundation/compound-styles.git#d36cfe2a33fbc0b434da130b920a372b6dcad6d5"
 
 connect-history-api-fallback@^1.6.0:
   version "1.6.0"
