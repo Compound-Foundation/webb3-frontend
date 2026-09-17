@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@coinbase/wallet-sdk": "4.3.4",
-    "@compound-finance/comet-extension": "^0.0.16",
+    "@compound-finance/comet-extension": "https://github.com/Compound-Foundation/comet-extension.git#c2faf995c7cdcd48f83373ff4d20ff2b1378400c",
     "@esbuild-plugins/node-globals-polyfill": "^0.2.3",
     "@ethersproject/abi": "^5.8.0",
     "@ethersproject/bignumber": "^5.8.0",

@@ -463,10 +463,9 @@
   resolved "https://registry.yarnpkg.com/@colors/colors/-/colors-1.5.0.tgz#bb504579c1cae923e6576a4f5da43d25f97bdbd9"
   integrity sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ==
 
-"@compound-finance/comet-extension@^0.0.16":
+"@compound-finance/comet-extension@https://github.com/Compound-Foundation/comet-extension.git#c2faf995c7cdcd48f83373ff4d20ff2b1378400c":
   version "0.0.16"
-  resolved "https://registry.yarnpkg.com/@compound-finance/comet-extension/-/comet-extension-0.0.16.tgz#36c608d16e65c04b45e57ce6e8d74b61845c5a74"
-  integrity sha512-A0U4fcy2+NMzjZWR37uNlXyfBEGhaK3peytW2lVVMGneVP1wxSE8REwYMOiDRVFJ/EyM3qtxu/UK9D1XfXUQ3Q==
+  resolved "https://github.com/Compound-Foundation/comet-extension.git#c2faf995c7cdcd48f83373ff4d20ff2b1378400c"
   dependencies:
     "@ethersproject/abi" "^5.7.0"
     "@ethersproject/providers" "^5.7.1"
