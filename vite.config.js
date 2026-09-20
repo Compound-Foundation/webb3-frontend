@@ -40,6 +40,7 @@ export default defineConfig({
         extensionDetail: resolve(__dirname, 'extensions/ipfs-404.html'),
         transactions: resolve(__dirname, 'transactions/index.html'),
         rewards: resolve(__dirname, 'rewards/index.html'),
+        redirect: resolve(__dirname, 'redirect/index.html'),
       },
       plugins: [nodePolyfills()],
       external: ['@safe-global/safe-apps-sdk', '@safe-globalThis/safe-apps-sdk', '@safe-globalThis/safe-apps-provider'],

@@ -14,6 +14,7 @@ import Extension from './pages/extensions/Extension';
 import Home from './pages/home';
 import MarketOverview from './pages/markets';
 import Market from './pages/markets/Market';
+import Redirect from './pages/redirect';
 import Rewards from './pages/rewards';
 import TransactionHistory from './pages/transactions';
 import Vote from './pages/vote';
@@ -46,6 +47,8 @@ createRoot(document.getElementById('root') as HTMLElement).render(
               <Route path="/vote" element={<App Component={Vote} pageProps={{}} />} />
               <Route path="/transactions" element={<App Component={TransactionHistory} pageProps={{}} />} />
               <Route path="/rewards" element={<App Component={Rewards} pageProps={{}} />} />
+              {/* Standalone interstitial: no header, footer, or wallet chrome. */}
+              <Route path="/redirect" element={<Redirect />} />
             </Routes>
           </Web3Provider>
         </QueryClientProvider>
