@@ -115,8 +115,8 @@ jobs:
           )
 
           for PR in $PRS; do
-            EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp \
-              --jq "[.[][] | select(.body | contains(\"$MARKER\")) | .id][0] // empty")
+            EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+              --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | sed -n '1p')
             if [ -n "$EXISTING" ]; then
               gh api --method PATCH "repos/$REPO/issues/comments/$EXISTING" -f body="$BODY" > /dev/null
               echo "Updated preview comment on PR #$PR"
