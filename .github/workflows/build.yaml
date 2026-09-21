@@ -8,6 +8,7 @@ jobs:
     permissions:
       contents: write
       deployments: write
+      pull-requests: write
     steps:
       - name: Build Note for ${{ github.ref }}
         run: |
@@ -52,6 +53,7 @@ jobs:
           path: dist
 
       - name: Deploy to IPFS
+        id: ipfs
         run: |
           node scripts/ipfs.js | tee .release-notes
         env:
@@ -68,6 +70,61 @@ jobs:
       - name: Echo
         run: |
           echo "Release URL: ${{ env.RELEASE_URL }}"
+          echo "IPFS URL:    ${{ env.IPFS_URL }}"
+          echo "CID:         ${{ env.IPFS_CID }}"
+
+      # Post (or refresh) a single sticky comment with the preview links on
+      # every open PR for this commit. Covers PRs whose head is this branch
+      # and PRs from forks whose branch a maintainer mirrored into this repo.
+      - name: Post preview links to PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          MARKER='<!-- ipfs-preview-comment -->'
+
+          PRS=$(
+            {
+              gh pr list --repo "$REPO" --state open --head "$BRANCH" --json number --jq '.[].number' || true
+              gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[] | select(.state == "open") | .number' || true
+            } | sort -un
+          )
+
+          if [ -z "$PRS" ]; then
+            echo "No open pull request for $BRANCH @ $SHA; skipping comment."
+            exit 0
+          fi
+
+          SHORT_SHA=$(echo "$SHA" | cut -c1-7)
+          BODY=$(cat <<EOT
+          $MARKER
+          ### IPFS preview
+
+          Built from \`$SHORT_SHA\` on \`$BRANCH\`.
+
+          - Pinata: $PINATA_URL
+          - IPFS: $IPFS_URL
+          - CID: \`$IPFS_CID\`
+
+          [Build run]($RUN_URL)
+          EOT
+          )
+
+          for PR in $PRS; do
+            EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp \
+              --jq "[.[][] | select(.body | contains(\"$MARKER\")) | .id][0] // empty")
+            if [ -n "$EXISTING" ]; then
+              gh api --method PATCH "repos/$REPO/issues/comments/$EXISTING" -f body="$BODY" > /dev/null
+              echo "Updated preview comment on PR #$PR"
+            else
+              gh api --method POST "repos/$REPO/issues/$PR/comments" -f body="$BODY" > /dev/null
+              echo "Posted preview comment on PR #$PR"
+            fi
+          done
 
       - name: Update deployment status (success)
         if: success()
