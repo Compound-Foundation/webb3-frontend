@@ -12,9 +12,16 @@ type HydratedMastheadState = {
   baseAssetPost?: BaseAssetWithAccountState;
   pendingAction?: PendingAction;
   actions?: Action[];
+  isDeprecatedMarket?: boolean;
 };
 
-const hydratedMasthead = ({ baseAssetToUse, baseAssetPost, pendingAction, actions }: HydratedMastheadState) => {
+const hydratedMasthead = ({
+  baseAssetToUse,
+  baseAssetPost,
+  pendingAction,
+  actions,
+  isDeprecatedMarket,
+}: HydratedMastheadState) => {
   return (
     <div>
       <div id="overlay"></div>
@@ -36,6 +43,7 @@ const hydratedMasthead = ({ baseAssetToUse, baseAssetPost, pendingAction, action
             onSupplyAction: () => undefined,
             onWithdrawAction: () => undefined,
             setCompare: () => undefined,
+            isDeprecatedMarket: isDeprecatedMarket,
             pendingAction: pendingAction,
             theme: Theme.Dark,
           },
@@ -436,6 +444,55 @@ describe('Has Earn Balance', () => {
     expect(compareButton).toHaveClass('button--circle');
     expect(compareButton).toHaveClass('button--compare');
     expect(screen.getAllByRole('button').length).toBe(3);
+  });
+});
+
+describe('Deprecated Market', () => {
+  it('supply and borrow disabled with deprecation tooltips when account has no position', () => {
+    const mockBase = {
+      ...MockBaseAssetWithAccountState,
+      balance: 0n,
+    };
+
+    render(hydratedMasthead({ baseAssetToUse: mockBase, isDeprecatedMarket: true }));
+
+    const supplyButton = screen.getByRole('button', { name: 'Supply USDC' });
+    const borrowButton = screen.getByRole('button', { name: 'Borrow USDC' });
+    expect(supplyButton).toBeDisabled();
+    expect(borrowButton).toBeDisabled();
+    expect(screen.getAllByRole('button').length).toBe(2);
+    // One deprecation tooltip per disabled button
+    expect(screen.getAllByText('This market has been deprecated').length).toBe(2);
+  });
+
+  it('supply and withdraw stay enabled with an existing supply balance', () => {
+    const mockBase = {
+      ...MockBaseAssetWithAccountState,
+      balance: 1000000n,
+    };
+
+    render(hydratedMasthead({ baseAssetToUse: mockBase, isDeprecatedMarket: true }));
+
+    const supplyButton = screen.getByRole('button', { name: 'Supply USDC' });
+    const withdrawButton = screen.getByRole('button', { name: 'Withdraw USDC' });
+    expect(supplyButton).toBeEnabled();
+    expect(withdrawButton).toBeEnabled();
+    expect(screen.queryByText('This market has been deprecated')).toBeNull();
+  });
+
+  it('borrow and repay stay enabled with an existing borrow balance', () => {
+    const mockBase = {
+      ...MockBaseAssetWithAccountState,
+      balance: -1000000n,
+    };
+
+    render(hydratedMasthead({ baseAssetToUse: mockBase, isDeprecatedMarket: true }));
+
+    const borrowButton = screen.getByRole('button', { name: 'Borrow USDC' });
+    const repayButton = screen.getByRole('button', { name: 'Repay USDC' });
+    expect(borrowButton).toBeEnabled();
+    expect(repayButton).toBeEnabled();
+    expect(screen.queryByText('This market has been deprecated')).toBeNull();
   });
 });
 

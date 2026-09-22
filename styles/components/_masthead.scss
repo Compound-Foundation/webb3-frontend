@@ -66,6 +66,18 @@
   &__action-buttons {
     display: flex;
     align-items: center;
+    gap: 1rem;
+
+    // A tooltip trigger wrapping a disabled button (disabled buttons swallow
+    // the hover events the tooltip needs); it takes a button's place among
+    // the flex items
+    &__tooltip-wrapper {
+      display: flex;
+    }
+
+    .button + .button {
+      margin-left: 0;
+    }
   }
 
   .meta {
@@ -96,9 +108,14 @@
 
     &__action-buttons {
       flex-direction: column;
+      gap: 0.75rem;
       width: 100%;
       margin-top: 1.25rem;
       order: 1;
+
+      &__tooltip-wrapper {
+        width: 100%;
+      }
 
       .button {
         position: relative;
@@ -116,7 +133,7 @@
 
       .button + .button {
         margin-left: 0;
-        margin-top: 0.75rem;
+        margin-top: 0;
       }
     }
 

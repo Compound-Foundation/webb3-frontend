@@ -87,7 +87,9 @@ const NetRatesGraph = (state: NetRatesGraphState) => {
           <div className="net-rates-graph__earn-group">
             <div
               className="net-rates-graph__graph net-rates-graph--earn-group"
-              style={{ width: (Number(earnAPR) / Number(netSupplyAPR)) * 100 + '%' }}
+              // A market paying no interest or rewards still shows a full
+              // interest bar (0/0 would set an invalid NaN% width)
+              style={{ width: netSupplyAPR === 0n ? '100%' : (Number(earnAPR) / Number(netSupplyAPR)) * 100 + '%' }}
             >
               <div className="net-rates-graph__bar net-rates-graph__bar--supply"></div>
               <p className="L3 meta text-color--1">
