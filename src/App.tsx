@@ -36,6 +36,7 @@ function App({ Component, pageProps }: any) {
   const SelectedMarketContext = getSelectedMarketContext();
 
   const location = useLocation();
+
   const { transactions, addTransaction, clearTransactions } = useTransactionManager(web3);
   const rewardsState = useRewardsState(web3, transactions);
   const { theme, setTheme } = useThemeManager();

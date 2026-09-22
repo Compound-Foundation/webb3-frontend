@@ -531,4 +531,7 @@ export const INACTIVE_CHAIN_IDS: ReadonlySet<number> = new Set([
   534352, // Scroll
   59144, // Linea
   2020, // Ronin
+  137, // Polygon
+  130, // Unichain
+  5000, // Mantle
 ]);
