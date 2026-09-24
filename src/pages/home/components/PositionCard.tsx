@@ -3,7 +3,7 @@ import { useContext, useState, ReactNode } from 'react';
 import DetailSheet from '@components/DetailSheet';
 import { ArrowDown, ArrowUp, CaretDown, Compare, HoverUnder } from '@components/Icons';
 import Tooltip from '@components/Tooltip';
-import NetRatesTooltip, { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
+import NetRatesTooltip, { MarketRewards, NetRatesTooltipView, RewardsType } from '@components/Tooltips/NetRatesTooltip';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import {
@@ -263,15 +263,26 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
     isRewardsLoading,
   } = state[1];
 
+  const rewards: MarketRewards = isInstitutional
+    ? {
+      type: RewardsType.Institutional,
+      supplyAPR: earnRewardsAPR ?? 0n,
+      borrowAPR: borrowRewardsAPR ?? 0n,
+      assetSymbol: rewardsAssetSymbol,
+      whitelistStatus: institutionalWhitelistStatus
+    }
+    : {
+      type: RewardsType.Standard,
+      supplyAPR: earnRewardsAPR ?? 0n,
+      borrowAPR: borrowRewardsAPR ?? 0n,
+      assetSymbol: rewardsAssetSymbol
+    };
+
   const ratesTooltipContent = (
     <NetRatesTooltip
       borrowAPR={borrowAPR}
-      borrowRewardsAPR={borrowRewardsAPR}
       earnAPR={earnAPR}
-      earnRewardsAPR={earnRewardsAPR}
-      isInstitutional={isInstitutional}
-      rewardsAssetSymbol={rewardsAssetSymbol}
-      institutionalWhitelistStatus={institutionalWhitelistStatus}
+      rewards={rewards}
       view={NetRatesTooltipView.All}
     />
   );

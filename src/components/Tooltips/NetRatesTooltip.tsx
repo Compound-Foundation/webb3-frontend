@@ -9,32 +9,39 @@ export enum NetRatesTooltipView {
   All = 'all',
 }
 
-export interface NetRatesTooltipProps {
-  borrowAPR: bigint;
-  borrowRewardsAPR?: bigint;
-  earnAPR: bigint;
-  earnRewardsAPR?: bigint;
-  // Set on institutional markets: the supply section shows the boosted rate
-  // breakdown and whitelist card instead of the standard earn graph
-  institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
-  // Label override for the boosted portion of the rate
-  institutionalBoostLabel?: string;
-  rewardsAssetSymbol?: string;
-  view: NetRatesTooltipView;
-  isInstitutional?: boolean;
+export enum RewardsType {
+  Standard = 'standard',
+  Institutional = 'institutional',
+  Merkl = 'merkl',
 }
 
-const NetRatesTooltip = ({
-  borrowAPR,
-  borrowRewardsAPR = 0n,
-  earnAPR,
-  earnRewardsAPR = 0n,
-  rewardsAssetSymbol,
-  institutionalWhitelistStatus,
-  institutionalBoostLabel,
-  isInstitutional,
-  view,
-}: NetRatesTooltipProps) => {
+interface BaseRewards {
+  supplyAPR: bigint;
+  borrowAPR: bigint;
+  assetSymbol?: string;
+}
+
+export type MarketRewards =
+  | (BaseRewards & { type: RewardsType.Standard })
+  | (BaseRewards & { type: RewardsType.Merkl })
+  | (BaseRewards & {
+  type: RewardsType.Institutional;
+  whitelistStatus?: InstitutionalWhitelistStatus;
+  boostLabel?: string;
+});
+
+export interface NetRatesTooltipProps {
+  borrowAPR: bigint;
+  earnAPR: bigint;
+  rewards?: MarketRewards;
+  view: NetRatesTooltipView;
+}
+
+const NetRatesTooltip = ({ borrowAPR, earnAPR, rewards, view }: NetRatesTooltipProps) => {
+  const borrowRewardsAPR = rewards?.borrowAPR ?? 0n;
+  const earnRewardsAPR = rewards?.supplyAPR ?? 0n;
+  const rewardsAssetSymbol = rewards?.assetSymbol;
+
   const netBorrowAPR = borrowAPR - borrowRewardsAPR;
   const netSupplyAPR = earnAPR + earnRewardsAPR;
 
@@ -65,12 +72,12 @@ const NetRatesTooltip = ({
   );
 
   const boostedBreakdown =
-    isInstitutional ? (
+    rewards?.type === RewardsType.Institutional ? (
       <BoostedSupplyRates
         earnAPR={earnAPR}
-        boostAPR={earnRewardsAPR}
-        whitelistStatus={institutionalWhitelistStatus ?? InstitutionalWhitelistStatus.NoWallet}
-        boostLabel={institutionalBoostLabel}
+        boostAPR={rewards.supplyAPR}
+        whitelistStatus={rewards.whitelistStatus ?? InstitutionalWhitelistStatus.NoWallet}
+        boostLabel={rewards.boostLabel}
       />
     ) : null;
 

@@ -1,6 +1,6 @@
 import { Lightning } from '@components/Icons/Lightning';
 import Tooltip from '@components/Tooltip';
-import NetRatesTooltip, { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
+import NetRatesTooltip, { NetRatesTooltipView, RewardsType } from '@components/Tooltips/NetRatesTooltip';
 
 interface BoostedRateInfoProps {
   view: NetRatesTooltipView;
@@ -31,9 +31,12 @@ export const BoostedRateInfo = (props: BoostedRateInfoProps) => {
         <NetRatesTooltip
           borrowAPR={borrowAPR}
           earnAPR={earnAPR}
-          earnRewardsAPR={earnRewardsAPR}
-          borrowRewardsAPR={borrowRewardsAPR}
-          rewardsAssetSymbol={rewardsAssetSymbol}
+          rewards={{
+            type: RewardsType.Standard,
+            supplyAPR: earnRewardsAPR,
+            borrowAPR: borrowRewardsAPR,
+            assetSymbol: rewardsAssetSymbol,
+           }}
           view={view}
         />
       }

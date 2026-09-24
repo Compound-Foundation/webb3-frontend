@@ -3,7 +3,12 @@ import { Dispatch, ReactNode, useRef, useState } from 'react';
 import DetailSheet from '@components/DetailSheet';
 import { Compare, HoverUnder } from '@components/Icons';
 import Tooltip from '@components/Tooltip';
-import NetRatesTooltip, { NetRatesTooltipProps, NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
+import NetRatesTooltip, {
+  MarketRewards,
+  NetRatesTooltipProps,
+  NetRatesTooltipView,
+  RewardsType
+} from '@components/Tooltips/NetRatesTooltip';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { sanitizedAmountForAction } from '@helpers/actions';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
@@ -266,14 +271,25 @@ function getContent(state: MastheadState): Content {
     },
   ];
 
+  const rewards: MarketRewards = isInstitutional
+    ? {
+      type: RewardsType.Institutional,
+      supplyAPR: earnRewardsAPR ?? 0n,
+      borrowAPR: borrowRewardsAPR ?? 0n,
+      assetSymbol: rewardsAssetSymbol,
+      whitelistStatus: institutionalWhitelistStatus
+    }
+    : {
+      type: RewardsType.Standard,
+      supplyAPR: earnRewardsAPR ?? 0n,
+      borrowAPR: borrowRewardsAPR ?? 0n,
+      assetSymbol: rewardsAssetSymbol
+    };
+
   const netRatesTooltipProps = {
     borrowAPR,
-    borrowRewardsAPR,
     earnAPR,
-    earnRewardsAPR,
-    rewardsAssetSymbol,
-    institutionalWhitelistStatus,
-    isInstitutional,
+    rewards
   } satisfies Omit<NetRatesTooltipProps, 'view'>;
 
   let ratesTooltipContent = <NetRatesTooltip {...netRatesTooltipProps} view={NetRatesTooltipView.Borrow} />;

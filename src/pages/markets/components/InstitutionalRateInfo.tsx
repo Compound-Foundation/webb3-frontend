@@ -1,6 +1,6 @@
 import { Lightning } from '@components/Icons/Lightning';
 import Tooltip from '@components/Tooltip';
-import NetRatesTooltip, { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
+import NetRatesTooltip, { NetRatesTooltipView, RewardsType } from '@components/Tooltips/NetRatesTooltip';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 
 import { MarketSummary } from '../../../types';
@@ -32,10 +32,13 @@ const InstitutionalRateInfo = ({
         <NetRatesTooltip
           borrowAPR={0n}
           earnAPR={marketSummary.supplyAPR}
-          earnRewardsAPR={marketSummary.supplyRewardsAPR}
-          isInstitutional={marketSummary.isInstitutional}
-          institutionalWhitelistStatus={whitelistStatus}
-          institutionalBoostLabel="Whitelisted Extra APY"
+          rewards={{
+            type: RewardsType.Institutional,
+            supplyAPR: marketSummary.supplyRewardsAPR,
+            borrowAPR: 0n,
+            whitelistStatus,
+            boostLabel: 'Whitelisted Extra APY',
+          }}
           view={NetRatesTooltipView.Supply}
         />
       }
