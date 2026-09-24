@@ -108,7 +108,8 @@ const Home = ({
       borrowRewardsAPR,
       supplyRewardsAPR,
       rewardsAssetSymbol,
-      isInstitutional
+      isInstitutional,
+      isRewardsLoading,
     } = state[1];
 
     mastheadState = [StateType.NoWallet, { baseAsset, earnAPR }];
@@ -126,6 +127,7 @@ const Home = ({
         earnRewardsAPR: supplyRewardsAPR,
         institutionalWhitelistStatus: whitelistStatus,
         isInstitutional: isInstitutional,
+        isRewardsLoading,
         theme,
       },
     ];
@@ -142,6 +144,7 @@ const Home = ({
       supplyRewardsAPR,
       isInstitutional,
       rewardsAssetSymbol,
+      isRewardsLoading
     } = state[1];
     isBulkerAllowed = state[1].isBulkerAllowed;
 
@@ -314,6 +317,7 @@ const Home = ({
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
         pendingAction,
         theme,
+        isRewardsLoading,
         transaction: blockingTransaction,
         onClearClicked: () => {
           clearActions();

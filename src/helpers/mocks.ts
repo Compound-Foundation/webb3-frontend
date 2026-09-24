@@ -148,7 +148,8 @@ const mockProtocolState: ProtocolState = {
   baseAsset: baseAssetWithState,
   collateralAssets: [LINK, COMP, DAI, ETH, UNI, WBTC],
   borrowRewardsAPR: 0n,
-  supplyRewardsAPR: 0n
+  supplyRewardsAPR: 0n,
+  isRewardsLoading: false
 };
 
 const collateralAssetsForBorrow = [
@@ -225,7 +226,8 @@ const mockProtocolAndAccountStateBorrowing: ProtocolAndAccountState = {
     collateralAssetsForBorrow
   ),
   borrowRewardsAPR: 0n,
-  supplyRewardsAPR: 0n
+  supplyRewardsAPR: 0n,
+  isRewardsLoading: false
 };
 
 const collateralAssetsForSupply = [
@@ -302,7 +304,8 @@ const mockProtocolAndAccountStateSupply: ProtocolAndAccountState = {
     collateralAssetsForSupply
   ),
   borrowRewardsAPR: 0n,
-  supplyRewardsAPR: 0n
+  supplyRewardsAPR: 0n,
+  isRewardsLoading: false
 };
 
 const collateralAssetsForMarkets = [
@@ -361,7 +364,8 @@ const mockProtocolMarketState: ProtocolAndMarketsState = {
   marketHistory: [],
   type: 'ProtocolAndMarketState',
   borrowRewardsAPR: 0n,
-  supplyRewardsAPR: 0n
+  supplyRewardsAPR: 0n,
+  isRewardsLoading: false
 };
 
 const mockRewardsState: RewardAccountStateInfo = [

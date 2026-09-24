@@ -1,5 +1,5 @@
 import { getAddress } from 'ethers/lib/utils';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import type { Web3 } from '@contexts/Web3Context';
@@ -28,16 +28,12 @@ type RewardsStateResponse = {
     priceFeed: string;
     symbol: string;
   };
-  /** @deprecated should npt be used anymore */
-  borrowRewardsApr: string;
   comet: {
     address: string;
   };
   cometRewards: {
     address: string;
   };
-  /** @deprecated should npt be used anymore */
-  earnRewardsApr: string;
   rewardAsset: { address: string; decimals: number; description: string; price: string; symbol: string };
 };
 
@@ -63,10 +59,11 @@ function areRewardsSupported(chainInformation: ChainInformation) {
 export function useRewardsState(web3: Web3, transactions: Transaction[]): RewardsState {
   const [searchParams] = useSearchParams();
   const [state, setState] = useState<RewardsState>([StateType.Loading]);
-  const marketsByNetwork = getMarketsByNetwork(searchParams.has('testnet'));
   const maybeAccount = web3.write.account;
   const accountRef = useRef(maybeAccount);
   const includeTestnets = searchParams.has('testnet');
+
+  const marketsByNetwork = useMemo(() => getMarketsByNetwork(includeTestnets), [includeTestnets]);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -92,10 +89,21 @@ export function useRewardsState(web3: Web3, transactions: Transaction[]): Reward
       return;
     }
 
-    // pass latest value of accountRef.current to `getState`
-    const updatedState: RewardsState = await getState(marketsByNetwork, currentAccount, includeTestnets);
-    if (currentAccount === accountRef.current) {
-      setState(updatedState);
+    try {
+      const updatedState: RewardsState = await getState(marketsByNetwork, currentAccount, includeTestnets);
+      if (currentAccount === accountRef.current) {
+        setState(updatedState);
+      }
+    } catch (error) {
+      console.error('[useRewardsState] Failed to refresh rewards state:', error);
+
+      if (currentAccount === accountRef.current) {
+        setState((prevState) =>
+          prevState[0] === StateType.Loading
+            ? [currentAccount === undefined ? StateType.NoWallet : StateType.Hydrated, []]
+            : prevState
+        );
+      }
     }
   }, [marketsByNetwork, includeTestnets]);
 

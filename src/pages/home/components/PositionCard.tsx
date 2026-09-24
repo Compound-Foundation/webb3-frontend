@@ -58,6 +58,7 @@ type PositionCardNoWallet = [
     theme: Theme;
     rewardsAssetSymbol?: string;
     isInstitutional?: boolean;
+    isRewardsLoading?: boolean;
   }
 ];
 type PositionCardHydrated = [
@@ -90,6 +91,7 @@ type PositionCardHydrated = [
     onPendingActionUpdateAmount: (amount?: bigint) => void;
     onSelectAction: (action: Action) => void;
     onSubmitClicked: () => void;
+    isRewardsLoading?: boolean;
     isInstitutional?: boolean;
   }
 ];
@@ -257,7 +259,8 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
     rewardsAssetSymbol,
     institutionalWhitelistStatus,
     theme,
-    isInstitutional
+    isInstitutional,
+    isRewardsLoading,
   } = state[1];
 
   const ratesTooltipContent = (
@@ -277,20 +280,40 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
       <div className="position-card__row position-card__row--divider">
         <div className="divider"></div>
       </div>
-      <Tooltip content={ratesTooltipContent} width={400} hideArrow={true} interactive={true} touchToggle={false} yOffset={0}>
-        <div className="position-card__rates" onClick={() => setRatesDetailActive(true)}>
+      {isRewardsLoading ? (
+        <div className="position-card__rates">
           <div className="position-card__rates__info position-card__rates__info--left">
             <label className="L2 label text-color--2">Net Borrow APR</label>
-            <p className="body body--emphasized">{formatRateFactor(borrowAPR - (borrowRewardsAPR || 0n))}</p>
-            <HoverUnder className="hover-under" theme={theme} />
+            <span className="placeholder-content" style={{ width: '70px' }}></span>
           </div>
           <div className="position-card__rates__info position-card__rates__info--right">
             <label className="L2 label text-color--2">Net Supply APR</label>
-            <p className="body body--emphasized">{formatRateFactor(earnAPR + (earnRewardsAPR || 0n))}</p>
-            <HoverUnder className="hover-under" theme={theme} />
+            <span className="placeholder-content" style={{ width: '70px' }}></span>
           </div>
         </div>
-      </Tooltip>
+      ) : (
+        <Tooltip
+          content={ratesTooltipContent}
+          width={400}
+          hideArrow={true}
+          interactive={true}
+          touchToggle={false}
+          yOffset={0}
+        >
+          <div className="position-card__rates" onClick={() => setRatesDetailActive(true)}>
+            <div className="position-card__rates__info position-card__rates__info--left">
+              <label className="L2 label text-color--2">Net Borrow APR</label>
+              <p className="body body--emphasized">{formatRateFactor(borrowAPR - (borrowRewardsAPR || 0n))}</p>
+              <HoverUnder className="hover-under" theme={theme} />
+            </div>
+            <div className="position-card__rates__info position-card__rates__info--right">
+              <label className="L2 label text-color--2">Net Supply APR</label>
+              <p className="body body--emphasized">{formatRateFactor(earnAPR + (earnRewardsAPR || 0n))}</p>
+              <HoverUnder className="hover-under" theme={theme} />
+            </div>
+          </div>
+        </Tooltip>
+      )}
       <DetailSheet active={ratesDetailActive} onClickOutside={() => setRatesDetailActive(false)}>
         {ratesTooltipContent}
       </DetailSheet>

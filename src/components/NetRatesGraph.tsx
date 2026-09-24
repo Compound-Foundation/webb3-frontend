@@ -36,7 +36,7 @@ const NetRatesGraph = (state: NetRatesGraphState) => {
           {netBorrowAPR >= 0n || borrowRewardsAPR === undefined ? (
             <div className='net-rates-graph__graph'>
               <div className='net-rates-graph__graph__row net-rates-graph__bar net-rates-graph__bar--borrow'>
-                {borrowRewardsAPR > 0 && (
+                {borrowRewardsAPR !== undefined && formatRateFactor(borrowRewardsAPR) !== '0.00%' && (
                   <div
                     className='net-rates-graph__reward net-rates-graph__reward--borrow'
                     style={{ width: (Number(borrowRewardsAPR) / Number(borrowAPR)) * 100 + '%' }}
@@ -45,11 +45,11 @@ const NetRatesGraph = (state: NetRatesGraphState) => {
                   </div>
                 )}
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div className={'net-rates-graph__graph__container'}>
                 <p className='L3 meta text-color--1'>
                   {formatRateFactor(borrowAPR)} <span className='L4 meta text-color--2'> Interest</span>
                 </p>
-                {borrowRewardsAPR > 0 && (
+                {borrowRewardsAPR !== undefined && formatRateFactor(borrowRewardsAPR) !== '0.00%' && (
                   <div className='net-rates-graph__reward__asset'>
                     <span className='L3 meta text-color--1'>{formatRateFactor(borrowRewardsAPR)}</span>
                       <Tooltip

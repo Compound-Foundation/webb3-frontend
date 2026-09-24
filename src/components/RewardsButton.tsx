@@ -6,6 +6,7 @@ import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
 import { iconNameForChainId } from '@helpers/assets';
+import { ALLOWED_REWARDS_CHAIN_IDS } from '@helpers/constants';
 import { filterMap } from '@helpers/functions';
 import { formatTokenBalance } from '@helpers/numbers';
 import useOnClickOutside from '@hooks/useOnClickOutside';
@@ -37,7 +38,6 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
   const [expandedState, setExpandedState] = useState<ExpandedState>({});
   const ref = useRef(null);
   useOnClickOutside(ref, () => setDropdownActive(false));
-  const allowedChainIds = new Set([5000, 59144]);
 
   useEffect(() => {
     if (rewardsState === StateType.Hydrated && state[1] !== undefined) {
@@ -56,7 +56,7 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
   if (rewardsState === StateType.Hydrated && state[1] !== undefined) {
     const allRewards = state[1];
     const { totalRewards, totalUnclaimed } = allRewards
-      .filter(([chainId]) => allowedChainIds.has(+chainId))
+      .filter(([chainId]) => ALLOWED_REWARDS_CHAIN_IDS.has(+chainId))
       .reduce(
         (accum, [, { rewardsStates }]) => {
           const unclaimed = rewardsStates.reduce((accum, { amountOwed }) => accum + amountOwed, 0n);
@@ -73,7 +73,12 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
           totalUnclaimed: 0n,
         }
     );
-    const rewardAsset = allRewards[0][1].rewardsStates[0].rewardAsset;
+    const rewardAsset = allRewards.find(([, { rewardsStates }]) => rewardsStates.length > 0)?.[1].rewardsStates[0]
+      .rewardAsset;
+
+    if (rewardAsset === undefined) {
+      return null;
+    }
     const [wholeNumberTotalRewards, fractionalTotalRewards] = `${formatTokenBalance(
       rewardAsset.decimals,
       totalRewards
@@ -244,11 +249,11 @@ const RewardsNetworkRow = ({
     );
 
   // Show rewards only for Mantle and Linea networks.
-  const filteredUnclaimedBalances = unclaimedBalances.filter(
-    balance => balance.chainId === 59144 || balance.chainId === 5000
+  const filteredUnclaimedBalances = unclaimedBalances.filter((balance) =>
+    ALLOWED_REWARDS_CHAIN_IDS.has(balance.chainId)
   );
 
-  const isExternalClaimNetwork = chainInformation.chainId !== 59144 && chainInformation.chainId !== 5000;
+  const isExternalClaimNetwork = !ALLOWED_REWARDS_CHAIN_IDS.has(chainInformation.chainId);
 
   return (
     <>

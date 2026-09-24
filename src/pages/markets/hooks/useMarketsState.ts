@@ -10,10 +10,9 @@ import Comet from '@helpers/abis/Comet';
 import ERC20 from '@helpers/abis/ERC20';
 import { adjustCollateralPrice, getBaseAssetPriceFeed } from '@helpers/baseAssetPrice';
 import { getHardcodedFeedPrice, getRemappedPriceFeed } from '@helpers/deprecatedMarkets';
-import { institutionalSupplyRewardRate } from '@helpers/institutionalRates';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
-import { getRewardsAPR } from '@helpers/numbers';
+import { getMarketRewardsAPRs } from '@helpers/rewards';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
 import { getV2State } from '@hooks/useV2MarketState';
 import {
@@ -78,13 +77,11 @@ export function useMarketsState(web3: Web3, marketState: MarketDataState): Marke
 }
 
 const getState = async (rawProvider: JsonRpcProvider, market: MarketData | MarketDataLoaded, rewardsState: RewardsState): Promise<MarketState> => {
-  const [ rewardsStateType, rewards ] = rewardsState;
-
   if (isV2Market(market)) {
     return getV2State();
   }
 
-  if (market.type === 'MarketData' || rewardsStateType === StateType.Loading) return [StateType.Loading];
+  if (market.type === 'MarketData') return [StateType.Loading];
 
   const provider = new StaticJsonRpcProvider(rawProvider.connection);
   const ethcallProvider = new Provider(provider, market.chainInformation.chainId);
@@ -245,50 +242,7 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     type: 'ProtocolAndMarketState',
     borrowAPR: borrowAPR,
     earnAPR: earnAPR,
-    ...((() => {
-      if (market?.rewardsOverwrite) {
-        const marketRewards = rewards
-          ?.find(([chainId]) => +chainId === +market.chainInformation.chainId)?.[1]
-          ?.rewardsStates.find((state) =>
-            state.comet.toLowerCase() === market.marketAddress.toLowerCase()
-          );
-
-        const rewardsAssetPrice = marketRewards?.rewardAsset?.price ?? 0n;
-
-        return {
-          borrowRewardsAPR:
-            market.rewardsOverwrite.borrowRewardsAPR ??
-            (() =>
-              getRewardsAPR(
-                market.rewardsOverwrite.borrowCompPerDay,
-                rewardsAssetPrice,
-                totalBorrowValueInDollars,
-              ))(),
-          supplyRewardsAPR:
-            market.rewardsOverwrite.supplyRewardsAPR ??
-            (() =>
-              getRewardsAPR(
-                market.rewardsOverwrite.supplyCompPerDay,
-                rewardsAssetPrice,
-                totalSupplyValueInDollars
-              ))(),
-          rewardsAssetSymbol: market.rewardsOverwrite.rewardsAssetSymbol
-        };
-      }
-
-      if (market?.institutional) {
-        return {
-          borrowRewardsAPR: 0n,
-          supplyRewardsAPR: institutionalSupplyRewardRate(totalSupplyValueInDollars),
-          isInstitutional: true
-        };
-      }
-
-      return {
-        borrowRewardsAPR: 0n,
-        supplyRewardsAPR: 0n,
-      };
-    })())
+    ...getMarketRewardsAPRs(market, rewardsState, totalSupplyValueInDollars, totalBorrowValueInDollars),
   };
   return [StateType.Hydrated, state];
 };

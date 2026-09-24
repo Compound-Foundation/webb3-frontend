@@ -61,21 +61,27 @@ const MarketOverviewPanels = ({ latestMarketSummaries, institutionalWhitelistSta
 
   // Sort the markets in place
   Object.values(marketSummariesByChain).forEach((marketSummaries) => {
-    const sortByMap = {
-      Utilization: 'utilization',
-      'Earn APR': 'supplyAPR',
-      'Borrow APR': 'borrowAPR',
-      'Total Earning': 'totalSupplyValue',
-      'Total Borrowing': 'totalBorrowValue',
-      'Total Collateral': 'totalCollateralValue',
+    const getSortValue = (marketSummary: MarketSummary): bigint => {
+      switch (sortBy) {
+        case 'Utilization':
+          return marketSummary.utilization;
+        case 'Earn APR':
+          return marketSummary.supplyAPR + marketSummary.supplyRewardsAPR;
+        case 'Borrow APR':
+          return marketSummary.borrowAPR - marketSummary.borrowRewardsAPR;
+        case 'Total Earning':
+          return marketSummary.totalSupplyValue;
+        case 'Total Borrowing':
+          return marketSummary.totalBorrowValue;
+        case 'Total Collateral':
+          return marketSummary.totalCollateralValue;
+      }
     };
-
-    const sortByKey = sortByMap[sortBy];
 
     // Ascending, sort "a to z", descending sort "z to a"
     marketSummaries.sort((a, z) => {
-      const aVal = a[sortByKey as keyof MarketSummary] as bigint;
-      const zVal = z[sortByKey as keyof MarketSummary] as bigint;
+      const aVal = getSortValue(a);
+      const zVal = getSortValue(z);
 
       if (sortOrder === 'Ascending') {
         return Number(aVal - zVal);

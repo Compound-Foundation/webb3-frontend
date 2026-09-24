@@ -205,7 +205,6 @@ export const MarketOverviewPanelView = ({
   const zeroIsNotALimit = borrowCap == '$0.00' ? 'No Limit' : borrowCap;
   const stats = (
     <div className="market-overview__stats">
-      asdassadasdasdasdasdsa
       <MarketOverviewPanelItem label={'Total Earning'} value={totalSupply} />
       <MarketOverviewPanelItem asset={baseAsset.symbol} label={'Earn APR'} value={earnAPR} />
       <MarketOverviewPanelItem asset={rewardsAssetSymbol} label={'Earn Distribution'} value={earnRewardsAPR} />

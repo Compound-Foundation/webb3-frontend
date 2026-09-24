@@ -26,6 +26,11 @@
     gap: 0.38rem;
     min-width: 5.4rem;
 
+    &__container {
+      display: flex;
+      justify-content: space-between;
+    }
+
     &__small {
       width: 5.4rem;
     }
