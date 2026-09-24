@@ -1,9 +1,10 @@
 import { BigNumber } from '@ethersproject/bignumber';
 import { JsonRpcProvider, StaticJsonRpcProvider } from '@ethersproject/providers';
 import { Contract, Provider } from 'ethers-multicall';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
 
+import RewardsStateContext from '@contexts/RewardsStateContext';
 import type { Web3 } from '@contexts/Web3Context';
 import Comet from '@helpers/abis/Comet';
 import ERC20 from '@helpers/abis/ERC20';
@@ -11,19 +12,22 @@ import { adjustCollateralPrice, getBaseAssetPriceFeed } from '@helpers/baseAsset
 import { getHardcodedFeedPrice, getRemappedPriceFeed } from '@helpers/deprecatedMarkets';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
+import { getMarketRewardsAPRs } from '@helpers/rewards';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
 import { getV2State } from '@hooks/useV2MarketState';
 import {
-  MarketDataState,
   MarketData,
   MarketDataLoaded,
+  MarketDataState,
   MarketHistoricalBucket,
   MarketState,
   ProtocolAndMarketsState,
+  RewardsState,
   StateType,
   TokenWithMarketState,
-  V3MarketApiBucket,
+  V3MarketApiBucket
 } from '@types';
+
 
 const MARKETS_REFRESH_INTERVAL = 300_000; // 5 mins
 
@@ -33,6 +37,7 @@ export function useMarketsState(web3: Web3, marketState: MarketDataState): Marke
   const location = useLocation();
   const [state, setState] = useState<MarketState>([StateType.Loading]);
   const marketRef = useRef(marketState);
+  const rewardsState = useContext(RewardsStateContext);
 
   // When network is changed, immediately set state to loading and update the chainIdRef
   useEffect(() => {
@@ -49,7 +54,7 @@ export function useMarketsState(web3: Web3, marketState: MarketDataState): Marke
       if (new URLSearchParams(location.search).has('mock')) {
         state = getMockMarketState();
       } else {
-        state = await getState(web3.read.provider, marketState[1]);
+        state = await getState(web3.read.provider, marketState[1], rewardsState);
       }
 
       // Only update state if chainId has not changed since the start of this callback
@@ -58,7 +63,7 @@ export function useMarketsState(web3: Web3, marketState: MarketDataState): Marke
         setState(state);
       }
     }
-  }, [marketState]);
+  }, [marketState, rewardsState]);
 
   useEffect(() => {
     const intervalId = setInterval(refreshData, MARKETS_REFRESH_INTERVAL);
@@ -71,7 +76,7 @@ export function useMarketsState(web3: Web3, marketState: MarketDataState): Marke
   return state;
 }
 
-const getState = async (rawProvider: JsonRpcProvider, market: MarketData | MarketDataLoaded): Promise<MarketState> => {
+const getState = async (rawProvider: JsonRpcProvider, market: MarketData | MarketDataLoaded, rewardsState: RewardsState): Promise<MarketState> => {
   if (isV2Market(market)) {
     return getV2State();
   }
@@ -216,15 +221,16 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     baseAssetPriceInDollars: baseTokenPriceInDollars.toBigInt(),
   };
 
+  const totalSupplyValueInDollars = (totalSupply * baseAssetWithState.baseAssetPriceInDollars) / 10n ** BigInt(baseAssetWithState.decimals);
+
+  const totalBorrowValueInDollars = (totalBorrow * baseAssetWithState.baseAssetPriceInDollars) / 10n ** BigInt(baseAssetWithState.decimals);
+
   const state: ProtocolAndMarketsState = {
     baseAsset: baseAssetWithState,
-    borrowAPR,
     borrowRates,
     collateralAssets,
     cometAddress: market.marketAddress,
-    earnAPR,
-    totalBaseSupplyUsd:
-      (totalSupply * baseAssetWithState.baseAssetPriceInDollars) / 10n ** BigInt(baseAssetWithState.decimals),
+    totalBaseSupplyUsd: totalSupplyValueInDollars,
     factorScale,
     marketHistory: marketHistoryAsBuckets,
     reserves: reserves.toBigInt(),
@@ -234,6 +240,9 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     totalSupply,
     utilization: utilization.toBigInt(),
     type: 'ProtocolAndMarketState',
+    borrowAPR: borrowAPR,
+    earnAPR: earnAPR,
+    ...getMarketRewardsAPRs(market, rewardsState, totalSupplyValueInDollars, totalBorrowValueInDollars),
   };
   return [StateType.Hydrated, state];
 };

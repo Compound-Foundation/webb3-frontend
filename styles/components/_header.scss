@@ -232,6 +232,10 @@
       .button--rewards {
         background-color: var(--ui--foreground--2);
         padding-right: 2.75rem;
+
+        svg {
+          margin-top: 0.125rem;
+        }
       }
 
       &--hide {

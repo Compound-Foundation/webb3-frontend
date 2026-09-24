@@ -2,7 +2,6 @@ import BoostedSupplyRates from '@components/BoostedSupplyRates';
 import NetRatesGraph, { NetRatesGraphType } from '@components/NetRatesGraph';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { formatRateFactor } from '@helpers/numbers';
-import { Token } from '@types';
 
 export enum NetRatesTooltipView {
   Borrow = 'borrow',
@@ -10,41 +9,48 @@ export enum NetRatesTooltipView {
   All = 'all',
 }
 
+export enum RewardsType {
+  Standard = 'standard',
+  Institutional = 'institutional',
+  Merkl = 'merkl',
+}
+
+interface BaseRewards {
+  supplyAPR: bigint;
+  borrowAPR: bigint;
+  assetSymbol?: string;
+}
+
+export type MarketRewards =
+  | (BaseRewards & { type: RewardsType.Standard })
+  | (BaseRewards & { type: RewardsType.Merkl })
+  | (BaseRewards & {
+  type: RewardsType.Institutional;
+  whitelistStatus?: InstitutionalWhitelistStatus;
+  boostLabel?: string;
+});
+
 export interface NetRatesTooltipProps {
   borrowAPR: bigint;
-  borrowRewardsAPR?: bigint;
   earnAPR: bigint;
-  earnRewardsAPR?: bigint;
-  // Set on institutional markets: the supply section shows the boosted rate
-  // breakdown and whitelist card instead of the standard earn graph
-  institutionalBoostAPR?: bigint;
-  institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
-  // Label override for the boosted portion of the rate
-  institutionalBoostLabel?: string;
-  rewardsAsset?: Token;
+  rewards?: MarketRewards;
   view: NetRatesTooltipView;
 }
 
-const NetRatesTooltip = ({
-   borrowAPR,
-   borrowRewardsAPR = 0n,
-   earnAPR,
-   earnRewardsAPR = 0n,
-   institutionalBoostAPR,
-   institutionalWhitelistStatus,
-   institutionalBoostLabel,
-   rewardsAsset,
-   view,
- }: NetRatesTooltipProps) => {
-  const netBorrowAPR = borrowRewardsAPR ? borrowAPR - borrowRewardsAPR : borrowAPR;
-  const netSupplyAPR = earnRewardsAPR ? earnRewardsAPR + earnAPR : earnAPR;
+const NetRatesTooltip = ({ borrowAPR, earnAPR, rewards, view }: NetRatesTooltipProps) => {
+  const borrowRewardsAPR = rewards?.borrowAPR ?? 0n;
+  const earnRewardsAPR = rewards?.supplyAPR ?? 0n;
+  const rewardsAssetSymbol = rewards?.assetSymbol;
+
+  const netBorrowAPR = borrowAPR - borrowRewardsAPR;
+  const netSupplyAPR = earnAPR + earnRewardsAPR;
 
   const netBorrowRateGraph = (
     <NetRatesGraph
       state={NetRatesGraphType.Borrow}
       borrowAPR={borrowAPR}
       borrowRewardsAPR={borrowRewardsAPR}
-      rewardsAsset={rewardsAsset}
+      rewardsAssetSymbol={rewardsAssetSymbol}
     />
   );
 
@@ -53,7 +59,7 @@ const NetRatesTooltip = ({
       state={NetRatesGraphType.Earn}
       earnAPR={earnAPR}
       earnRewardsAPR={earnRewardsAPR}
-      rewardsAsset={rewardsAsset}
+      rewardsAssetSymbol={rewardsAssetSymbol}
     />
   );
 
@@ -65,14 +71,13 @@ const NetRatesTooltip = ({
     </div>
   );
 
-  const boostAPR = institutionalBoostAPR !== undefined && institutionalBoostAPR > 0n ? institutionalBoostAPR : undefined;
   const boostedBreakdown =
-    boostAPR !== undefined ? (
+    rewards?.type === RewardsType.Institutional ? (
       <BoostedSupplyRates
         earnAPR={earnAPR}
-        boostAPR={boostAPR}
-        whitelistStatus={institutionalWhitelistStatus ?? InstitutionalWhitelistStatus.NoWallet}
-        boostLabel={institutionalBoostLabel}
+        boostAPR={rewards.supplyAPR}
+        whitelistStatus={rewards.whitelistStatus ?? InstitutionalWhitelistStatus.NoWallet}
+        boostLabel={rewards.boostLabel}
       />
     ) : null;
 
@@ -80,7 +85,7 @@ const NetRatesTooltip = ({
     <div className="net-rates-tooltip__section">
       <label className="L2 label text-color--2">Net Supply APR</label>
       <p className="L2 body body--emphasized text-color--1">
-        {formatRateFactor(boostAPR !== undefined ? earnAPR + boostAPR : netSupplyAPR)}
+        {formatRateFactor(netSupplyAPR)}
       </p>
       {boostedBreakdown ?? netEarnRateGraph}
     </div>
