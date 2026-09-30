@@ -17,6 +17,7 @@ type MarketRatesPanelHydrated = [
     earnRewardsAPR?: bigint;
     rewardsAssetSymbol?: string;
     isInstitutional?: boolean;
+    isRewardsLoading?: boolean;
   }
 ];
 
@@ -50,7 +51,7 @@ function getMarketRatesPanelContent(state: MarketRatesPanelState): PanelContent 
 }
 
 const MarketRatesPanel = ({ state }: { state: MarketRatesPanelState }) => {
-  if (state[0] == StateType.Loading) {
+  if (state[0] == StateType.Loading || state[1].isRewardsLoading) {
     return <LoadingView />;
   } else {
     const panelContent = getMarketRatesPanelContent(state);

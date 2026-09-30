@@ -362,36 +362,44 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
         </div>
       </td>
       <td>
-        <div className="market-overview-panels__apr-container">
-          <div className="body text-color--1 L3">{netEarnAPR}</div>
-          {marketSummary.isInstitutional && (
-            <InstitutionalRateInfo
-              marketSummary={marketSummary}
-              whitelistStatus={institutionalWhitelistStatus}
-            />
-          )}
-          {(hasEarnRewards && !marketSummary.isInstitutional) &&
-            <BoostedRateInfo
-              view={NetRatesTooltipView.Supply}
-              earnAPR={marketSummary.supplyAPR}
-              earnRewardsAPR={marketSummary.supplyRewardsAPR}
-              rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
-            />
-          }
-        </div>
+        {marketSummary.isRewardsLoading ? (
+          <div className="placeholder-content" style={{ width: '4rem', height: '1.25rem' }}></div>
+        ) : (
+          <div className="market-overview-panels__apr-container">
+            <div className="body text-color--1 L3">{netEarnAPR}</div>
+            {marketSummary.isInstitutional && (
+              <InstitutionalRateInfo
+                marketSummary={marketSummary}
+                whitelistStatus={institutionalWhitelistStatus}
+              />
+            )}
+            {(hasEarnRewards && !marketSummary.isInstitutional) &&
+              <BoostedRateInfo
+                view={NetRatesTooltipView.Supply}
+                earnAPR={marketSummary.supplyAPR}
+                earnRewardsAPR={marketSummary.supplyRewardsAPR}
+                rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
+              />
+            }
+          </div>
+        )}
       </td>
       <td>
-        <div className="market-overview-panels__apr-container">
-          <div className="body text-color--1 L3">{netBorrowAPR}</div>
-          {(hasBorrowRewards && !marketSummary.isInstitutional) &&
-            <BoostedRateInfo 
-              view={NetRatesTooltipView.Borrow}
-              borrowAPR={marketSummary.borrowAPR}
-              borrowRewardsAPR={marketSummary.borrowRewardsAPR}
-              rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
-            />
-          }
-        </div>
+        {marketSummary.isRewardsLoading ? (
+          <div className="placeholder-content" style={{ width: '4rem', height: '1.25rem' }}></div>
+        ) : (
+          <div className="market-overview-panels__apr-container">
+            <div className="body text-color--1 L3">{netBorrowAPR}</div>
+            {(hasBorrowRewards && !marketSummary.isInstitutional) &&
+              <BoostedRateInfo 
+                view={NetRatesTooltipView.Borrow}
+                borrowAPR={marketSummary.borrowAPR}
+                borrowRewardsAPR={marketSummary.borrowRewardsAPR}
+                rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
+              />
+            }
+          </div>
+        )}
       </td>
       <td>
         <div className="body text-color--1 L3">

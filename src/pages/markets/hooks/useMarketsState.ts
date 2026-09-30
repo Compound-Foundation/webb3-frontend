@@ -243,6 +243,7 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     borrowAPR: borrowAPR,
     earnAPR: earnAPR,
     ...getMarketRewardsAPRs(market, rewardsState, totalSupplyValueInDollars, totalBorrowValueInDollars),
+    isRewardsLoading: rewardsState[0] === StateType.Loading,
   };
   return [StateType.Hydrated, state];
 };

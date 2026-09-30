@@ -3,26 +3,9 @@ import { getRewardsAPR } from '@helpers/numbers';
 import {
   AccountRewardsState, MarketData,
   MarketDataLoaded,
-  MarketDataState,
   RewardsState,
-  RewardsTokenState,
   StateType
 } from '@types';
-
-export function getRewardsForSelectedMarket(
-  rewards: RewardsState,
-  selectedMarket: MarketDataState
-): undefined | RewardsTokenState | AccountRewardsState {
-  if (rewards[0] !== StateType.Loading && rewards[1] !== undefined && selectedMarket[1] !== undefined) {
-    const rewardsForChain = rewards[1].find(
-      ([chainId]) => chainId === selectedMarket[1]?.chainInformation.chainId.toString()
-    );
-    return rewardsForChain?.[1].rewardsStates.find(
-      (rewardsState) => rewardsState.comet === selectedMarket[1]?.marketAddress
-    );
-  }
-  return undefined;
-}
 
 export function getRewardsForMarket(
   rewards: RewardsState,

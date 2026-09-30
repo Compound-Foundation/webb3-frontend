@@ -406,6 +406,7 @@ export type MarketSummary = {
   collateralAssetSymbols: string[];
   date: string;
   isInstitutional?: boolean;
+  isRewardsLoading?: boolean;
 };
 
 export type AggregatedHistoricalSummary = {

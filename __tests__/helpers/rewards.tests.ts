@@ -6,7 +6,7 @@ const LOADING_REWARDS_STATE: RewardsState = [StateType.Loading];
 describe('getMarketRewardsAPRs', () => {
   it('institutional market: uses institutionalSupplyRewardRate, borrowRewardsAPR is 0', () => {
     const market = { institutional: true, chainInformation: { chainId: 1 } } as any;
-    const result = getMarketRewardsAPRs(market, LOADING_REWARDS_STATE, 1_000_000n, 500_000n);
+    const result = getMarketRewardsAPRs(market, LOADING_REWARDS_STATE, 1_000_000n * 10n ** 8n, 500_000n * 10n ** 8n);
 
     expect(result.isInstitutional).toBe(true);
     expect(result.borrowRewardsAPR).toBe(0n);
