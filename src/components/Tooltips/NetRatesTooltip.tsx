@@ -51,6 +51,7 @@ const NetRatesTooltip = ({ borrowAPR, earnAPR, rewards, view }: NetRatesTooltipP
       borrowAPR={borrowAPR}
       borrowRewardsAPR={borrowRewardsAPR}
       rewardsAssetSymbol={rewardsAssetSymbol}
+      boostLabel={'Rewards'}
     />
   );
 
@@ -60,6 +61,7 @@ const NetRatesTooltip = ({ borrowAPR, earnAPR, rewards, view }: NetRatesTooltipP
       earnAPR={earnAPR}
       earnRewardsAPR={earnRewardsAPR}
       rewardsAssetSymbol={rewardsAssetSymbol}
+      boostLabel={'Rewards'}
     />
   );
 
