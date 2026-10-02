@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 
 import { CircleExclamation } from '@components/Icons/CircleExclamation';
 import { ScreeningStatus } from '@hooks/useAddressScreening';

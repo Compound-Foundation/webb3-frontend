@@ -1,13 +1,13 @@
 import '../styles/main.scss';
 import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 
 import AlertBanner from '@components/AlertBanner';
 import ConnectWalletModal from '@components/ConnectWalletModal';
 import Footer from '@components/Footer';
 import Header from '@components/Header';
 import NetworkSwitchModal, { NetworkSwitchModalState } from '@components/NetworkSwitchModal';
-import { SafeAutoConnect } from "@components/SafeAutoConnect";
+import { SafeAutoConnect } from '@components/SafeAutoConnect';
 import ScreeningErrorOverlay from '@components/ScreeningErrorOverlay';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import { CurrencyContextProvider } from '@contexts/CurrencyContext';
@@ -24,6 +24,7 @@ import { useTransactionManager } from '@hooks/useTransactionManager';
 import { Action, MarketDataLoaded, StateType } from '@types';
 
 import { allExtensions } from './pages/extensions/helpers/list';
+import { MerklRedirectModal, MerklRedirectModalProvider } from './pages/rewards/components/MerklRedirectModal';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function App({ Component, pageProps }: any) {
@@ -36,6 +37,7 @@ function App({ Component, pageProps }: any) {
   const SelectedMarketContext = getSelectedMarketContext();
 
   const location = useLocation();
+
   const { transactions, addTransaction, clearTransactions } = useTransactionManager(web3);
   const rewardsState = useRewardsState(web3, transactions);
   const { theme, setTheme } = useThemeManager();
@@ -60,6 +62,9 @@ function App({ Component, pageProps }: any) {
     if (location.pathname.startsWith('/extensions')) {
       document.title = 'Compound | Extensions';
     }
+    if (location.pathname.startsWith('/rewards')) {
+      document.title = 'Compound | Rewards';
+    }
 
     const extensionPathRegex = new RegExp('^\\/extensions\\/([a-zA-Z0-9-_]+)');
     const pathMatch = location.pathname.match(extensionPathRegex);
@@ -72,7 +77,7 @@ function App({ Component, pageProps }: any) {
     }
   }, [location.pathname]);
 
-  const cometState = useCometState(web3, selectedMarketState.selectedMarket, transactions);
+  const cometState = useCometState(web3, selectedMarketState.selectedMarket, transactions, rewardsState);
   initializeContext(selectedMarketState);
 
   const handleRequestNetworkSwitch = (fromChainId: number, toChainId: number, description?: string) => {
@@ -162,57 +167,60 @@ function App({ Component, pageProps }: any) {
       <RewardsStateContext.Provider value={rewardsState}>
         <ActionQueueContext.Provider value={actionQueue}>
           <CurrencyContextProvider>
-            <SafeAutoConnect/>
-            <AlertBanner web3={web3} />
-            <Header
-              web3={web3}
-              transactions={transactions}
-              clearTransactions={() => {
-                clearTransactions();
-                actionQueue.clearActions();
-              }}
-              onConnectWalletClick={() => {
-                setShowConnectWalletModal(true);
-              }}
-              onWalletDisconnect={() => {
-                web3.disconnectWallet();
-              }}
-            />
-            <ConnectWalletModal
-              isOpen={showConnectWalletModal}
-              onRequestClose={() => {
-                setNetworkSwitchState(undefined);
-                setShowConnectWalletModal(false);
-              }}
-              onSelectConnector={(connector) => {
-                web3.connectWallet(connector);
-                setShowConnectWalletModal(false);
-              }}
-            />
-            <NetworkSwitchModal state={networkSwitchState} onSwitchNetwork={handleSwitchNetwork} />
-            <div className="app-content">
-              <Component
-                transactions={transactions}
+            <MerklRedirectModalProvider>
+              <SafeAutoConnect />
+              <AlertBanner web3={web3} />
+              <MerklRedirectModal web3={web3}/>
+              <Header
                 web3={web3}
-                addTransaction={addTransaction}
-                theme={theme}
-                cometState={cometState}
-                setShowConnectWalletModal={setShowConnectWalletModal}
-                switchWriteNetwork={(chainId: number, description?: string) => {
-                  if (web3.write.chainId) {
-                    handleRequestNetworkSwitch(web3.write.chainId, chainId, description);
-                    return;
-                  }
-
-                  web3.switchWriteNetwork(chainId);
+                transactions={transactions}
+                clearTransactions={() => {
+                  clearTransactions();
+                  actionQueue.clearActions();
                 }}
-                estimatedGasMap={estimatedGasMap}
-                {...pageProps}
+                onConnectWalletClick={() => {
+                  setShowConnectWalletModal(true);
+                }}
+                onWalletDisconnect={() => {
+                  web3.disconnectWallet();
+                }}
               />
-              <ScreeningErrorOverlay screeningStatus={web3.screeningStatus} />
-            </div>
-            <Footer theme={theme} setTheme={setTheme} />
-            <div id="overlay"></div>
+              <ConnectWalletModal
+                isOpen={showConnectWalletModal}
+                onRequestClose={() => {
+                  setNetworkSwitchState(undefined);
+                  setShowConnectWalletModal(false);
+                }}
+                onSelectConnector={(connector) => {
+                  web3.connectWallet(connector);
+                  setShowConnectWalletModal(false);
+                }}
+              />
+              <NetworkSwitchModal state={networkSwitchState} onSwitchNetwork={handleSwitchNetwork} />
+              <div className="app-content">
+                <Component
+                  transactions={transactions}
+                  web3={web3}
+                  addTransaction={addTransaction}
+                  theme={theme}
+                  cometState={cometState}
+                  setShowConnectWalletModal={setShowConnectWalletModal}
+                  switchWriteNetwork={(chainId: number, description?: string) => {
+                    if (web3.write.chainId) {
+                      handleRequestNetworkSwitch(web3.write.chainId, chainId, description);
+                      return;
+                    }
+
+                    web3.switchWriteNetwork(chainId);
+                  }}
+                  estimatedGasMap={estimatedGasMap}
+                  {...pageProps}
+                />
+                <ScreeningErrorOverlay screeningStatus={web3.screeningStatus} />
+              </div>
+              <Footer theme={theme} setTheme={setTheme} />
+              <div id="overlay"></div>
+            </MerklRedirectModalProvider>
           </CurrencyContextProvider>
         </ActionQueueContext.Provider>
       </RewardsStateContext.Provider>

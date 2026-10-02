@@ -2,7 +2,7 @@ import { StaticJsonRpcProvider } from '@ethersproject/providers';
 import { ConnectionInfo } from 'ethers/lib/utils';
 import { setMulticallAddress } from 'ethers-multicall';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
@@ -71,16 +71,17 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
   const selectMarket = useCallback(
     async (desiredMarket: MarketData) => {
       const isMarketsPage = location.pathname.startsWith('/markets');
+      const isRewardsPage = location.pathname.startsWith('/rewards');
       const hasMarketQueryParam = searchParams.has('market');
 
       // On the /markets page, don't set the market query param
-      if (!isMarketsPage) {
+      if (!isMarketsPage && !isRewardsPage) {
         // Force update the market query parameter
         const newSearchParams = new URLSearchParams(searchParams);
         newSearchParams.set('market', shortMarketKey(desiredMarket));
 
         setSearchParams(newSearchParams, { replace: true });
-      } else if (hasMarketQueryParam) {
+      } else if (isMarketsPage && hasMarketQueryParam) {
         // Instead of updating query param, navigate to /markets/:marketId.
         const existingSearchParams = new URLSearchParams(searchParams);
         existingSearchParams.delete('market');
@@ -268,10 +269,11 @@ export function shortMarketKey(market: MarketData | MarketDataLoaded): string {
   if (market.baseAsset.symbol === V2_MARKET.baseAsset.symbol) {
     return 'v2';
   }
-  // Markets with a wrapped base asset are referred to in terms of the wrapped asset (e.g. 'WETH' or 'WMATIC').
-  const marketName = market.baseAsset.isWrapped
-    ? `w${market.baseAsset.symbol.toLowerCase()}`
-    : market.baseAsset.symbol.toLowerCase();
+  // Markets with a slug override are referred to by it (e.g. 'usdc-institutional-mainnet'), while
+  // markets with a wrapped base asset are referred to in terms of the wrapped asset (e.g. 'WETH' or 'WMATIC').
+  const marketName =
+    market.slug ??
+    (market.baseAsset.isWrapped ? `w${market.baseAsset.symbol.toLowerCase()}` : market.baseAsset.symbol.toLowerCase());
   return [marketName, market.chainInformation.key.toLowerCase()].join('-');
 }
 
@@ -285,17 +287,25 @@ export function parseMarketKeyOrDefault(
     return defaultData;
   }
 
-  const maybeShorthandMatch = marketKey.match(new RegExp('^([₮0-9a-zA-Z.]+)-([₮0-9a-zA-Z]+)$'));
+  // The base asset part is matched greedily so slugs may themselves contain hyphens,
+  // e.g. 'usdc-institutional-mainnet' parses as 'usdc-institutional' on 'mainnet'.
+  const maybeShorthandMatch = marketKey.match(new RegExp('^([₮0-9a-zA-Z.-]+)-([₮0-9a-zA-Z]+)$'));
   if (maybeShorthandMatch !== null) {
     // Matches a market key like 'usdc-mainnet'
     const [, baseAssetSymbol, networkName] = maybeShorthandMatch;
-    const maybeMarketFromShorthand = markets.find(
-      (market: MarketData) =>
-        market.chainInformation.key.toLowerCase() === networkName.toLowerCase() &&
-        ((!market.baseAsset.isWrapped && market.baseAsset.symbol.toLowerCase() === baseAssetSymbol.toLowerCase()) ||
-          (market.baseAsset.isWrapped &&
-            `w${market.baseAsset.symbol}`.toLowerCase() === baseAssetSymbol.toLowerCase())),
-    );
+    const maybeMarketFromShorthand = markets.find((market: MarketData) => {
+      if (market.chainInformation.key.toLowerCase() !== networkName.toLowerCase()) {
+        return false;
+      }
+      // A slug override is the market's only shorthand identity
+      if (market.slug !== undefined) {
+        return market.slug.toLowerCase() === baseAssetSymbol.toLowerCase();
+      }
+      return (
+        (!market.baseAsset.isWrapped && market.baseAsset.symbol.toLowerCase() === baseAssetSymbol.toLowerCase()) ||
+        (market.baseAsset.isWrapped && `w${market.baseAsset.symbol}`.toLowerCase() === baseAssetSymbol.toLowerCase())
+      );
+    });
 
     if (maybeMarketFromShorthand) {
       return maybeMarketFromShorthand;

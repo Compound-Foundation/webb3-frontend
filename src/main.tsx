@@ -2,7 +2,7 @@ import { SafeProvider } from '@safe-global/safe-apps-react-sdk';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router';
 import { WagmiProvider } from 'wagmi';
 
 import { Web3Provider } from '@contexts/Web3Context';
@@ -15,6 +15,8 @@ import Extension from './pages/extensions/Extension';
 import Home from './pages/home';
 import MarketOverview from './pages/markets';
 import Market from './pages/markets/Market';
+import Redirect from './pages/redirect';
+import Rewards from './pages/rewards';
 import TransactionHistory from './pages/transactions';
 import Vote from './pages/vote';
 
@@ -25,7 +27,16 @@ const queryClient = new QueryClient();
 createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <Router basename={ipfsMatch ? ipfsMatch[0] : '/'}>
-      <WagmiProvider config={config}>
+      {/*
+        `reconnectOnMount` is off so that Web3Provider's own effect is the single
+        reconnect path. Wagmi's mount-time reconnect walks every connector and takes the
+        first that reports `isAuthorized()`, which ignores our allowlist and our rdns
+        conflict checks — it would silently restore a session we had just severed for
+        impersonation. Restoring through our path is equally silent: an authorized
+        injected provider returns accounts without a prompt, and the WalletConnect
+        connector reuses a live session rather than showing a QR.
+      */}
+      <WagmiProvider config={config} reconnectOnMount={false}>
         <SafeProvider>
           <QueryClientProvider client={queryClient}>
             <Web3Provider>
@@ -37,6 +48,9 @@ createRoot(document.getElementById('root') as HTMLElement).render(
                 <Route path="/extensions" element={<App Component={ExtensionList} pageProps={{}} />} />
                 <Route path="/vote" element={<App Component={Vote} pageProps={{}} />} />
                 <Route path="/transactions" element={<App Component={TransactionHistory} pageProps={{}} />} />
+                <Route path="/rewards" element={<App Component={Rewards} pageProps={{}} />} />
+                {/* Standalone interstitial: no header, footer, or wallet chrome. */}
+                <Route path="/redirect" element={<Redirect />} />
               </Routes>
             </Web3Provider>
           </QueryClientProvider>

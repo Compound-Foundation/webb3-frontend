@@ -5,16 +5,24 @@ import { useContext } from 'react';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { isNonStablecoinMarket } from '@helpers/baseAssetPrice';
 import { convertApiResponse } from '@helpers/functions';
+import { institutionalSupplyRewardRate } from '@helpers/institutionalRates';
 import { filterLegacyCollateralSymbols } from '@helpers/legacyCollateral';
-import { getMarketDescriptors } from '@helpers/markets';
-import { BASE_FACTOR, FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
+import { getMarket, getMarketDescriptors } from '@helpers/markets';
+import { BASE_FACTOR, FACTOR_PRECISION, getRewardsAPR, PRICE_PRECISION } from '@helpers/numbers';
 import { getHistoricalMarketSummaryEndpoint, getLatestMarketSummaryEndpoint } from '@helpers/urls';
-import { AggregatedHistoricalSummary, MarketOverviewState, MarketSummary, RewardsState, StateType } from '@types';
+import {
+  AggregatedHistoricalSummary,
+  MarketOverviewState,
+  MarketSummary,
+  RewardsState,
+  RewardsTokenState,
+  StateType
+} from '@types';
+
 
 const LATEST_SUMMARY_REFRESH_INTERVAL = 1000 * 60 * 10; // 10 minutes
 
 export function useMarketsOverviewState(): MarketOverviewState {
-  // TODO: This can also be modified to use react-query
   const rewardsState = useContext(RewardsStateContext);
 
   const query = useQuery({
@@ -44,38 +52,29 @@ type MarketSummaryResponse = {
   collateralAssetSymbols: string[];
 };
 
-const getState = async (rewardsState: RewardsState, includeTestnets = false): Promise<MarketOverviewState> => {
+const getState = async (rewardsState: RewardsState, includeTestnets = false,): Promise<MarketOverviewState> => {
   const [rewardsStateType, rewards] = rewardsState;
-  if (rewardsStateType === StateType.Loading || rewards === undefined) {
+
+  if (rewardsStateType === StateType.Loading) {
     return [StateType.Loading];
   }
-
+  
   const latestMarketSummariesResponse = await fetch(getLatestMarketSummaryEndpoint(includeTestnets));
   const latestMarketSummaries = await latestMarketSummariesResponse.json();
 
   const sanitizedLatestMarketSummaries: MarketSummary[] = latestMarketSummaries
     .map(convertApiResponse)
-    .map(sanitizeMarketSummary)
-    // Add the rewards earned to the supply and borrow rates
-    .map((marketSummary: MarketSummary): MarketSummary => {
-      const rewardForChain = rewards.find((reward) => Number(reward[0]) === marketSummary.chainId);
-      if (rewardForChain === undefined) {
-        return marketSummary;
-      }
+    .map((marketSummary: MarketSummaryResponse) => {
+      const marketRewards = rewards
+        ?.find(([chainId]) => +chainId === +marketSummary.chainId)?.[1]
+        ?.rewardsStates.find((state) =>
+            state.comet.toLowerCase() === marketSummary.comet.address.toLowerCase()
+        );
 
-      const rewardsForMarket = rewardForChain[1].rewardsStates.find((rewardState) => {
-        return rewardState.comet === marketSummary.comet.address;
-      });
-
-      if (rewardsForMarket === undefined) {
-        return marketSummary;
-      }
-
-      return {
-        ...marketSummary,
-        borrowAPR: marketSummary.borrowAPR - rewardsForMarket.borrowRewardsAPR,
-        supplyAPR: marketSummary.supplyAPR + rewardsForMarket.earnRewardsAPR,
-      };
+      return { marketSummary, marketRewards };
+    })
+    .map(({ marketSummary, marketRewards }: {marketSummary: MarketSummaryResponse, marketRewards: RewardsTokenState}) => {
+      return sanitizeMarketSummary(marketSummary, marketRewards);
     });
 
   const historicalMarketSummariesResponse = await fetch(getHistoricalMarketSummaryEndpoint(includeTestnets));
@@ -122,7 +121,7 @@ const getState = async (rewardsState: RewardsState, includeTestnets = false): Pr
  * @param marketSummary
  * @returns
  */
-export const sanitizeMarketSummary = (marketSummary: MarketSummaryResponse): MarketSummary => {
+export const sanitizeMarketSummary = (marketSummary: MarketSummaryResponse, marketRewards?: RewardsTokenState): MarketSummary => {
   const baseUsdPrice = BigInt(Math.floor(Number(marketSummary.baseUsdPrice) * 10 ** PRICE_PRECISION));
   const borrowAPR = BigInt(Math.floor(Number(marketSummary.borrowApr) * 10 ** FACTOR_PRECISION));
   const supplyAPR = BigInt(Math.floor(Number(marketSummary.supplyApr) * 10 ** FACTOR_PRECISION));
@@ -150,8 +149,6 @@ export const sanitizeMarketSummary = (marketSummary: MarketSummaryResponse): Mar
     comet: {
       address: getAddress(marketSummary.comet.address),
     },
-    borrowAPR: borrowAPR,
-    supplyAPR: supplyAPR,
     totalBorrowValue: totalBorrowValueInDollars,
     totalSupplyValue: totalSupplyValueInDollars,
     totalCollateralValue: totalCollateralValueInDollars,
@@ -163,5 +160,47 @@ export const sanitizeMarketSummary = (marketSummary: MarketSummaryResponse): Mar
       baseAsset,
       marketSummary.collateralAssetSymbols ?? []
     ),
+    borrowAPR: borrowAPR,
+    supplyAPR: supplyAPR,
+    ...((() => {
+      const market = getMarket(marketSummary.chainId, marketSummary.comet.address);
+
+      if (market?.rewardsOverwrite) {
+        const rewardsAssetPrice = marketRewards?.rewardAsset?.price ?? 0n;
+
+        return {
+          borrowRewardsAPR:
+            market.rewardsOverwrite.borrowRewardsAPR ??
+            (() =>
+              getRewardsAPR(
+                market.rewardsOverwrite.borrowCompPerDay,
+                rewardsAssetPrice,
+                totalBorrowValueInDollars,
+              ))(),
+          supplyRewardsAPR:
+            market.rewardsOverwrite.supplyRewardsAPR ??
+            (() =>
+              getRewardsAPR(
+                market.rewardsOverwrite.supplyCompPerDay,
+                rewardsAssetPrice,
+                totalSupplyValueInDollars
+              ))(),
+          rewardsAssetSymbol: market.rewardsOverwrite.rewardsAssetSymbol
+        };
+      }
+
+      if (market?.institutional) {
+        return {
+          borrowRewardsAPR: 0n,
+          supplyRewardsAPR: institutionalSupplyRewardRate(totalSupplyValueInDollars),
+          isInstitutional: true
+        };
+      }
+
+      return {
+        borrowRewardsAPR: 0n,
+        supplyRewardsAPR: 0n,
+      };
+    })())
   };
 };

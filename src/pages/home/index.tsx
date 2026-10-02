@@ -13,9 +13,9 @@ import {
 } from '@helpers/actions';
 import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
+import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
-import { getRewardsForSelectedMarket } from '@helpers/rewards';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { Theme } from '@hooks/useThemeManager';
 import { AddTransaction } from '@hooks/useTransactionManager';
@@ -41,6 +41,7 @@ import {
 
 import ActionModal from './components/ActionModal';
 import AssetRow from './components/AssetRow';
+import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadState } from './components/Masthead';
 import PositionCard, { PositionCardState } from './components/PositionCard';
 
@@ -91,20 +92,24 @@ const Home = ({
   let mastheadState: MastheadState;
   let positionCardState: PositionCardState;
   let isBulkerAllowed = false;
-  let borrowRewardsAPR: bigint | undefined, earnRewardsAPR: bigint | undefined, rewardsAsset: Token | undefined;
-  const rewardsState = getRewardsForSelectedMarket(rewards, selectedMarket);
-  if (rewardsState !== undefined) {
-    borrowRewardsAPR = rewardsState.borrowRewardsAPR;
-    earnRewardsAPR = rewardsState.earnRewardsAPR;
-    rewardsAsset = rewardsState.rewardAsset;
-  }
+
+  const whitelistStatus = institutionalWhitelistStatus(web3.read.account);
 
   if (cometState === StateType.Loading) {
     mastheadState = [StateType.Loading];
     assetRows = [0, 0, 0, 0, 0, 0].map((_, index) => <AssetRow key={index} state={[StateType.Loading]} />);
     positionCardState = [StateType.Loading];
   } else if (cometState === StateType.NoWallet) {
-    const { baseAsset, borrowAPR, collateralAssets, earnAPR } = state[1];
+    const {
+      baseAsset,
+      borrowAPR,
+      collateralAssets,
+      earnAPR,
+      borrowRewardsAPR,
+      supplyRewardsAPR,
+      rewardsAssetSymbol,
+      isInstitutional
+    } = state[1];
 
     mastheadState = [StateType.NoWallet, { baseAsset, earnAPR }];
     assetRows = collateralAssets
@@ -115,17 +120,31 @@ const Home = ({
       {
         baseAsset,
         borrowAPR,
+        rewardsAssetSymbol,
         borrowRewardsAPR,
         earnAPR,
-        earnRewardsAPR,
-        rewardsAsset,
+        earnRewardsAPR: supplyRewardsAPR,
+        institutionalWhitelistStatus: whitelistStatus,
+        isInstitutional: isInstitutional,
         theme,
       },
     ];
   } else {
     const market = selectedMarket[1] as MarketDataLoaded; // It must be loaded if in StateType.Hydrated
-    const { baseAsset, borrowAPR, collateralAssets, collateralValue, earnAPR, liquidationCapacity } = state[1];
+    const {
+      baseAsset,
+      borrowAPR,
+      collateralAssets,
+      collateralValue,
+      earnAPR,
+      liquidationCapacity,
+      borrowRewardsAPR,
+      supplyRewardsAPR,
+      isInstitutional,
+      rewardsAssetSymbol,
+    } = state[1];
     isBulkerAllowed = state[1].isBulkerAllowed;
+
     const actions = getActions(baseAsset, collateralAssets, rewards);
     const actionsForCompare = compare ? [] : actions;
     const updatedDataPostActions = calculateUpdatedBalances(baseAsset, collateralAssets, actionsForCompare);
@@ -253,11 +272,13 @@ const Home = ({
         collateralValuePost: updatedDataPostActions.collateralValue,
         compare,
         earnAPR,
-        earnRewardsAPR,
+        earnRewardsAPR: supplyRewardsAPR,
+        isInstitutional: isInstitutional ?? false,
+        institutionalWhitelistStatus: whitelistStatus,
         liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
         pendingAction,
-        rewardsAsset,
+        rewardsAssetSymbol,
         theme,
         transaction: blockingTransaction,
         onWithdrawAction: (pendingAction?: PendingAction) => {
@@ -285,11 +306,13 @@ const Home = ({
         collateralValue: collateralValue,
         collateralValuePost: updatedDataPostActions.collateralValue,
         earnAPR,
-        earnRewardsAPR,
+        earnRewardsAPR: supplyRewardsAPR,
+        isInstitutional: isInstitutional,
+        institutionalWhitelistStatus: whitelistStatus,
+        rewardsAssetSymbol,
         liquidationCapacity: liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
         pendingAction,
-        rewardsAsset,
         theme,
         transaction: blockingTransaction,
         onClearClicked: () => {
@@ -509,6 +532,7 @@ const Home = ({
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
+      <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
       <div className="home__content grid-container">
         <div className="home__assets grid-column--7">

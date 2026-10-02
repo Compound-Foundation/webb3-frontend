@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 
 import '@testing-library/jest-dom';
 import { LatestMarketSummaries, MarketSummary } from '@types';
@@ -19,6 +19,8 @@ const makeSummary = (chainId: number, address: string): MarketSummary => ({
   timestamp: 0,
   collateralAssetSymbols: [],
   date: '2026-06-22',
+  borrowRewardsAPR: 0n,
+  supplyRewardsAPR: 0n
 });
 
 const renderPanels = (summaries: LatestMarketSummaries) =>

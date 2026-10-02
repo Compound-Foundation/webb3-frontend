@@ -9,6 +9,7 @@ import baseMainnetUSDSRoots from 'comet/deployments/base/usds/roots.json';
 import baseMainnetWETHRoots from 'comet/deployments/base/weth/roots.json';
 import lineaMainnetUSDCRoots from 'comet/deployments/linea/usdc/roots.json';
 import lineaWETHRoots from 'comet/deployments/linea/weth/roots.json';
+import mainnetInstitutionalUSDCRoots from 'comet/deployments/mainnet/institutional_usdc/roots.json';
 import mainnetUSDCRoots from 'comet/deployments/mainnet/usdc/roots.json';
 import mainnetUSDSRoots from 'comet/deployments/mainnet/usds/roots.json';
 import mainnetUSDTRoots from 'comet/deployments/mainnet/usdt/roots.json';
@@ -24,8 +25,6 @@ import polygonUSDTRoots from 'comet/deployments/polygon/usdt/roots.json';
 import roninWETHRoots from 'comet/deployments/ronin/weth/roots.json';
 import roninWRONRoots from 'comet/deployments/ronin/wron/roots.json';
 import scrollUSDCRoots from 'comet/deployments/scroll/usdc/roots.json';
-import sepoliaUSDCRoots from 'comet/deployments/sepolia/usdc/roots.json';
-import sepoliaWETHRoots from 'comet/deployments/sepolia/weth/roots.json';
 import unichainUSDCRoots from 'comet/deployments/unichain/usdc/roots.json';
 import unichainWETHRoots from 'comet/deployments/unichain/weth/roots.json';
 
@@ -72,20 +71,43 @@ export const V2_MARKET: MarketData = {
 export const MARKETS: MarketData[] = [
   ...(
     [
-      [1, 'USDC', 'USD Coin', mainnetUSDCRoots],
-      [1, 'ETH', 'Ether', mainnetWETHRoots],
-      [1, 'USDT', 'Tether', mainnetUSDTRoots],
+      [1, 'USDC', 'USD Coin', mainnetUSDCRoots, {
+        rewardsOverwrite: {
+          rewardsAssetSymbol: "COMP",
+          supplyCompPerDay: 55n * 10n ** 18n,
+          borrowCompPerDay: 55n * 10n ** 18n,
+        }
+      }],
+      [1, 'ETH', 'Ether', mainnetWETHRoots, {
+        rewardsOverwrite: {
+          rewardsAssetSymbol: "COMP",
+          supplyCompPerDay: 10n * 10n ** 18n,
+          borrowCompPerDay: 20n * 10n ** 18n,
+        }
+      }],
+      [1, 'USDT', 'Tether', mainnetUSDTRoots, {
+        rewardsOverwrite: {
+          rewardsAssetSymbol: "COMP",
+          supplyCompPerDay: 30n * 10n ** 18n,
+          borrowCompPerDay: 30n * 10n ** 18n,
+        }
+      }],
       [1, 'wstETH', 'Lido Wrapped Staked ETH', mainnetWSTETHRoots],
       [1, 'USDS', 'USDS', mainnetUSDSRoots],
       [1, 'WBTC', 'Wrapped BTC', mainnetWBTCRoots],
+      [
+        1,
+        'USDC',
+        'USDC Institutional',
+        mainnetInstitutionalUSDCRoots,
+        { slug: 'usdc-institutional', institutional: true, isNew: true },
+      ],
       [137, 'USDC.e', 'USD Coin (Bridged)', polygonUSDCRoots],
       [137, 'USDT0', 'Tether', polygonUSDTRoots],
       [42161, 'USDC', 'USD Coin', arbitrumNativeUSDCRoots],
       [42161, 'USDC.e', 'USD Coin (Bridged)', arbitrumBridgedUSDCRoots],
       [42161, 'ETH', 'Ether', arbitrumWETHRoots],
       [42161, 'USD₮0', 'Tether', arbitrumUSDTRoots],
-      [11155111, 'USDC', 'USD Coin', sepoliaUSDCRoots],
-      [11155111, 'ETH', 'Ether', sepoliaWETHRoots],
       [10, 'USDC', 'USD Coin', optimismUSDCRoots],
       [10, 'USDT', 'Tether', optimismUSDTRoots],
       [10, 'ETH', 'Ether', optimismWETHRoots],
@@ -102,8 +124,8 @@ export const MARKETS: MarketData[] = [
       [2020, 'WETH', 'Wrapped Ether', roninWETHRoots],
       [2020, 'RON', 'Ronin', roninWRONRoots],
       [59144, 'ETH', 'Ether', lineaWETHRoots],
-    ] as [number, string, string, { [x: string]: string }][]
-  ).map(([chainId, baseAsset, baseAssetName, root]) => {
+    ] as [number, string, string, { [x: string]: string }, Pick<MarketData, 'slug' | 'institutional' | 'isNew'>?][]
+  ).map(([chainId, baseAsset, baseAssetName, root, options]) => {
     const chain: ChainInformation = CHAINS[chainId];
 
     return {
@@ -113,11 +135,12 @@ export const MARKETS: MarketData[] = [
         isWrapped: WRAPPED_BASE_ASSETS.includes(baseAsset),
       },
       chainInformation: chain,
-      iconPair: [iconNameForChainId(chainId), baseAsset],
+      iconPair: [options?.institutional ? 'INSTITUTIONAL' : iconNameForChainId(chainId), baseAsset],
       marketAddress: root['comet'],
       bulkerAddress: root['bulker'],
       fauceteerAddress: root['fauceteer'],
       rewardsAddress: root['rewards'],
+      ...options,
       type: 'MarketData',
     } as MarketData;
   }),

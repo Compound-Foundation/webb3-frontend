@@ -647,13 +647,13 @@ describe('ActionInputView', () => {
       );
 
       await user.click(getByText('Max'));
-      // We lose some precision in the computation of the max value
-      expect(getByPlaceholderText('0')).toHaveValue('9.999999999575620809');
+      // With no outstanding borrow, max is the exact collateral balance
+      expect(getByPlaceholderText('0')).toHaveValue('10');
       expect(getByText('Add Action')).toBeEnabled();
       expect(getByText('Cancel')).toBeEnabled();
 
       await user.click(getByText('Add Action'));
-      expect(onConfirm).toHaveBeenCalledWith(9999999999575620809n, 'Withdraw 9.999999999575620809 ETH');
+      expect(onConfirm).toHaveBeenCalledWith(BigInt(10e18), 'Withdraw 10 ETH');
 
       await user.click(getByText('Cancel'));
       expect(onCancel).toHaveBeenCalled();

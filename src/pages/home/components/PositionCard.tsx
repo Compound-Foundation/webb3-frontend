@@ -15,6 +15,7 @@ import {
 import { assetIconForAssetSymbol } from '@helpers/assets';
 import { adjustValueForAeroAsset } from '@helpers/baseAssetPrice';
 import { noop } from '@helpers/functions';
+import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import {
   MAX_UINT256,
   PRICE_PRECISION,
@@ -52,8 +53,11 @@ type PositionCardNoWallet = [
     borrowRewardsAPR?: bigint;
     earnAPR: bigint;
     earnRewardsAPR?: bigint;
+    institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
     rewardsAsset?: Token;
     theme: Theme;
+    rewardsAssetSymbol?: string;
+    isInstitutional?: boolean;
   }
 ];
 type PositionCardHydrated = [
@@ -70,10 +74,11 @@ type PositionCardHydrated = [
     collateralValuePost: bigint;
     earnAPR: bigint;
     earnRewardsAPR?: bigint;
+    institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
     liquidationCapacity: bigint;
     liquidationCapacityPost: bigint;
     pendingAction?: PendingAction;
-    rewardsAsset?: Token;
+    rewardsAssetSymbol?: string;
     theme: Theme;
     transaction?: Transaction;
     onClearClicked: () => void;
@@ -85,6 +90,7 @@ type PositionCardHydrated = [
     onPendingActionUpdateAmount: (amount?: bigint) => void;
     onSelectAction: (action: Action) => void;
     onSubmitClicked: () => void;
+    isInstitutional?: boolean;
   }
 ];
 
@@ -243,7 +249,16 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
     return defaultPanelState;
   }
 
-  const { borrowAPR, borrowRewardsAPR, earnAPR, earnRewardsAPR, rewardsAsset, theme } = state[1];
+  const {
+    borrowAPR,
+    borrowRewardsAPR,
+    earnAPR,
+    earnRewardsAPR,
+    rewardsAssetSymbol,
+    institutionalWhitelistStatus,
+    theme,
+    isInstitutional
+  } = state[1];
 
   const ratesTooltipContent = (
     <NetRatesTooltip
@@ -251,7 +266,9 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
       borrowRewardsAPR={borrowRewardsAPR}
       earnAPR={earnAPR}
       earnRewardsAPR={earnRewardsAPR}
-      rewardsAsset={rewardsAsset}
+      isInstitutional={isInstitutional}
+      rewardsAssetSymbol={rewardsAssetSymbol}
+      institutionalWhitelistStatus={institutionalWhitelistStatus}
       view={NetRatesTooltipView.All}
     />
   );
@@ -260,7 +277,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
       <div className="position-card__row position-card__row--divider">
         <div className="divider"></div>
       </div>
-      <Tooltip content={ratesTooltipContent} width={400} hideArrow={true}>
+      <Tooltip content={ratesTooltipContent} width={400} hideArrow={true} interactive={true} touchToggle={false} yOffset={0}>
         <div className="position-card__rates" onClick={() => setRatesDetailActive(true)}>
           <div className="position-card__rates__info position-card__rates__info--left">
             <label className="L2 label text-color--2">Net Borrow APR</label>

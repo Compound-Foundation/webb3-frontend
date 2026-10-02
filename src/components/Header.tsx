@@ -1,5 +1,5 @@
 import { ReactNode, useContext, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink } from 'react-router';
 
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
@@ -13,7 +13,7 @@ import { Transaction, PendingTransaction, StateType, TransactionHistoryItem, Tra
 
 import Hamburger from './Hamburger';
 import { HeaderNavButtonHighlight } from './HeaderNavButtonHighlight';
-import { Dashboard, Extensions, ExternalLink, Markets, Vote } from './Icons';
+import { Dashboard, Extensions, ExternalLink, Markets, Vote, Rewards } from './Icons';
 import { LoadSpinnerNew } from './LoadSpinner';
 import Logo, { Mark } from './Logo';
 import MarketSelector from './MarketSelector';
@@ -40,7 +40,7 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
     tx.state === TransactionState.Pending ? tx : undefined
   );
 
-  const hideMarketSelector = ['/vote', '/markets'].some((path) => window.location.pathname.includes(path));
+  const hideMarketSelector = ['/vote', '/markets', '/rewards'].some((path) => window.location.pathname.includes(path));
 
   const { state } = useTransactionHistory(web3, RECENT_NUM);
   const [transactionsStateType, transactionsState] = state;
@@ -81,6 +81,12 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
                 So explicitly set the width for now */}
                 <span style={{ width: '3.125rem' }} className="L1 label">
                   Markets
+                </span>
+              </NavLink>
+              <NavLink to="/rewards" className={({ isActive }) => (isActive ? 'active' : undefined)}>
+                <Rewards className="header__links__icon" />
+                <span style={{ width: '3.3rem' }} className="L1 label">
+                  Rewards
                 </span>
               </NavLink>
               <SimpleLink to="/extensions" className={({ isActive }) => (isActive ? 'active' : undefined)}>
@@ -296,6 +302,17 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
             }}
           >
             Markets
+          </SimpleLink>
+          <SimpleLink
+            to="/rewards"
+            className={({ isActive }) =>
+              isActive ? 'heading heading--emphasized active' : 'heading heading--emphasized'
+            }
+            onClick={() => {
+              setMobileNavActive(false);
+            }}
+          >
+            Rewards
           </SimpleLink>
           <SimpleLink
             to="/extensions"

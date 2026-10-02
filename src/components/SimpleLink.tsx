@@ -1,5 +1,5 @@
 import { forwardRef, MouseEventHandler, PropsWithChildren } from 'react';
-import { Link, NavLink, NavLinkProps } from 'react-router-dom';
+import { Link, NavLink, NavLinkProps } from 'react-router';
 
 type Props = PropsWithChildren & {
   to: string;

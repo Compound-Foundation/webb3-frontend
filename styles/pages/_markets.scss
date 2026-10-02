@@ -119,7 +119,10 @@
   }
 
   &__names {
+    align-items: center;
     color: var(--text--1);
+    display: flex;
+    flex-wrap: wrap;
     margin: 0;
 
     &__divider {
@@ -130,6 +133,19 @@
     &__chain-name {
       color: var(--text--2);
     }
+
+    &__new-badge {
+      margin-left: 0.75rem;
+    }
+  }
+
+  &__learn-more {
+    align-self: center;
+    // Match the header rewards button's fill
+    background-color: var(--ui--foreground--2);
+    margin-left: auto;
+    padding: 0 1.5rem;
+    text-transform: none;
   }
 
   &__address {
@@ -154,6 +170,13 @@
     &__info {
       margin-left: 0;
     }
+  }
+}
+
+.theme--light {
+  // Keep the rewards button's border, which the light theme strips from large buttons
+  .token-pair__learn-more {
+    border-color: var(--button--neutral);
   }
 }
 

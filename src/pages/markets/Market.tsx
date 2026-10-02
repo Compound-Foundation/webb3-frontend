@@ -1,16 +1,15 @@
 import { ReactNode, useContext } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 import IconPair from '@components/IconPair';
 import { ArrowLeft, ExternalLink } from '@components/Icons';
-import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
-import { isV2Market } from '@helpers/markets';
+import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
+import { getMarket, isV2Market } from '@helpers/markets';
 import { formatTokenBalance, getTokenValue, PRICE_PRECISION } from '@helpers/numbers';
-import { getRewardsForSelectedMarket } from '@helpers/rewards';
-import { getBlockExplorerUrlForAddress } from '@helpers/urls';
-import { CTokenWithMarketState, Currency, StateType, Token, TokenWithMarketState } from '@types';
+import { getBlockExplorerUrlForAddress, INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
+import { CTokenWithMarketState, Currency, StateType, TokenWithMarketState } from '@types';
 
 import AdditionalMarketDataPanel from './components/AdditionalMarketDataPanel';
 import AssetsTableRow from './components/AssetsTableRow';
@@ -21,6 +20,7 @@ import MarketOverviewPanel, { MarketOverviewPanelView } from './components/Marke
 import MarketRatesPanel from './components/MarketRatesPanel';
 import MarketStatsPanel from './components/MarketStatsPanel';
 import RateModelPanel from './components/RateModelPanel';
+import WhitelistStatusBanner from './components/WhitelistStatusBanner';
 import { useMarketsState } from './hooks/useMarketsState';
 
 type MarketsProps = {
@@ -32,7 +32,6 @@ const Market = ({ web3 }: MarketsProps) => {
 
   const marketCurrencyToShow = Currency.USD;
 
-  const rewards = useContext(RewardsStateContext);
   const state = useMarketsState(web3, selectedMarket);
   const [marketStateType, marketStateData] = state;
   const [, market] = selectedMarket;
@@ -40,12 +39,17 @@ const Market = ({ web3 }: MarketsProps) => {
     market !== undefined
       ? [market.chainInformation.name, market.chainInformation.chainId, market.baseAsset.symbol]
       : ['Connecting', -1, undefined];
+  // The configured market entry keeps the display name and institutional flags,
+  // which the hydrated market's on-chain base asset data doesn't carry
+  const configMarket = market !== undefined ? getMarket(market.chainInformation.chainId, market.marketAddress) : undefined;
+  const marketDisplayName = configMarket?.institutional ? configMarket.baseAsset.name : currentBaseToken;
   let assetRows: ReactNode = null;
   let marketOverviewPanel: ReactNode = null;
   let marketStatsPanel: ReactNode = null;
   let marketRatesPanel: ReactNode = null;
   let interestRateModelPanel: ReactNode = null;
   let additionalMarketDataPanel: ReactNode = null;
+  let whitelistStatusBanner: ReactNode = null;
   let debtOutstandingFormatted = '';
   let collateralValueFormatted = '';
   let collateralHistoryPanel: ReactNode = null;
@@ -120,7 +124,7 @@ const Market = ({ web3 }: MarketsProps) => {
               interestRateModel: modelState,
               reserveFactor: token.reserveFactor,
               reserves: token.reserves,
-              rewardsAsset: 'COMP',
+              rewardsAssetSymbol: 'COMP',
               totalBorrow: token.totalBorrow,
               totalSupply: token.totalSupply,
               withHeader: true,
@@ -132,6 +136,7 @@ const Market = ({ web3 }: MarketsProps) => {
   } else if (marketStateData?.type === 'ProtocolAndMarketState') {
     const {
       borrowAPR,
+      borrowRewardsAPR,
       borrowRates,
       earnAPR,
       baseAsset,
@@ -141,13 +146,17 @@ const Market = ({ web3 }: MarketsProps) => {
       totalBorrow,
       totalSupply,
       utilization,
+      isInstitutional,
+      supplyRewardsAPR,
+      rewardsAssetSymbol,
     } = marketStateData;
-    let borrowRewardsAPR: bigint | undefined, earnRewardsAPR: bigint | undefined, rewardsAsset: Token | undefined;
-    const rewardsState = getRewardsForSelectedMarket(rewards, selectedMarket);
-    if (rewardsState !== undefined) {
-      borrowRewardsAPR = rewardsState.borrowRewardsAPR;
-      earnRewardsAPR = rewardsState.earnRewardsAPR;
-      rewardsAsset = rewardsState.rewardAsset;
+
+    // While the boost is paying, a banner describes the connected account's
+    // access to it
+    if (isInstitutional && supplyRewardsAPR > 0n) {
+      whitelistStatusBanner = (
+        <WhitelistStatusBanner whitelistStatus={institutionalWhitelistStatus(web3.read.account)} />
+      );
     }
 
     assetRows = (
@@ -170,11 +179,14 @@ const Market = ({ web3 }: MarketsProps) => {
         state={[
           StateType.Hydrated,
           {
+            chainId: market.chainInformation.chainId,
+            marketAddress: market.marketAddress,
             borrowAPR,
-            borrowRewardsAPR,
+            borrowRewardsAPR: borrowRewardsAPR,
             earnAPR,
-            earnRewardsAPR,
-            rewardsAsset,
+            earnRewardsAPR: supplyRewardsAPR,
+            rewardsAssetSymbol,
+            isInstitutional: isInstitutional,
           },
         ]}
       />
@@ -282,9 +294,12 @@ const Market = ({ web3 }: MarketsProps) => {
               </div>
               <div className="token-pair__info">
                 <h2 className="token-pair__names heading heading--emphasized text-color--1">
-                  {currentBaseToken}
+                  {marketDisplayName}
                   <span className="token-pair__names__divider">•</span>
                   <span className="token-pair__names__chain-name">{currentChainName}</span>
+                  {configMarket?.isNew && (
+                    <span className="token-pair__names__new-badge new-badge new-badge--large label">New</span>
+                  )}
                 </h2>
                 {v2Markets ? (
                   <div className="token-pair__address">
@@ -297,6 +312,16 @@ const Market = ({ web3 }: MarketsProps) => {
                   <></>
                 )}
               </div>
+              {configMarket?.institutional && (
+                <a
+                  className="button button--large token-pair__learn-more"
+                  href={INSTITUTIONAL_MARKET_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Learn More
+                </a>
+              )}
             </div>
           )}
           {marketStateData !== undefined && market !== undefined && (
@@ -309,8 +334,9 @@ const Market = ({ web3 }: MarketsProps) => {
         {marketStatsPanel}
         {v2Markets ? marketOverviewPanel : marketRatesPanel}
         {interestRateModelPanel}
+        {whitelistStatusBanner}
         {assetRows}
-        {additionalMarketDataPanel}
+        {!configMarket?.institutional && additionalMarketDataPanel}
       </main>
     </>
   );

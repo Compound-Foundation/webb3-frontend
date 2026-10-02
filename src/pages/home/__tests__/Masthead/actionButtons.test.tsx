@@ -40,6 +40,7 @@ const hydratedMasthead = ({ baseAssetToUse, baseAssetPost, pendingAction, action
             setCompare: () => undefined,
             pendingAction: pendingAction,
             theme: Theme.Dark,
+            isInstitutional: false
           },
         ]}
       />

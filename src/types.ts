@@ -150,6 +150,12 @@ export type ProtocolState = {
   borrowAPR: bigint;
   collateralAssets: TokenWithState[];
   earnAPR: bigint;
+  // The market's total supplied base asset value in dollars, at PRICE_PRECISION
+  totalBaseSupplyUsd: bigint;
+  borrowRewardsAPR: bigint;
+  supplyRewardsAPR: bigint;
+  rewardsAssetSymbol?: string;
+  isInstitutional?: boolean;
 };
 
 export type ProtocolAndAccountState = Omit<ProtocolState, 'baseAsset' | 'collateralAssets'> & {
@@ -158,6 +164,10 @@ export type ProtocolAndAccountState = Omit<ProtocolState, 'baseAsset' | 'collate
   collateralValue: bigint;
   isBulkerAllowed: boolean;
   liquidationCapacity: bigint;
+  borrowRewardsAPR: bigint;
+  supplyRewardsAPR: bigint;
+  rewardsAssetSymbol?: string;
+  isInstitutional?: boolean;
 };
 
 export type ProtocolAndMarketsState = Omit<ProtocolState, 'collateralAssets'> & {
@@ -172,6 +182,10 @@ export type ProtocolAndMarketsState = Omit<ProtocolState, 'collateralAssets'> & 
   totalBorrow: bigint;
   totalSupply: bigint;
   utilization: bigint;
+  borrowRewardsAPR: bigint;
+  supplyRewardsAPR: bigint;
+  rewardsAssetSymbol?: string
+  isInstitutional?: boolean;
   type: 'ProtocolAndMarketState';
 };
 
@@ -289,8 +303,6 @@ export type RewardsTokenState = {
   cometRewards: string;
   baseAsset: BaseAsset;
   rewardAsset: Token & { price: bigint };
-  earnRewardsAPR: bigint;
-  borrowRewardsAPR: bigint;
 };
 
 export type AccountRewardsState = RewardsTokenState & {
@@ -335,7 +347,21 @@ export type MarketData = {
   bulkerAddress: string;
   fauceteerAddress?: string;
   rewardsAddress?: string;
+  // Overrides the base-asset part of the market's URL key (e.g. 'usdc-institutional' -> '?market=usdc-institutional-mainnet').
+  // Required when multiple markets on the same chain share a base asset symbol.
+  slug?: string;
+  // Institutional markets are listed in their own section of the market selector
+  institutional?: boolean;
+  // Recently launched markets get a 'New' badge in the market selector
+  isNew?: boolean;
   type: 'MarketData';
+  rewardsOverwrite?: {
+    rewardsAssetSymbol: string;
+    supplyCompPerDay: bigint;
+    borrowCompPerDay: bigint;
+    borrowRewardsAPR?: bigint;
+    supplyRewardsAPR?: bigint;
+  };
 };
 
 export type MarketDataLoaded = Omit<MarketData, 'baseAsset' | 'type'> & {
@@ -358,6 +384,9 @@ export type MarketSummary = {
   };
   borrowAPR: bigint;
   supplyAPR: bigint;
+  borrowRewardsAPR: bigint;
+  supplyRewardsAPR: bigint;
+  rewardsAssetSymbol?: string;
   /**
    * Total borrow value in USD
    */
@@ -374,6 +403,7 @@ export type MarketSummary = {
   timestamp: number;
   collateralAssetSymbols: string[];
   date: string;
+  isInstitutional?: boolean;
 };
 
 export type AggregatedHistoricalSummary = {

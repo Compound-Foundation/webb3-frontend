@@ -5,6 +5,7 @@ import arbitrumWETHRoots from 'comet/deployments/arbitrum/weth/roots.json';
 import baseMainnetUSDbCRoots from 'comet/deployments/base/usdbc/roots.json';
 import baseMainnetUSDCRoots from 'comet/deployments/base/usdc/roots.json';
 import baseMainnetWETHRoots from 'comet/deployments/base/weth/roots.json';
+import mainnetInstitutionalUSDCRoots from 'comet/deployments/mainnet/institutional_usdc/roots.json';
 import mainnetUSDCRoots from 'comet/deployments/mainnet/usdc/roots.json';
 import mainnetUSDTRoots from 'comet/deployments/mainnet/usdt/roots.json';
 import mainnetWETHRoots from 'comet/deployments/mainnet/weth/roots.json';
@@ -16,8 +17,6 @@ import optimismWETHRoots from 'comet/deployments/optimism/weth/roots.json';
 import polygonUSDCRoots from 'comet/deployments/polygon/usdc/roots.json';
 import polygonUSDTRoots from 'comet/deployments/polygon/usdt/roots.json';
 import scrollUSDCRoots from 'comet/deployments/scroll/usdc/roots.json';
-import sepoliaUSDCRoots from 'comet/deployments/sepolia/usdc/roots.json';
-import sepoliaWETHRoots from 'comet/deployments/sepolia/weth/roots.json';
 
 import { getMarketDescriptors } from '@helpers/markets';
 
@@ -109,18 +108,11 @@ describe('getMarketDescriptors', () => {
       'USD Coin',
     ]);
   });
-  test('returns the correct market descriptors for sepolia USDC', () => {
-    expect(getMarketDescriptors(sepoliaUSDCRoots['comet'].toLowerCase(), 11155111)).toEqual([
+  test('returns the correct market descriptors for mainnet institutional USDC', () => {
+    expect(getMarketDescriptors(mainnetInstitutionalUSDCRoots['comet'].toLowerCase(), 1)).toEqual([
       'USDC',
-      'Sepolia',
-      'USD Coin',
-    ]);
-  });
-  test('returns the correct market descriptors for sepolia ETH', () => {
-    expect(getMarketDescriptors(sepoliaWETHRoots['comet'].toLowerCase(), 11155111)).toEqual([
-      'ETH',
-      'Sepolia',
-      'Ether',
+      'Ethereum',
+      'USDC Institutional',
     ]);
   });
 

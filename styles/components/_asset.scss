@@ -60,6 +60,10 @@
     background-image: url('/images/assets/asset_COMP.svg');
   }
 
+  &--MERKL {
+    background-image: url('/images/assets/asset_MERKL.svg');
+  }
+
   &--DAI {
     background-image: url('/images/assets/asset_DAI.svg');
   }
@@ -71,6 +75,10 @@
 
   &--ETHEREUM {
     background-image: url('/images/assets/asset_ETHEREUM.svg');
+  }
+
+  &--INSTITUTIONAL {
+    background-image: url('/images/assets/asset_INSTITUTIONAL.svg');
   }
 
   &--LBTC {
@@ -181,6 +189,10 @@
 
   &--USDTugrik0 {
     background-image: url('/images/assets/asset_USDTugrik0.png');
+  }
+
+  &--XAUt {
+    background-image: url('/images/assets/asset_XAUt.svg');
   }
 
   &--WBTC,
@@ -326,6 +338,10 @@
 .theme--light {
   .asset--ETHEREUM {
     background-image: url('/images/assets/asset_ETHEREUM_light.svg');
+  }
+
+  .asset--INSTITUTIONAL {
+    background-image: url('/images/assets/asset_INSTITUTIONAL_light.svg');
   }
 
   .asset--POLYGON {

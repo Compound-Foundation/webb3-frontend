@@ -1,7 +1,7 @@
 import { ExtMessage, InMessage } from '@compound-finance/comet-extension';
 import { Contract } from '@ethersproject/contracts';
 import { ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router';
 
 import IconPair from '@components/IconPair';
 import { ArrowLeft, CircleCheckmark, ExternalLink, Github, PromptWallet } from '@components/Icons';

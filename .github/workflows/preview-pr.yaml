@@ -1,0 +1,210 @@
+name: Preview PR
+run-name: 'IPFS preview for PR #${{ inputs.pr_number }}'
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open PR number (including fork PRs)
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: ipfs-preview-pr-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve PR commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      repository: ${{ steps.pr.outputs.repository }}
+      sha: ${{ steps.pr.outputs.sha }}
+    steps:
+      - name: Validate request and pin the PR head
+        id: pr
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        with:
+          script: |
+            if (context.ref !== 'refs/heads/main') {
+              throw new Error('Run this workflow from main so publishing uses trusted code.');
+            }
+            const input = process.env.PR_NUMBER;
+            if (!/^[1-9][0-9]*$/.test(input) || !Number.isSafeInteger(Number(input))) {
+              throw new Error('PR number must be a positive integer.');
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: Number(input),
+            });
+            if (pr.state !== 'open' || pr.base.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              throw new Error('Choose an open PR targeting this repository.');
+            }
+            if (!pr.head.repo || !/^[a-f0-9]{40}$/.test(pr.head.sha)) {
+              throw new Error('The PR head repository or commit is unavailable.');
+            }
+            core.setOutput('pr_number', String(pr.number));
+            core.setOutput('repository', pr.head.repo.full_name);
+            core.setOutput('sha', pr.head.sha);
+            core.info(`Building PR #${pr.number} at ${pr.head.sha}`);
+
+  build:
+    name: Build PR without publishing credentials
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+
+      - name: Install Yarn
+        run: npm install --global yarn@1.22.18
+
+      - name: Checkout the exact PR commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ needs.resolve.outputs.repository }}
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      # These are public browser configuration values already embedded in the
+      # deployed Vite bundle. Never add private service credentials to this job.
+      - name: Build app
+        run: yarn run build
+        env:
+          VITE_V3_API_HOST: ${{ secrets.VITE_V3_API_HOST }}
+          VITE_V3_GAS_SUFFIX: ${{ secrets.VITE_V3_GAS_SUFFIX }}
+          VITE_V3_RPC_PROVIDER_HOST: ${{ secrets.VITE_V3_RPC_PROVIDER_HOST }}
+          VITE_V3_WALLET_CONNECT_PROJECT_ID: ${{ secrets.VITE_V3_WALLET_CONNECT_PROJECT_ID }}
+          VITE_SCREENING_ENDPOINT: ${{ secrets.VITE_SCREENING_ENDPOINT }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
+
+      - name: Save static preview files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-preview-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish static files to IPFS
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # A fresh runner uses the workflow's trusted main commit, never the PR's
+      # scripts, dependency manifest, or lockfile. Do not share build caches.
+      - name: Checkout trusted publishing code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+
+      - name: Install trusted publishing dependencies
+        run: |
+          npm install --global yarn@1.22.18
+          yarn install --frozen-lockfile --ignore-scripts
+
+      # Keep untrusted files outside the trusted checkout and never execute them.
+      - name: Download this run's static files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pr-preview-dist
+          path: ${{ runner.temp }}/ipfs-preview/dist
+
+      - name: Validate static files
+        working-directory: ${{ runner.temp }}/ipfs-preview
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('dist')
+          if root.is_symlink() or not root.is_dir():
+              raise SystemExit('Expected a dist directory')
+          for path in root.rglob('*'):
+              if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                  raise SystemExit('Preview artifacts must contain only regular files and directories')
+          index = root / 'index.html'
+          if not index.is_file() or index.stat().st_size == 0:
+              raise SystemExit('Preview is missing a nonempty index.html')
+          PY
+
+      - name: Upload static files with the trusted script
+        id: ipfs
+        working-directory: ${{ runner.temp }}/ipfs-preview
+        run: node "$GITHUB_WORKSPACE/scripts/ipfs.js"
+        env:
+          PINATA_JWT: ${{ secrets.PINATA_JWT }}
+          PINATA_GATEWAY_URL: ${{ secrets.PINATA_GATEWAY_URL }}
+
+      - name: Update PR preview comment
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
+          PR_SHA: ${{ needs.resolve.outputs.sha }}
+          PINATA_URL: ${{ steps.ipfs.outputs.PINATA_URL }}
+          IPFS_URL: ${{ steps.ipfs.outputs.IPFS_URL }}
+          IPFS_CID: ${{ steps.ipfs.outputs.IPFS_CID }}
+        with:
+          script: |
+            const issue_number = Number(process.env.PR_NUMBER);
+            const sha = process.env.PR_SHA;
+            const marker = '<!-- ipfs-preview-comment -->';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              marker,
+              '### IPFS preview',
+              '',
+              `Built from \`${sha}\` for PR #${issue_number}.`,
+              '',
+              `- Pinata: ${process.env.PINATA_URL}`,
+              `- IPFS: ${process.env.IPFS_URL}`,
+              `- CID: \`${process.env.IPFS_CID}\``,
+              '',
+              `[Build run](${runUrl})`,
+            ].join('\n');
+            await core.summary.addRaw(body).write();
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find(comment =>
+              comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker));
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo, pull_number: issue_number,
+            });
+            if (pr.state !== 'open' || pr.head.sha !== sha) {
+              core.notice('PR changed or closed during the build; preview links are in the run summary only.');
+              return;
+            }
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number, body,
+              });
+            }

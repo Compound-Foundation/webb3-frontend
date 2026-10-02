@@ -3,9 +3,10 @@ import { Dispatch, ReactNode, useRef, useState } from 'react';
 import DetailSheet from '@components/DetailSheet';
 import { Compare, HoverUnder } from '@components/Icons';
 import Tooltip from '@components/Tooltip';
-import NetRatesTooltip, { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
+import NetRatesTooltip, { NetRatesTooltipProps, NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { sanitizedAmountForAction } from '@helpers/actions';
+import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import {
   displayValue,
   formatRateFactor,
@@ -26,7 +27,7 @@ import {
   StateType,
   Token,
   TokenWithAccountState,
-  Transaction,
+  Transaction
 } from '@types';
 
 import { iconForActionType } from './ActionQueueItem';
@@ -43,22 +44,24 @@ type MastheadHydrated = [
     baseAsset: BaseAssetWithAccountState;
     baseAssetPost: BaseAssetWithAccountState;
     borrowAPR: bigint;
-    borrowRewardsAPR: bigint | undefined;
+    borrowRewardsAPR?: bigint;
     collateralAssets: TokenWithAccountState[];
     collateralValue: bigint;
     collateralValuePost: bigint;
     compare: boolean;
     earnAPR: bigint;
-    earnRewardsAPR: bigint | undefined;
+    earnRewardsAPR?: bigint;
+    institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
     liquidationCapacity: bigint;
     liquidationCapacityPost: bigint;
     pendingAction?: PendingAction;
-    rewardsAsset?: Token;
+    rewardsAssetSymbol?: string;
     theme: Theme;
     transaction?: Transaction;
     onSupplyAction: (pendingAction?: PendingAction) => void;
     onWithdrawAction: (pendingAction?: PendingAction) => void;
     setCompare: Dispatch<boolean>;
+    isInstitutional: boolean;
   }
 ];
 export type MastheadState = MastheadLoading | MastheadNoWallet | MastheadHydrated;
@@ -218,12 +221,14 @@ function getContent(state: MastheadState): Content {
     compare,
     earnAPR,
     earnRewardsAPR,
+    institutionalWhitelistStatus,
     liquidationCapacity,
     liquidationCapacityPost,
     pendingAction,
-    rewardsAsset,
+    rewardsAssetSymbol,
     theme,
     transaction,
+    isInstitutional,
     onSupplyAction,
     onWithdrawAction,
     setCompare,
@@ -266,8 +271,10 @@ function getContent(state: MastheadState): Content {
     borrowRewardsAPR,
     earnAPR,
     earnRewardsAPR,
-    rewardsAsset,
-  };
+    rewardsAssetSymbol,
+    institutionalWhitelistStatus,
+    isInstitutional,
+  } satisfies Omit<NetRatesTooltipProps, 'view'>;
 
   let ratesTooltipContent = <NetRatesTooltip {...netRatesTooltipProps} view={NetRatesTooltipView.Borrow} />;
 
@@ -307,13 +314,14 @@ function getContent(state: MastheadState): Content {
     let buttons: ReactNode;
 
     if (!hasActions) {
+      const anchorRect = tooltipLeftAlign.current?.getBoundingClientRect();
       overviewDetails = (
         <Tooltip
           content={ratesTooltipContent}
           width={400}
           hideArrow={true}
-          x={tooltipLeftAlign.current?.getBoundingClientRect().left}
-          y={tooltipLeftAlign.current?.getBoundingClientRect().bottom}
+          x={anchorRect?.left}
+          y={anchorRect?.bottom}
         >
           <div className="masthead__overview-details" onClick={() => setRatesDetailActive(true)}>
             <span className="meta text-color--3"> &#64; </span>
@@ -576,14 +584,19 @@ function getContent(state: MastheadState): Content {
     ratesTooltipContent = <NetRatesTooltip {...netRatesTooltipProps} view={NetRatesTooltipView.Supply} />;
 
     if (!hasActions) {
+      const anchorRect = tooltipLeftAlign.current?.getBoundingClientRect();
       overviewDetails =
         baseAssetToUse.balance > 0n ? (
           <Tooltip
             content={ratesTooltipContent}
             width={400}
             hideArrow={true}
-            x={tooltipLeftAlign.current?.getBoundingClientRect().left}
-            y={tooltipLeftAlign.current?.getBoundingClientRect().bottom}
+            interactive={true}
+            touchToggle={false}
+            x={anchorRect?.left}
+            // Overlap the trigger slightly so the pointer can cross from the
+            // rate text onto the tooltip without a gap breaking the hover
+            y={anchorRect !== undefined ? anchorRect.bottom - 18 : undefined}
           >
             <div className="masthead__overview-details" onClick={() => setRatesDetailActive(true)}>
               <span className="meta text-color--3"> &#64; </span>

@@ -1,0 +1,12 @@
+// Small info glyph that opens a tooltip on hover (market rate annotations)
+.info-icon {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+
+  // The info glyph is a stroked outline icon
+  .svg__path {
+    fill: none;
+    stroke: var(--text--1);
+  }
+}

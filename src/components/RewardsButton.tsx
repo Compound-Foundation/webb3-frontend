@@ -1,5 +1,5 @@
-import { useState, useRef, useContext, useEffect, MouseEventHandler } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useState, useRef, useContext, useEffect, MouseEventHandler, SetStateAction, Dispatch } from 'react';
+import { useLocation } from 'react-router';
 
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
@@ -10,6 +10,8 @@ import { filterMap } from '@helpers/functions';
 import { formatTokenBalance } from '@helpers/numbers';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 import { AccountRewardsState, ActionType, ChainInformation, StateType } from '@types';
+
+import { useMerklRedirectModal } from '../pages/rewards/components/MerklRedirectModal';
 
 import DetailSheet from './DetailSheet';
 import IconPair from './IconPair';
@@ -35,6 +37,7 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
   const [expandedState, setExpandedState] = useState<ExpandedState>({});
   const ref = useRef(null);
   useOnClickOutside(ref, () => setDropdownActive(false));
+  const allowedChainIds = new Set([5000, 59144]);
 
   useEffect(() => {
     if (rewardsState === StateType.Hydrated && state[1] !== undefined) {
@@ -52,21 +55,23 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
 
   if (rewardsState === StateType.Hydrated && state[1] !== undefined) {
     const allRewards = state[1];
-    const { totalRewards, totalUnclaimed } = allRewards.reduce(
-      (accum, [, { rewardsStates }]) => {
-        const unclaimed = rewardsStates.reduce((accum, { amountOwed }) => accum + amountOwed, 0n);
-        const walletBalance = (rewardsStates[0] || {}).walletBalance || 0n;
+    const { totalRewards, totalUnclaimed } = allRewards
+      .filter(([chainId]) => allowedChainIds.has(+chainId))
+      .reduce(
+        (accum, [, { rewardsStates }]) => {
+          const unclaimed = rewardsStates.reduce((accum, { amountOwed }) => accum + amountOwed, 0n);
+          const walletBalance = (rewardsStates[0] || {}).walletBalance || 0n;
 
-        return {
-          ...accum,
-          totalRewards: accum.totalRewards + unclaimed + walletBalance,
-          totalUnclaimed: accum.totalUnclaimed + unclaimed,
-        };
-      },
-      {
-        totalRewards: 0n,
-        totalUnclaimed: 0n,
-      }
+          return {
+            ...accum,
+            totalRewards: accum.totalRewards + unclaimed + walletBalance,
+            totalUnclaimed: accum.totalUnclaimed + unclaimed,
+          };
+        },
+        {
+          totalRewards: 0n,
+          totalUnclaimed: 0n,
+        }
     );
     const rewardAsset = allRewards[0][1].rewardsStates[0].rewardAsset;
     const [wholeNumberTotalRewards, fractionalTotalRewards] = `${formatTokenBalance(
@@ -94,6 +99,7 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
             chainInformation={chainInformation}
             expanded={expandedState[chainId] ?? false}
             rewardsStates={rewardsStates}
+            setDropdownActive={setDropdownActive}
             onClaimClicked={(claimBalances: AccountRewardsState[]) => {
               if (
                 selectedMarket[1] !== undefined &&
@@ -182,6 +188,7 @@ type RewardsNetworkRowProps = {
   rewardsStates: AccountRewardsState[];
   onClaimClicked: (balanceClaims: AccountRewardsState[]) => void;
   onExpand: () => void;
+  setDropdownActive: Dispatch<SetStateAction<boolean>>;
 };
 
 const RewardsNetworkRow = ({
@@ -190,9 +197,13 @@ const RewardsNetworkRow = ({
   rewardsStates,
   onExpand,
   onClaimClicked,
+  setDropdownActive
 }: RewardsNetworkRowProps) => {
-  if (rewardsStates[0] == null) return null;
   const location = useLocation();
+  const { setIsOpen } = useMerklRedirectModal()
+
+  if (rewardsStates[0] == null) return null;
+
   const { walletBalance, rewardAsset } = rewardsStates[0];
   const balance = formatTokenBalance(rewardAsset.decimals, walletBalance);
   const [wholeNumberWalletBalance, fractionalWalletBalance] = `${balance}`.split('.');
@@ -204,31 +215,40 @@ const RewardsNetworkRow = ({
   const formattedUnclaimed = formatTokenBalance(rewardAsset.decimals, totalUnclaimed);
   const [wholeNumberUnclaimed, fractionalUnclaimed] = `${formattedUnclaimed}`.split('.');
 
-  const sumBalances = walletBalance + totalUnclaimed;
-  const formattedSumBalances = formatTokenBalance(rewardAsset.decimals, sumBalances);
-
   const buttonText =
     unclaimedBalances.length > 1
       ? `Claim ${unclaimedBalances.length} Balances`
       : `Claim ${formattedUnclaimed} ${rewardAsset.symbol}`;
 
-  const onClick: MouseEventHandler<HTMLButtonElement> = (e) => {
+  const onClickClaim: MouseEventHandler<HTMLButtonElement> = (e) => {
     e.stopPropagation();
     onClaimClicked(unclaimedBalances);
   };
 
+  const onClickRedirectModalOpen: MouseEventHandler<HTMLButtonElement> = () => {
+    setIsOpen(true)
+    setDropdownActive(false)
+  };
+
   const claimButton =
     location.pathname === '/' ? (
-      <button className={`button button--small`} onClick={onClick}>
+      <button className={`button button--small`} onClick={onClickClaim}>
         {buttonText}
       </button>
     ) : (
       <SimpleLink style={{ width: '100%' }} to="/">
-        <button className={`button button--small`} onClick={onClick}>
+        <button className={`button button--small`} onClick={onClickClaim}>
           {buttonText}
         </button>
       </SimpleLink>
     );
+
+  // Show rewards only for Mantle and Linea networks.
+  const filteredUnclaimedBalances = unclaimedBalances.filter(
+    balance => balance.chainId === 59144 || balance.chainId === 5000
+  );
+
+  const isExternalClaimNetwork = chainInformation.chainId !== 59144 && chainInformation.chainId !== 5000;
 
   return (
     <>
@@ -246,9 +266,6 @@ const RewardsNetworkRow = ({
             <label className="label L1 text-color--1">{chainInformation.name}</label>
           </div>
           <div className="rewards__network-row__content__icons-with-info">
-            <label className="rewards__network-row__content__icons-with-info__total label label--secondary L1 text-color--2">
-              {formattedSumBalances}
-            </label>
             <CaretDown className="chevron" />
           </div>
         </div>
@@ -260,7 +277,7 @@ const RewardsNetworkRow = ({
               <span className="text-color--2">{`.${fractionalWalletBalance}`}</span>
             </label>
           </div>
-          {unclaimedBalances.length > 0 && (
+          {filteredUnclaimedBalances.length > 0 && (
             <>
               <div className="rewards__network-row__content">
                 <label className="label L2 text-color--2">Unclaimed Balances</label>
@@ -269,7 +286,7 @@ const RewardsNetworkRow = ({
                   <span className="text-color--2">{`.${fractionalUnclaimed}`}</span>
                 </label>
               </div>
-              {unclaimedBalances.map((rewardState) => {
+              {filteredUnclaimedBalances.map((rewardState) => {
                 const amountOwed = formatTokenBalance(rewardState.rewardAsset.decimals, rewardState.amountOwed);
                 const [wholeNumberUnclaimed, fractionalUnclaimed] = `${amountOwed}`.split('.');
                 return (
@@ -293,6 +310,14 @@ const RewardsNetworkRow = ({
               })}
               {claimButton}
             </>
+          )}
+          {isExternalClaimNetwork && (
+            <button
+              className={`button button--small rewards__network-row__content__claim-button`}
+              onClick={onClickRedirectModalOpen}
+            >
+              Claim COMP
+            </button>
           )}
         </div>
       </div>

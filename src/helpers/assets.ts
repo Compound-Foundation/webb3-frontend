@@ -89,6 +89,7 @@ export const hasAssetIcon = (symbol: string): boolean => {
     'ETH',
     'WETH',
     'ETHEREUM',
+    'INSTITUTIONAL',
     'LINK',
     'LIQUIDATE',
     'MKR',
@@ -147,6 +148,7 @@ export const hasAssetIcon = (symbol: string): boolean => {
     'deUSD',
     'pufETH',
     'wOETH',
+    'XAUt',
   ];
   return ICONS.includes(symbol);
 };

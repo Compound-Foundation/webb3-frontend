@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 
 import { CircleMinus, CirclePlus, CircleRightArrow } from '@components/Icons';
 import { Web3 } from '@contexts/Web3Context';

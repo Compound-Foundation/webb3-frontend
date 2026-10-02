@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
-import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router';
 
 import { ScreeningStatus } from '@hooks/useAddressScreening';
 
