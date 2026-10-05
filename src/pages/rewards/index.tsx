@@ -1,9 +1,8 @@
 import { DollarCircle } from '@components/Icons/DollarCircle';
 import { Grid } from '@components/Icons/Grid';
 import { Sparkle } from '@components/Icons/Sparkle';
-import { SimpleLink } from '@components/SimpleLink';
-import { Web3 } from '@contexts/Web3Context';
 
+import { useMerklRedirectModal } from '../rewards/components/MerklRedirectModal';
 import { RewardsBanner } from '../rewards/components/RewardsBanner';
 import { RewardsCard } from '../rewards/components/RewardsCard';
 
@@ -119,15 +118,11 @@ const rewardsFaq = [
   }
 ];
 
-interface RewardsProps {
-  web3: Web3;
-}
-
-const Rewards = ({ web3 }: RewardsProps) => {
-  const { account } = web3.write;
+const Rewards = () => {
+  const { setIsOpen } = useMerklRedirectModal()
 
   return (
-    <main className={'rewards'}>
+    <main className={'rewards-page'}>
       <RewardsBanner />
       <section className={'rewards-cards'}>
         {rewardsCards.map((card) => {
@@ -143,14 +138,12 @@ const Rewards = ({ web3 }: RewardsProps) => {
         })}
       </section>
       <div className={'rewards-links'}>
-        {!!account && (
-          <SimpleLink className={'button button-green'} to={`https://app.merkl.xyz/users/${account}`}>
-            View your Rewards
-          </SimpleLink>
-        )}
-        <SimpleLink className={'button'} to={`https://app.merkl.xyz/?search=Compound+Legacy+Rewards&status=PAST`}>
-          Live Campaigns
-        </SimpleLink>
+        <button
+          className={'button button-green'}
+          onClick={() => setIsOpen(true)}
+        >
+          View your Rewards
+        </button>
       </div>
       <RewardsFaq
         title={'FAQ'}

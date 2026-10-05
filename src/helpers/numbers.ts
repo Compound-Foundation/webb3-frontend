@@ -1,3 +1,4 @@
+import { DAYS_PER_YEAR } from '@helpers/constants';
 import { BaseAsset, BaseAssetWithAccountState, Currency, MeterRiskLevel, TokenWithAccountState } from '@types';
 
 import { adjustValueForAeroAsset } from './baseAssetPrice';
@@ -341,21 +342,13 @@ export const getCapacity = (
 };
 
 export const getRewardsAPR = (
+  compPerDay: bigint,
   rewardsAssetPrice: bigint,
-  baseAssetPrice: bigint,
-  baseAssetDecimals: number,
   totalBase: bigint,
-  speed: bigint,
-  trackingIndexScale: bigint
-): bigint => {
-  const totalBaseUSD = normalizePrice((baseAssetPrice * totalBase) / BigInt(10 ** baseAssetDecimals));
-  const rewardsUSDPerDay = normalizePrice((rewardsAssetPrice * speed * 86400n) / trackingIndexScale);
-  const rewardsAPR = (rewardsUSDPerDay / totalBaseUSD) * 365;
-  return BigInt(rewardsAPR * Number(BASE_FACTOR));
-};
+) => {
+  if (totalBase <= 0n) return 0n;
 
-export const getRewardsPerYear = (speed: bigint, trackingIndexScale: bigint, rewardDecimals: number): bigint => {
-  return (speed * BigInt(10 ** rewardDecimals) * 86400n * 365n) / trackingIndexScale;
+  return (rewardsAssetPrice * compPerDay * DAYS_PER_YEAR) / totalBase;
 };
 
 export const getCollateralValue = (collateralAssets: TokenWithAccountState[]): bigint => {

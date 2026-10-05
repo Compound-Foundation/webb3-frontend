@@ -31,21 +31,18 @@
     display: flex;
     justify-content: space-between;
 
+    &__container {
+      display: flex;
+      gap: 0.25rem;
+    }
+
+    &__icon {
+      pointer-events: none;
+    }
+
     &__value {
       color: var(--text--1);
       font-weight: 500;
-    }
-
-    &__bolt {
-      height: 0.75rem;
-      width: auto;
-      margin-right: 0.125rem;
-      vertical-align: -0.06rem;
-
-      .svg__path {
-        fill: none;
-        stroke: var(--text--1);
-      }
     }
 
     .meta + .meta {

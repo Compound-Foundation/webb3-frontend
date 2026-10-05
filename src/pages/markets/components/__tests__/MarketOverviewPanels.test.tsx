@@ -19,6 +19,8 @@ const makeSummary = (chainId: number, address: string): MarketSummary => ({
   timestamp: 0,
   collateralAssetSymbols: [],
   date: '2026-06-22',
+  borrowRewardsAPR: 0n,
+  supplyRewardsAPR: 0n
 });
 
 const renderPanels = (summaries: LatestMarketSummaries) =>

@@ -199,7 +199,7 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
                 Borrow APR
               </label>
               <label className="interest-rate-model__keys__item interest-rate-model__keys__item--supply">
-                Earn APR
+                Supply APR
               </label>
             </div>
 
