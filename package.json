@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@coinbase/wallet-sdk": "4.3.4",
-    "@compound-finance/comet-extension": "^0.0.16",
+    "@compound-finance/comet-extension": "https://github.com/Compound-Foundation/comet-extension.git#c2faf995c7cdcd48f83373ff4d20ff2b1378400c",
     "@esbuild-plugins/node-globals-polyfill": "^0.2.3",
     "@ethersproject/abi": "^5.8.0",
     "@ethersproject/bignumber": "^5.8.0",
@@ -31,7 +31,7 @@
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
     "comet": "https://github.com/Compound-Foundation/comet.git#6647ec7ed79a7019b84f8152c4fb27c201eac851",
-    "compound-styles": "https://github.com/compound-finance/compound-styles.git#d36cfe2a33fbc0b434da130b920a372b6dcad6d5",
+    "compound-styles": "https://github.com/Compound-Foundation/compound-styles.git#d36cfe2a33fbc0b434da130b920a372b6dcad6d5",
     "date-fns": "^4.1.0",
     "eslint-plugin-import": "^2.32.0",
     "ethers-multicall": "0.2.3",
