@@ -17,6 +17,7 @@ type MarketRatesPanelHydrated = [
     earnRewardsAPR?: bigint;
     rewardsAssetSymbol?: string;
     isInstitutional?: boolean;
+    isRewardsLoading?: boolean;
   }
 ];
 
@@ -50,7 +51,7 @@ function getMarketRatesPanelContent(state: MarketRatesPanelState): PanelContent 
 }
 
 const MarketRatesPanel = ({ state }: { state: MarketRatesPanelState }) => {
-  if (state[0] == StateType.Loading) {
+  if (state[0] == StateType.Loading || state[1].isRewardsLoading) {
     return <LoadingView />;
   } else {
     const panelContent = getMarketRatesPanelContent(state);
@@ -78,7 +79,7 @@ const LoadingView = () => {
           </div>
           <div className="market-rates__section grid-container grid-container--6">
             <div className="market-rates__section__labels-holder grid-column--2">
-              <label className="label text-color--2">Net Earn APR</label>
+              <label className="label text-color--2">Net Supply APR</label>
               <h4>
                 <span className="placeholder-content" style={{ width: '4rem' }}></span>
               </h4>
@@ -112,6 +113,7 @@ const MarketRatesPanelView = ({
       borrowAPR={borrowAPR}
       borrowRewardsAPR={borrowRewardsAPR}
       rewardsAssetSymbol={rewardsAssetSymbol}
+      boostLabel={'Rewards'}
     />
   );
 
@@ -126,6 +128,7 @@ const MarketRatesPanelView = ({
         earnAPR={earnAPR}
         earnRewardsAPR={earnRewardsAPR}
         rewardsAssetSymbol={rewardsAssetSymbol}
+        boostLabel={'Rewards'}
       />
     );
 
@@ -141,7 +144,7 @@ const MarketRatesPanelView = ({
         </div>
         <div className="market-rates__section grid-container grid-container--6">
           <div className="market-rates__section__labels-holder grid-column--2">
-            <label className="label text-color--2">Net Earn APR</label>
+            <label className="label text-color--2">Net Supply APR</label>
             <h4 className="text-color--1 heading heading--emphasized L4">{formatRateFactor(netSupplyAPR)}</h4>
           </div>
           <div className="grid-column--4">{netEarnRateGraph}</div>

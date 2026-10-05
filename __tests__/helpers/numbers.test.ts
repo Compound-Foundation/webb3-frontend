@@ -10,9 +10,35 @@ import {
   formatValueInDollars,
   shouldShowValueInBaseAsset,
   formatValueInCurrency,
-  formatUnitsWithTruncation,
+  formatUnitsWithTruncation, PRICE_PRECISION, getRewardsAPR, FACTOR_PRECISION
 } from '@helpers/numbers';
 import { Currency } from '@types';
+
+describe('getRewardsAPR', () => {
+  it('computes APR at FACTOR_PRECISION from compPerDay (wei/day) and price/totalBase at PRICE_PRECISION', () => {
+    const compPerDay = 100n * 10n ** 18n;
+    const rewardsAssetPrice = 60n * 10n ** BigInt(PRICE_PRECISION);
+    const totalBase = 10_000_000n * 10n ** BigInt(PRICE_PRECISION);
+
+    const result = getRewardsAPR(compPerDay, rewardsAssetPrice, totalBase);
+
+    const expectedApr = (100 * 60 * 365) / 10_000_000;
+    const expected = BigInt(Math.round(expectedApr * 10 ** FACTOR_PRECISION));
+
+    expect(result).toBe(expected);
+  });
+
+  it('returns 0n when totalBase is zero or negative (guards against division by zero)', () => {
+    expect(getRewardsAPR(100n, 100n, 0n)).toBe(0n);
+    expect(getRewardsAPR(100n, 100n, -1n)).toBe(0n);
+  });
+
+  it('is not symmetric in rewardsAssetPrice vs totalBase — catches accidental argument swap', () => {
+    const a = getRewardsAPR(100n, 200n, 1_000_000n);
+    const b = getRewardsAPR(100n, 1_000_000n, 200n); // swapped
+    expect(a).not.toBe(b);
+  });
+});
 
 describe('formatTokenBalance', () => {
   it('should return the correct value for a token with decimals of 6', () => {

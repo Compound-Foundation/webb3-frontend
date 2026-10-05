@@ -5,11 +5,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
-import { getBaseAssetPriceFeed, getBaseAssetDollarPrice, adjustCollateralPrice } from '@helpers/baseAssetPrice';
+import { adjustCollateralPrice, getBaseAssetDollarPrice, getBaseAssetPriceFeed } from '@helpers/baseAssetPrice';
 import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
-import { institutionalSupplyRewardRate } from '@helpers/institutionalRates';
 import { shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
-import { REFRESH_INTERVAL, getCapacity, getCollateralValue, MAX_UINT256, getRewardsAPR } from '@helpers/numbers';
+import { getCapacity, getCollateralValue, MAX_UINT256, REFRESH_INTERVAL } from '@helpers/numbers';
+import { getMarketRewardsAPRs } from '@helpers/rewards';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
 import { CometStateResponse, CometWithAccountStateQuery, CometWithAccountStateResponse } from '@helpers/sleuth/types';
@@ -26,8 +26,9 @@ import {
   RewardsState,
   StateType,
   TokenWithAccountState,
-  Transaction,
+  Transaction
 } from '@types';
+
 
 import { getSleuthOptions, queryCometData, sanitizeCollateralAssetName } from './useSelectedMarket';
 
@@ -55,8 +56,7 @@ export function useCometState(
       if (
         !!marketStateData &&
         web3.read.provider !== undefined &&
-        web3.read.chainId === marketStateData?.chainInformation.chainId &&
-        rewards[0] !== StateType.Loading
+        web3.read.chainId === marketStateData?.chainInformation.chainId
       ) {
         let newState: CometState;
         if (account) {
@@ -261,48 +261,8 @@ const formatCometStateHydrated = (
     isBulkerAllowed: cometResponse.bulkerAllowance.gt(0),
     borrowAPR: cometResponse.borrowAPR.toBigInt(),
     earnAPR: cometResponse.earnAPR.toBigInt(),
-    ...((() => {
-      if (market?.rewardsOverwrite) {
-        const rewardState = rewards[1]
-          ?.find(([id]) => +id === +market.chainInformation.chainId)?.[1]
-          ?.rewardsStates.find((state) => state.comet === market.marketAddress);
-
-        const rewardsAssetPrice = rewardState?.rewardAsset.price ?? 0n;
-
-        return {
-          borrowRewardsAPR:
-            market.rewardsOverwrite.borrowRewardsAPR ??
-            (() =>
-              getRewardsAPR(
-                market.rewardsOverwrite.borrowCompPerDay,
-                rewardsAssetPrice,
-                totalBaseBorrowInDollars,
-              ))(),
-          supplyRewardsAPR:
-            market.rewardsOverwrite.supplyRewardsAPR ??
-            (() =>
-              getRewardsAPR(
-                market.rewardsOverwrite.supplyCompPerDay,
-                rewardsAssetPrice,
-                totalBaseSupplyInDollars
-              ))(),
-          rewardsAssetSymbol: market.rewardsOverwrite.rewardsAssetSymbol
-        };
-      }
-
-      if (market?.institutional) {
-        return {
-          borrowRewardsAPR: 0n,
-          supplyRewardsAPR: institutionalSupplyRewardRate(totalBaseSupplyInDollars),
-          isInstitutional: true
-        };
-      }
-
-      return {
-        borrowRewardsAPR: 0n,
-        supplyRewardsAPR: 0n,
-      };
-    })())
+    ...getMarketRewardsAPRs(market, rewards, totalBaseSupplyInDollars, totalBaseBorrowInDollars),
+    isRewardsLoading: rewards[0] === StateType.Loading
   };
 
   return [StateType.Hydrated, state];
@@ -409,48 +369,8 @@ const formatCometStateNoWallet = (
     },
     borrowAPR: cometResponse.borrowAPR.toBigInt(),
     earnAPR: cometResponse.earnAPR.toBigInt(),
-    ...((() => {
-      if (market?.rewardsOverwrite) {
-        const rewardState = rewards[1]
-          ?.find(([id]) => +id === +market.chainInformation.chainId)?.[1]
-          ?.rewardsStates.find((state) => state.comet === market.marketAddress);
-
-        const rewardsAssetPrice = rewardState?.rewardAsset.price ?? 0n;
-
-        return {
-          borrowRewardsAPR:
-            market.rewardsOverwrite.borrowRewardsAPR ??
-            (() =>
-              getRewardsAPR(
-                market.rewardsOverwrite.borrowCompPerDay,
-                rewardsAssetPrice,
-                totalBaseBorrowInDollars,
-              ))(),
-          supplyRewardsAPR:
-            market.rewardsOverwrite.supplyRewardsAPR ??
-            (() =>
-              getRewardsAPR(
-                market.rewardsOverwrite.supplyCompPerDay,
-                rewardsAssetPrice,
-                totalBaseSupplyInDollars
-              ))(),
-          rewardsAssetSymbol: market.rewardsOverwrite.rewardsAssetSymbol
-        };
-      }
-
-      if (market?.institutional) {
-        return {
-          borrowRewardsAPR: 0n,
-          supplyRewardsAPR: institutionalSupplyRewardRate(totalBaseSupplyInDollars),
-          isInstitutional: true
-        };
-      }
-
-      return {
-        borrowRewardsAPR: 0n,
-        supplyRewardsAPR: 0n,
-      };
-    })())
+    ...getMarketRewardsAPRs(market, rewards, totalBaseSupplyInDollars, totalBaseBorrowInDollars),
+    isRewardsLoading: rewards[0] === StateType.Loading
   };
 
   return [StateType.NoWallet, state];

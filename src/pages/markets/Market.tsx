@@ -149,6 +149,7 @@ const Market = ({ web3 }: MarketsProps) => {
       isInstitutional,
       supplyRewardsAPR,
       rewardsAssetSymbol,
+      isRewardsLoading,
     } = marketStateData;
 
     // While the boost is paying, a banner describes the connected account's
@@ -187,6 +188,7 @@ const Market = ({ web3 }: MarketsProps) => {
             earnRewardsAPR: supplyRewardsAPR,
             rewardsAssetSymbol,
             isInstitutional: isInstitutional,
+            isRewardsLoading,
           },
         ]}
       />

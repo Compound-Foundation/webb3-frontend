@@ -16,3 +16,5 @@ export const PREFERRED_CURRENCY_KEY = 'webb3-preferred-currency';
 export const BREAKPOINT_SM_PX = 1120;
 
 export const DAYS_PER_YEAR = 365n;
+
+export const ALLOWED_REWARDS_CHAIN_IDS = new Set([5000, 59144]);

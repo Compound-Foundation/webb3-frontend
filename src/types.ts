@@ -156,6 +156,7 @@ export type ProtocolState = {
   supplyRewardsAPR: bigint;
   rewardsAssetSymbol?: string;
   isInstitutional?: boolean;
+  isRewardsLoading?: boolean;
 };
 
 export type ProtocolAndAccountState = Omit<ProtocolState, 'baseAsset' | 'collateralAssets'> & {
@@ -168,6 +169,7 @@ export type ProtocolAndAccountState = Omit<ProtocolState, 'baseAsset' | 'collate
   supplyRewardsAPR: bigint;
   rewardsAssetSymbol?: string;
   isInstitutional?: boolean;
+  isRewardsLoading?: boolean;
 };
 
 export type ProtocolAndMarketsState = Omit<ProtocolState, 'collateralAssets'> & {
@@ -404,6 +406,7 @@ export type MarketSummary = {
   collateralAssetSymbols: string[];
   date: string;
   isInstitutional?: boolean;
+  isRewardsLoading?: boolean;
 };
 
 export type AggregatedHistoricalSummary = {
