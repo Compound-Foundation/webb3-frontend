@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "webb3-dev",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["dev"],
+      "port": 5173,
+      "autoPort": true
+    },
+    {
+      "name": "webb3-dev-stage",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "set -a && . ./.env.stage.local && exec yarn dev"],
+      "port": 5173,
+      "autoPort": true
+    }
+  ]
+}
