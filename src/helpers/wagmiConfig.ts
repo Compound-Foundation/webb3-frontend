@@ -1,6 +1,6 @@
 import { createConfig, http } from 'wagmi';
 import { type Chain } from 'wagmi/chains';
-import { injected, walletConnect, coinbaseWallet } from 'wagmi/connectors';
+import { injected, walletConnect, coinbaseWallet, safe } from 'wagmi/connectors';
 
 import { CHAINS } from '@constants/chains';
 import { startEip6963Watcher } from '@helpers/eip6963Security';
@@ -42,6 +42,7 @@ export const config = createConfig({
       preference: { options: 'all', telemetry: false },
     }),
     ledgerConnector(),
+    safe()
   ],
   transports,
 });
