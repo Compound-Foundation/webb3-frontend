@@ -6,6 +6,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router';
 import { WagmiProvider } from 'wagmi';
 
 import { Web3Provider } from '@contexts/Web3Context';
+import { SAFE_ALLOWED_DOMAINS } from '@helpers/safe';
 
 import App from './App';
 import './init';
@@ -37,7 +38,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
         connector reuses a live session rather than showing a QR.
       */}
       <WagmiProvider config={config} reconnectOnMount={false}>
-        <SafeProvider>
+        <SafeProvider opts={{ allowedDomains: SAFE_ALLOWED_DOMAINS }}>
           <QueryClientProvider client={queryClient}>
             <Web3Provider>
               <Routes>
