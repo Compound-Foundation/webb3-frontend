@@ -1,5 +1,5 @@
 {
-  "name": "Compound III",
-  "description": "A full featured dashboard to interface with the Compound III protocol directly. Earn interest, borrow against your assets, and participate in community governance.",
-  "iconPath": "compound-192.png"
+  "name": "Compound",
+  "description": "Supply assets to earn interest, borrow against your collateral, and claim rewards on Compound, the decentralized lending protocol, directly from your Safe.",
+  "iconPath": "images/assets/asset_COMP.svg"
 }
