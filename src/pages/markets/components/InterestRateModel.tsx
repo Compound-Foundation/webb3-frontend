@@ -93,7 +93,7 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
 
       const targetWidth = targetElement.getBoundingClientRect().width;
       const widthThreshold = targetWidth - targetWidth * 0.03 ;
-      const utilizationPercent = Math.min(e.nativeEvent.offsetX / widthThreshold, 1)
+      const utilizationPercent = Math.min(Math.max(e.nativeEvent.offsetX / widthThreshold, 0), 1);
 
       setUtilizationPercentage(utilizationPercent);
 
@@ -128,7 +128,7 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
     });
 
     const currentUtilizationBorrowPoints = borrowPoints.filter((bp) => {
-      return Number(bp[0]) / factorScale <= Math.abs(utilizationPercentage);
+      return Number(bp[0]) / factorScale <= utilizationPercentage;
     });
     const [borrowUtilization, hypotheticalBorrowAPR, borrowCircleX, borrowCircleY] =
       currentUtilizationBorrowPoints[currentUtilizationBorrowPoints.length - 1];
@@ -154,7 +154,7 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
 
     //TODO: Should try binary search on this for better speed
     const currentUtilizationSupplyPoints = supplyPoints.filter((sp) => {
-      return Number(sp[0]) / factorScale <= Math.abs(utilizationPercentage);
+      return Number(sp[0]) / factorScale <= utilizationPercentage;
     });
     const [, hypotheticalSupplyAPR, supplyCircleX, supplyCircleY] =
       currentUtilizationSupplyPoints[currentUtilizationSupplyPoints.length - 1];
@@ -177,7 +177,7 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
     if (!isMouseOnChart) {
       utilizationToDisplay = actualUtilizationPercentage * 100;
     } else {
-      utilizationToDisplay = Number(borrowUtilization / 10n ** BigInt(FACTOR_PRECISION - 2));
+      utilizationToDisplay = Number(borrowUtilization / 10n ** BigInt(Math.max(FACTOR_PRECISION, 2) - 2));
     }
     return (
       <div className="interest-rate-model">
