@@ -1,5 +1,6 @@
 import { BigNumber } from '@ethersproject/bignumber';
 import { JsonRpcProvider, StaticJsonRpcProvider } from '@ethersproject/providers';
+import { parseUnits } from '@ethersproject/units';
 import { Contract, Provider } from 'ethers-multicall';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
@@ -13,6 +14,7 @@ import { getHardcodedFeedPrice, getRemappedPriceFeed } from '@helpers/deprecated
 import { perSecondRateAt, SECONDS_PER_YEAR } from '@helpers/interestRates';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
+import { FACTOR_PRECISION } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
 import { getV2State } from '@hooks/useV2MarketState';
@@ -244,8 +246,8 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
           blockTimestamp: Number(v3HistoryBucket.timestamp * 1000),
           supplyTotal: Number(v3HistoryBucket.total_collateral_value),
           borrowTotal: Number(v3HistoryBucket.total_borrow_value),
-          supplyRate: Number(v3HistoryBucket.supply_apr),
-          borrowRate: Number(v3HistoryBucket.borrow_apr),
+          supplyRate: parseUnits(v3HistoryBucket.supply_apr, FACTOR_PRECISION).toBigInt(),
+          borrowRate: parseUnits(v3HistoryBucket.borrow_apr, FACTOR_PRECISION).toBigInt(),
         };
       })
       .sort((a, b) => (a.blockTimestamp > b.blockTimestamp ? 1 : -1));
