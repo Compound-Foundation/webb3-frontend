@@ -171,13 +171,14 @@ const SupportedNetworks = ({ marketsByNetwork, selectedChainId, setSelectedChain
 
 type MarketOptionProps = {
   isCurrentMarket: boolean;
+  isError: boolean;
   market: MarketData;
   pathname: string;
   onClick: () => void;
   loading: boolean;
 };
 
-const MarketOption = ({ isCurrentMarket, market, pathname, onClick, loading }: MarketOptionProps) => {
+const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loading }: MarketOptionProps) => {
   const content = (
     <>
       <MarketNetworkIcon icon={market.iconPair[1]} />
@@ -208,7 +209,12 @@ const MarketOption = ({ isCurrentMarket, market, pathname, onClick, loading }: M
   }
 
   return (
-    <div key={market.baseAsset.symbol} className={`market-selector__option`} onClick={onClick}>
+    <div
+      key={market.baseAsset.symbol}
+      className={`market-selector__option${isError ? ' market-selector__option--disabled' : ''}`}
+      aria-disabled={isError}
+      onClick={onClick}
+    >
       {content}
     </div>
   );
@@ -224,6 +230,7 @@ type SupportedMarketsProps = {
 const SupportedMarkets = ({ currentMarket, markets, pathname, onSelectMarket }: SupportedMarketsProps) => {
   const institutionalMarkets = markets.filter((market: MarketData) => market.institutional);
   const standardMarkets = markets.filter((market: MarketData) => !market.institutional);
+  const { getMarketStatus } = useMarketsContext();
 
   const renderMarket = (market: MarketData, index: number) => {
     const onClick = () => {
@@ -231,6 +238,8 @@ const SupportedMarkets = ({ currentMarket, markets, pathname, onSelectMarket }: 
     };
 
     const isCurrentMarket = currentMarket === undefined ? false : areSameMarket(currentMarket, market);
+    // Markets in the error status are shown but can't be picked
+    const isError = getMarketStatus(market.chainInformation.chainId, market.marketAddress) === 'error';
     return (
       <Fragment key={`${index}-${market.baseAsset}`}>
         {market.baseAsset.symbol === V2_MARKET_KEY && (
@@ -241,9 +250,10 @@ const SupportedMarkets = ({ currentMarket, markets, pathname, onSelectMarket }: 
         <MarketOption
           key={market.marketAddress}
           isCurrentMarket={isCurrentMarket}
+          isError={isError}
           market={market}
           pathname={pathname}
-          onClick={(pathname === '/' && isV2Market(market)) || isCurrentMarket ? () => undefined : onClick}
+          onClick={(pathname === '/' && isV2Market(market)) || isCurrentMarket || isError ? () => undefined : onClick}
           loading={false} // TODO(mykelp): This actually needs to be handled properly
         />
       </Fragment>

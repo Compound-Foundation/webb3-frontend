@@ -343,6 +343,32 @@ export interface ChainInformation {
 
 export type MarketStatus = 'success' | 'partially' | 'error';
 
+export type CollateralStatus = 'success' | 'error';
+
+// A latest market summary from the v3 API after convertApiResponse (snake_case -> camelCase)
+export type LatestMarketSummaryResponse = {
+  chainId: number;
+  comet: {
+    address: string;
+  };
+  status?: MarketStatus;
+  borrowApr: string;
+  supplyApr: string;
+  totalBorrowValue: string;
+  totalSupplyValue: string;
+  totalCollateralValue: string;
+  utilization: string;
+  timestamp: number;
+  date: string;
+  baseUsdPrice: string;
+  collateralAssetSymbols: string[];
+  collaterals?: {
+    address: string;
+    symbol: string;
+    status: CollateralStatus;
+  }[];
+};
+
 export type MarketData = {
   baseAsset: BaseAssetConfig;
   chainInformation: ChainInformation;

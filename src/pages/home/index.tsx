@@ -15,6 +15,7 @@ import {
 import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
+import { getStatusCollateralAddress } from '@helpers/marketStatus';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { Theme } from '@hooks/useThemeManager';
@@ -61,7 +62,7 @@ type HomeProps = {
 const Home = ({
   transactions,
   web3,
-  cometState: state,
+  cometState: cometStateProp,
   addTransaction,
   switchWriteNetwork,
   estimatedGasMap,
@@ -69,7 +70,7 @@ const Home = ({
 }: HomeProps) => {
   // when V2 market was selected from market page and open up a new window default dashboard with default market
   const { selectedMarket, selectMarket } = useContext(getSelectedMarketContext());
-  const { isLoading: marketsLoading, defaultMarket } = useMarketsContext();
+  const { isLoading: marketsLoading, defaultMarket, getMarketStatus, getCollateralStatus } = useMarketsContext();
 
   // We use a useEffect here to prevent infinite renders by the state update in selectMarket
   useEffect(() => {
@@ -87,6 +88,18 @@ const Home = ({
 
   const [actionModalState, setActionModalState] = useState<ActionModalState>(undefined);
   const [compare, setCompare] = useState(false);
+  // A market the summary reports in the error status is shown like one whose on-chain data failed to load
+  const selected = selectedMarket[1];
+  const isMarketStatusError =
+    selected !== undefined && getMarketStatus(selected.chainInformation.chainId, selected.marketAddress) === 'error';
+  const getCollateralStatusFor = (assetAddress: string) =>
+    selected &&
+    getCollateralStatus(
+      selected.chainInformation.chainId,
+      selected.marketAddress,
+      getStatusCollateralAddress(selected.chainInformation, assetAddress)
+    );
+  const state: CometState = isMarketStatusError ? [StateType.Loading, undefined] : cometStateProp;
   const [cometState] = state;
 
   let assetRows: ReactNode[];
@@ -117,7 +130,12 @@ const Home = ({
     mastheadState = [StateType.NoWallet, { baseAsset, earnAPR }];
     assetRows = collateralAssets
       .sort(sortTokensAlphabetically)
-      .map((token, index) => <AssetRow key={index} state={[StateType.NoWallet, { asset: token }]} />);
+      .map((token, index) => (
+        <AssetRow
+          key={index}
+          state={[StateType.NoWallet, { asset: token, isCollateralError: getCollateralStatusFor(token.address) === 'error' }]}
+        />
+      ));
     positionCardState = [
       StateType.NoWallet,
       {
@@ -340,7 +358,14 @@ const Home = ({
           setPendingAction(undefined);
         },
         onPendingActionConfirm: (amount: bigint) => {
-          if (pendingAction !== undefined) {
+          // The collateral can turn to the error status after the supply input was opened
+          if (
+            pendingAction !== undefined &&
+            !(
+              pendingAction[0] === ActionType.SupplyCollateral &&
+              getCollateralStatusFor(pendingAction[1].address) === 'error'
+            )
+          ) {
             const action = getActionFromPendingAction(pendingAction, amount);
             const confirmAction = () => {
               setPendingAction(undefined);
@@ -377,6 +402,15 @@ const Home = ({
           }
         },
         onSubmitClicked: () => {
+          // A supply queued before its collateral turned to the error status must not be sent
+          if (
+            actions.some(
+              (action) =>
+                action[0] === ActionType.SupplyCollateral && getCollateralStatusFor(action[1].address) === 'error'
+            )
+          ) {
+            return;
+          }
           setPendingAction(undefined);
 
           if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
@@ -454,6 +488,7 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
+              isCollateralError: getCollateralStatusFor(token.address) === 'error',
               unwrappedAssetSupplyAction: stEthWrapSupplyAction,
               onDripClicked: () => {
                 writeState.drip(market, token.address);
@@ -510,6 +545,7 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
+              isCollateralError: getCollateralStatusFor(token.address) === 'error',
               wrappedAsset: matchingWrappedAsset,
               onCancelClicked: () => {
                 if (pendingActionOrUndefined) {
@@ -537,7 +573,11 @@ const Home = ({
 
   return (
     <div className="page home">
-      <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
+      <ActionModal
+        isBulkerAllowed={isBulkerAllowed}
+        state={isMarketStatusError ? undefined : actionModalState}
+        transactions={transactions}
+      />
       <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
       <div className="home__content grid-container">

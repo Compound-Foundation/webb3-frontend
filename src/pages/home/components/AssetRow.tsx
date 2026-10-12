@@ -23,7 +23,7 @@ import {
 } from '@types';
 
 type AssetRowLoading = [StateType.Loading];
-type AssetRowNoWallet = [StateType.NoWallet, { asset: TokenWithState }];
+type AssetRowNoWallet = [StateType.NoWallet, { asset: TokenWithState; isCollateralError?: boolean }];
 type AssetRowHydrated = [
   StateType.Hydrated,
   {
@@ -34,6 +34,8 @@ type AssetRowHydrated = [
     transaction?: Transaction;
     unwrappedAssetSupplyAction?: Action;
     wrappedAsset?: TokenWithAccountState;
+    // The market summary reports this collateral in the error status: it can't be supplied
+    isCollateralError: boolean;
     onCancelClicked: () => void;
     onEditClicked: () => void;
     onSupplyClicked: () => void;
@@ -113,7 +115,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
 
     return {
       asset,
-      assetRowModifier: '',
+      assetRowModifier: state[1].isCollateralError ? ' asset-row--error' : '',
       collateralValue: null,
       assetBalance: <p className="body text-color--3">0.0000</p>,
       displayWalletBalance: '',
@@ -129,6 +131,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
     pendingAction,
     transaction,
     unwrappedAssetSupplyAction,
+    isCollateralError,
     onCancelClicked,
     onEditClicked,
     onSupplyClicked,
@@ -136,7 +139,8 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
     onDripClicked,
   } = state[1];
   const { decimals, price, balance, walletBalance } = asset as TokenWithAccountState;
-  const assetRowModifier = pendingAction !== undefined ? ` asset-row--active` : '';
+  const assetRowModifier =
+    (pendingAction !== undefined ? ` asset-row--active` : '') + (isCollateralError ? ' asset-row--error' : '');
   const formattedWalletBalance = (
     <p className="L2 meta">&nbsp;•&nbsp;{formatValue(decimals, walletBalance)} in wallet</p>
   );
@@ -206,7 +210,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
             onSupplyClicked();
           }}
           className={`button${supplyButtonModifier}`}
-          disabled={walletBalance === 0n || transaction !== undefined}
+          disabled={walletBalance === 0n || transaction !== undefined || isCollateralError}
         >
           <Plus />
           <span className={supplyButtonTextClass}>Supply</span>

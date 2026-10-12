@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { createContext, ReactNode, useContext, useMemo } from 'react';
 
+import { latestMarketSummaryQueryOptions } from '@helpers/latestMarketSummary';
 import {
   fetchMarketRegistry,
   MARKET_REGISTRY_CACHE_MAX_AGE,
@@ -11,7 +12,8 @@ import {
   registryToMarkets,
 } from '@helpers/marketRegistry';
 import { getMarket, getMarketDescriptors, getMarkets, getMarketsByNetwork } from '@helpers/markets';
-import { MarketData, MarketsByNetwork } from '@types';
+import { buildMarketStatusIndex, getCollateralStatus, getMarketStatus } from '@helpers/marketStatus';
+import { CollateralStatus, MarketData, MarketsByNetwork, MarketStatus } from '@types';
 
 type MarketsProviderProps = {
   children: ReactNode;
@@ -22,6 +24,9 @@ type MarketsHelpers = {
   getMarkets: (showTestnet: boolean) => MarketData[];
   getMarketsByNetwork: (showTestnet: boolean) => MarketsByNetwork;
   getMarketDescriptors: (cometAddress: string, chainId: number) => string[];
+  // Statuses come from the latest market summary; undefined until it loads or when it fails
+  getMarketStatus: (chainId: number, cometAddress: string) => MarketStatus | undefined;
+  getCollateralStatus: (chainId: number, cometAddress: string, collateralAddress: string) => CollateralStatus | undefined;
 };
 
 type MarketsLoading = Omit<RegistryMarkets, 'defaultMarket' | 'registryVersionId'> & {
@@ -66,6 +71,8 @@ export const MarketsProvider = (props: MarketsProviderProps) => {
 
   const loadFailed = data === undefined && (isError || failureCount >= 3);
 
+  const { data: statusIndex } = useQuery({ ...latestMarketSummaryQueryOptions, select: buildMarketStatusIndex });
+
   const value = useMemo((): MarketsContextValue => {
     const markets = data?.markets ?? [];
 
@@ -75,12 +82,16 @@ export const MarketsProvider = (props: MarketsProviderProps) => {
       getMarkets: (showTestnet) => getMarkets(markets, showTestnet),
       getMarketsByNetwork: (showTestnet) => getMarketsByNetwork(markets, showTestnet),
       getMarketDescriptors: (cometAddress, chainId) => getMarketDescriptors(markets, cometAddress, chainId),
+      getMarketStatus: (chainId, cometAddress) =>
+        statusIndex && getMarketStatus(statusIndex, chainId, cometAddress),
+      getCollateralStatus: (chainId, cometAddress, collateralAddress) =>
+        statusIndex && getCollateralStatus(statusIndex, chainId, cometAddress, collateralAddress),
     };
 
     return data === undefined
       ? { ...helpers, isLoading: true, markets, defaultMarket: undefined, registryVersionId: undefined }
       : { ...helpers, isLoading: false, ...data };
-  }, [data, loadFailed]);
+  }, [data, loadFailed, statusIndex]);
 
   return (
     <MarketsContext.Provider value={value}>

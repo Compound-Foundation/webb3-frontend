@@ -15,16 +15,21 @@ export type AlertBannerProps = {
 const AlertBanner = ({ web3, isCometStateError, isMarketsStateError }: AlertBannerProps) => {
   const location = useLocation();
 
-  const { markets, isLoading } = useMarketsContext();
+  const { markets, isLoading, getMarketStatus } = useMarketsContext();
 
-  const { isSelectedMarketError } = useContext(getSelectedMarketContext());
+  const { selectedMarket, isSelectedMarketError } = useContext(getSelectedMarketContext());
 
   const isHomePage = location.pathname === '/';
 
   const isMarketPage = /^\/markets\/[^/]+/.test(location.pathname);
 
+  // The market summary can report the selected market in the error status even when its on-chain data loads
+  const selected = selectedMarket[1];
+  const isSelectedMarketStatusError =
+    selected !== undefined && getMarketStatus(selected.chainInformation.chainId, selected.marketAddress) === 'error';
+
   const isMarketDataError =
-    (isHomePage && (isSelectedMarketError || isCometStateError)) ||
+    (isHomePage && (isSelectedMarketError || isCometStateError || isSelectedMarketStatusError)) ||
     (isMarketPage && (isSelectedMarketError || isMarketsStateError));
 
   const messages: string[] = [];

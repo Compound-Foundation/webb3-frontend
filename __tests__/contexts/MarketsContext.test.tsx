@@ -4,12 +4,14 @@ import { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 
 import { MarketsProvider, useMarketsContext } from '@contexts/MarketsContext';
+import { latestMarketSummaryQueryOptions } from '@helpers/latestMarketSummary';
 import { fetchMarketRegistry, MARKET_REGISTRY_QUERY_KEY, shouldPersistQuery } from '@helpers/marketRegistry';
-import { getMarketRegistryEndpoint } from '@helpers/urls';
+import { getLatestMarketSummaryEndpoint, getMarketRegistryEndpoint } from '@helpers/urls';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
 import { StateType } from '@types';
 
 import { rest, server } from '../../handlers/server';
+import mockLatestMarketSummaryResponse from '../mocks/mockLatestMarketSummaryResponse.json';
 import { MOCK_DEFAULT_MARKET, MOCK_MARKET_REGISTRY, MOCK_MARKETS, MockMarketsProvider } from '../mocks/mockMarkets';
 import { mockWeb3 } from '../mocks/mockWeb3';
 
@@ -78,6 +80,46 @@ describe('MarketsProvider', () => {
     warn.mockRestore();
     await queryClient.cancelQueries();
     queryClient.clear();
+  });
+});
+
+describe('MarketsProvider market statuses', () => {
+  const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
+  const WBTC = '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599';
+  const newQueryClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  test('exposes market and collateral statuses from the latest summary', async () => {
+    server.use(
+      rest.get(getLatestMarketSummaryEndpoint(), (_req, res, ctx) =>
+        res(
+          ctx.json(
+            mockLatestMarketSummaryResponse.map((summary) =>
+              summary.comet.address === USDC_COMET.toLowerCase()
+                ? { ...summary, status: 'error', collaterals: [{ address: WBTC, symbol: 'WBTC', status: 'error' }] }
+                : summary
+            )
+          )
+        )
+      )
+    );
+
+    const { result } = renderMarketsContext(newQueryClient());
+
+    await waitFor(() => expect(result.current.getMarketStatus(1, USDC_COMET)).toBe('error'));
+    expect(result.current.getCollateralStatus(1, USDC_COMET, WBTC.toLowerCase())).toBe('error');
+  });
+
+  test('reports no statuses when the summary request fails', async () => {
+    server.use(rest.get(getLatestMarketSummaryEndpoint(), (_req, res, ctx) => res(ctx.status(500))));
+    const queryClient = newQueryClient();
+
+    const { result } = renderMarketsContext(queryClient);
+
+    await waitFor(() =>
+      expect(queryClient.getQueryState(latestMarketSummaryQueryOptions.queryKey)?.status).toBe('error')
+    );
+    expect(result.current.getMarketStatus(1, USDC_COMET)).toBeUndefined();
+    await queryClient.cancelQueries();
   });
 });
 
