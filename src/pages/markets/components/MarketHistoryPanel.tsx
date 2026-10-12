@@ -317,7 +317,7 @@ function getHoveredLabels(
   if (hoveredTime == 0 || hoveredData === undefined) {
     return <></>;
   } else {
-    const rateLabel = isBorrow ? 'Borrow APR' : 'Earn APR';
+    const rateLabel = isBorrow ? 'Borrow APR' : 'Supply APR';
     const rateHoverImage = isBorrow
       ? '/images/line-graph-hover-icn-borrow.svg'
       : '/images/line-graph-hover-icn-supply.svg';

@@ -59,7 +59,7 @@ const LoadingView = () => {
               </h4>
             </div>
             <div className="market-rate-model__rates-section__labels-holder market-rate-model__rates-section__labels-holder--loading">
-              <label className="label text-color--2">Earn APR</label>
+              <label className="label text-color--2">Supply APR</label>
               <h4>
                 <span className="placeholder-content" style={{ width: '4rem' }}></span>
               </h4>
