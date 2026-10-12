@@ -100,8 +100,6 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
   const baseAssetDollarPriceFeed = getBaseAssetPriceFeed(market);
 
   const [
-    borrowRatePerSecond,
-    supplyRatePerSecond,
     reserves,
     totalSupplyBN,
     totalBorrowBN,
@@ -116,8 +114,6 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     supplySlopeLow,
     supplySlopeHigh,
   ]: BigNumber[] = await ethcallProvider.all([
-    cometContract.getBorrowRate(utilization),
-    cometContract.getSupplyRate(utilization),
     cometContract.getReserves(),
     cometContract.totalSupply(),
     cometContract.totalBorrow(),
@@ -198,8 +194,27 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
   const collateralReserves = combinedCalls.slice(numAssets * 2, numAssets * 3).map((cr) => cr.toBigInt());
 
   const baseAssetPrice = baseTokenPrice.toBigInt();
-  const borrowAPR = borrowRatePerSecond.toBigInt() * SECONDS_PER_YEAR;
-  const earnAPR = supplyRatePerSecond.toBigInt() * SECONDS_PER_YEAR;
+
+  const borrowAPR =
+    perSecondRateAt({
+      utilization: utilization.toBigInt(),
+      kink: borrowKink.toBigInt(),
+      base: borrowBase.toBigInt(),
+      slopeLow: borrowSlopeLow.toBigInt(),
+      slopeHigh: borrowSlopeHigh.toBigInt(),
+      factorScale: factorScaleBN.toBigInt(),
+    }) * SECONDS_PER_YEAR;
+
+  const earnAPR =
+    perSecondRateAt({
+      utilization: utilization.toBigInt(),
+      kink: supplyKink.toBigInt(),
+      base: supplyBase.toBigInt(),
+      slopeLow: supplySlopeLow.toBigInt(),
+      slopeHigh: supplySlopeHigh.toBigInt(),
+      factorScale: factorScaleBN.toBigInt(),
+    }) * SECONDS_PER_YEAR;
+
   const totalSupply = totalSupplyBN.toBigInt();
   const totalBorrow = totalBorrowBN.toBigInt();
 
