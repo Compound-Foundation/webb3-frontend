@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
 
 import DetailSheet from '@components/DetailSheet';
-import { ArrowDown, ArrowUp, Close, Minus, Plus } from '@components/Icons';
+import { ArrowDown, ArrowUp, CircleExclamationSmall, Close, Minus, Plus } from '@components/Icons';
 import Tooltip from '@components/Tooltip';
 import AssetTooltipContent from '@components/Tooltips/AssetTooltipContent';
 import UnwrappedAssetTooltipContent from '@components/Tooltips/UnwrappedAssetTooltipContent';
@@ -21,6 +21,8 @@ import {
   TokenWithState,
   Transaction,
 } from '@types';
+
+const COLLATERAL_UNAVAILABLE = 'Collateral temporarily unavailable.';
 
 type AssetRowLoading = [StateType.Loading];
 type AssetRowNoWallet = [StateType.NoWallet, { asset: TokenWithState; isCollateralError?: boolean }];
@@ -314,6 +316,8 @@ const AssetRow = ({ state }: AssetRowProps) => {
   const [detailsActive, setDetailsActive] = useState(false);
   const { currency } = useCurrencyContext();
   const prevActionAmount = useRef<bigint | undefined>();
+  // The status tooltip of a collateral in the error status points at the error badge
+  const errorIconRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (stateType === StateType.Hydrated) {
@@ -345,6 +349,16 @@ const AssetRow = ({ state }: AssetRowProps) => {
   };
 
   const abbrSymbol = asset.symbol === 'wsuperOETHb' ? '...OETHb' : asset.symbol;
+  const isCollateralError = state[1].isCollateralError === true;
+
+  const assetIcon = (
+    <span
+      className={`asset asset--${assetIconForAssetSymbol(asset.symbol)}${
+        isCollateralError ? ' asset-row__icon--disabled' : ''
+      }`}
+      onClick={onIconClick}
+    ></span>
+  );
 
   return (
     <div
@@ -354,7 +368,18 @@ const AssetRow = ({ state }: AssetRowProps) => {
       }}
     >
       <div className={`asset-row__hover${hoverModifier}`}></div>
-      <Tooltip content={tooltipContent} width={340} hideArrow={true} yOffset={30}>
+      {/* A collateral in the error status shows its status over the error badge instead of the asset details */}
+      <Tooltip
+        content={
+          isCollateralError ? <span className="asset-row__tooltip-text">{COLLATERAL_UNAVAILABLE}</span> : tooltipContent
+        }
+        width={isCollateralError ? 214 : 340}
+        hideArrow={!isCollateralError}
+        // Hover-only tooltips are hidden on small screens, the status one opens on tap there
+        interactive={isCollateralError}
+        yOffset={isCollateralError ? 12 : 30}
+        anchorRef={errorIconRef}
+      >
         <div
           className="asset-row__detail-content"
           onMouseEnter={() => {
@@ -364,9 +389,18 @@ const AssetRow = ({ state }: AssetRowProps) => {
             setHoverModifier('');
           }}
         >
-          <span className={`asset asset--${assetIconForAssetSymbol(asset.symbol)}`} onClick={onIconClick}></span>
+          {isCollateralError ? (
+            <span className="asset-row__icon-container">
+              {assetIcon}
+              <span ref={errorIconRef} className="asset-row__error-icon">
+                <CircleExclamationSmall />
+              </span>
+            </span>
+          ) : (
+            assetIcon
+          )}
           <div className="asset-row__info">
-            <p className="body">{asset.name}</p>
+            <p className={`body${isCollateralError ? ' text-color--3' : ''}`}>{asset.name}</p>
             <div className="asset-row__info__details meta L2">
               {abbrSymbol}
               {displayWalletBalance}

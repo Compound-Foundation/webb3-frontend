@@ -28,6 +28,7 @@ const Tooltip = ({
   yOffset = 20,
   x,
   y,
+  anchorRef,
 }: {
   width: number;
   children: React.ReactElement;
@@ -44,6 +45,8 @@ const Tooltip = ({
   yOffset?: number;
   x?: number;
   y?: number;
+  // The element to place the tooltip over, when it isn't the hovered trigger itself
+  anchorRef?: React.RefObject<HTMLElement | null>;
 }) => {
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
   const [coordinates, setCoordinates] = useState<TooltipCoordinates>({ x: 0, y: 0 });
@@ -66,7 +69,7 @@ const Tooltip = ({
     if (!disabled && tooltipRef.current) {
       triggerRef.current = e.currentTarget;
       setShowTooltip(true);
-      const triggerEl = e.currentTarget.getBoundingClientRect();
+      const triggerEl = (anchorRef?.current ?? e.currentTarget).getBoundingClientRect();
 
       const tooltipHeight = tooltipRef.current.clientHeight;
       // By default, try to set the tooltip above the hovered element.

@@ -31,7 +31,7 @@ type MarketsProps = {
 
 const Market = ({ web3, setIsMarketsStateError }: MarketsProps) => {
   const { selectedMarket } = useContext(getSelectedMarketContext());
-  const { getMarket } = useMarketsContext();
+  const { getMarket, getCollateralStatus } = useMarketsContext();
 
   const marketCurrencyToShow = Currency.USD;
 
@@ -51,7 +51,11 @@ const Market = ({ web3, setIsMarketsStateError }: MarketsProps) => {
   // The configured market entry keeps the display name and institutional flags,
   // which the hydrated market's on-chain base asset data doesn't carry
   const configMarket = market !== undefined ? getMarket(market.chainInformation.chainId, market.marketAddress) : undefined;
-  const marketDisplayName = configMarket?.institutional ? configMarket.baseAsset.name : currentBaseToken;
+  // The registry symbol stays the same once the market loads, unlike the on-chain one
+  // (e.g. USDC-cr of a test market becomes USDC), so the title doesn't change
+  const marketDisplayName = configMarket?.institutional
+    ? configMarket.baseAsset.name
+    : (configMarket?.baseAsset.symbol ?? currentBaseToken);
   let assetRows: ReactNode = null;
   let marketOverviewPanel: ReactNode = null;
   let marketStatsPanel: ReactNode = null;
@@ -179,7 +183,13 @@ const Market = ({ web3, setIsMarketsStateError }: MarketsProps) => {
               : 1
           )
           .map((token, index) => (
-            <AssetsTableRow key={index} state={[StateType.Hydrated, token, baseAsset]} />
+            <AssetsTableRow
+              key={index}
+              state={[StateType.Hydrated, token, baseAsset]}
+              isCollateralError={
+                getCollateralStatus(market.chainInformation.chainId, market.marketAddress, token.address) === 'error'
+              }
+            />
           ))}
       </CollateralAssetsPanel>
     );

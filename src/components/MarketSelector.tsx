@@ -1,7 +1,7 @@
-import { useState, useRef, useContext, Fragment } from 'react';
+import { useState, useRef, useContext, Fragment, ReactElement } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { UnavailableTooltip } from '@components/UnavalableMarketTooltip';
+import Tooltip from '@components/Tooltip';
 import { useMarketsContext } from '@contexts/MarketsContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { iconNameForChainId } from '@helpers/assets';
@@ -20,6 +20,7 @@ const INSTITUTIONAL = 'Institutional';
 const MARKETS_SECTION = 'Markets';
 const NEW = 'New';
 const MARKETS_UNAVAILABLE = 'Markets unavailable';
+const MARKET_UNAVAILABLE = 'Market temporarily unavailable. Please check back shortly.';
 
 const MarketSelector = () => {
   const [marketDropdownActive, setMarketDropdownActive] = useState<boolean>(false);
@@ -85,8 +86,14 @@ type SelectedMarketProps = {
 };
 
 const SelectedMarket = ({ active, market, onClick }: SelectedMarketProps) => {
+  const { getMarket } = useMarketsContext();
+  // The registry symbol stays the same once the market loads, unlike the on-chain one
+  // (e.g. USDC-cr of a test market becomes USDC), so the label doesn't change
+  const configMarket = market !== undefined ? getMarket(market.chainInformation.chainId, market.marketAddress) : undefined;
   const [currentChainName, currentBaseToken] =
-    market !== undefined ? [market.chainInformation.name, market.baseAsset.symbol] : ['Connecting', undefined];
+    market !== undefined
+      ? [market.chainInformation.name, configMarket?.baseAsset.symbol ?? market.baseAsset.symbol]
+      : ['Connecting', undefined];
   return (
     <div
       className={`button market-selector__selected-market${active ? ' market-selector__selected-market--active' : ''}`}
@@ -180,6 +187,7 @@ type MarketOptionProps = {
 };
 
 const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loading }: MarketOptionProps) => {
+  const exclamationRef = useRef<HTMLSpanElement>(null);
   const content = (
     <>
       <MarketNetworkIcon icon={market.iconPair[1]} className={`${isError ? 'icon-disabled' : ''}`}/>
@@ -187,16 +195,32 @@ const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loa
         <span className={`label text-color--1 L1 ${isError ? "text-color--3" : ''}`}>{market.baseAsset.symbol}</span>
         {loading && <span className="label label--secondary text-color--2">{APPROVE_IN_WALLET}</span>}
       </div>
-      {isError && <UnavailableTooltip className="tooltip-container"/>}
+      {isError && (
+        <span ref={exclamationRef} className="market-selector__option__exclamation">
+          <CircleExclamation className="svg--icon--3 market-selector__option__exclamation-icon" />
+        </span>
+      )}
       {market.isNew && <span className="new-badge label label--secondary">{NEW}</span>}
       {isCurrentMarket && <CheckMark className="svg--supply" />}
       {loading && <TailSpin className="svg--spin" />}
     </>
   );
 
+  const withUnavailableTooltip = (option: ReactElement) => (
+    <Tooltip
+      disabled={!isError}
+      width={200}
+      yOffset={12}
+      anchorRef={exclamationRef}
+      content={<span className="market-selector__tooltip-text">{MARKET_UNAVAILABLE}</span>}
+    >
+      {option}
+    </Tooltip>
+  );
+
   if (isV2Market(market) && pathname === '/') {
     // V2 market isn't supported so should link out to the V2 app
-    return (
+    return withUnavailableTooltip(
       <a
         key={market.baseAsset.symbol}
         className={`market-selector__option`}
@@ -210,7 +234,7 @@ const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loa
     );
   }
 
-  return (
+  return withUnavailableTooltip(
     <div
       key={market.baseAsset.symbol}
       className={`market-selector__option`}

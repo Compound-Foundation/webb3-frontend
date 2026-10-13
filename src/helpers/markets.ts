@@ -37,8 +37,13 @@ export function marketKey(market: MarketData | MarketDataLoaded): string {
   return [market.chainInformation.chainId, market.baseAsset.symbol, market.marketAddress].join(MARKET_KEY_DELIMITER);
 }
 
+// A market is identified by its chain and comet address. The base asset symbol isn't part of it:
+// a loaded market carries the on-chain symbol, which can differ from the registry one (e.g. USDC-cr)
 export function areSameMarket(market1: MarketData | MarketDataLoaded, market2: MarketData | MarketDataLoaded): boolean {
-  return marketKey(market1) === marketKey(market2);
+  return (
+    market1.chainInformation.chainId === market2.chainInformation.chainId &&
+    market1.marketAddress.toLowerCase() === market2.marketAddress.toLowerCase()
+  );
 }
 
 export function isV2Market(market: MarketData | MarketDataLoaded) {

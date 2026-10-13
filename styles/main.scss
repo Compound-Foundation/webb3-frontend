@@ -84,7 +84,6 @@
 @use 'pages/vote';
 @use 'pages/rewards-page';
 @use 'pages/redirect';
-@use 'components/unavailable-tooltip';
 
 .text-link:hover {
   opacity: 0.85;

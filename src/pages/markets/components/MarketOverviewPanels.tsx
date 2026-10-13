@@ -4,9 +4,10 @@ import { Link, useNavigate } from 'react-router';
 import CircleMeter from '@components/CircleMeter';
 import DetailSheet from '@components/DetailSheet';
 import IconPair from '@components/IconPair';
-import { CaretDown, CheckMark } from '@components/Icons';
+import { CaretDown, CheckMark, CircleExclamation, CircleExclamationSmall } from '@components/Icons';
 import PanelWithHeader from '@components/PanelWithHeader';
 import PanelWithNoHeader from '@components/PanelWithNoHeader';
+import Tooltip from '@components/Tooltip';
 import { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
 import { CHAINS, INACTIVE_CHAIN_IDS } from '@constants/chains';
 import { useMarketsContext } from '@contexts/MarketsContext';
@@ -19,6 +20,10 @@ import { LatestMarketSummaries, MarketSummary } from '../../../types';
 import { BoostedRateInfo } from '../BoostedRateInfo';
 
 import InstitutionalRateInfo from './InstitutionalRateInfo';
+
+const MARKET_UNAVAILABLE = 'Market temporarily unavailable. Please check back shortly.';
+const MARKET_PARTIALLY_UNAVAILABLE = 'Market partially unavailable';
+const COLLATERAL_UNAVAILABLE = 'Collateral temporarily unavailable.';
 
 const SORT_BY_OPTIONS = [
   'Utilization',
@@ -323,6 +328,9 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
   const marketPath = `/markets/${shortMarketName()}`;
 
   const isError = marketSummary.status === 'error';
+  const isPartially = marketSummary.status === 'partially';
+  // The status tooltip opens on hovering the whole row, but points at the exclamation icon
+  const exclamationRef = useRef<HTMLSpanElement>(null);
 
   const navigate = useNavigate();
   const handleRowClick = () => {
@@ -333,115 +341,140 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
   };
 
   const rowModifier = market?.institutional ? ' market-overview-panels__table-row--institutional' : '';
-  const statusModifier =
-    marketSummary.status === 'error' || marketSummary.status === 'partially'
-      ? ` market-overview-panels__table-row--${marketSummary.status}`
-      : '';
 
   return (
-    // The Link component doesn't work here because tr must be
-    // a direct child of tbody and td must be a direct child of tr
-    // A market in the error status has no data to show, so its page isn't opened
-    <tr
-      className={`market-overview-panels__table-row${rowModifier}${statusModifier}`}
-      onClick={isError ? undefined : handleRowClick}
+    <Tooltip
+      disabled={!isError && !isPartially}
+      width={200}
+      // A tap on a partially working row opens its page instead of the tooltip
+      touchToggle={isError}
+      yOffset={12}
+      anchorRef={exclamationRef}
+      content={
+        <span className={`market-overview-panels__tooltip-text ${isPartially ? 'market-overview-panels__tooltip-text-centered' : ''}`}>
+          {isError ? MARKET_UNAVAILABLE : MARKET_PARTIALLY_UNAVAILABLE}
+        </span>
+      }
     >
-      <td>
-        <div className="market-overview-panels__market-container">
-          <IconPair
-            className="icon-pair--reverse-draw"
-            icon1={assetIconForAssetSymbol(assetSymbol)}
-            icon2={market?.iconPair[0] ?? iconNameForChainId(marketSummary.chainId)}
-          />
-          <div className="market-overview-panels__asset-description-container">
-            {showNewBadge && (
-              <div className="L2 market-overview-panels__badges">
-                <span className="new-badge label label--secondary">New</span>
+      {/* The Link component doesn't work here because tr must be
+        a direct child of tbody and td must be a direct child of tr
+        A market in the error status has no data to show, so its page isn't opened */}
+      <tr
+        className={`market-overview-panels__table-row${rowModifier}`}
+        onClick={isError ? undefined : handleRowClick}
+      >
+        <td>
+          <div className="market-overview-panels__market-container">
+            <IconPair
+              className={`icon-pair--reverse-draw ${isError ? 'icon-pair__disabled' : ''}`}
+              icon1={assetIconForAssetSymbol(assetSymbol)}
+              icon2={market?.iconPair[0] ?? iconNameForChainId(marketSummary.chainId)}
+            />
+            <div className="market-overview-panels__asset-description-container">
+              {showNewBadge && (
+                <div className="L2 market-overview-panels__badges">
+                  <span className="new-badge label label--secondary">New</span>
+                </div>
+              )}
+              <div className="market-overview-panels__asset-name-container">
+                <AssetName assetName={assetName} className={`${isError ? 'text-color--3' : ''}`}/>
+                {(isError || isPartially) && (
+                  <span ref={exclamationRef} className="market-overview-panels__exclamation">
+                    <CircleExclamation className="svg--icon--3 market-overview-panels__exclamation-icon" />
+                  </span>
+                )}
               </div>
-            )}
-            <AssetName assetName={assetName} />
-            <div className="label text-color--2 L2">
-              {assetSymbol} ∙ {chainName}
+              <div className={`label text-color--2 L2 ${isError ? 'text-color--3' : ''}`}>
+                {assetSymbol} ∙ {chainName}
+              </div>
             </div>
           </div>
-        </div>
-      </td>
-      <td>
-        {isError ? (
-          <div className="body text-color--1 L3">N/A</div>
-        ) : (
+        </td>
+        <td>
           <div className="market-overview-panels__utilization-container">
-            <CircleMeter percentageFill={utilization.toString()} />
-            <div className="body text-color--1 L3">{utilization}</div>
-          </div>
-        )}
-      </td>
-      <td>
-        {isError ? (
-          <div className="body text-color--1 L3">N/A</div>
-        ) : marketSummary.isRewardsLoading ? (
-          <div className="placeholder-content" style={{ width: '4rem', height: '1.25rem' }}></div>
-        ) : (
-          <div className="market-overview-panels__apr-container">
-            <div className="body text-color--1 L3">{netEarnAPR}</div>
-            {marketSummary.isInstitutional && (
-              <InstitutionalRateInfo
-                marketSummary={marketSummary}
-                whitelistStatus={institutionalWhitelistStatus}
-              />
+            {isError ? (
+              <>
+                <CircleMeter percentageFill={'0'} disabled />
+                <span className="body text-color--3 L3">N/A</span>
+              </>
+            ) : (
+              <>
+                <CircleMeter percentageFill={utilization.toString()} />
+                <div className="body text-color--1 L3">{utilization}</div>
+              </>
             )}
-            {(hasEarnRewards && !marketSummary.isInstitutional) &&
-              <BoostedRateInfo
-                view={NetRatesTooltipView.Supply}
-                earnAPR={marketSummary.supplyAPR}
-                earnRewardsAPR={marketSummary.supplyRewardsAPR}
-                rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
-              />
-            }
           </div>
-        )}
-      </td>
-      <td>
-        {isError ? (
-          <div className="body text-color--1 L3">N/A</div>
-        ) : marketSummary.isRewardsLoading ? (
-          <div className="placeholder-content" style={{ width: '4rem', height: '1.25rem' }}></div>
-        ) : (
-          <div className="market-overview-panels__apr-container">
-            <div className="body text-color--1 L3">{netBorrowAPR}</div>
-            {(hasBorrowRewards && !marketSummary.isInstitutional) &&
-              <BoostedRateInfo
-                view={NetRatesTooltipView.Borrow}
-                borrowAPR={marketSummary.borrowAPR}
-                borrowRewardsAPR={marketSummary.borrowRewardsAPR}
-                rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
-              />
-            }
+        </td>
+        <td>
+          {isError ? (
+            <span className="body text-color--3 L3">N/A</span>
+          ) : marketSummary.isRewardsLoading ? (
+            <div className="placeholder-content" style={{ width: '4rem', height: '1.25rem' }}></div>
+          ) : (
+            <div className="market-overview-panels__apr-container">
+              <div className="body text-color--1 L3">{netEarnAPR}</div>
+              {marketSummary.isInstitutional && (
+                <InstitutionalRateInfo
+                  marketSummary={marketSummary}
+                  whitelistStatus={institutionalWhitelistStatus}
+                />
+              )}
+              {(hasEarnRewards && !marketSummary.isInstitutional) &&
+                <BoostedRateInfo
+                  view={NetRatesTooltipView.Supply}
+                  earnAPR={marketSummary.supplyAPR}
+                  earnRewardsAPR={marketSummary.supplyRewardsAPR}
+                  rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
+                />
+              }
+            </div>
+          )}
+        </td>
+        <td>
+          {isError ? (
+            <span className="text-color--3 L3">N/A</span>
+          ) : marketSummary.isRewardsLoading ? (
+            <div className="placeholder-content" style={{ width: '4rem', height: '1.25rem' }}></div>
+          ) : (
+            <div className="market-overview-panels__apr-container">
+              <div className="body text-color--1 L3">{netBorrowAPR}</div>
+              {(hasBorrowRewards && !marketSummary.isInstitutional) &&
+                <BoostedRateInfo
+                  view={NetRatesTooltipView.Borrow}
+                  borrowAPR={marketSummary.borrowAPR}
+                  borrowRewardsAPR={marketSummary.borrowRewardsAPR}
+                  rewardsAssetSymbol={marketSummary.rewardsAssetSymbol}
+                />
+              }
+            </div>
+          )}
+        </td>
+        <td>
+          <div className="body text-color--1 L3">
+            {isError ? <span className="text-color--3">N/A</span> : formatValueInDollars(PRICE_PRECISION, marketSummary.totalSupplyValue)}
           </div>
-        )}
-      </td>
-      <td>
-        <div className="body text-color--1 L3">
-          {isError ? 'N/A' : formatValueInDollars(PRICE_PRECISION, marketSummary.totalSupplyValue)}
-        </div>
-      </td>
-      <td>
-        <div className="body text-color--1 L3">
-          {isError ? 'N/A' : formatValueInDollars(PRICE_PRECISION, marketSummary.totalBorrowValue)}
-        </div>
-      </td>
-      <td>
-        <div className="body text-color--1 L3">
-          {isError ? 'N/A' : formatValueInDollars(PRICE_PRECISION, marketSummary.totalCollateralValue)}
-        </div>
-      </td>
-      <td>
-        <CollateralAssets
-          collateralAssets={marketSummary.collateralAssetSymbols}
-          errorCollateralAssets={marketSummary.errorCollateralSymbols ?? []}
-        />
-      </td>
-    </tr>
+        </td>
+        <td>
+          <div className="body text-color--1 L3">
+            {isError ? <span className="text-color--3">N/A</span> : formatValueInDollars(PRICE_PRECISION, marketSummary.totalBorrowValue)}
+          </div>
+        </td>
+        <td>
+          <div className="body text-color--1 L3">
+            {isError ? <span className="text-color--3">N/A</span> : formatValueInDollars(PRICE_PRECISION, marketSummary.totalCollateralValue)}
+          </div>
+        </td>
+        <td>
+          {isError
+            ? <span className="text-color--3 L3">N/A</span>
+            : <CollateralAssets
+              collateralAssets={marketSummary.collateralAssetSymbols}
+              errorCollateralAssets={marketSummary.errorCollateralSymbols ?? []}
+            />
+          }
+        </td>
+      </tr>
+    </Tooltip>
   );
 };
 
@@ -465,15 +498,37 @@ const CollateralAssets = ({ collateralAssets, errorCollateralAssets }: Collatera
         style={shouldUseEqualRows ? { gridTemplateColumns: `repeat(${iconsPerRow}, calc(1rem - 0.25rem))` } : undefined}
       >
         {collateralAssets.map((collateralAsset) => {
+          const isError = errorCollateralAssets.includes(collateralAsset);
           return (
-            <div
+            <Tooltip
               key={collateralAsset}
-              className={`asset asset--${assetIconForAssetSymbol(
-                collateralAsset,
-              )} market-overview-panels__collateral-asset-icon${
-                errorCollateralAssets.includes(collateralAsset) ? ' market-overview-panels__collateral-asset-icon--error' : ''
-              }`}
-            />
+              disabled={!isError}
+              width={214}
+              yOffset={12}
+              content={
+                <span className="market-overview-panels__tooltip-text market-overview-panels__tooltip-text-centered">
+                  {COLLATERAL_UNAVAILABLE}
+                </span>
+              }
+            >
+              {isError ? (
+                // The badge sits beside the dimmed icon, not inside it, so it isn't dimmed too
+                <div className="market-overview-panels__collateral-asset-icon-container">
+                  <div
+                    className={`asset asset--${assetIconForAssetSymbol(
+                      collateralAsset,
+                    )} market-overview-panels__collateral-asset-icon market-overview-panels__collateral-asset-icon--error`}
+                  />
+                  <CircleExclamationSmall className="market-overview-panels__collateral-asset-error-icon" />
+                </div>
+              ) : (
+                <div
+                  className={`asset asset--${assetIconForAssetSymbol(
+                    collateralAsset,
+                  )} market-overview-panels__collateral-asset-icon`}
+                />
+              )}
+            </Tooltip>
           );
         })}
       </div>
@@ -500,17 +555,20 @@ const TableHead = () => {
 
 type AssetNameProps = {
   assetName: string;
+  className?: string;
 };
 /**
  * If a part of the asset name is in (parentheses), we grey
  * out that part https://discord.com/channels/402910780124561410/796452739030319135/1154428517614899352
  * @param param0
  */
-const AssetName = ({ assetName }: AssetNameProps) => {
+const AssetName = ({ assetName, className }: AssetNameProps) => {
   const [first, second] = assetName.split('(');
   return (
     <div>
-      <span className="body--emphasized text-color--1 L3">{first}</span>
+      <span className={`body--emphasized text-color--1 L3 ${className}`}>
+        {first}
+      </span>
       {second !== undefined ? (
         <span className="body--emphasized text-color--2 L3">
           {'('}

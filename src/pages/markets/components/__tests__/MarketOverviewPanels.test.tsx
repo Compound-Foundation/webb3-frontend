@@ -76,9 +76,7 @@ describe('MarketOverviewPanels — market statuses', () => {
       makeSummary(1, USDC_COMET, { status: 'error', utilization: 5n * 10n ** 17n, totalSupplyValue: 10n ** 12n }),
     ]);
 
-    const row = getRow('USD Coin');
-    expect(row).toHaveClass('market-overview-panels__table-row--error');
-    expect(within(row).getAllByText('N/A')).toHaveLength(6);
+    expect(within(getRow('USD Coin')).getAllByText('N/A')).toHaveLength(7);
   });
 
   test('does not open the market page for a market in the error status', async () => {
@@ -89,11 +87,10 @@ describe('MarketOverviewPanels — market statuses', () => {
     expect(screen.queryByText('Market page')).not.toBeInTheDocument();
   });
 
-  test('marks a partially working market and still opens its page', async () => {
+  test('shows the numbers of a partially working market and still opens its page', async () => {
     renderPanels([makeSummary(1, USDC_COMET, { status: 'partially' })]);
 
     const row = getRow('USD Coin');
-    expect(row).toHaveClass('market-overview-panels__table-row--partially');
     expect(within(row).queryByText('N/A')).not.toBeInTheDocument();
 
     await userEvent.click(row);

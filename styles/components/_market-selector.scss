@@ -99,6 +99,16 @@
       }
     }
 
+    &__exclamation {
+      display: flex;
+      margin-left: auto;
+    }
+
+    &__exclamation-icon {
+      width: 0.875rem;
+      height: 0.875rem;
+    }
+
     .icon + .market-selector__option__info {
       margin-left: 0.5rem;
     }
@@ -111,6 +121,15 @@
     &--arrow {
       margin-left: 0.75rem;
     }
+  }
+
+  &__tooltip-text {
+    font-weight: 400;
+    line-height: 1rem;
+    font-size: 11px;
+    width: 100%;
+    max-width: 10.125rem;
+    display: block;
   }
 
   @media (max-width: $device--sm) {
