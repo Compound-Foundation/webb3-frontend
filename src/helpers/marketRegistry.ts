@@ -15,7 +15,7 @@ export type RegistryMarket = {
   isInstitutional: boolean;
   contracts: {
     comet: string;
-    bulker: string;
+    bulker: string | null;
     rewards: string | null;
     fauceteer: string | null;
   };
@@ -117,7 +117,7 @@ function toMarketData(chainId: number, chainInformation: ChainInformation, marke
     chainInformation,
     iconPair: [market.isInstitutional ? 'INSTITUTIONAL' : iconNameForChainId(chainId), market.displayName],
     marketAddress: getAddress(contracts.comet),
-    bulkerAddress: getAddress(contracts.bulker),
+    bulkerAddress: contracts.bulker ? getAddress(contracts.bulker) : undefined,
     rewardsAddress: contracts.rewards ? getAddress(contracts.rewards) : undefined,
     fauceteerAddress: contracts.fauceteer ? getAddress(contracts.fauceteer) : undefined,
     slug: market.slug ?? undefined,

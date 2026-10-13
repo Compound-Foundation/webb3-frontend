@@ -376,11 +376,13 @@ const Home = ({
               if (web3.read.chainId && web3.write.chainId !== web3.read.chainId) {
                 switchWriteNetwork(web3.read.chainId);
               } else {
-                let spender = market.marketAddress;
+                let spender: string | undefined = market.marketAddress;
                 const assetAddress = asset.address;
                 if (isStETH(asset.symbol) && isUnwrappedCollateralAsset(market.chainInformation, assetAddress)) {
                   spender = market.bulkerAddress;
                 }
+                // stETH is supplied through the bulker, so a market without one can't take it
+                if (spender === undefined) return;
                 const approveGasLimit = estimatedGasMap.get(PreEstimatedAction.Approve) || 0;
                 writeState.approve(spender, assetAddress, `Enable ${asset.symbol}`, approveGasLimit);
                 confirmAction();
@@ -413,6 +415,9 @@ const Home = ({
                 // don't use bulker if you're only taking a single action (that
                 // doesn't involve wrapping Ether or stETH)
                 submitSingleAction(actions[0]);
+              } else if (market.bulkerAddress === undefined) {
+                // A market without a bulker only takes single actions sent to the comet directly
+                return;
               } else if (!isBulkerAllowed) {
                 setActionModalState(
                   actionModalStateBulkerApprove(
@@ -664,6 +669,7 @@ function actionModalStateBulkerApprove(
       isBulkerAllowed: state.isBulkerAllowed,
       transactions,
       onActionClicked: () => {
+        if (market.bulkerAddress === undefined) return;
         const allowOperatorGasLimit = estimatedGasMap.get(PreEstimatedAction.AllowOperator) || 0;
         writeState.allowOperator(market, market.bulkerAddress, 'Approve Compound III Proxy', allowOperatorGasLimit);
       },

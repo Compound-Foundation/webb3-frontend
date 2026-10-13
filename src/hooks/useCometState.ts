@@ -1,4 +1,5 @@
 import { StaticJsonRpcProvider } from '@ethersproject/providers';
+import { ethers } from 'ethers';
 import { ConnectionInfo } from 'ethers/lib/utils';
 import { Provider } from 'ethers-multicall';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -173,7 +174,8 @@ export const queryCometDataWithAccount = (
     market.marketAddress,
     nativeTokenToUsdPriceFeed,
     account,
-    market.bulkerAddress,
+    // Without a bulker its allowances read as zero
+    market.bulkerAddress ?? ethers.constants.AddressZero,
     wrappedNativeTokenSymbol,
     checkDeprecatedwUSDM,
   ]);
@@ -308,7 +310,7 @@ const maybeHydrateStEthCollateral = async (
                   account,
                   tokenWithAccountState,
                   unwrappedAsset,
-                  market.bulkerAddress,
+                  market.bulkerAddress ?? ethers.constants.AddressZero,
                   provider
                 );
                 return tokenWithAccountState;

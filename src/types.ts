@@ -375,7 +375,8 @@ export type MarketData = {
   chainInformation: ChainInformation;
   iconPair: [string, string];
   marketAddress: string;
-  bulkerAddress: string;
+  // A market can come from the registry without a bulker: it then only takes actions sent to the comet directly
+  bulkerAddress?: string;
   fauceteerAddress?: string;
   rewardsAddress?: string;
   // Overrides the base-asset part of the market's URL key (e.g. 'usdc-institutional' -> '?market=usdc-institutional-mainnet').

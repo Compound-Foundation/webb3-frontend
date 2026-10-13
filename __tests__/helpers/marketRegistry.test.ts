@@ -122,6 +122,29 @@ describe('registryToMarkets', () => {
     withoutV2.forEach((market) => expect(market.fauceteerAddress).toBeUndefined());
   });
 
+  test('keeps a market the registry has no bulker for, without a bulker address', () => {
+    const [mainnet, ...restNetworks] = registry.networks;
+    const [noBulkerMarket, ...restMarkets] = mainnet.markets;
+    const withoutBulker: MarketRegistryResponse = {
+      ...registry,
+      networks: [
+        {
+          ...mainnet,
+          markets: [
+            { ...noBulkerMarket, contracts: { ...noBulkerMarket.contracts, bulker: null } },
+            ...restMarkets,
+          ],
+        },
+        ...restNetworks,
+      ],
+    };
+    const mapped = registryToMarkets(withoutBulker).markets.find(
+      (market) => market.marketAddress.toLowerCase() === noBulkerMarket.contracts.comet
+    );
+    expect(mapped).toBeDefined();
+    expect(mapped?.bulkerAddress).toBeUndefined();
+  });
+
   test('returns the registry default market', () => {
     expect(defaultMarket?.marketAddress).toEqual(LEGACY_ADDRESSES.mainnetUSDC.comet);
   });

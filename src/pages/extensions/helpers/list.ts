@@ -42,7 +42,7 @@ export function getOperator(extension: Extension, marketData: MarketData | Marke
   }
 
   const operator = extension.supportedMarkets[marketKey(marketData)];
-  return operator === MarketBulker ? marketData.bulkerAddress : operator || null;
+  return operator === MarketBulker ? (marketData.bulkerAddress ?? null) : operator || null;
 }
 
 export function getSrc(extension: Extension): string | null {

@@ -72,9 +72,16 @@ type RenderOptions = {
   isWbtcError?: boolean;
   actions?: Action[];
   pendingAction?: PendingAction;
+  selectedMarketData?: SelectedMarketData;
 };
 
-const renderHome = ({ status = 'success', isWbtcError = false, actions, pendingAction }: RenderOptions) => {
+const renderHome = ({
+  status = 'success',
+  isWbtcError = false,
+  actions,
+  pendingAction,
+  selectedMarketData = selected,
+}: RenderOptions) => {
   const SelectedMarketContext = getSelectedMarketContext();
   const ActionQueueContext = getActionQueueContext();
   const actionQueue = makeActionQueue(actions, pendingAction);
@@ -89,12 +96,12 @@ const renderHome = ({ status = 'success', isWbtcError = false, actions, pendingA
     <MemoryRouter>
       <div id="overlay"></div>
       <MockMarketsProvider marketSummaries={[summary]}>
-        <SelectedMarketContext.Provider value={selected}>
+        <SelectedMarketContext.Provider value={selectedMarketData}>
           <ActionQueueContext.Provider value={actionQueue}>
             <Home
               transactions={[]}
               web3={mockWeb3}
-              selectedMarketData={selected}
+              selectedMarketData={selectedMarketData}
               cometState={cometState}
               addTransaction={jest.fn()}
               switchWriteNetwork={jest.fn()}
@@ -163,4 +170,33 @@ describe('Home — collateral status', () => {
       expect(writeState.withdraw).not.toHaveBeenCalled();
     }
   );
+});
+
+describe('Home — market without a bulker', () => {
+  const withoutBulker: SelectedMarketData = {
+    ...selected,
+    selectedMarket: [StateType.Hydrated, { ...MOCK_DEFAULT_MARKET, bulkerAddress: undefined }],
+  };
+
+  test('does not send actions that need the bulker', async () => {
+    renderHome({
+      selectedMarketData: withoutBulker,
+      actions: [
+        [ActionType.SupplyCollateral, wbtc, 10n ** 7n],
+        [ActionType.Supply, mockBaseAsset(), 10n ** 6n],
+      ],
+    });
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Submit Transaction' })[0]);
+
+    expect(writeState.invokeBulker).not.toHaveBeenCalled();
+  });
+
+  test('still sends a single action straight to the comet', async () => {
+    renderHome({ selectedMarketData: withoutBulker, actions: [[ActionType.SupplyCollateral, wbtc, 10n ** 7n]] });
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Submit Transaction' })[0]);
+
+    expect(writeState.supply).toHaveBeenCalled();
+  });
 });
