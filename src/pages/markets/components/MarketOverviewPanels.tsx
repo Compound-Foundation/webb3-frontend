@@ -12,7 +12,7 @@ import { CHAINS, INACTIVE_CHAIN_IDS } from '@constants/chains';
 import { assetIconForAssetSymbol, iconNameForChainId } from '@helpers/assets';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, getMarketDescriptors } from '@helpers/markets';
-import { formatRateFactor, formatValueInDollars, PRICE_PRECISION } from '@helpers/numbers';
+import { BASE_FACTOR, formatRateFactor, formatValueInDollars, PRICE_PRECISION } from '@helpers/numbers';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 
 import { LatestMarketSummaries, MarketSummary } from '../../../types';
@@ -304,7 +304,11 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
   const market = getMarket(marketSummary.chainId, marketSummary.comet.address);
   const showNewBadge = market?.isNew === true;
 
-  const utilization = formatRateFactor(marketSummary.utilization);
+  const utilizationPercent = (Number(marketSummary.utilization) / Number(BASE_FACTOR)) * 100;
+  const utilization = `${(Math.round(utilizationPercent * 100) / 100).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}%`;
 
   const netEarnAPR = formatRateFactor(marketSummary.supplyAPR + marketSummary.supplyRewardsAPR);
   const netBorrowAPR = formatRateFactor(marketSummary.borrowAPR - marketSummary.borrowRewardsAPR);
