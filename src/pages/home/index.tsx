@@ -358,14 +358,8 @@ const Home = ({
           setPendingAction(undefined);
         },
         onPendingActionConfirm: (amount: bigint) => {
-          // The collateral can turn to the error status after the supply input was opened
-          if (
-            pendingAction !== undefined &&
-            !(
-              pendingAction[0] === ActionType.SupplyCollateral &&
-              getCollateralStatusFor(pendingAction[1].address) === 'error'
-            )
-          ) {
+          // The collateral can turn to the error status after the action input was opened
+          if (pendingAction !== undefined && getCollateralStatusFor(pendingAction[1].address) !== 'error') {
             const action = getActionFromPendingAction(pendingAction, amount);
             const confirmAction = () => {
               setPendingAction(undefined);
@@ -402,13 +396,8 @@ const Home = ({
           }
         },
         onSubmitClicked: () => {
-          // A supply queued before its collateral turned to the error status must not be sent
-          if (
-            actions.some(
-              (action) =>
-                action[0] === ActionType.SupplyCollateral && getCollateralStatusFor(action[1].address) === 'error'
-            )
-          ) {
+          // An action queued before its collateral turned to the error status must not be sent
+          if (actions.some((action) => getCollateralStatusFor(action[1].address) === 'error')) {
             return;
           }
           setPendingAction(undefined);

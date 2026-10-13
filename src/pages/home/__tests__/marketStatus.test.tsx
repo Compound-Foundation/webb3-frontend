@@ -24,7 +24,7 @@ import { MOCK_DEFAULT_MARKET, MockMarketsProvider } from '../../../../__tests__/
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import Home from '../index';
 
-const writeState = { approve: jest.fn(), supply: jest.fn(), invokeBulker: jest.fn() };
+const writeState = { approve: jest.fn(), supply: jest.fn(), withdraw: jest.fn(), invokeBulker: jest.fn() };
 jest.mock('@hooks/useWriteCometState', () => ({ useWriteCometState: () => writeState }));
 
 beforeEach(() => jest.clearAllMocks());
@@ -124,34 +124,43 @@ describe('Home — market status', () => {
 });
 
 describe('Home — collateral status', () => {
-  test('an error collateral row is marked, cannot be supplied, and can still be withdrawn', () => {
+  test('an error collateral row is marked and can be neither supplied nor withdrawn', () => {
     renderHome({ isWbtcError: true });
     const row = document.querySelector('.asset-row--error') as HTMLElement;
 
     expect(row).not.toBeNull();
     expect(within(row).getAllByRole('button', { name: /Supply/ })[0]).toBeDisabled();
-    expect(within(row).getAllByRole('button', { name: /Withdraw/ })[0]).toBeEnabled();
+    expect(within(row).getAllByRole('button', { name: /Withdraw/ })[0]).toBeDisabled();
   });
 
-  test('confirming a pending supply of an error collateral neither approves nor queues it', async () => {
-    const actionQueue = renderHome({
-      isWbtcError: true,
-      pendingAction: [ActionType.SupplyCollateral, { ...wbtc, allowance: 0n }, 10n ** 7n],
-    });
+  test.each<[string, PendingAction]>([
+    ['supply', [ActionType.SupplyCollateral, { ...wbtc, allowance: 0n }, 10n ** 7n]],
+    ['withdraw', [ActionType.WithdrawCollateral, wbtc, mockBaseAsset(), 10n ** 7n]],
+  ])(
+    'confirming a pending %s of an error collateral neither approves nor queues it',
+    async (_, pendingAction) => {
+      const actionQueue = renderHome({ isWbtcError: true, pendingAction });
 
-    // The confirm (or enable) button sits right after Cancel in the action input
-    const [confirmButton] = screen.getAllByRole('button', { name: 'Cancel' }).map((cancel) => cancel.nextElementSibling);
-    await userEvent.click(confirmButton as HTMLElement);
+      // The confirm (or enable) button sits right after Cancel in the action input
+      const [confirmButton] = screen
+        .getAllByRole('button', { name: 'Cancel' })
+        .map((cancel) => cancel.nextElementSibling);
+      await userEvent.click(confirmButton as HTMLElement);
 
-    expect(writeState.approve).not.toHaveBeenCalled();
-    expect(actionQueue.addOrUpdateAction).not.toHaveBeenCalled();
-  });
+      expect(writeState.approve).not.toHaveBeenCalled();
+      expect(actionQueue.addOrUpdateAction).not.toHaveBeenCalled();
+    }
+  );
 
-  test('a queued supply of an error collateral is not submitted', async () => {
-    renderHome({ isWbtcError: true, actions: [[ActionType.SupplyCollateral, wbtc, 10n ** 7n]] });
+  test.each([ActionType.SupplyCollateral, ActionType.WithdrawCollateral] as const)(
+    'a queued %s of an error collateral is not submitted',
+    async (actionType) => {
+      renderHome({ isWbtcError: true, actions: [[actionType, wbtc, 10n ** 7n]] });
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'Submit Transaction' })[0]);
+      await userEvent.click(screen.getAllByRole('button', { name: 'Submit Transaction' })[0]);
 
-    expect(writeState.supply).not.toHaveBeenCalled();
-  });
+      expect(writeState.supply).not.toHaveBeenCalled();
+      expect(writeState.withdraw).not.toHaveBeenCalled();
+    }
+  );
 });

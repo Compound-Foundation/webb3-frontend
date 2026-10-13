@@ -219,7 +219,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
           <button
             onClick={() => onWithdrawClicked()}
             className="button button--circle"
-            disabled={balanceToUse === 0n || transaction !== undefined}
+            disabled={balanceToUse === 0n || transaction !== undefined || isCollateralError}
           >
             <Minus />
             <span className="mobile-only">Withdraw</span>
