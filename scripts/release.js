@@ -6,6 +6,9 @@ const releaseFile = '.release';
 const ethereumNode = process.env['ETHEREUM_NODE'] || 'http://localhost:8585';
 const workerHost = process.env['WORKER_HOST'] || 'https://v3-app.compound.xyz';
 const url = `${workerHost}/release`;
+// The worker only accepts a release signed for its own app host, so a release
+// signed for one app cannot be replayed against another.
+const appHost = process.env['APP_HOST'] || new URL(workerHost).host;
 
 async function release(payload, url, signature) {
   const body = JSON.stringify(payload);
@@ -35,10 +38,11 @@ async function release(payload, url, signature) {
 }
 
 // The signed message is the JSON-stringified payload. The worker recovers the
-// signer from this exact body and checks it matches `deployer` and `timestamp`,
-// so the object signed here must be byte-identical to the one sent in `release`.
+// signer from this exact body and checks it matches `deployer`, `timestamp` and
+// `app_host`, so the object signed here must be byte-identical to the one sent
+// in `release`.
 function buildPayload(cid, timestamp, deployer) {
-  return { cid, timestamp, deployer };
+  return { cid, timestamp, deployer, app_host: appHost };
 }
 
 async function run(cid, signature, timestamp, deployer) {
@@ -47,7 +51,8 @@ async function run(cid, signature, timestamp, deployer) {
   }
 
   // Release timestamp (epoch ms) provides replay protection: the worker
-  // requires it to strictly increase between releases.
+  // requires it to strictly increase between releases and to be at most an
+  // hour old (and at most five minutes ahead) when the release arrives.
   if (timestamp === undefined) {
     timestamp = Date.now();
   }
