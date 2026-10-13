@@ -55,7 +55,6 @@ describe('MarketSelector — market statuses', () => {
     const { selectMarket } = renderSelector('error');
     const option = await openAndClickWeth();
 
-    expect(option).toHaveClass('market-selector__option--disabled');
     expect(option).toHaveAttribute('aria-disabled', 'true');
     expect(selectMarket).not.toHaveBeenCalled();
   });

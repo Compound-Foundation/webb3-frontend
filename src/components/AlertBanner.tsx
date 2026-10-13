@@ -39,7 +39,7 @@ const AlertBanner = ({ web3, isCometStateError, isMarketsStateError }: AlertBann
   }
 
   if (isMarketDataError) {
-    messages.push('Market data is currently unavailable. Please try again later or select another market.');
+    messages.push('Market temporarily unavailable. Please check back shortly.');
   }
 
   const hideBannerClass = messages.length === 0 ? '--hide' : '';

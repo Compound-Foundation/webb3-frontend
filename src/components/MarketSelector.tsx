@@ -1,6 +1,7 @@
 import { useState, useRef, useContext, Fragment } from 'react';
 import { useSearchParams } from 'react-router';
 
+import { UnavailableTooltip } from '@components/UnavalableMarketTooltip';
 import { useMarketsContext } from '@contexts/MarketsContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { iconNameForChainId } from '@helpers/assets';
@@ -10,7 +11,7 @@ import useOnClickOutside from '@hooks/useOnClickOutside';
 import { MarketData, MarketDataLoaded, MarketsByNetwork } from '@types';
 
 import IconPair from './IconPair';
-import { ArrowRightNoDash, CaretDown, CheckMark, TailSpin } from './Icons';
+import { ArrowRightNoDash, CaretDown, CheckMark, CircleExclamation, TailSpin } from './Icons';
 import MarketNetworkIcon from './MarketNetworkIcon';
 
 const APPROVE_IN_WALLET = 'Approve in wallet';
@@ -181,11 +182,12 @@ type MarketOptionProps = {
 const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loading }: MarketOptionProps) => {
   const content = (
     <>
-      <MarketNetworkIcon icon={market.iconPair[1]} />
+      <MarketNetworkIcon icon={market.iconPair[1]} className={`${isError ? 'icon-disabled' : ''}`}/>
       <div className="market-selector__option__info">
-        <span className="label text-color--1 L1">{market.baseAsset.symbol}</span>
+        <span className={`label text-color--1 L1 ${isError ? "text-color--3" : ''}`}>{market.baseAsset.symbol}</span>
         {loading && <span className="label label--secondary text-color--2">{APPROVE_IN_WALLET}</span>}
       </div>
+      {isError && <UnavailableTooltip className="tooltip-container"/>}
       {market.isNew && <span className="new-badge label label--secondary">{NEW}</span>}
       {isCurrentMarket && <CheckMark className="svg--supply" />}
       {loading && <TailSpin className="svg--spin" />}
@@ -211,7 +213,7 @@ const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loa
   return (
     <div
       key={market.baseAsset.symbol}
-      className={`market-selector__option${isError ? ' market-selector__option--disabled' : ''}`}
+      className={`market-selector__option`}
       aria-disabled={isError}
       onClick={onClick}
     >

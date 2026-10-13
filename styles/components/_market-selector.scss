@@ -67,6 +67,14 @@
     width: 100%;
     text-transform: none;
 
+    .icon-disabled {
+      opacity: 0.3;
+    }
+
+    .tooltip-container {
+      margin-left: auto;
+    }
+
     .new-badge {
       margin-left: 0.375rem;
     }

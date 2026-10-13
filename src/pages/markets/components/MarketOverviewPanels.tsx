@@ -322,6 +322,8 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
 
   const marketPath = `/markets/${shortMarketName()}`;
 
+  const isError = marketSummary.status === 'error';
+
   const navigate = useNavigate();
   const handleRowClick = () => {
     navigate(marketPath);
@@ -331,11 +333,19 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
   };
 
   const rowModifier = market?.institutional ? ' market-overview-panels__table-row--institutional' : '';
+  const statusModifier =
+    marketSummary.status === 'error' || marketSummary.status === 'partially'
+      ? ` market-overview-panels__table-row--${marketSummary.status}`
+      : '';
 
   return (
     // The Link component doesn't work here because tr must be
     // a direct child of tbody and td must be a direct child of tr
-    <tr className={`market-overview-panels__table-row${rowModifier}`} onClick={handleRowClick}>
+    // A market in the error status has no data to show, so its page isn't opened
+    <tr
+      className={`market-overview-panels__table-row${rowModifier}${statusModifier}`}
+      onClick={isError ? undefined : handleRowClick}
+    >
       <td>
         <div className="market-overview-panels__market-container">
           <IconPair
@@ -357,13 +367,19 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
         </div>
       </td>
       <td>
-        <div className="market-overview-panels__utilization-container">
-          <CircleMeter percentageFill={utilization.toString()} />
-          <div className="body text-color--1 L3">{utilization}</div>
-        </div>
+        {isError ? (
+          <div className="body text-color--1 L3">N/A</div>
+        ) : (
+          <div className="market-overview-panels__utilization-container">
+            <CircleMeter percentageFill={utilization.toString()} />
+            <div className="body text-color--1 L3">{utilization}</div>
+          </div>
+        )}
       </td>
       <td>
-        {marketSummary.isRewardsLoading ? (
+        {isError ? (
+          <div className="body text-color--1 L3">N/A</div>
+        ) : marketSummary.isRewardsLoading ? (
           <div className="placeholder-content" style={{ width: '4rem', height: '1.25rem' }}></div>
         ) : (
           <div className="market-overview-panels__apr-container">
@@ -386,7 +402,9 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
         )}
       </td>
       <td>
-        {marketSummary.isRewardsLoading ? (
+        {isError ? (
+          <div className="body text-color--1 L3">N/A</div>
+        ) : marketSummary.isRewardsLoading ? (
           <div className="placeholder-content" style={{ width: '4rem', height: '1.25rem' }}></div>
         ) : (
           <div className="market-overview-panels__apr-container">
@@ -404,21 +422,24 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
       </td>
       <td>
         <div className="body text-color--1 L3">
-          {formatValueInDollars(PRICE_PRECISION, marketSummary.totalSupplyValue)}
+          {isError ? 'N/A' : formatValueInDollars(PRICE_PRECISION, marketSummary.totalSupplyValue)}
         </div>
       </td>
       <td>
         <div className="body text-color--1 L3">
-          {formatValueInDollars(PRICE_PRECISION, marketSummary.totalBorrowValue)}
+          {isError ? 'N/A' : formatValueInDollars(PRICE_PRECISION, marketSummary.totalBorrowValue)}
         </div>
       </td>
       <td>
         <div className="body text-color--1 L3">
-          {formatValueInDollars(PRICE_PRECISION, marketSummary.totalCollateralValue)}
+          {isError ? 'N/A' : formatValueInDollars(PRICE_PRECISION, marketSummary.totalCollateralValue)}
         </div>
       </td>
       <td>
-        <CollateralAssets collateralAssets={marketSummary.collateralAssetSymbols} />
+        <CollateralAssets
+          collateralAssets={marketSummary.collateralAssetSymbols}
+          errorCollateralAssets={marketSummary.errorCollateralSymbols ?? []}
+        />
       </td>
     </tr>
   );
@@ -426,8 +447,9 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
 
 type CollateralAssetsProps = {
   collateralAssets: string[];
+  errorCollateralAssets: string[];
 };
-const CollateralAssets = ({ collateralAssets }: CollateralAssetsProps) => {
+const CollateralAssets = ({ collateralAssets, errorCollateralAssets }: CollateralAssetsProps) => {
   // divide the icons into two rows of equal lengths (5 & 5 for 10 icons, 8 & 7 for 15 icons, etc.)
   // we're using 9 and more as the cut-off to divide into two rows
   const shouldUseEqualRows = collateralAssets.length > 8;
@@ -448,7 +470,9 @@ const CollateralAssets = ({ collateralAssets }: CollateralAssetsProps) => {
               key={collateralAsset}
               className={`asset asset--${assetIconForAssetSymbol(
                 collateralAsset,
-              )} market-overview-panels__collateral-asset-icon`}
+              )} market-overview-panels__collateral-asset-icon${
+                errorCollateralAssets.includes(collateralAsset) ? ' market-overview-panels__collateral-asset-icon--error' : ''
+              }`}
             />
           );
         })}

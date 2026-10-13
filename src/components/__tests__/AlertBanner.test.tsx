@@ -9,7 +9,7 @@ import { MOCK_DEFAULT_MARKET, MockMarketsProvider } from '../../../__tests__/moc
 import { mockWeb3 } from '../../../__tests__/mocks/mockWeb3';
 import AlertBanner from '../AlertBanner';
 
-const MARKET_DATA_UNAVAILABLE = 'Market data is currently unavailable. Please try again later or select another market.';
+const MARKET_DATA_UNAVAILABLE = 'Market temporarily unavailable. Please check back shortly.';
 
 const renderBanner = (path: string, status: MarketStatus) => {
   const selected: SelectedMarketData = {

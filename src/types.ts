@@ -352,15 +352,16 @@ export type LatestMarketSummaryResponse = {
     address: string;
   };
   status?: MarketStatus;
-  borrowApr: string;
-  supplyApr: string;
-  totalBorrowValue: string;
-  totalSupplyValue: string;
-  totalCollateralValue: string;
-  utilization: string;
+  // A market in the error status comes without the numbers
+  borrowApr?: string;
+  supplyApr?: string;
+  totalBorrowValue?: string;
+  totalSupplyValue?: string;
+  totalCollateralValue?: string;
+  utilization?: string;
   timestamp: number;
   date: string;
-  baseUsdPrice: string;
+  baseUsdPrice?: string;
   collateralAssetSymbols: string[];
   collaterals?: {
     address: string;
@@ -384,7 +385,6 @@ export type MarketData = {
   institutional?: boolean;
   // Recently launched markets get a 'New' badge in the market selector
   isNew?: boolean;
-  status?: MarketStatus;
   type: 'MarketData';
   rewardsOverwrite?: {
     rewardsAssetSymbol: string;
@@ -437,6 +437,7 @@ export type MarketSummary = {
   isInstitutional?: boolean;
   isRewardsLoading?: boolean;
   status?: MarketStatus;
+  errorCollateralSymbols?: string[];
 };
 
 export type AggregatedHistoricalSummary = {

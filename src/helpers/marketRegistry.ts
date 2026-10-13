@@ -5,7 +5,7 @@ import { CHAINS } from '@constants/chains';
 import { iconNameForChainId } from '@helpers/assets';
 import { V2_MARKET } from '@helpers/markets';
 import { getMarketRegistryEndpoint } from '@helpers/urls';
-import { ChainInformation, MarketData, MarketStatus } from '@types';
+import { ChainInformation, MarketData } from '@types';
 
 export type RegistryMarket = {
   deploymentKey: string;
@@ -13,7 +13,6 @@ export type RegistryMarket = {
   slug: string | null;
   isDefault: boolean;
   isInstitutional: boolean;
-  status: MarketStatus;
   contracts: {
     comet: string;
     bulker: string;
@@ -123,7 +122,6 @@ function toMarketData(chainId: number, chainInformation: ChainInformation, marke
     fauceteerAddress: contracts.fauceteer ? getAddress(contracts.fauceteer) : undefined,
     slug: market.slug ?? undefined,
     institutional: market.isInstitutional || undefined,
-    status: market.status,
     ...MARKET_OVERRIDES[`${chainId}:${market.deploymentKey}`],
     type: 'MarketData',
   };
