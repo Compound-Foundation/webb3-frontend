@@ -345,9 +345,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
   return (
     <Tooltip
       disabled={!isError && !isPartially}
-      width={200}
-      // A tap on a partially working row opens its page instead of the tooltip
-      touchToggle={isError}
+      width={isError ? 200 : 180}
       yOffset={12}
       anchorRef={exclamationRef}
       content={
