@@ -316,6 +316,10 @@ const Home = ({
         setCompare,
       },
     ];
+    // Don't use the bulker for a single action that doesn't involve wrapping Ether or stETH: it goes to the comet directly
+    const isSingleCometAction =
+      actions.length === 1 && ![market.chainInformation.nativeToken.symbol, 'stETH'].includes(actions[0][1].symbol);
+
     positionCardState = [
       StateType.Hydrated,
       {
@@ -338,6 +342,8 @@ const Home = ({
         pendingAction,
         theme,
         isRewardsLoading,
+        // A market without a bulker only takes single actions sent to the comet directly
+        isSubmitDisabled: !isSingleCometAction && market.bulkerAddress === undefined,
         transaction: blockingTransaction,
         onClearClicked: () => {
           clearActions();
@@ -408,15 +414,9 @@ const Home = ({
             if (web3.write.chainId !== web3.read.chainId) {
               switchWriteNetwork(web3.read.chainId);
             } else {
-              const nativeTokenSymbol = market.chainInformation.nativeToken.symbol;
-              const actionAssetSymbol = actions[0][1].symbol;
-
-              if (actions.length === 1 && actionAssetSymbol !== nativeTokenSymbol && actionAssetSymbol !== 'stETH') {
-                // don't use bulker if you're only taking a single action (that
-                // doesn't involve wrapping Ether or stETH)
+              if (isSingleCometAction) {
                 submitSingleAction(actions[0]);
               } else if (market.bulkerAddress === undefined) {
-                // A market without a bulker only takes single actions sent to the comet directly
                 return;
               } else if (!isBulkerAllowed) {
                 setActionModalState(

@@ -178,7 +178,7 @@ describe('Home — market without a bulker', () => {
     selectedMarket: [StateType.Hydrated, { ...MOCK_DEFAULT_MARKET, bulkerAddress: undefined }],
   };
 
-  test('does not send actions that need the bulker', async () => {
+  test('cannot submit actions that need the bulker', async () => {
     renderHome({
       selectedMarketData: withoutBulker,
       actions: [
@@ -186,17 +186,19 @@ describe('Home — market without a bulker', () => {
         [ActionType.Supply, mockBaseAsset(), 10n ** 6n],
       ],
     });
+    const submitButtons = screen.getAllByRole('button', { name: 'Submit Transaction' });
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'Submit Transaction' })[0]);
-
+    submitButtons.forEach((button) => expect(button).toBeDisabled());
+    await userEvent.click(submitButtons[0]);
     expect(writeState.invokeBulker).not.toHaveBeenCalled();
   });
 
   test('still sends a single action straight to the comet', async () => {
     renderHome({ selectedMarketData: withoutBulker, actions: [[ActionType.SupplyCollateral, wbtc, 10n ** 7n]] });
+    const submitButtons = screen.getAllByRole('button', { name: 'Submit Transaction' });
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'Submit Transaction' })[0]);
-
+    submitButtons.forEach((button) => expect(button).toBeEnabled());
+    await userEvent.click(submitButtons[0]);
     expect(writeState.supply).toHaveBeenCalled();
   });
 });
