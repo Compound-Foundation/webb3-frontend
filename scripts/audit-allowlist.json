@@ -1,0 +1,7 @@
+[
+  {
+    "id": "GHSA-vfj7-8cjw-p6xm",
+    "package": "braces",
+    "justification": "No patched release exists (3.0.3 is latest). Only reached via dev/test tooling (jest, @types/jest, msw>chokidar, globby in scripts/ipfs.js); not part of the built app. Remove once a fix ships."
+  }
+]

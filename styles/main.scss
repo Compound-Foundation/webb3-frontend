@@ -82,8 +82,8 @@
 @use 'pages/extension-list';
 @use 'pages/transactions';
 @use 'pages/vote';
-@use 'pages/rewards-page';
 @use 'pages/redirect';
+@use 'pages/rewards-page';
 
 .text-link:hover {
   opacity: 0.85;
