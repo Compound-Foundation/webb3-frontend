@@ -48,7 +48,9 @@ const UnwrappedAssetTooltipContent = ({
     );
     wrappedAssetPrice = formatTokenBalance(PRICE_PRECISION, wrappedAssetPriceInDollars, false, currency);
 
-    const wstEthPerStEth = (asset.price * BigInt(10 ** wrappedAsset.decimals)) / wrappedAsset.price;
+    // A reverting price feed prices the wrapped asset at 0, which would divide by zero
+    const wstEthPerStEth =
+      wrappedAsset.price > 0n ? (asset.price * BigInt(10 ** wrappedAsset.decimals)) / wrappedAsset.price : 0n;
     [exchangeRatewholeNumber, exchangeRatefractionalNumber] = displayValue(wrappedAsset.decimals, wstEthPerStEth).split(
       '.'
     );

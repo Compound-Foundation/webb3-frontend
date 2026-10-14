@@ -86,8 +86,14 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
       }
 
       const [, currentMarket] = state;
+      // A refreshed registry can change the market's contracts: then the market is loaded again
+      const contractsChanged =
+        currentMarket !== undefined &&
+        (currentMarket.bulkerAddress !== desiredMarket.bulkerAddress ||
+          currentMarket.rewardsAddress !== desiredMarket.rewardsAddress ||
+          currentMarket.fauceteerAddress !== desiredMarket.fauceteerAddress);
       // if we've already selected the desired market, return
-      if (currentMarket !== undefined && areSameMarket(currentMarket, desiredMarket)) return;
+      if (currentMarket !== undefined && areSameMarket(currentMarket, desiredMarket) && !contractsChanged) return;
       const switched = await web3.switchReadNetwork(desiredMarket.chainInformation.chainId);
 
       if (switched) {

@@ -1,5 +1,5 @@
 import type { Query } from '@tanstack/react-query';
-import { getAddress, isAddress } from 'ethers/lib/utils';
+import { getAddress } from 'ethers/lib/utils';
 
 import { CHAINS } from '@constants/chains';
 import { iconNameForChainId } from '@helpers/assets';
@@ -154,14 +154,14 @@ function collectRegistryMarkets(response: MarketRegistryResponse): CollectedMark
     for (const market of network.markets) {
       const id = `${network.chainId}:${market.deploymentKey}`;
 
-      const { comet, bulker, rewards, fauceteer } = market.contracts;
-
-      if (![comet, bulker, rewards, fauceteer].every((address) => address === null || isAddress(address))) {
-        console.warn(`Market registry: skipping market ${id} (invalid address)`);
+      let marketData: MarketData;
+      try {
+        marketData = toMarketData(network.chainId, chainInformation, market);
+      } catch {
+        // A malformed entry (e.g. an invalid or missing address) is skipped, so it doesn't fail the whole registry
+        console.warn(`Market registry: skipping market ${id} (malformed entry)`);
         continue;
       }
-
-      const marketData = toMarketData(network.chainId, chainInformation, market);
 
       // Markets missing from the priority list go after the listed ones, in registry order
       collected.entries.push({ priority: MARKET_PRIORITY_INDEX.get(id) ?? MARKET_PRIORITY.length, market: marketData });
