@@ -43,7 +43,6 @@ export default defineConfig({
         redirect: resolve(__dirname, 'redirect/index.html'),
       },
       plugins: [nodePolyfills()],
-      external: ['@safe-global/safe-apps-sdk', '@safe-globalThis/safe-apps-sdk', '@safe-globalThis/safe-apps-provider'],
     },
   },
   base: '',

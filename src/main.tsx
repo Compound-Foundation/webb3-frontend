@@ -1,3 +1,4 @@
+import { SafeProvider } from '@safe-global/safe-apps-react-sdk';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { QueryClient } from '@tanstack/react-query';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
@@ -14,6 +15,7 @@ import {
   MARKET_REGISTRY_CACHE_MAX_AGE,
   shouldPersistQuery,
 } from '@helpers/marketRegistry';
+import { SAFE_ALLOWED_DOMAINS } from '@helpers/safe';
 
 import App from './App';
 import './init';
@@ -49,32 +51,34 @@ createRoot(document.getElementById('root') as HTMLElement).render(
         connector reuses a live session rather than showing a QR.
       */}
       <WagmiProvider config={config} reconnectOnMount={false}>
-        <PersistQueryClientProvider
-          client={queryClient}
-          persistOptions={{
-            persister,
-            maxAge: MARKET_REGISTRY_CACHE_MAX_AGE,
-            buster: MARKET_REGISTRY_CACHE_BUSTER,
-            dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
-          }}
-        >
-          <MarketsProvider>
-            <Web3Provider>
-              <Routes>
-                <Route path="/" element={<App Component={Home} pageProps={{}} />} />
-                <Route path="/markets/:marketId" element={<App Component={Market} pageProps={{}} />} />
-                <Route path="/markets" element={<App Component={MarketOverview} pageProps={{}} />} />
-                <Route path="/extensions/:extensionId" element={<App Component={Extension} pageProps={{}} />} />
-                <Route path="/extensions" element={<App Component={ExtensionList} pageProps={{}} />} />
-                <Route path="/vote" element={<App Component={Vote} pageProps={{}} />} />
-                <Route path="/transactions" element={<App Component={TransactionHistory} pageProps={{}} />} />
-                <Route path="/rewards" element={<App Component={Rewards} pageProps={{}} />} />
-                {/* Standalone interstitial: no header, footer, or wallet chrome. */}
-                <Route path="/redirect" element={<Redirect />} />
-              </Routes>
-            </Web3Provider>
-          </MarketsProvider>
-        </PersistQueryClientProvider>
+        <SafeProvider opts={{ allowedDomains: SAFE_ALLOWED_DOMAINS }}>
+          <PersistQueryClientProvider
+            client={queryClient}
+            persistOptions={{
+              persister,
+              maxAge: MARKET_REGISTRY_CACHE_MAX_AGE,
+              buster: MARKET_REGISTRY_CACHE_BUSTER,
+              dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+            }}
+          >
+            <MarketsProvider>
+              <Web3Provider>
+                <Routes>
+                  <Route path="/" element={<App Component={Home} pageProps={{}} />} />
+                  <Route path="/markets/:marketId" element={<App Component={Market} pageProps={{}} />} />
+                  <Route path="/markets" element={<App Component={MarketOverview} pageProps={{}} />} />
+                  <Route path="/extensions/:extensionId" element={<App Component={Extension} pageProps={{}} />} />
+                  <Route path="/extensions" element={<App Component={ExtensionList} pageProps={{}} />} />
+                  <Route path="/vote" element={<App Component={Vote} pageProps={{}} />} />
+                  <Route path="/transactions" element={<App Component={TransactionHistory} pageProps={{}} />} />
+                  <Route path="/rewards" element={<App Component={Rewards} pageProps={{}} />} />
+                  {/* Standalone interstitial: no header, footer, or wallet chrome. */}
+                  <Route path="/redirect" element={<Redirect />} />
+                </Routes>
+              </Web3Provider>
+            </MarketsProvider>
+          </PersistQueryClientProvider>
+        </SafeProvider>
       </WagmiProvider>
     </Router>
   </React.StrictMode>,

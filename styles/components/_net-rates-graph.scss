@@ -20,6 +20,12 @@
     font-weight: 400;
   }
 
+  &__boosted-label {
+    color: var(--text--2);
+    font-size: 11px;
+    margin-left: 0.25rem;
+  }
+
   &__graph {
     display: flex;
     flex-direction: column;
