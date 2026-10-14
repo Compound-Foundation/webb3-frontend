@@ -11,7 +11,7 @@ import Comet from '@helpers/abis/Comet';
 import ERC20 from '@helpers/abis/ERC20';
 import { adjustCollateralPrice, getBaseAssetPriceFeed } from '@helpers/baseAssetPrice';
 import { getHardcodedFeedPrice, getRemappedPriceFeed } from '@helpers/deprecatedMarkets';
-import { perSecondRateAt, SECONDS_PER_YEAR } from '@helpers/interestRates';
+import { aprAt, RateModel } from '@helpers/interestRates';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
 import { FACTOR_PRECISION } from '@helpers/numbers';
@@ -131,28 +131,27 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     cometContract.supplyPerSecondInterestRateSlopeHigh(),
   ]);
 
+  const rateFactorScale = factorScaleBN.toBigInt();
+  const borrowRateModel: RateModel = {
+    kink: borrowKink.toBigInt(),
+    base: borrowBase.toBigInt(),
+    slopeLow: borrowSlopeLow.toBigInt(),
+    slopeHigh: borrowSlopeHigh.toBigInt(),
+  };
+  const supplyRateModel: RateModel = {
+    kink: supplyKink.toBigInt(),
+    base: supplyBase.toBigInt(),
+    slopeLow: supplySlopeLow.toBigInt(),
+    slopeHigh: supplySlopeHigh.toBigInt(),
+  };
+
   const borrowRates: [bigint, bigint][] = utilizationIntervals.map((interval) => [
     interval,
-    perSecondRateAt({
-      utilization: interval,
-      kink: borrowKink.toBigInt(),
-      base: borrowBase.toBigInt(),
-      slopeLow: borrowSlopeLow.toBigInt(),
-      slopeHigh: borrowSlopeHigh.toBigInt(),
-      factorScale: factorScaleBN.toBigInt()
-    }) * SECONDS_PER_YEAR,
+    aprAt(interval, borrowRateModel, rateFactorScale),
   ]);
-
   const supplyRates: [bigint, bigint][] = utilizationIntervals.map((interval) => [
     interval,
-    perSecondRateAt({
-      utilization: interval,
-      kink: supplyKink.toBigInt(),
-      base: supplyBase.toBigInt(),
-      slopeLow: supplySlopeLow.toBigInt(),
-      slopeHigh: supplySlopeHigh.toBigInt(),
-      factorScale: factorScaleBN.toBigInt()
-    }) * SECONDS_PER_YEAR,
+    aprAt(interval, supplyRateModel, rateFactorScale),
   ]);
 
   const baseTokenContract = new Contract(market.baseAsset.address, ERC20);
@@ -197,25 +196,8 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
 
   const baseAssetPrice = baseTokenPrice.toBigInt();
 
-  const borrowAPR =
-    perSecondRateAt({
-      utilization: utilization.toBigInt(),
-      kink: borrowKink.toBigInt(),
-      base: borrowBase.toBigInt(),
-      slopeLow: borrowSlopeLow.toBigInt(),
-      slopeHigh: borrowSlopeHigh.toBigInt(),
-      factorScale: factorScaleBN.toBigInt(),
-    }) * SECONDS_PER_YEAR;
-
-  const earnAPR =
-    perSecondRateAt({
-      utilization: utilization.toBigInt(),
-      kink: supplyKink.toBigInt(),
-      base: supplyBase.toBigInt(),
-      slopeLow: supplySlopeLow.toBigInt(),
-      slopeHigh: supplySlopeHigh.toBigInt(),
-      factorScale: factorScaleBN.toBigInt(),
-    }) * SECONDS_PER_YEAR;
+  const borrowAPR = aprAt(utilization.toBigInt(), borrowRateModel, rateFactorScale);
+  const earnAPR = aprAt(utilization.toBigInt(), supplyRateModel, rateFactorScale);
 
   const totalSupply = totalSupplyBN.toBigInt();
   const totalBorrow = totalBorrowBN.toBigInt();

@@ -7,13 +7,18 @@ import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
 import { adjustCollateralPrice, getBaseAssetDollarPrice, getBaseAssetPriceFeed } from '@helpers/baseAssetPrice';
 import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
-import { perSecondRateAt, SECONDS_PER_YEAR } from '@helpers/interestRates';
+import { aprAt, RateModel } from '@helpers/interestRates';
 import { shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
 import { getCapacity, getCollateralValue, MAX_UINT256, REFRESH_INTERVAL } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
-import { CometStateResponse, CometWithAccountStateQuery, CometWithAccountStateResponse } from '@helpers/sleuth/types';
+import {
+  CometStateResponse,
+  CometWithAccountStateQuery,
+  CometWithAccountStateResponse,
+  RateModelResponse,
+} from '@helpers/sleuth/types';
 import { getStETHAccountState, isStETH, isWrappedStETH } from '@helpers/steth';
 import { useWaiter } from '@hooks/useWaiter';
 import {
@@ -180,27 +185,17 @@ const getCometAPRs = ({
   borrowRateModel,
   supplyRateModel,
 }: CometStateResponse | CometWithAccountStateResponse): CometAPRs => {
-  const borrowAPR =
-    perSecondRateAt({
-      utilization: utilization.toBigInt(),
-      kink: borrowRateModel.kink.toBigInt(),
-      base: borrowRateModel.perSecondInterestRateBase.toBigInt(),
-      slopeLow: borrowRateModel.perSecondInterestRateSlopeLow.toBigInt(),
-      slopeHigh: borrowRateModel.perSecondInterestRateSlopeHigh.toBigInt(),
-      factorScale: factorScale.toBigInt(),
-    }) * SECONDS_PER_YEAR;
+  const toRateModel = (rateModel: RateModelResponse): RateModel => ({
+    kink: rateModel.kink.toBigInt(),
+    base: rateModel.perSecondInterestRateBase.toBigInt(),
+    slopeLow: rateModel.perSecondInterestRateSlopeLow.toBigInt(),
+    slopeHigh: rateModel.perSecondInterestRateSlopeHigh.toBigInt(),
+  });
 
-  const earnAPR =
-    perSecondRateAt({
-      utilization: utilization.toBigInt(),
-      kink: supplyRateModel.kink.toBigInt(),
-      base: supplyRateModel.perSecondInterestRateBase.toBigInt(),
-      slopeLow: supplyRateModel.perSecondInterestRateSlopeLow.toBigInt(),
-      slopeHigh: supplyRateModel.perSecondInterestRateSlopeHigh.toBigInt(),
-      factorScale: factorScale.toBigInt(),
-    }) * SECONDS_PER_YEAR;
-
-  return { borrowAPR, earnAPR };
+  return {
+    borrowAPR: aprAt(utilization.toBigInt(), toRateModel(borrowRateModel), factorScale.toBigInt()),
+    earnAPR: aprAt(utilization.toBigInt(), toRateModel(supplyRateModel), factorScale.toBigInt()),
+  };
 };
 
 const formatCometStateHydrated = (

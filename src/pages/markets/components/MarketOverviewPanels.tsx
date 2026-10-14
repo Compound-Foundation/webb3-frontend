@@ -17,6 +17,7 @@ import useOnClickOutside from '@hooks/useOnClickOutside';
 
 import { LatestMarketSummaries, MarketSummary } from '../../../types';
 import { BoostedRateInfo } from '../BoostedRateInfo';
+import { formatPercentage } from '../helpers/rateModelLines';
 
 import InstitutionalRateInfo from './InstitutionalRateInfo';
 
@@ -304,11 +305,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
   const market = getMarket(marketSummary.chainId, marketSummary.comet.address);
   const showNewBadge = market?.isNew === true;
 
-  const utilizationPercent = (Number(marketSummary.utilization) / Number(BASE_FACTOR)) * 100;
-  const utilization = `${(Math.round(utilizationPercent * 100) / 100).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}%`;
+  const utilization = formatPercentage((Number(marketSummary.utilization) / Number(BASE_FACTOR)) * 100, 2);
 
   const netEarnAPR = formatRateFactor(marketSummary.supplyAPR + marketSummary.supplyRewardsAPR);
   const netBorrowAPR = formatRateFactor(marketSummary.borrowAPR - marketSummary.borrowRewardsAPR);
