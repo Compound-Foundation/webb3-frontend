@@ -17,7 +17,6 @@ const LEGACY = 'Legacy';
 const INSTITUTIONAL = 'Institutional';
 const MARKETS_SECTION = 'Markets';
 const NEW = 'New';
-const TEMP = 'Temp';
 
 const MarketSelector = () => {
   const [marketDropdownActive, setMarketDropdownActive] = useState<boolean>(false);
@@ -174,7 +173,6 @@ const MarketOption = ({ isCurrentMarket, market, pathname, onClick, loading }: M
         {loading && <span className="label label--secondary text-color--2">{APPROVE_IN_WALLET}</span>}
       </div>
       {market.isNew && <span className="new-badge label label--secondary">{NEW}</span>}
-      {market.isTemp && <span className="new-badge label label--secondary">{TEMP}</span>}
       {isCurrentMarket && <CheckMark className="svg--supply" />}
       {loading && <TailSpin className="svg--spin" />}
     </>

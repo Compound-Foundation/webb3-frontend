@@ -356,8 +356,6 @@ export type MarketData = {
   institutional?: boolean;
   // Recently launched markets get a 'New' badge in the market selector
   isNew?: boolean;
-  // Temporary markets get a 'Temp' badge in the market selector
-  isTemp?: boolean;
   type: 'MarketData';
   rewardsOverwrite?: {
     rewardsAssetSymbol: string;

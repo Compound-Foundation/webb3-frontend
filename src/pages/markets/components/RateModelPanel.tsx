@@ -20,6 +20,9 @@ type RateModelPanelHydrated = [StateType.Hydrated, RateModelHydratedData];
 
 export type RateModelPanelState = RateModelPanelLoading | RateModelPanelHydrated;
 
+const toChartRates = (rates: [bigint, bigint][]): [bigint, number][] =>
+  rates.map(([utilization, apr]) => [utilization, (Number(apr) / Number(BASE_FACTOR)) * 100]);
+
 const RateModelPanel = ({ state }: { state: RateModelPanelState }) => {
   if (state[0] == StateType.Loading) {
     return <LoadingView />;
@@ -74,10 +77,6 @@ const LoadingView = () => {
 
 const RateModelPanelView = ({ borrowRates, supplyRates, borrowAPR, supplyAPR, utilization }: RateModelHydratedData) => {
   const [hoveredRate, sethoveredRate] = useState<HoveredRate | undefined>(undefined);
-
-  const toChartRates = (rates: [bigint, bigint][]): [bigint, number][] => {
-    return rates.map(([utilization, apr]) => [utilization, (Number(apr) / Number(BASE_FACTOR)) * 100]);
-  }
 
   const rateModelGraph = (
     <InterestRateModel

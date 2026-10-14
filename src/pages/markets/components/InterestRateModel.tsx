@@ -1,6 +1,6 @@
 import { MouseEventHandler, MouseEvent, useState, useEffect } from 'react';
 
-import { BASE_FACTOR, FACTOR_PRECISION, formatRateFactor } from '@helpers/numbers';
+import { FACTOR_PRECISION, formatRateFactor } from '@helpers/numbers';
 import { StateType } from '@types';
 
 import {
@@ -89,10 +89,10 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
     const actualUtilizationPercentage = getUtilizationPercentage(state[1].utilization);
     // loaded state
     const mouseMove: MouseEventHandler<HTMLDivElement> = (e: MouseEvent<HTMLDivElement>) => {
-      const targetElement = e.currentTarget as HTMLElement;
+      const targetElement = e.currentTarget;
 
       const targetWidth = targetElement.getBoundingClientRect().width;
-      const widthThreshold = targetWidth - targetWidth * 0.03 ;
+      const widthThreshold = targetWidth - targetWidth * 0.03;
       const utilizationPercent = Math.min(Math.max(e.nativeEvent.offsetX / widthThreshold, 0), 1);
 
       setUtilizationPercentage(utilizationPercent);

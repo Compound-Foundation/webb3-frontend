@@ -102,29 +102,6 @@ export const MARKETS: MarketData[] = [
         mainnetInstitutionalUSDCRoots,
         { slug: 'usdc-institutional', institutional: true, isNew: true },
       ],
-      // Not in the comet deployments, so they reuse the mainnet USDC market's bulker and rewards
-      [
-        1,
-        'USDC',
-        'USDC (Service Patch)',
-        {
-          comet: '0x20f48143FDF6c0B01FF05399f85E5Cad55aAd5F4',
-          bulker: mainnetUSDCRoots['bulker'],
-          rewards: mainnetUSDCRoots['rewards'],
-        },
-        { slug: 'usdc-service-patch', isTemp: true },
-      ],
-      [
-        1,
-        'USDC',
-        'USDC (No Service Patch)',
-        {
-          comet: '0xAfaCa8573a21231CdD38BF7FF2CeD8Cd47C26599',
-          bulker: mainnetUSDCRoots['bulker'],
-          rewards: mainnetUSDCRoots['rewards'],
-        },
-        { slug: 'usdc-no-service-patch', isTemp: true },
-      ],
       [137, 'USDC.e', 'USD Coin (Bridged)', polygonUSDCRoots],
       [137, 'USDT0', 'Tether', polygonUSDTRoots],
       [42161, 'USDC', 'USD Coin', arbitrumNativeUSDCRoots],
@@ -147,7 +124,7 @@ export const MARKETS: MarketData[] = [
       [2020, 'WETH', 'Wrapped Ether', roninWETHRoots],
       [2020, 'RON', 'Ronin', roninWRONRoots],
       [59144, 'ETH', 'Ether', lineaWETHRoots],
-    ] as [number, string, string, { [x: string]: string }, Pick<MarketData, 'slug' | 'institutional' | 'isNew' | 'isTemp'>?][]
+    ] as [number, string, string, { [x: string]: string }, Pick<MarketData, 'slug' | 'institutional' | 'isNew'>?][]
   ).map(([chainId, baseAsset, baseAssetName, root, options]) => {
     const chain: ChainInformation = CHAINS[chainId];
 
