@@ -4,9 +4,8 @@ import { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 
 import { convertApiResponse } from '@helpers/functions';
-import { summaryToMarkets } from '@helpers/marketList';
 import { getLatestMarketSummaryEndpoint } from '@helpers/urls';
-import { useMarkets } from '@hooks/useMarkets';
+import { summaryToMarkets, useMarkets } from '@hooks/useMarkets';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
 import { LatestMarketSummaryResponse, StateType } from '@types';
 

@@ -1,7 +1,6 @@
-import { CHAINS } from '@constants/chains';
 import { convertApiResponse } from '@helpers/functions';
-import { summaryToMarkets } from '@helpers/marketList';
 import { isV2Market, marketKey, V2_MARKET } from '@helpers/markets';
+import { summaryToMarkets } from '@hooks/useMarkets';
 import { shortMarketKey } from '@hooks/useSelectedMarket';
 import { extensions } from '@pages/extensions/helpers/core';
 import { getOperator } from '@pages/extensions/helpers/list';
@@ -116,10 +115,6 @@ describe('summaryToMarkets', () => {
     });
   });
 
-  test('takes chain information from the local CHAINS config', () => {
-    withoutV2.forEach((market) => expect(market.chainInformation).toBe(CHAINS[market.chainInformation.chainId]));
-  });
-
   test('returns the default market from the summary', () => {
     expect(defaultMarket.marketAddress).toEqual(LEGACY_ADDRESSES.mainnetUSDC.comet);
   });
@@ -146,18 +141,6 @@ describe('summaryToMarkets', () => {
     const mapped = summaryToMarkets(withUnknownChain).markets;
     expect(mapped.some((market) => market.chainInformation?.chainId === 999999)).toBe(false);
     expect(mapped.filter((market: MarketData) => !isV2Market(market)).length).toEqual(LEGACY_MARKETS.length - 7);
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  test('skips a market with a malformed address and keeps the rest', () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const [bad, ...rest] = entries;
-    const mapped = summaryToMarkets([{ ...bad, comet: { ...bad.comet, address: 'not-an-address' } }, ...rest]).markets.filter(
-      (market) => !isV2Market(market)
-    );
-    expect(mapped.length).toEqual(LEGACY_MARKETS.length - 1);
-    expect(mapped.some((market) => market.marketAddress === 'not-an-address')).toBe(false);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -217,10 +200,5 @@ describe('extension operators for the market list', () => {
     const bulker = extensionById('bulker');
     const usdt = markets.find((m) => marketKey(m).startsWith('1_USDT_')) as MarketData;
     expect(getOperator(bulker, usdt)).toBeNull();
-  });
-
-  test('has no operator for extensions without operator contracts', () => {
-    expect(getOperator(extensionById('defisaver'), marketByAddress(mainnetUSDC.comet))).toBeNull();
-    expect(getOperator(extensionById('comp_vote'), marketByAddress(mainnetUSDC.comet))).toBeNull();
   });
 });

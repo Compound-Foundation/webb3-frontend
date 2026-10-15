@@ -2,8 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactNode, useState } from 'react';
 
 import { convertApiResponse } from '@helpers/functions';
-import { summaryToMarkets } from '@helpers/marketList';
-import { LATEST_MARKET_SUMMARY_QUERY_KEY } from '@hooks/useMarkets';
+import { LATEST_MARKET_SUMMARY_QUERY_KEY, summaryToMarkets } from '@hooks/useMarkets';
 import { LatestMarketSummaryResponse, MarketData } from '@types';
 
 import mockMarketListResponse from './mockMarketListResponse.json';
