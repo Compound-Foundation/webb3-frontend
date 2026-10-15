@@ -95,7 +95,7 @@ export const CurrencyContextProvider = ({ children }: { children: ReactNode | Re
 
   const getPreferredCurrency = () => {
     const market = getMarketData();
-    // Until the market registry loads there is no market to derive the currency from
+    // Until the market list loads there is no market to derive the currency from
     return market !== undefined ? loadPreferredCurrency(market) : initialCurrencyManagerContext.currency;
   };
 

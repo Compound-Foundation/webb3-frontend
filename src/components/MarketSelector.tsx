@@ -87,7 +87,7 @@ type SelectedMarketProps = {
 
 const SelectedMarket = ({ active, market, onClick }: SelectedMarketProps) => {
   const { getMarket } = useMarketsContext();
-  // The registry symbol stays the same once the market loads, unlike the on-chain one
+  // The market list symbol stays the same once the market loads, unlike the on-chain one
   // (e.g. USDC-cr of a test market becomes USDC), so the label doesn't change
   const configMarket = market !== undefined ? getMarket(market.chainInformation.chainId, market.marketAddress) : undefined;
   const [currentChainName, currentBaseToken] =

@@ -15,10 +15,9 @@ async function fetchLatestMarketSummaries(): Promise<LatestMarketSummaryResponse
   return summaries.map(convertApiResponse) as LatestMarketSummaryResponse[];
 }
 
-// One cache entry for every consumer of the latest summaries, so the app makes a single request
+// One cache entry for every consumer of the latest summaries, so the app makes a single request.
 export const latestMarketSummaryQueryOptions = queryOptions({
   queryKey: ['latestMarketSummary'],
   queryFn: fetchLatestMarketSummaries,
-  staleTime: LATEST_MARKET_SUMMARY_REFRESH_INTERVAL,
   refetchInterval: LATEST_MARKET_SUMMARY_REFRESH_INTERVAL,
 });

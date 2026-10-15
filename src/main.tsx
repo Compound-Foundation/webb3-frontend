@@ -9,12 +9,8 @@ import { WagmiProvider } from 'wagmi';
 
 import { MarketsProvider } from '@contexts/MarketsContext';
 import { Web3Provider } from '@contexts/Web3Context';
-import { MARKET_REGISTRY_LOCAL_STORAGE_KEY } from '@helpers/constants';
-import {
-  MARKET_REGISTRY_CACHE_BUSTER,
-  MARKET_REGISTRY_CACHE_MAX_AGE,
-  shouldPersistQuery,
-} from '@helpers/marketRegistry';
+import { MARKET_LIST_LOCAL_STORAGE_KEY } from '@helpers/constants';
+import { MARKET_LIST_CACHE_BUSTER, MARKET_LIST_CACHE_MAX_AGE, shouldPersistQuery } from '@helpers/marketList';
 import { SAFE_ALLOWED_DOMAINS } from '@helpers/safe';
 
 import App from './App';
@@ -35,7 +31,7 @@ const ipfsMatch = new RegExp('.*/ba[a-zA-Z0-9]{57}/').exec(pathname);
 const queryClient = new QueryClient();
 const persister = createAsyncStoragePersister({
   storage: window.localStorage,
-  key: MARKET_REGISTRY_LOCAL_STORAGE_KEY,
+  key: MARKET_LIST_LOCAL_STORAGE_KEY,
 });
 
 createRoot(document.getElementById('root') as HTMLElement).render(
@@ -56,8 +52,8 @@ createRoot(document.getElementById('root') as HTMLElement).render(
             client={queryClient}
             persistOptions={{
               persister,
-              maxAge: MARKET_REGISTRY_CACHE_MAX_AGE,
-              buster: MARKET_REGISTRY_CACHE_BUSTER,
+              maxAge: MARKET_LIST_CACHE_MAX_AGE,
+              buster: MARKET_LIST_CACHE_BUSTER,
               dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
             }}
           >

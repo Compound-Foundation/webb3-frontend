@@ -23,13 +23,12 @@ import {
 } from '@types';
 
 export function useMarketsOverviewState(): MarketOverviewState {
-  const { isLoading: marketsLoading, markets, registryVersionId } = useMarketsContext();
+  const { isLoading: marketsLoading, markets } = useMarketsContext();
   const rewardsState = useContext(RewardsStateContext);
   const queryClient = useQueryClient();
 
   const query = useQuery({
-    // A new registry version re-derives the summaries from the new market list
-    queryKey: ['marketOverviewState', registryVersionId, rewardsState[0]],
+    queryKey: ['marketOverviewState', rewardsState[0]],
     queryFn: () => getState(queryClient, markets, rewardsState),
     // Keep showing the summaries fetched before rewards loaded while the query refetches with them
     placeholderData: keepPreviousData,

@@ -1,19 +1,20 @@
 import { ReactNode } from 'react';
 
 import { MarketsContext, MarketsContextValue } from '@contexts/MarketsContext';
-import { MarketRegistryResponse, registryToMarkets } from '@helpers/marketRegistry';
+import { convertApiResponse } from '@helpers/functions';
+import { MarketListEntry, summaryToMarkets } from '@helpers/marketList';
 import { getMarket, getMarketDescriptors, getMarkets, getMarketsByNetwork } from '@helpers/markets';
 import { buildMarketStatusIndex, getCollateralStatus, getMarketStatus } from '@helpers/marketStatus';
 import { LatestMarketSummaryResponse, MarketData } from '@types';
 
-import mockMarketRegistryResponse from './mockMarketRegistryResponse.json';
+import mockMarketListResponse from './mockMarketListResponse.json';
 
-export const MOCK_MARKET_REGISTRY = mockMarketRegistryResponse as MarketRegistryResponse;
+export const MOCK_MARKET_LIST = mockMarketListResponse.map(convertApiResponse) as MarketListEntry[];
 
-const registryMarkets = registryToMarkets(MOCK_MARKET_REGISTRY);
+const marketList = summaryToMarkets(MOCK_MARKET_LIST);
 
-export const MOCK_MARKETS: MarketData[] = registryMarkets.markets;
-export const MOCK_DEFAULT_MARKET: MarketData = registryMarkets.defaultMarket;
+export const MOCK_MARKETS: MarketData[] = marketList.markets;
+export const MOCK_DEFAULT_MARKET: MarketData = marketList.defaultMarket;
 
 export const MockMarketsProvider = ({
   children,
@@ -47,9 +48,8 @@ export const MockMarketsProvider = ({
         isLoading: true,
         markets: contextMarkets,
         defaultMarket: undefined,
-        registryVersionId: undefined,
       }
-    : { ...helpers, isLoading: false, ...registryMarkets, markets };
+    : { ...helpers, isLoading: false, ...marketList, markets };
 
   return <MarketsContext.Provider value={value}>{children}</MarketsContext.Provider>;
 };

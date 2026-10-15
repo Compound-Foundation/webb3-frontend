@@ -1,0 +1,409 @@
+[
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3",
+      "rewards": "0x1b0e765f6224c21223aea2af16c1c46e38885a40",
+      "bulker": "0xa397a8c2086c554b531c02e29f3291c9704b00c7"
+    },
+    "deployment_key": "usdc",
+    "display_name": "USDC",
+    "base_asset_name": "USD Coin",
+    "is_default": true,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94",
+      "rewards": "0x1b0e765f6224c21223aea2af16c1c46e38885a40",
+      "bulker": "0xa397a8c2086c554b531c02e29f3291c9704b00c7"
+    },
+    "deployment_key": "weth",
+    "display_name": "ETH",
+    "base_asset_name": "Ether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0x3afdc9bca9213a35503b077a6072f3d0d5ab0840",
+      "rewards": "0x1b0e765f6224c21223aea2af16c1c46e38885a40",
+      "bulker": "0xa397a8c2086c554b531c02e29f3291c9704b00c7"
+    },
+    "deployment_key": "usdt",
+    "display_name": "USDT",
+    "base_asset_name": "Tether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0x3d0bb1ccab520a66e607822fc55bc921738fafe3",
+      "rewards": "0x1b0e765f6224c21223aea2af16c1c46e38885a40",
+      "bulker": "0x2c776041ccfe903071af44aa147368a9c8eea518"
+    },
+    "deployment_key": "wsteth",
+    "display_name": "wstETH",
+    "base_asset_name": "Lido Wrapped Staked ETH",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0x5d409e56d886231adaf00c8775665ad0f9897b56",
+      "rewards": "0x1b0e765f6224c21223aea2af16c1c46e38885a40",
+      "bulker": "0xa397a8c2086c554b531c02e29f3291c9704b00c7"
+    },
+    "deployment_key": "usds",
+    "display_name": "USDS",
+    "base_asset_name": "USDS",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0xe85dc543813b8c2cfeaac371517b925a166a9293",
+      "rewards": "0x1b0e765f6224c21223aea2af16c1c46e38885a40",
+      "bulker": "0xa397a8c2086c554b531c02e29f3291c9704b00c7"
+    },
+    "deployment_key": "wbtc",
+    "display_name": "WBTC",
+    "base_asset_name": "Wrapped BTC",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 1,
+    "comet": {
+      "address": "0x207158a267cbd2598bb3d611d8cbdee2709f2f8c",
+      "rewards": "0x561e8e1e7eb56f558922c198a3c228545093f32d",
+      "bulker": "0xa397a8c2086c554b531c02e29f3291c9704b00c7"
+    },
+    "deployment_key": "institutional_usdc",
+    "display_name": "USDC",
+    "base_asset_name": "USDC Institutional",
+    "is_default": false,
+    "is_institutional": true,
+    "slug": "usdc-institutional",
+    "status": "success"
+  },
+  {
+    "chain_id": 10,
+    "comet": {
+      "address": "0x2e44e174f7d53f0212823acc11c01a11d58c5bcb",
+      "rewards": "0x443ea0340cb75a160f31a440722dec7b5bc3c2e9",
+      "bulker": "0xcb3643cc8294b23171272845473dec49739d4ba3"
+    },
+    "deployment_key": "usdc",
+    "display_name": "USDC",
+    "base_asset_name": "USD Coin",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 10,
+    "comet": {
+      "address": "0x995e394b8b2437ac8ce61ee0bc610d617962b214",
+      "rewards": "0x443ea0340cb75a160f31a440722dec7b5bc3c2e9",
+      "bulker": "0xcb3643cc8294b23171272845473dec49739d4ba3"
+    },
+    "deployment_key": "usdt",
+    "display_name": "USDT",
+    "base_asset_name": "Tether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 10,
+    "comet": {
+      "address": "0xe36a30d249f7761327fd973001a32010b521b6fd",
+      "rewards": "0x443ea0340cb75a160f31a440722dec7b5bc3c2e9",
+      "bulker": "0xcb3643cc8294b23171272845473dec49739d4ba3"
+    },
+    "deployment_key": "weth",
+    "display_name": "ETH",
+    "base_asset_name": "Ether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 130,
+    "comet": {
+      "address": "0x2c7118c4c88b9841fcf839074c26ae8f035f2921",
+      "rewards": "0x6f7d514bbd4aff3bcd1140b7344b32f063dee486",
+      "bulker": "0x58ebb8db8b4fdf2dcbbb16e04c2f5b952963b514"
+    },
+    "deployment_key": "usdc",
+    "display_name": "USDC",
+    "base_asset_name": "USD Coin",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 130,
+    "comet": {
+      "address": "0x6c987dde50db1dcdd32cd4175778c2a291978e2a",
+      "rewards": "0x6f7d514bbd4aff3bcd1140b7344b32f063dee486",
+      "bulker": "0x58ebb8db8b4fdf2dcbbb16e04c2f5b952963b514"
+    },
+    "deployment_key": "weth",
+    "display_name": "ETH",
+    "base_asset_name": "Ether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xf25212e676d1f7f89cd72ffee66158f541246445",
+      "rewards": "0x45939657d1ca34a8fa39a924b71d28fe8431e581",
+      "bulker": "0x59e242d352ae13166b4987ae5c990c232f7f7cd6"
+    },
+    "deployment_key": "usdc",
+    "display_name": "USDC.e",
+    "base_asset_name": "USD Coin (Bridged)",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 137,
+    "comet": {
+      "address": "0xaeb318360f27748acb200ce616e389a6c9409a07",
+      "rewards": "0x45939657d1ca34a8fa39a924b71d28fe8431e581",
+      "bulker": "0x59e242d352ae13166b4987ae5c990c232f7f7cd6"
+    },
+    "deployment_key": "usdt",
+    "display_name": "USDT0",
+    "base_asset_name": "Tether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 2020,
+    "comet": {
+      "address": "0x4006ed4097ee51c09a04c3b0951d28ccf19e6dfe",
+      "rewards": "0x31cdee8609bc15fd33cc525f101b70a81b2b1e59",
+      "bulker": "0x840281fad56dd88afba052b7f18be2a65796ecc6"
+    },
+    "deployment_key": "weth",
+    "display_name": "WETH",
+    "base_asset_name": "Wrapped Ether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 2020,
+    "comet": {
+      "address": "0xc0afdbd1ceb621ef576ba969ce9d4cef78dbc0c0",
+      "rewards": "0x31cdee8609bc15fd33cc525f101b70a81b2b1e59",
+      "bulker": "0x840281fad56dd88afba052b7f18be2a65796ecc6"
+    },
+    "deployment_key": "wron",
+    "display_name": "RON",
+    "base_asset_name": "Ronin",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 5000,
+    "comet": {
+      "address": "0x606174f62cd968d8e684c645080fa694c1d7786e",
+      "rewards": "0xcd83cbbfce149d141a5171c3d6a0f0fccee225ab",
+      "bulker": "0x67dfca85cceefa2c5b1db4dee3bea716a28b9baa"
+    },
+    "deployment_key": "usde",
+    "display_name": "USDe",
+    "base_asset_name": "Ethena USDe",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x9c4ec768c28520b50860ea7a15bd7213a9ff58bf",
+      "rewards": "0x123964802e6ababbe1bc9547d72ef1b69b00a6b1",
+      "bulker": "0x78d0677032a35c63d142a48a2037048871212a8c"
+    },
+    "deployment_key": "usdbc",
+    "display_name": "USDbC",
+    "base_asset_name": "USD Coin (Bridged)",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x46e6b214b524310239732d51387075e0e70970bf",
+      "rewards": "0x123964802e6ababbe1bc9547d72ef1b69b00a6b1",
+      "bulker": "0x78d0677032a35c63d142a48a2037048871212a8c"
+    },
+    "deployment_key": "weth",
+    "display_name": "ETH",
+    "base_asset_name": "Ether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0xb125e6687d4313864e53df431d5425969c15eb2f",
+      "rewards": "0x123964802e6ababbe1bc9547d72ef1b69b00a6b1",
+      "bulker": "0x78d0677032a35c63d142a48a2037048871212a8c"
+    },
+    "deployment_key": "usdc",
+    "display_name": "USDC",
+    "base_asset_name": "USD Coin",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x784efeb622244d2348d4f2522f8860b96fbece89",
+      "rewards": "0x123964802e6ababbe1bc9547d72ef1b69b00a6b1",
+      "bulker": "0x78d0677032a35c63d142a48a2037048871212a8c"
+    },
+    "deployment_key": "aero",
+    "display_name": "AERO",
+    "base_asset_name": "Aero",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 8453,
+    "comet": {
+      "address": "0x2c776041ccfe903071af44aa147368a9c8eea518",
+      "rewards": "0x123964802e6ababbe1bc9547d72ef1b69b00a6b1",
+      "bulker": "0x78d0677032a35c63d142a48a2037048871212a8c"
+    },
+    "deployment_key": "usds",
+    "display_name": "USDS",
+    "base_asset_name": "USDS",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xa5edbdd9646f8dff606d7448e414884c7d905dca",
+      "rewards": "0x88730d254a2f7e6ac8388c3198afd694ba9f7fae",
+      "bulker": "0xbde8f31d2ddda895264e27dd990fab3dc87b372d"
+    },
+    "deployment_key": "usdc.e",
+    "display_name": "USDC.e",
+    "base_asset_name": "USD Coin (Bridged)",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x9c4ec768c28520b50860ea7a15bd7213a9ff58bf",
+      "rewards": "0x88730d254a2f7e6ac8388c3198afd694ba9f7fae",
+      "bulker": "0xbde8f31d2ddda895264e27dd990fab3dc87b372d"
+    },
+    "deployment_key": "usdc",
+    "display_name": "USDC",
+    "base_asset_name": "USD Coin",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0x6f7d514bbd4aff3bcd1140b7344b32f063dee486",
+      "rewards": "0x88730d254a2f7e6ac8388c3198afd694ba9f7fae",
+      "bulker": "0xbde8f31d2ddda895264e27dd990fab3dc87b372d"
+    },
+    "deployment_key": "weth",
+    "display_name": "ETH",
+    "base_asset_name": "Ether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 42161,
+    "comet": {
+      "address": "0xd98be00b5d27fc98112bde293e487f8d4ca57d07",
+      "rewards": "0x88730d254a2f7e6ac8388c3198afd694ba9f7fae",
+      "bulker": "0xbde8f31d2ddda895264e27dd990fab3dc87b372d"
+    },
+    "deployment_key": "usdt",
+    "display_name": "USD₮0",
+    "base_asset_name": "Tether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 59144,
+    "comet": {
+      "address": "0x8d38a3d6b3c3b7d96d6536da7eef94a9d7dbc991",
+      "rewards": "0x2c7118c4c88b9841fcf839074c26ae8f035f2921",
+      "bulker": "0x023ee795361b28cdbb94e302983578486a0a5f1b"
+    },
+    "deployment_key": "usdc",
+    "display_name": "USDC",
+    "base_asset_name": "USD Coin",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 59144,
+    "comet": {
+      "address": "0x60f2058379716a64a7a5d29219397e79bc552194",
+      "rewards": "0x2c7118c4c88b9841fcf839074c26ae8f035f2921",
+      "bulker": "0x023ee795361b28cdbb94e302983578486a0a5f1b"
+    },
+    "deployment_key": "weth",
+    "display_name": "ETH",
+    "base_asset_name": "Ether",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  },
+  {
+    "chain_id": 534352,
+    "comet": {
+      "address": "0xb2f97c1bd3bf02f5e74d13f02e3e26f93d77ce44",
+      "rewards": "0x70167d30964cbfdc315ecae02441af747be0c5ee",
+      "bulker": "0x53c6d04e3ec7031105baea05b36cbc3c987c56fa"
+    },
+    "deployment_key": "usdc",
+    "display_name": "USDC",
+    "base_asset_name": "USD Coin",
+    "is_default": false,
+    "is_institutional": false,
+    "status": "success"
+  }
+]

@@ -16,7 +16,7 @@ export declare type Links = {
 
 // Special keyword to represent all supported markets.
 export const AllMarkets = 'all';
-// Operator placeholder resolved to the selected market's bulker from the market registry.
+// Operator placeholder resolved to the selected market's bulker from the market list.
 export const MarketBulker = 'market-bulker';
 export declare type SupportedMarkets = Record<string, string | null> | typeof AllMarkets;
 export interface Extension {

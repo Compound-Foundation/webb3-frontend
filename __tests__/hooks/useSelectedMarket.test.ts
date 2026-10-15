@@ -79,7 +79,7 @@ describe('parseMarketKeyOrDefault', () => {
     ).toEqual(MAINNET_USDC_COMET);
   });
 
-  test('falls back to the default market for a market missing from the registry', () => {
+  test('falls back to the default market for a market missing from the market list', () => {
     expect(parseMarketKeyOrDefault(MARKETS, MOCK_DEFAULT_MARKET, 'usdc-avax')).toBe(MOCK_DEFAULT_MARKET);
   });
 });

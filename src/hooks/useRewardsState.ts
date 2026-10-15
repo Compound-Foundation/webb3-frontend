@@ -81,11 +81,11 @@ export function useRewardsState(web3: Web3, transactions: Transaction[]): Reward
 
     return () => clearTimeout(timeoutId);
     // re-trigger when maybeAccount changes -- so during wallet disconnect/connect we refresh the rewards
-    // and once the market registry has loaded
+    // and once the market list has loaded
   }, [maybeAccount, marketsLoading]);
 
   const refreshData = useCallback(async () => {
-    // Rewards are grouped by the networks of the markets, so wait for the market registry
+    // Rewards are grouped by the networks of the markets, so wait for the market list
     if (marketsLoading) {
       return;
     }

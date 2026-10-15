@@ -63,7 +63,7 @@ describe('MarketOverviewPanels — inactive markets', () => {
 });
 
 describe('MarketOverviewPanels — market statuses', () => {
-  // Ethereum USDC comet from the mock registry
+  // Ethereum USDC comet from the mock market list
   const USDC_COMET = '0xc3d688b66703497daa19211eedff47f25384cdc3';
 
   // jsdom doesn't implement scrolling, which a row click does after navigating

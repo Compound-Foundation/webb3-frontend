@@ -92,10 +92,6 @@ export function getHistoricalMarketSummaryEndpoint(includeTestnets = false): str
   }`;
 }
 
-export function getMarketRegistryEndpoint(): string {
-  return `${V3_API_URL}/registry/v1/active`;
-}
-
 export function getV2MarketsUrl(): string {
   return `${V3_API_URL}/legacy/mainnet/ctokens`;
 }

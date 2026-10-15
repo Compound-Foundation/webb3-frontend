@@ -1,5 +1,8 @@
+import { type Query } from '@tanstack/react-query';
+
 import { CHAINS } from '@constants/chains';
-import { MarketRegistryResponse, registryToMarkets, validateMarketRegistry } from '@helpers/marketRegistry';
+import { convertApiResponse } from '@helpers/functions';
+import { MarketListEntry, shouldPersistQuery, summaryToMarkets } from '@helpers/marketList';
 import { isV2Market, marketKey, V2_MARKET } from '@helpers/markets';
 import { shortMarketKey } from '@hooks/useSelectedMarket';
 import { extensions } from '@pages/extensions/helpers/core';
@@ -7,12 +10,12 @@ import { getOperator } from '@pages/extensions/helpers/list';
 import { MarketData } from '@types';
 
 import { LEGACY_ADDRESSES } from '../mocks/legacyMarketAddresses';
-import mockMarketRegistryResponse from '../mocks/mockMarketRegistryResponse.json';
+import mockMarketListResponse from '../mocks/mockMarketListResponse.json';
 
-const registry = mockMarketRegistryResponse as MarketRegistryResponse;
-const { markets, defaultMarket } = registryToMarkets(registry);
+const entries = mockMarketListResponse.map(convertApiResponse) as MarketListEntry[];
+const { markets, defaultMarket } = summaryToMarkets(entries);
 
-// The market list as it was defined before the migration to the market registry, in the same order.
+// The market list as it was defined before the migration, in the same order.
 const LEGACY_MARKETS: [number, string, string, { comet: string; bulker: string; rewards: string }][] = [
   [1, 'USDC', 'USD Coin', LEGACY_ADDRESSES.mainnetUSDC],
   [1, 'ETH', 'Ether', LEGACY_ADDRESSES.mainnetWETH],
@@ -54,8 +57,9 @@ const LEGACY_SHORT_KEYS = [
 ];
 
 const withoutV2 = markets.filter((market) => !isV2Market(market));
+const mainnetEntries = entries.filter((entry) => entry.chainId === 1);
 
-describe('registryToMarkets', () => {
+describe('summaryToMarkets', () => {
   test('maps every legacy market in the legacy order, with V2 last', () => {
     expect(withoutV2.length).toEqual(LEGACY_MARKETS.length);
     expect(markets[markets.length - 1]).toBe(V2_MARKET);
@@ -118,79 +122,38 @@ describe('registryToMarkets', () => {
     withoutV2.forEach((market) => expect(market.chainInformation).toBe(CHAINS[market.chainInformation.chainId]));
   });
 
-  test('omits the fauceteer when the registry has none', () => {
-    withoutV2.forEach((market) => expect(market.fauceteerAddress).toBeUndefined());
-  });
-
-  test('keeps a market the registry has no bulker for, without a bulker address', () => {
-    const [mainnet, ...restNetworks] = registry.networks;
-    const [noBulkerMarket, ...restMarkets] = mainnet.markets;
-    const withoutBulker: MarketRegistryResponse = {
-      ...registry,
-      networks: [
-        {
-          ...mainnet,
-          markets: [
-            { ...noBulkerMarket, contracts: { ...noBulkerMarket.contracts, bulker: null } },
-            ...restMarkets,
-          ],
-        },
-        ...restNetworks,
-      ],
-    };
-    const mapped = registryToMarkets(withoutBulker).markets.find(
-      (market) => market.marketAddress.toLowerCase() === noBulkerMarket.contracts.comet
-    );
+  test('keeps a market the summary has no bulker for, without a bulker address', () => {
+    const [noBulker, ...rest] = entries;
+    const mapped = summaryToMarkets([{ ...noBulker, comet: { ...noBulker.comet, bulker: undefined } }, ...rest])
+      .markets.find((market) => market.marketAddress.toLowerCase() === noBulker.comet.address.toLowerCase());
     expect(mapped).toBeDefined();
     expect(mapped?.bulkerAddress).toBeUndefined();
   });
 
-  test('returns the registry default market', () => {
-    expect(defaultMarket?.marketAddress).toEqual(LEGACY_ADDRESSES.mainnetUSDC.comet);
+  test('returns the default market from the summary', () => {
+    expect(defaultMarket.marketAddress).toEqual(LEGACY_ADDRESSES.mainnetUSDC.comet);
   });
 
-  test('falls back to the first market in selector order when the registry has no default', () => {
-    const noDefault: MarketRegistryResponse = {
-      ...registry,
-      networks: [...registry.networks].reverse().map((network) => ({
-        ...network,
-        markets: network.markets.map((market) => ({ ...market, isDefault: false })),
-      })),
-    };
-    expect(registryToMarkets(noDefault).defaultMarket.marketAddress).toEqual(LEGACY_ADDRESSES.mainnetUSDC.comet);
+  test('falls back to the first market in selector order when the summary has no default', () => {
+    const noDefault = [...entries].reverse().map((entry) => ({ ...entry, isDefault: false }));
+    expect(summaryToMarkets(noDefault).defaultMarket.marketAddress).toEqual(LEGACY_ADDRESSES.mainnetUSDC.comet);
   });
 
-  test('returns the registry version id', () => {
-    expect(registryToMarkets(registry).registryVersionId).toEqual(registry.registryVersion.id);
-  });
-
-  test('puts markets missing from the priority list after the listed ones, in registry order', () => {
-    const [mainnet] = registry.networks;
-    const [usdc] = mainnet.markets;
-    const withNewMarkets: MarketRegistryResponse = {
-      ...registry,
-      networks: [
-        {
-          ...mainnet,
-          markets: [
-            { ...usdc, deploymentKey: 'new_b', displayName: 'NEWB', isDefault: false },
-            ...mainnet.markets,
-            { ...usdc, deploymentKey: 'new_a', displayName: 'NEWA', isDefault: false },
-          ],
-        },
-      ],
-    };
-    const symbols = registryToMarkets(withNewMarkets).markets.map((market) => market.baseAsset.symbol);
+  test('puts markets missing from the priority list after the listed ones, in summary order', () => {
+    const [usdc] = mainnetEntries;
+    const withNewMarkets = [
+      { ...usdc, deploymentKey: 'new_b', displayName: 'NEWB', isDefault: false },
+      ...mainnetEntries,
+      { ...usdc, deploymentKey: 'new_a', displayName: 'NEWA', isDefault: false },
+    ];
+    const symbols = summaryToMarkets(withNewMarkets).markets.map((market) => market.baseAsset.symbol);
     expect(symbols).toEqual(['USDC', 'ETH', 'USDT', 'wstETH', 'USDS', 'WBTC', 'USDC', 'NEWB', 'NEWA', 'Compound V2']);
   });
 
-  test('skips networks that are not configured in CHAINS', () => {
+  test('skips markets on chains that are not configured in CHAINS', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const withUnknownChain: MarketRegistryResponse = {
-      ...registry,
-      networks: [{ ...registry.networks[0], chainId: 999999 }, ...registry.networks.slice(1)],
-    };
-    const mapped = registryToMarkets(withUnknownChain).markets;
+    const withUnknownChain = entries.map((entry) => (entry.chainId === 1 ? { ...entry, chainId: 999999 } : entry));
+    const mapped = summaryToMarkets(withUnknownChain).markets;
     expect(mapped.some((market) => market.chainInformation?.chainId === 999999)).toBe(false);
     expect(mapped.filter((market: MarketData) => !isV2Market(market)).length).toEqual(LEGACY_MARKETS.length - 7);
     expect(warn).toHaveBeenCalled();
@@ -199,66 +162,53 @@ describe('registryToMarkets', () => {
 
   test('skips a market with a malformed address and keeps the rest', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const [mainnet, ...restNetworks] = registry.networks;
-    const [badMarket, ...restMarkets] = mainnet.markets;
-    const withBadMarket: MarketRegistryResponse = {
-      ...registry,
-      networks: [
-        {
-          ...mainnet,
-          markets: [
-            { ...badMarket, contracts: { ...badMarket.contracts, comet: 'not-an-address' } },
-            ...restMarkets,
-          ],
-        },
-        ...restNetworks,
-      ],
-    };
-    const mapped = registryToMarkets(withBadMarket).markets.filter((market) => !isV2Market(market));
+    const [bad, ...rest] = entries;
+    const mapped = summaryToMarkets([{ ...bad, comet: { address: 'not-an-address' } }, ...rest]).markets.filter(
+      (market) => !isV2Market(market)
+    );
     expect(mapped.length).toEqual(LEGACY_MARKETS.length - 1);
-    expect(mapped.some((market) => market.marketAddress === badMarket.contracts.comet)).toBe(false);
+    expect(mapped.some((market) => market.marketAddress === 'not-an-address')).toBe(false);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
-});
 
-describe('validateMarketRegistry', () => {
-  test('accepts a valid response', () => {
-    expect(validateMarketRegistry(registry)).toBe(registry);
-  });
-
-  test('rejects an unsupported schema version', () => {
-    expect(() => validateMarketRegistry({ ...registry, schemaVersion: 2 })).toThrow();
-  });
-
-  test('rejects a response without networks', () => {
-    expect(() => validateMarketRegistry({ schemaVersion: 1 })).toThrow();
-    expect(() => validateMarketRegistry(null)).toThrow();
-    expect(() => validateMarketRegistry('<html></html>')).toThrow();
-  });
-
-  test('rejects a response without supported markets', () => {
-    expect(() => validateMarketRegistry({ ...registry, networks: [] })).toThrow();
-  });
-
-  test('rejects a response where every market is malformed', () => {
+  test('treats fields sent as null like missing ones', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const allMarketsInvalid: MarketRegistryResponse = {
-      ...registry,
-      networks: registry.networks.map((network) => ({
-        ...network,
-        markets: network.markets.map((market) => ({
-          ...market,
-          contracts: { ...market.contracts, comet: 'not-an-address' },
-        })),
-      })),
-    };
-    expect(() => validateMarketRegistry(allMarketsInvalid)).toThrow();
+    const [usdc, weth, ...rest] = entries;
+    const withNulls = [
+      { ...usdc, slug: null },
+      { ...weth, displayName: null },
+      ...rest,
+    ] as unknown as MarketListEntry[];
+    const mapped = summaryToMarkets(withNulls).markets.filter((market) => !isV2Market(market));
+
+    const usdcMarket = mapped.find((market) => market.marketAddress === LEGACY_ADDRESSES.mainnetUSDC.comet);
+    expect(usdcMarket?.slug).toBeUndefined();
+    expect(usdcMarket && shortMarketKey(usdcMarket)).toEqual('usdc-mainnet');
+    expect(mapped.some((market) => market.marketAddress === LEGACY_ADDRESSES.mainnetWETH.comet)).toBe(false);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  test('throws when no market is supported', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(() => summaryToMarkets([])).toThrow();
+    expect(() => summaryToMarkets(entries.map(({ chainId, comet }) => ({ chainId, comet })))).toThrow();
     warn.mockRestore();
   });
 });
 
-describe('extension operators for registry markets', () => {
+describe('shouldPersistQuery', () => {
+  const query = (queryKey: unknown[], status: string) => ({ queryKey, state: { status } }) as unknown as Query;
+
+  test('persists only a successful market list query', () => {
+    expect(shouldPersistQuery(query(['marketList'], 'success'))).toBe(true);
+    expect(shouldPersistQuery(query(['marketList'], 'error'))).toBe(false);
+    expect(shouldPersistQuery(query(['latestMarketSummary'], 'success'))).toBe(false);
+  });
+});
+
+describe('extension operators for the market list', () => {
   const { mainnetUSDC, mainnetWETH } = LEGACY_ADDRESSES;
 
   const extensionById = (id: string) => {

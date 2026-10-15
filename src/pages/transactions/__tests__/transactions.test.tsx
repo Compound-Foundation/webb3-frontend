@@ -48,7 +48,7 @@ describe('Transaction History Page', () => {
     expect(await screen.getAllByLabelText('Transaction description loader').length).toBe(5);
   });
 
-  test('renders the loading state while the market registry is loading', async () => {
+  test('renders the loading state while the market list is loading', async () => {
     renderTransactionsPage([] as Transaction[], mockWeb3NoWallet, true);
     expect(screen.getAllByLabelText('Transaction loader').length).toBe(5);
     expect(screen.queryByText('No wallet connected')).not.toBeInTheDocument();

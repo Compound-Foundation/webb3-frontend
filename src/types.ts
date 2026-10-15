@@ -350,7 +350,16 @@ export type LatestMarketSummaryResponse = {
   chainId: number;
   comet: {
     address: string;
+    // The market's other contracts, when it has them
+    bulker?: string;
+    rewards?: string;
   };
+  deploymentKey?: string;
+  displayName?: string;
+  baseAssetName?: string;
+  slug?: string;
+  isDefault?: boolean;
+  isInstitutional?: boolean;
   status?: MarketStatus;
   // A market in the error status comes without the numbers
   borrowApr?: string;
@@ -375,7 +384,7 @@ export type MarketData = {
   chainInformation: ChainInformation;
   iconPair: [string, string];
   marketAddress: string;
-  // A market can come from the registry without a bulker: it then only takes actions sent to the comet directly
+  // A market can come without a bulker: it then only takes actions sent to the comet directly
   bulkerAddress?: string;
   fauceteerAddress?: string;
   rewardsAddress?: string;

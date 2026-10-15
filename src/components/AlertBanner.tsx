@@ -33,7 +33,7 @@ const AlertBanner = ({ web3, isCometStateError, isMarketsStateError }: AlertBann
     (isMarketPage && (isSelectedMarketError || isMarketsStateError));
 
   const messages: string[] = [];
-  // Until the registry loads every network would look unsupported
+  // Until the market list loads every network would look unsupported
   if (!isLoading && web3.write.chainId && !isSupportedNetwork(markets, web3.write.chainId)) {
     messages.push('Compound III is not supported on this network. Please switch to a supported network.');
   }

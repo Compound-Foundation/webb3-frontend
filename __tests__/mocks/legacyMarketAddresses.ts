@@ -1,5 +1,5 @@
 // Contract addresses of the markets as they were defined in comet/deployments/**/roots.json before the
-// migration to the market registry. Tests use them to prove the registry reproduces the same markets.
+// migration away from roots.json. Tests use them to prove the market list reproduces the same markets.
 type LegacyMarketAddresses = { comet: string; bulker: string; rewards: string };
 
 export const LEGACY_ADDRESSES = {

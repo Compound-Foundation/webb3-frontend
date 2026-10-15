@@ -86,7 +86,7 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
       }
 
       const [, currentMarket] = state;
-      // A refreshed registry can change the market's contracts: then the market is loaded again
+      // A refreshed market list can change the market's contracts: then the market is loaded again
       const contractsChanged =
         currentMarket !== undefined &&
         (currentMarket.bulkerAddress !== desiredMarket.bulkerAddress ||
@@ -119,7 +119,7 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
   );
 
   useEffect(() => {
-    // Markets come from the registry; until it loads the selected market stays in the loading state
+    // Markets come from the market list; until it loads the selected market stays in the loading state
     if (marketsLoading) return;
 
     const maybePreferredMarket =

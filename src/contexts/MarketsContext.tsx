@@ -2,17 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import { createContext, ReactNode, useContext, useMemo } from 'react';
 
 import { latestMarketSummaryQueryOptions } from '@helpers/latestMarketSummary';
-import {
-  fetchMarketRegistry,
-  MARKET_REGISTRY_CACHE_MAX_AGE,
-  MARKET_REGISTRY_QUERY_KEY,
-  MARKET_REGISTRY_REFRESH_INTERVAL,
-  MarketRegistryResponse,
-  RegistryMarkets,
-  registryToMarkets,
-} from '@helpers/marketRegistry';
+import { MarketList } from '@helpers/marketList';
 import { getMarket, getMarketDescriptors, getMarkets, getMarketsByNetwork } from '@helpers/markets';
 import { buildMarketStatusIndex, getCollateralStatus, getMarketStatus } from '@helpers/marketStatus';
+import { useMarketList } from '@hooks/useMarketList';
 import { CollateralStatus, MarketData, MarketsByNetwork, MarketStatus } from '@types';
 
 type MarketsProviderProps = {
@@ -29,13 +22,12 @@ type MarketsHelpers = {
   getCollateralStatus: (chainId: number, cometAddress: string, collateralAddress: string) => CollateralStatus | undefined;
 };
 
-type MarketsLoading = Omit<RegistryMarkets, 'defaultMarket' | 'registryVersionId'> & {
+type MarketsLoading = Omit<MarketList, 'defaultMarket'> & {
   isLoading: true;
   defaultMarket: undefined;
-  registryVersionId: undefined;
 };
 
-type MarketsLoaded = RegistryMarkets & {
+type MarketsLoaded = MarketList & {
   isLoading: false;
 };
 
@@ -45,31 +37,10 @@ export type MarketsContextValue = MarketsState & MarketsHelpers & { loadFailed: 
 
 export const MarketsContext = createContext<MarketsContextValue | undefined>(undefined);
 
-function selectRegistryMarkets(response: MarketRegistryResponse): RegistryMarkets {
-  try {
-    return registryToMarkets(response);
-  } catch (error) {
-    console.warn('Market registry: failed to map response, treating as loading', error);
-    throw error;
-  }
-}
-
 export const MarketsProvider = (props: MarketsProviderProps) => {
   const { children } = props;
 
-  const { data, failureCount, isError } = useQuery({
-    queryKey: MARKET_REGISTRY_QUERY_KEY,
-    queryFn: fetchMarketRegistry,
-    select: selectRegistryMarkets,
-    staleTime: MARKET_REGISTRY_REFRESH_INTERVAL,
-    refetchInterval: MARKET_REGISTRY_REFRESH_INTERVAL,
-    // Must outlive the persisted cache, otherwise the restored registry is garbage collected
-    gcTime: MARKET_REGISTRY_CACHE_MAX_AGE,
-    // Keep retrying in the background; the UI shows skeletons (no data yet) or the cached registry
-    retry: true,
-  });
-
-  const loadFailed = data === undefined && (isError || failureCount >= 3);
+  const { marketList: data, loadFailed } = useMarketList();
 
   const { data: statusIndex } = useQuery({ ...latestMarketSummaryQueryOptions, select: buildMarketStatusIndex });
 
@@ -89,7 +60,7 @@ export const MarketsProvider = (props: MarketsProviderProps) => {
     };
 
     return data === undefined
-      ? { ...helpers, isLoading: true, markets, defaultMarket: undefined, registryVersionId: undefined }
+      ? { ...helpers, isLoading: true, markets, defaultMarket: undefined }
       : { ...helpers, isLoading: false, ...data };
   }, [data, loadFailed, statusIndex]);
 

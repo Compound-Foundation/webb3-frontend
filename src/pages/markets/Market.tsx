@@ -51,7 +51,7 @@ const Market = ({ web3, setIsMarketsStateError }: MarketsProps) => {
   // The configured market entry keeps the display name and institutional flags,
   // which the hydrated market's on-chain base asset data doesn't carry
   const configMarket = market !== undefined ? getMarket(market.chainInformation.chainId, market.marketAddress) : undefined;
-  // The registry symbol stays the same once the market loads, unlike the on-chain one
+  // The market list symbol stays the same once the market loads, unlike the on-chain one
   // (e.g. USDC-cr of a test market becomes USDC), so the title doesn't change
   const marketDisplayName = configMarket?.institutional
     ? configMarket.baseAsset.name
