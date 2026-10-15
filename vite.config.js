@@ -45,7 +45,7 @@ export default defineConfig({
       plugins: [nodePolyfills()],
     },
   },
-  base: '',
+  base: '/',
   experimental: {
     renderBuiltUrl: (filename, { hostType }) => {
       return { relative: true };
