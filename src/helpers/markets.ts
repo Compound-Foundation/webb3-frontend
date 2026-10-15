@@ -50,12 +50,8 @@ export function isV2Market(market: MarketData | MarketDataLoaded) {
   return areSameMarket(market, V2_MARKET);
 }
 
-export function getMarkets(markets: MarketData[], showTestnet: boolean): MarketData[] {
-  return markets.filter((market) => (showTestnet ? true : !market.chainInformation.testnet));
-}
-
-export function getMarketsByNetwork(markets: MarketData[], showTestnet: boolean): MarketsByNetwork {
-  return getMarkets(markets, showTestnet).reduce<MarketsByNetwork>((acc, market: MarketData) => {
+export function getMarketsByNetwork(markets: MarketData[]): MarketsByNetwork {
+  return markets.reduce<MarketsByNetwork>((acc, market: MarketData) => {
     const { chainInformation } = market;
     const networkInfo = acc[chainInformation.chainId] ?? { chainInformation, markets: [] };
     return {

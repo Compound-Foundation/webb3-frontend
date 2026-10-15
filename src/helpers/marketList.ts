@@ -1,4 +1,3 @@
-import type { Query } from '@tanstack/react-query';
 import { getAddress } from 'ethers/lib/utils';
 
 import { CHAINS } from '@constants/chains';
@@ -6,27 +5,10 @@ import { iconNameForChainId } from '@helpers/assets';
 import { V2_MARKET } from '@helpers/markets';
 import { LatestMarketSummaryResponse, MarketData } from '@types';
 
-export type MarketListEntry = Pick<
-  LatestMarketSummaryResponse,
-  'chainId' | 'comet' | 'deploymentKey' | 'displayName' | 'baseAssetName' | 'slug' | 'isDefault' | 'isInstitutional'
->;
-
 export type MarketList = {
   markets: MarketData[];
   defaultMarket: MarketData;
 };
-
-export const MARKET_LIST_QUERY_KEY = ['marketList'] as const;
-// The list holds only names and addresses, which rarely change
-export const MARKET_LIST_REFRESH_INTERVAL = 1000 * 60 * 10; // 10 minutes
-export const MARKET_LIST_CACHE_MAX_AGE = 1000 * 60 * 60 * 24; // 24 hours
-// Bump when the persisted market list shape changes so stale caches are dropped
-export const MARKET_LIST_CACHE_BUSTER = 'market-list-v1';
-
-// Only the market list is persisted to localStorage
-export function shouldPersistQuery(query: Query): boolean {
-  return query.queryKey[0] === MARKET_LIST_QUERY_KEY[0] && query.state.status === 'success';
-}
 
 export const MARKET_PRIORITY = [
   '1:usdc',
@@ -85,8 +67,9 @@ export const MARKET_OVERRIDES: Record<string, Pick<MarketData, 'isNew' | 'reward
   '1:institutional_usdc': { isNew: true },
 };
 
-function toMarketData(entry: MarketListEntry): MarketData {
-  const { chainId, comet, deploymentKey, displayName, baseAssetName, slug, isInstitutional } = entry;
+function toMarketData(entry: LatestMarketSummaryResponse): MarketData {
+  const { chainId, comet, deploymentKey, displayName, baseAssetName, slug, isInstitutional, status, collaterals } =
+    entry;
   const chainInformation = CHAINS[chainId];
   if (chainInformation === undefined) {
     throw new Error(`Unsupported chain ${chainId}`);
@@ -106,10 +89,12 @@ function toMarketData(entry: MarketListEntry): MarketData {
     chainInformation,
     iconPair: [isInstitutional ? 'INSTITUTIONAL' : iconNameForChainId(chainId), displayName],
     marketAddress: getAddress(comet.address),
-    bulkerAddress: comet.bulker ? getAddress(comet.bulker) : undefined,
-    rewardsAddress: comet.rewards ? getAddress(comet.rewards) : undefined,
+    bulkerAddress: getAddress(comet.bulker),
+    rewardsAddress: getAddress(comet.rewards),
     slug: slug ?? undefined,
-    institutional: isInstitutional || undefined,
+    institutional: isInstitutional || false,
+    status,
+    collaterals,
     ...MARKET_OVERRIDES[`${chainId}:${deploymentKey}`],
     type: 'MarketData',
   };
@@ -118,11 +103,11 @@ function toMarketData(entry: MarketListEntry): MarketData {
 const MARKET_PRIORITY_INDEX = new Map(MARKET_PRIORITY.map((id, index) => [id, index]));
 
 // Markets missing from the priority list go after the listed ones, in summary order (sort is stable)
-const priorityOf = ({ chainId, deploymentKey }: MarketListEntry) => {
+const priorityOf = ({ chainId, deploymentKey }: LatestMarketSummaryResponse) => {
   return MARKET_PRIORITY_INDEX.get(`${chainId}:${deploymentKey}`) ?? MARKET_PRIORITY.length;
 }
 
-export function summaryToMarkets(entries: MarketListEntry[]): MarketList {
+export function summaryToMarkets(entries: LatestMarketSummaryResponse[]): MarketList {
   const listed = [...entries]
     .sort((a, b) => priorityOf(a) - priorityOf(b))
     .flatMap((entry) => {

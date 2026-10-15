@@ -22,7 +22,6 @@ const renderSelector = (wethStatus: MarketStatus) => {
     selectedMarket: [StateType.Hydrated, MOCK_DEFAULT_MARKET],
     selectMarket: jest.fn(),
     selectMarketByAddress: jest.fn(),
-    isSelectedMarketError: false,
   };
   initializeContext(selected);
   const SelectedMarketContext = getSelectedMarketContext();
@@ -62,6 +61,6 @@ describe('MarketSelector — market statuses', () => {
   test('a partially market can be selected', async () => {
     const { selectMarket } = renderSelector('partially');
     await openAndClickWeth();
-    expect(selectMarket).toHaveBeenCalledWith(weth);
+    expect(selectMarket).toHaveBeenCalledWith({ ...weth, status: 'partially' });
   });
 });

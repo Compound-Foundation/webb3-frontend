@@ -1,18 +1,16 @@
-import { type Query } from '@tanstack/react-query';
-
 import { CHAINS } from '@constants/chains';
 import { convertApiResponse } from '@helpers/functions';
-import { MarketListEntry, shouldPersistQuery, summaryToMarkets } from '@helpers/marketList';
+import { summaryToMarkets } from '@helpers/marketList';
 import { isV2Market, marketKey, V2_MARKET } from '@helpers/markets';
 import { shortMarketKey } from '@hooks/useSelectedMarket';
 import { extensions } from '@pages/extensions/helpers/core';
 import { getOperator } from '@pages/extensions/helpers/list';
-import { MarketData } from '@types';
+import { LatestMarketSummaryResponse, MarketData } from '@types';
 
 import { LEGACY_ADDRESSES } from '../mocks/legacyMarketAddresses';
 import mockMarketListResponse from '../mocks/mockMarketListResponse.json';
 
-const entries = mockMarketListResponse.map(convertApiResponse) as MarketListEntry[];
+const entries = mockMarketListResponse.map(convertApiResponse) as LatestMarketSummaryResponse[];
 const { markets, defaultMarket } = summaryToMarkets(entries);
 
 // The market list as it was defined before the migration, in the same order.
@@ -99,7 +97,7 @@ describe('summaryToMarkets', () => {
     const standard = withoutV2.filter((market) => !market.institutional);
     standard.forEach((market) => {
       expect(market.slug).toBeUndefined();
-      expect(market.institutional).toBeUndefined();
+      expect(market.institutional).toBe(false);
       expect(market.isNew).toBeUndefined();
     });
   });
@@ -120,14 +118,6 @@ describe('summaryToMarkets', () => {
 
   test('takes chain information from the local CHAINS config', () => {
     withoutV2.forEach((market) => expect(market.chainInformation).toBe(CHAINS[market.chainInformation.chainId]));
-  });
-
-  test('keeps a market the summary has no bulker for, without a bulker address', () => {
-    const [noBulker, ...rest] = entries;
-    const mapped = summaryToMarkets([{ ...noBulker, comet: { ...noBulker.comet, bulker: undefined } }, ...rest])
-      .markets.find((market) => market.marketAddress.toLowerCase() === noBulker.comet.address.toLowerCase());
-    expect(mapped).toBeDefined();
-    expect(mapped?.bulkerAddress).toBeUndefined();
   });
 
   test('returns the default market from the summary', () => {
@@ -163,7 +153,7 @@ describe('summaryToMarkets', () => {
   test('skips a market with a malformed address and keeps the rest', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const [bad, ...rest] = entries;
-    const mapped = summaryToMarkets([{ ...bad, comet: { address: 'not-an-address' } }, ...rest]).markets.filter(
+    const mapped = summaryToMarkets([{ ...bad, comet: { ...bad.comet, address: 'not-an-address' } }, ...rest]).markets.filter(
       (market) => !isV2Market(market)
     );
     expect(mapped.length).toEqual(LEGACY_MARKETS.length - 1);
@@ -179,7 +169,7 @@ describe('summaryToMarkets', () => {
       { ...usdc, slug: null },
       { ...weth, displayName: null },
       ...rest,
-    ] as unknown as MarketListEntry[];
+    ] as unknown as LatestMarketSummaryResponse[];
     const mapped = summaryToMarkets(withNulls).markets.filter((market) => !isV2Market(market));
 
     const usdcMarket = mapped.find((market) => market.marketAddress === LEGACY_ADDRESSES.mainnetUSDC.comet);
@@ -193,18 +183,12 @@ describe('summaryToMarkets', () => {
   test('throws when no market is supported', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(() => summaryToMarkets([])).toThrow();
-    expect(() => summaryToMarkets(entries.map(({ chainId, comet }) => ({ chainId, comet })))).toThrow();
+    expect(() =>
+      summaryToMarkets(
+        entries.map((entry) => ({ ...entry, deploymentKey: undefined, displayName: undefined, baseAssetName: undefined }))
+      )
+    ).toThrow();
     warn.mockRestore();
-  });
-});
-
-describe('shouldPersistQuery', () => {
-  const query = (queryKey: unknown[], status: string) => ({ queryKey, state: { status } }) as unknown as Query;
-
-  test('persists only a successful market list query', () => {
-    expect(shouldPersistQuery(query(['marketList'], 'success'))).toBe(true);
-    expect(shouldPersistQuery(query(['marketList'], 'error'))).toBe(false);
-    expect(shouldPersistQuery(query(['latestMarketSummary'], 'success'))).toBe(false);
   });
 });
 

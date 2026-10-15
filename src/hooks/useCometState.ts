@@ -1,5 +1,4 @@
 import { StaticJsonRpcProvider } from '@ethersproject/providers';
-import { ethers } from 'ethers';
 import { ConnectionInfo } from 'ethers/lib/utils';
 import { Provider } from 'ethers-multicall';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -38,9 +37,8 @@ export function useCometState(
   marketState: MarketDataState,
   transactions: Transaction[],
   rewards: RewardsState
-): [CometState, boolean] {
+): CometState {
   const [state, setState] = useState<CometState>([StateType.Loading, undefined]);
-  const [isError, setIsError] = useState(false);
   const { waitFor } = useWaiter<Transaction[]>(transactions);
   const marketRef = useRef(marketState);
 
@@ -48,7 +46,6 @@ export function useCometState(
   useEffect(() => {
     const state: CometState = [StateType.Loading, undefined];
     setState(state);
-    setIsError(false);
     marketRef.current = marketState;
   }, [marketState[1]?.marketAddress, marketState[1]?.chainInformation.chainId]);
 
@@ -77,17 +74,12 @@ export function useCometState(
             newState = formatCometStateNoWallet(cometResponse, marketStateData, rewards);
           }
         } catch (e) {
-          console.error('Error fetching comet state: ', e);
-          if (marketState[1]?.marketAddress === marketRef.current[1]?.marketAddress) {
-            setIsError(true);
-          }
           return;
         }
 
         // Only update state if chainId has not changed since the start of this callback
         // We compare to a ref because the `marketState` in the callback can be stale
-        if (marketState[1]?.marketAddress === marketRef.current[1]?.marketAddress) {
-          setIsError(false);
+        if (marketState[1]?.marketAddress.toLowerCase() === marketRef.current[1]?.marketAddress.toLowerCase()) {
           waitFor(
             (transactions) => transactions.length === 0,
             async () => {
@@ -153,8 +145,7 @@ export function useCometState(
     }
   }
 
-  // Only report the error while there's no data, so a failed refresh doesn't flag data already shown
-  return [state, isError && state[0] === StateType.Loading];
+  return state;
 }
 
 const QUERY_WITH_ACCOUNT = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryWithAccount' });
@@ -174,8 +165,7 @@ export const queryCometDataWithAccount = (
     market.marketAddress,
     nativeTokenToUsdPriceFeed,
     account,
-    // Without a bulker its allowances read as zero
-    market.bulkerAddress ?? ethers.constants.AddressZero,
+    market.bulkerAddress,
     wrappedNativeTokenSymbol,
     checkDeprecatedwUSDM,
   ]);
@@ -310,12 +300,11 @@ const maybeHydrateStEthCollateral = async (
                   account,
                   tokenWithAccountState,
                   unwrappedAsset,
-                  market.bulkerAddress ?? ethers.constants.AddressZero,
+                  market.bulkerAddress,
                   provider
                 );
                 return tokenWithAccountState;
               } else {
-                console.error('Unknown handling for extra collateral asset: ', unwrappedAsset);
                 return Promise.reject();
               }
             })

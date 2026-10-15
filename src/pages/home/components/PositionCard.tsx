@@ -93,7 +93,6 @@ type PositionCardHydrated = [
     onSubmitClicked: () => void;
     isRewardsLoading?: boolean;
     isInstitutional?: boolean;
-    isSubmitDisabled: boolean;
   }
 ];
 
@@ -365,7 +364,6 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
     liquidationCapacityPost,
     pendingAction,
     transaction,
-    isSubmitDisabled,
     onClearClicked,
     onCompareClicked,
     onDeleteAction,
@@ -576,7 +574,6 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
             buttonText,
             collateralAssets,
             invalidAction,
-            isSubmitDisabled,
             transaction,
             onClearClicked,
             onCompareClicked,
@@ -594,7 +591,6 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
             buttonText,
             collateralAssets,
             invalidAction,
-            isSubmitDisabled,
             transaction,
             onClearClicked,
             onCompareClicked,
@@ -702,7 +698,6 @@ type ActionQueueViewProps = {
   buttonText: string;
   collateralAssets: TokenWithAccountState[];
   invalidAction?: Action;
-  isSubmitDisabled: boolean;
   mobile?: boolean;
   transaction?: Transaction;
   onClearClicked: () => void;
@@ -720,7 +715,6 @@ const ActionQueueView = ({
   buttonText,
   collateralAssets,
   invalidAction,
-  isSubmitDisabled,
   mobile = false,
   transaction,
   onClearClicked,
@@ -797,7 +791,7 @@ const ActionQueueView = ({
       <div className="position-card__button-row">
         <button
           className={`button button--${actionColor}`}
-          disabled={transaction !== undefined || invalidAction !== undefined || isSubmitDisabled}
+          disabled={transaction !== undefined || invalidAction !== undefined}
           onClick={onSubmitClicked}
         >
           {buttonText}
@@ -842,7 +836,7 @@ const ActionQueueView = ({
     <div className="position-card__button-row">
       <button
         className={`button button--x-large button--${actionColor}`}
-        disabled={transaction !== undefined || invalidAction !== undefined || isSubmitDisabled}
+        disabled={transaction !== undefined || invalidAction !== undefined}
         onClick={onSubmitClicked}
       >
         {buttonText}

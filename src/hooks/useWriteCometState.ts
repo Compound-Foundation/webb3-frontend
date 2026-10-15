@@ -201,12 +201,7 @@ export function useWriteCometState(web3: Web3, addTransaction: AddTransaction): 
       estimatedGas: number,
       callback?: () => void
     ) => {
-      if (
-        web3.write.provider !== undefined &&
-        web3.write.chainId === web3.read.chainId &&
-        web3.write.account &&
-        market.bulkerAddress !== undefined
-      ) {
+      if (web3.write.provider !== undefined && web3.write.chainId === web3.read.chainId && web3.write.account) {
         const { bulker, bulkerActions, bulkerCallData, bulkerCallValue }: BulkerTrxData = getBulkerTrxData(
           web3.write.account,
           web3.write.provider,

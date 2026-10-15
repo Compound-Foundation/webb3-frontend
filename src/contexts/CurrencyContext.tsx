@@ -1,10 +1,10 @@
 import { Context, createContext, Dispatch, ReactNode, SetStateAction, useContext, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { useMarketsContext } from '@contexts/MarketsContext';
 import { MARKET_LOCAL_STORAGE_KEY, PREFERRED_CURRENCY_KEY } from '@helpers/constants';
+import { useMarkets } from '@hooks/useMarkets';
 import { parseMarketKeyOrDefault } from '@hooks/useSelectedMarket';
-import { Currency, MarketData } from '@types';
+import { Currency, MarketData, StateType } from '@types';
 
 type CurrencyManagerContext = {
   currency: Currency;
@@ -91,7 +91,7 @@ export const CurrencyContextProvider = ({ children }: { children: ReactNode | Re
   const [pressDownAnimate, setPressDownAnimate] = useState(false);
   const [pressUpAnimate, setPressUpAnimate] = useState(false);
   const [showCurrencyToggle, updateShowCurrencyToggle] = useState(false);
-  const { isLoading: marketsLoading, markets, defaultMarket } = useMarketsContext();
+  const [marketsStateType, marketsState] = useMarkets();
 
   const getPreferredCurrency = () => {
     const market = getMarketData();
@@ -100,9 +100,9 @@ export const CurrencyContextProvider = ({ children }: { children: ReactNode | Re
   };
 
   const getMarketData = (): MarketData | undefined => {
-    if (marketsLoading) return undefined;
+    if (marketsStateType !== StateType.Hydrated) return undefined;
     const marketKey = searchParams.get('market') ?? window.localStorage.getItem(MARKET_LOCAL_STORAGE_KEY);
-    return parseMarketKeyOrDefault(markets, defaultMarket, marketKey);
+    return parseMarketKeyOrDefault(marketsState.markets, marketsState.defaultMarket, marketKey);
   };
 
   const baseAssetSymbol = getMarketData()?.baseAsset.symbol ?? initialCurrencyManagerContext.baseAssetSymbol;

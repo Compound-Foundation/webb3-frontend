@@ -36,9 +36,6 @@ export function getBulkerTrxData(
   collateralAssetsPre: TokenWithAccountState[],
   actions: Action[]
 ): BulkerTrxData {
-  if (market.bulkerAddress === undefined) {
-    throw new Error('The market has no bulker');
-  }
   const signer = provider.getSigner(sender).connectUnchecked();
 
   const bulker = new Contract(market.bulkerAddress, MainnetBulker, signer);

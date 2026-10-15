@@ -1,14 +1,13 @@
 import { useState, useRef, useContext, Fragment, ReactElement } from 'react';
-import { useSearchParams } from 'react-router';
 
 import Tooltip from '@components/Tooltip';
-import { useMarketsContext } from '@contexts/MarketsContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { iconNameForChainId } from '@helpers/assets';
-import { areSameMarket, isV2Market, V2_MARKET_KEY } from '@helpers/markets';
+import { areSameMarket, getMarket, getMarketsByNetwork, isV2Market, V2_MARKET_KEY } from '@helpers/markets';
 import { V2_URL } from '@helpers/urls';
+import { useMarkets } from '@hooks/useMarkets';
 import useOnClickOutside from '@hooks/useOnClickOutside';
-import { MarketData, MarketDataLoaded, MarketsByNetwork } from '@types';
+import { MarketData, MarketDataLoaded, MarketsByNetwork, StateType } from '@types';
 
 import IconPair from './IconPair';
 import { ArrowRightNoDash, CaretDown, CheckMark, CircleExclamation, TailSpin } from './Icons';
@@ -20,22 +19,21 @@ const INSTITUTIONAL = 'Institutional';
 const MARKETS_SECTION = 'Markets';
 const NEW = 'New';
 const MARKETS_UNAVAILABLE = 'Markets unavailable';
-const MARKET_UNAVAILABLE = 'Market temporarily unavailable. Please check back shortly.';
+const MARKET_UNAVAILABLE = 'Market temporarily unavailable';
 
 const MarketSelector = () => {
   const [marketDropdownActive, setMarketDropdownActive] = useState<boolean>(false);
   const { selectedMarket, selectMarket } = useContext(getSelectedMarketContext());
   const [selectedChainId, setSelectedChainId] = useState<number>(selectedMarket[1]?.chainInformation.chainId ?? 1);
   const [, currentMarket] = selectedMarket;
-  const [searchParams] = useSearchParams();
-  const { getMarketsByNetwork, loadFailed } = useMarketsContext();
-  const marketsByNetwork = getMarketsByNetwork(searchParams.has('testnet'));
+  const [marketsStateType, marketsState] = useMarkets();
+  const marketsByNetwork = getMarketsByNetwork(marketsStateType === StateType.Hydrated ? marketsState.markets : []);
 
   const ref = useRef(null);
 
   useOnClickOutside(ref, () => setMarketDropdownActive(false));
 
-  if (loadFailed) {
+  if (marketsStateType === StateType.Loading && marketsState.loadFailed) {
     return (
       <div className="header__pill-dropdown market-selector">
         <label className="label label--secondary market-selector__unavailable-label market-selector__unavailable-label-container">
@@ -90,10 +88,13 @@ type SelectedMarketProps = {
 };
 
 const SelectedMarket = ({ active, market, onClick }: SelectedMarketProps) => {
-  const { getMarket } = useMarketsContext();
+  const [marketsStateType, marketsState] = useMarkets();
   // The market list symbol stays the same once the market loads, unlike the on-chain one
   // (e.g. USDC-cr of a test market becomes USDC), so the label doesn't change
-  const configMarket = getMarket(market.chainInformation.chainId, market.marketAddress);
+  const configMarket =
+    marketsStateType === StateType.Hydrated
+      ? getMarket(marketsState.markets, market.chainInformation.chainId, market.marketAddress)
+      : undefined;
   const currentChainName = market.chainInformation.name;
   const currentBaseToken = configMarket?.baseAsset.symbol ?? market.baseAsset.symbol;
 
@@ -259,7 +260,6 @@ type SupportedMarketsProps = {
 const SupportedMarkets = ({ currentMarket, markets, pathname, onSelectMarket }: SupportedMarketsProps) => {
   const institutionalMarkets = markets.filter((market: MarketData) => market.institutional);
   const standardMarkets = markets.filter((market: MarketData) => !market.institutional);
-  const { getMarketStatus } = useMarketsContext();
 
   const renderMarket = (market: MarketData, index: number) => {
     const onClick = () => {
@@ -268,7 +268,7 @@ const SupportedMarkets = ({ currentMarket, markets, pathname, onSelectMarket }: 
 
     const isCurrentMarket = currentMarket === undefined ? false : areSameMarket(currentMarket, market);
     // Markets in the error status are shown but can't be picked
-    const isError = getMarketStatus(market.chainInformation.chainId, market.marketAddress) === 'error';
+    const isError = market.status === 'error';
     return (
       <Fragment key={`${index}-${market.baseAsset}`}>
         {market.baseAsset.symbol === V2_MARKET_KEY && (

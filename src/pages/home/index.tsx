@@ -2,7 +2,6 @@ import { ReactNode, useContext, useEffect, useState } from 'react';
 
 import { isUnwrappedCollateralAsset } from '@constants/chains';
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
-import { useMarketsContext } from '@contexts/MarketsContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
@@ -18,6 +17,7 @@ import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getStatusCollateralAddress } from '@helpers/marketStatus';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
+import { useMarkets } from '@hooks/useMarkets';
 import { Theme } from '@hooks/useThemeManager';
 import { AddTransaction } from '@hooks/useTransactionManager';
 import { useWriteCometState, WriteCometState } from '@hooks/useWriteCometState';
@@ -70,12 +70,13 @@ const Home = ({
 }: HomeProps) => {
   // when V2 market was selected from market page and open up a new window default dashboard with default market
   const { selectedMarket, selectMarket } = useContext(getSelectedMarketContext());
-  const { isLoading: marketsLoading, defaultMarket, getMarketStatus, getCollateralStatus } = useMarketsContext();
+  const [marketsStateType, marketsState] = useMarkets();
+  const defaultMarket = marketsStateType === StateType.Hydrated ? marketsState.defaultMarket : undefined;
 
   // We use a useEffect here to prevent infinite renders by the state update in selectMarket
   useEffect(() => {
     const isV2Selected = selectedMarket[0] === 'hydrated' && selectedMarket[1].baseAsset.symbol == 'Compound V2';
-    if (isV2Selected && !marketsLoading) {
+    if (isV2Selected && defaultMarket !== undefined) {
       selectMarket(defaultMarket);
     }
   }, [selectedMarket[0], selectedMarket[1]?.baseAsset?.symbol, defaultMarket]);
@@ -90,15 +91,12 @@ const Home = ({
   const [compare, setCompare] = useState(false);
   // A market the summary reports in the error status is shown like one whose on-chain data failed to load
   const selected = selectedMarket[1];
-  const isMarketStatusError =
-    selected !== undefined && getMarketStatus(selected.chainInformation.chainId, selected.marketAddress) === 'error';
-  const getCollateralStatusFor = (assetAddress: string) =>
-    selected &&
-    getCollateralStatus(
-      selected.chainInformation.chainId,
-      selected.marketAddress,
-      getStatusCollateralAddress(selected.chainInformation, assetAddress)
-    );
+  const isMarketStatusError = selected?.status === 'error';
+  const getCollateralStatusFor = (assetAddress: string) => {
+    if (selected === undefined) return undefined;
+    const statusAddress = getStatusCollateralAddress(selected.chainInformation, assetAddress).toLowerCase();
+    return selected.collaterals?.find((collateral) => collateral.address.toLowerCase() === statusAddress)?.status;
+  };
   const state: CometState = isMarketStatusError ? [StateType.Loading, undefined] : cometStateProp;
   const [cometState] = state;
 
@@ -316,10 +314,6 @@ const Home = ({
         setCompare,
       },
     ];
-    // Don't use the bulker for a single action that doesn't involve wrapping Ether or stETH: it goes to the comet directly
-    const isSingleCometAction =
-      actions.length === 1 && ![market.chainInformation.nativeToken.symbol, 'stETH'].includes(actions[0][1].symbol);
-
     positionCardState = [
       StateType.Hydrated,
       {
@@ -342,8 +336,6 @@ const Home = ({
         pendingAction,
         theme,
         isRewardsLoading,
-        // A market without a bulker only takes single actions sent to the comet directly
-        isSubmitDisabled: !isSingleCometAction && market.bulkerAddress === undefined,
         transaction: blockingTransaction,
         onClearClicked: () => {
           clearActions();
@@ -382,13 +374,11 @@ const Home = ({
               if (web3.read.chainId && web3.write.chainId !== web3.read.chainId) {
                 switchWriteNetwork(web3.read.chainId);
               } else {
-                let spender: string | undefined = market.marketAddress;
+                let spender = market.marketAddress;
                 const assetAddress = asset.address;
                 if (isStETH(asset.symbol) && isUnwrappedCollateralAsset(market.chainInformation, assetAddress)) {
                   spender = market.bulkerAddress;
                 }
-                // stETH is supplied through the bulker, so a market without one can't take it
-                if (spender === undefined) return;
                 const approveGasLimit = estimatedGasMap.get(PreEstimatedAction.Approve) || 0;
                 writeState.approve(spender, assetAddress, `Enable ${asset.symbol}`, approveGasLimit);
                 confirmAction();
@@ -414,10 +404,13 @@ const Home = ({
             if (web3.write.chainId !== web3.read.chainId) {
               switchWriteNetwork(web3.read.chainId);
             } else {
-              if (isSingleCometAction) {
+              const nativeTokenSymbol = market.chainInformation.nativeToken.symbol;
+              const actionAssetSymbol = actions[0][1].symbol;
+
+              if (actions.length === 1 && actionAssetSymbol !== nativeTokenSymbol && actionAssetSymbol !== 'stETH') {
+                // don't use bulker if you're only taking a single action (that
+                // doesn't involve wrapping Ether or stETH)
                 submitSingleAction(actions[0]);
-              } else if (market.bulkerAddress === undefined) {
-                return;
               } else if (!isBulkerAllowed) {
                 setActionModalState(
                   actionModalStateBulkerApprove(
@@ -669,7 +662,6 @@ function actionModalStateBulkerApprove(
       isBulkerAllowed: state.isBulkerAllowed,
       transactions,
       onActionClicked: () => {
-        if (market.bulkerAddress === undefined) return;
         const allowOperatorGasLimit = estimatedGasMap.get(PreEstimatedAction.AllowOperator) || 0;
         writeState.allowOperator(market, market.bulkerAddress, 'Approve Compound III Proxy', allowOperatorGasLimit);
       },

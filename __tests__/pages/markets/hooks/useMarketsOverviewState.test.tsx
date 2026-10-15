@@ -6,19 +6,14 @@ import RewardsStateContext from '@contexts/RewardsStateContext';
 import { useMarketsOverviewState } from '@pages/markets/hooks/useMarketsOverviewState';
 import { StateType } from '@types';
 
-import { MOCK_MARKETS, MockMarketsProvider } from '../../../mocks/mockMarkets';
-
-// Rewards overrides would add rewards APRs to the expected summaries
-const MARKETS_WITHOUT_REWARDS_OVERWRITE = MOCK_MARKETS.map((market) => ({ ...market, rewardsOverwrite: undefined }));
-
+// The market list and the latest summaries come from the summary MSW serves. Rewards are loaded without a COMP
+// price, so the mainnet USDC and WETH rewards overrides only add their rewards asset symbol
 const Provider = ({ children }: { children: ReactNode }) => {
   const queryClient = new QueryClient();
 
   return (
     <QueryClientProvider client={queryClient}>
-      <MockMarketsProvider markets={MARKETS_WITHOUT_REWARDS_OVERWRITE}>
-        <RewardsStateContext.Provider value={[StateType.Hydrated, []]}>{children}</RewardsStateContext.Provider>
-      </MockMarketsProvider>
+      <RewardsStateContext.Provider value={[StateType.Hydrated, []]}>{children}</RewardsStateContext.Provider>
     </QueryClientProvider>
   );
 };
@@ -228,6 +223,7 @@ describe('useMarketsOverview', () => {
               },
               date: '2023-09-07',
               isRewardsLoading: false,
+              rewardsAssetSymbol: 'COMP',
               supplyAPR: 30836040536016000n,
               supplyRewardsAPR: 0n,
               status: 'success',
@@ -248,6 +244,7 @@ describe('useMarketsOverview', () => {
               },
               date: '2023-09-07',
               isRewardsLoading: false,
+              rewardsAssetSymbol: 'COMP',
               supplyAPR: 18374010062832000n,
               supplyRewardsAPR: 0n,
               status: 'success',

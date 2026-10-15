@@ -11,7 +11,7 @@ import {
   ActionQueue,
   ActionType,
   CometState,
-  LatestMarketSummaryResponse,
+  MarketData,
   MarketStatus,
   PendingAction,
   SelectedMarketData,
@@ -24,7 +24,7 @@ import { MOCK_DEFAULT_MARKET, MockMarketsProvider } from '../../../../__tests__/
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import Home from '../index';
 
-const writeState = { approve: jest.fn(), supply: jest.fn(), withdraw: jest.fn(), invokeBulker: jest.fn() };
+const writeState = { approve: jest.fn(), supply: jest.fn(), withdraw: jest.fn() };
 jest.mock('@hooks/useWriteCometState', () => ({ useWriteCometState: () => writeState }));
 
 beforeEach(() => jest.clearAllMocks());
@@ -33,7 +33,6 @@ const selected: SelectedMarketData = {
   selectedMarket: [StateType.Hydrated, MOCK_DEFAULT_MARKET],
   selectMarket: jest.fn(),
   selectMarketByAddress: jest.fn(),
-  isSelectedMarketError: false,
 };
 initializeSelectedMarket(selected);
 
@@ -72,7 +71,6 @@ type RenderOptions = {
   isWbtcError?: boolean;
   actions?: Action[];
   pendingAction?: PendingAction;
-  selectedMarketData?: SelectedMarketData;
 };
 
 const renderHome = ({
@@ -80,22 +78,21 @@ const renderHome = ({
   isWbtcError = false,
   actions,
   pendingAction,
-  selectedMarketData = selected,
 }: RenderOptions) => {
   const SelectedMarketContext = getSelectedMarketContext();
   const ActionQueueContext = getActionQueueContext();
   const actionQueue = makeActionQueue(actions, pendingAction);
-  const summary = {
-    chainId: MOCK_DEFAULT_MARKET.chainInformation.chainId,
-    comet: { address: MOCK_DEFAULT_MARKET.marketAddress },
+  const market: MarketData = {
+    ...MOCK_DEFAULT_MARKET,
     status,
     collaterals: [{ address: wbtc.address.toLowerCase(), symbol: wbtc.symbol, status: isWbtcError ? 'error' : 'success' }],
-  } as LatestMarketSummaryResponse;
+  };
+  const selectedMarketData: SelectedMarketData = { ...selected, selectedMarket: [StateType.Hydrated, market] };
 
   render(
     <MemoryRouter>
       <div id="overlay"></div>
-      <MockMarketsProvider marketSummaries={[summary]}>
+      <MockMarketsProvider>
         <SelectedMarketContext.Provider value={selectedMarketData}>
           <ActionQueueContext.Provider value={actionQueue}>
             <Home
@@ -170,35 +167,4 @@ describe('Home — collateral status', () => {
       expect(writeState.withdraw).not.toHaveBeenCalled();
     }
   );
-});
-
-describe('Home — market without a bulker', () => {
-  const withoutBulker: SelectedMarketData = {
-    ...selected,
-    selectedMarket: [StateType.Hydrated, { ...MOCK_DEFAULT_MARKET, bulkerAddress: undefined }],
-  };
-
-  test('cannot submit actions that need the bulker', async () => {
-    renderHome({
-      selectedMarketData: withoutBulker,
-      actions: [
-        [ActionType.SupplyCollateral, wbtc, 10n ** 7n],
-        [ActionType.Supply, mockBaseAsset(), 10n ** 6n],
-      ],
-    });
-    const submitButtons = screen.getAllByRole('button', { name: 'Submit Transaction' });
-
-    submitButtons.forEach((button) => expect(button).toBeDisabled());
-    await userEvent.click(submitButtons[0]);
-    expect(writeState.invokeBulker).not.toHaveBeenCalled();
-  });
-
-  test('still sends a single action straight to the comet', async () => {
-    renderHome({ selectedMarketData: withoutBulker, actions: [[ActionType.SupplyCollateral, wbtc, 10n ** 7n]] });
-    const submitButtons = screen.getAllByRole('button', { name: 'Submit Transaction' });
-
-    submitButtons.forEach((button) => expect(button).toBeEnabled());
-    await userEvent.click(submitButtons[0]);
-    expect(writeState.supply).toHaveBeenCalled();
-  });
 });

@@ -1,55 +1,49 @@
-import { ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactNode, useState } from 'react';
 
-import { MarketsContext, MarketsContextValue } from '@contexts/MarketsContext';
 import { convertApiResponse } from '@helpers/functions';
-import { MarketListEntry, summaryToMarkets } from '@helpers/marketList';
-import { getMarket, getMarketDescriptors, getMarkets, getMarketsByNetwork } from '@helpers/markets';
-import { buildMarketStatusIndex, getCollateralStatus, getMarketStatus } from '@helpers/marketStatus';
+import { summaryToMarkets } from '@helpers/marketList';
+import { LATEST_MARKET_SUMMARY_QUERY_KEY } from '@hooks/useMarkets';
 import { LatestMarketSummaryResponse, MarketData } from '@types';
 
 import mockMarketListResponse from './mockMarketListResponse.json';
 
-export const MOCK_MARKET_LIST = mockMarketListResponse.map(convertApiResponse) as MarketListEntry[];
+export const MOCK_MARKET_LIST = mockMarketListResponse.map(convertApiResponse) as LatestMarketSummaryResponse[];
 
 const marketList = summaryToMarkets(MOCK_MARKET_LIST);
 
 export const MOCK_MARKETS: MarketData[] = marketList.markets;
 export const MOCK_DEFAULT_MARKET: MarketData = marketList.defaultMarket;
 
+const isSameSummary = (a: LatestMarketSummaryResponse, b: LatestMarketSummaryResponse) =>
+  a.chainId === b.chainId && a.comet.address.toLowerCase() === b.comet.address.toLowerCase();
+
+// Serves the mock market list as the latest summaries useMarkets reads, without requesting them
 export const MockMarketsProvider = ({
   children,
   isLoading = false,
-  markets = MOCK_MARKETS,
   marketSummaries = [],
 }: {
   children: ReactNode;
   isLoading?: boolean;
-  markets?: MarketData[];
   // Latest summaries the market and collateral statuses are read from
   marketSummaries?: LatestMarketSummaryResponse[];
 }) => {
-  const contextMarkets = isLoading ? [] : markets;
-  const statusIndex = buildMarketStatusIndex(marketSummaries);
-  const helpers = {
-    loadFailed: false,
-    getMarket: (chainId: number, marketAddress: string) => getMarket(contextMarkets, chainId, marketAddress),
-    getMarkets: (showTestnet: boolean) => getMarkets(contextMarkets, showTestnet),
-    getMarketsByNetwork: (showTestnet: boolean) => getMarketsByNetwork(contextMarkets, showTestnet),
-    getMarketDescriptors: (cometAddress: string, chainId: number) =>
-      getMarketDescriptors(contextMarkets, cometAddress, chainId),
-    getMarketStatus: (chainId: number, cometAddress: string) => getMarketStatus(statusIndex, chainId, cometAddress),
-    getCollateralStatus: (chainId: number, cometAddress: string, collateralAddress: string) =>
-      getCollateralStatus(statusIndex, chainId, cometAddress, collateralAddress),
-  };
+  const [queryClient] = useState(() => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Without cached summaries the market list stays loading
+    client.setQueryDefaults(LATEST_MARKET_SUMMARY_QUERY_KEY, { enabled: false });
+    if (!isLoading) {
+      client.setQueryData(
+        LATEST_MARKET_SUMMARY_QUERY_KEY,
+        MOCK_MARKET_LIST.map((entry) => {
+          const summary = marketSummaries.find((summary) => isSameSummary(summary, entry));
+          return summary ? { ...entry, status: summary.status, collaterals: summary.collaterals } : entry;
+        })
+      );
+    }
+    return client;
+  });
 
-  const value: MarketsContextValue = isLoading
-    ? {
-        ...helpers,
-        isLoading: true,
-        markets: contextMarkets,
-        defaultMarket: undefined,
-      }
-    : { ...helpers, isLoading: false, ...marketList, markets };
-
-  return <MarketsContext.Provider value={value}>{children}</MarketsContext.Provider>;
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 };

@@ -182,9 +182,6 @@ async function estimateGas(
     validateAllowanceForAction(baseAsset, collateralAssets, actions, actions[0]) !== 'ok'
   ) {
     return 0;
-  } else if (market.bulkerAddress === undefined) {
-    // A market without a bulker can't send these actions, see isSubmitDisabled on Home
-    return 0;
   } else {
     let gasLimit = 0;
     if (web3.write.provider !== undefined && web3.write.chainId === web3.read.chainId && web3.write.account) {

@@ -1,15 +1,15 @@
-import { ReactNode, useContext, useEffect } from 'react';
+import { ReactNode, useContext } from 'react';
 import { Link } from 'react-router';
 
 import IconPair from '@components/IconPair';
 import { ArrowLeft, ExternalLink } from '@components/Icons';
-import { useMarketsContext } from '@contexts/MarketsContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
-import { isV2Market } from '@helpers/markets';
+import { getMarket, isV2Market } from '@helpers/markets';
 import { formatTokenBalance, getTokenValue, PRICE_PRECISION } from '@helpers/numbers';
 import { getBlockExplorerUrlForAddress, INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
+import { useMarkets } from '@hooks/useMarkets';
 import { CTokenWithMarketState, Currency, StateType, TokenWithMarketState } from '@types';
 
 import AdditionalMarketDataPanel from './components/AdditionalMarketDataPanel';
@@ -26,22 +26,15 @@ import { useMarketsState } from './hooks/useMarketsState';
 
 type MarketsProps = {
   web3: Web3;
-  setIsMarketsStateError: (isError: boolean) => void;
 };
 
-const Market = ({ web3, setIsMarketsStateError }: MarketsProps) => {
+const Market = ({ web3 }: MarketsProps) => {
   const { selectedMarket } = useContext(getSelectedMarketContext());
-  const { getMarket, getCollateralStatus } = useMarketsContext();
+  const [marketsStateType, marketsState] = useMarkets();
 
   const marketCurrencyToShow = Currency.USD;
 
-  const [state, isMarketsStateError] = useMarketsState(web3, selectedMarket);
-
-  // The alert banner lives in App, so report the error up and clear it when leaving the page
-  useEffect(() => {
-    setIsMarketsStateError(isMarketsStateError);
-    return () => setIsMarketsStateError(false);
-  }, [isMarketsStateError]);
+  const state = useMarketsState(web3, selectedMarket);
   const [marketStateType, marketStateData] = state;
   const [, market] = selectedMarket;
   const [currentChainName, currentChainId, currentBaseToken] =
@@ -50,7 +43,10 @@ const Market = ({ web3, setIsMarketsStateError }: MarketsProps) => {
       : ['Connecting', -1, undefined];
   // The configured market entry keeps the display name and institutional flags,
   // which the hydrated market's on-chain base asset data doesn't carry
-  const configMarket = market !== undefined ? getMarket(market.chainInformation.chainId, market.marketAddress) : undefined;
+  const configMarket =
+    market !== undefined && marketsStateType === StateType.Hydrated
+      ? getMarket(marketsState.markets, market.chainInformation.chainId, market.marketAddress)
+      : undefined;
   // The market list symbol stays the same once the market loads, unlike the on-chain one
   // (e.g. USDC-cr of a test market becomes USDC), so the title doesn't change
   const marketDisplayName = configMarket?.institutional
@@ -187,7 +183,9 @@ const Market = ({ web3, setIsMarketsStateError }: MarketsProps) => {
               key={index}
               state={[StateType.Hydrated, token, baseAsset]}
               isCollateralError={
-                getCollateralStatus(market.chainInformation.chainId, market.marketAddress, token.address) === 'error'
+                market.collaterals?.find(
+                  (collateral) => collateral.address.toLowerCase() === token.address.toLowerCase()
+                )?.status === 'error'
               }
             />
           ))}

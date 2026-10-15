@@ -33,10 +33,9 @@ const MARKETS_REFRESH_INTERVAL = 300_000; // 5 mins
 
 const SECONDS_PER_YEAR = BigInt(60 * 60 * 24 * 365);
 
-export function useMarketsState(web3: Web3, marketState: MarketDataState): [MarketState, boolean] {
+export function useMarketsState(web3: Web3, marketState: MarketDataState): MarketState {
   const location = useLocation();
   const [state, setState] = useState<MarketState>([StateType.Loading]);
-  const [isError, setIsError] = useState(false);
   const marketRef = useRef(marketState);
   const rewardsState = useContext(RewardsStateContext);
 
@@ -44,7 +43,6 @@ export function useMarketsState(web3: Web3, marketState: MarketDataState): [Mark
   useEffect(() => {
     const state: MarketState = [StateType.Loading];
     setState(state);
-    setIsError(false);
     marketRef.current = marketState;
   }, [marketState]);
 
@@ -60,9 +58,6 @@ export function useMarketsState(web3: Web3, marketState: MarketDataState): [Mark
           state = await getState(web3.read.provider, marketState[1], rewardsState);
         } catch (e) {
           console.error('Error fetching market state: ', e);
-          if (marketState === marketRef.current) {
-            setIsError(true);
-          }
           return;
         }
       }
@@ -71,7 +66,6 @@ export function useMarketsState(web3: Web3, marketState: MarketDataState): [Mark
       // We compare to a ref because the `web3.read.chainId` in the callback can be stale
       if (marketState === marketRef.current) {
         setState(state);
-        setIsError(false);
       }
     }
   }, [marketState, rewardsState]);
@@ -84,8 +78,7 @@ export function useMarketsState(web3: Web3, marketState: MarketDataState): [Mark
     return () => clearInterval(intervalId);
   }, [refreshData]);
 
-  // Only report the error while there's no data, so a failed refresh doesn't flag data already shown
-  return [state, isError && state[0] === StateType.Loading];
+  return state;
 }
 
 const getState = async (rawProvider: JsonRpcProvider, market: MarketData | MarketDataLoaded, rewardsState: RewardsState): Promise<MarketState> => {

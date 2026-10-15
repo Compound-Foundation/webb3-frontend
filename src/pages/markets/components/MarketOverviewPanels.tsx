@@ -10,19 +10,20 @@ import PanelWithNoHeader from '@components/PanelWithNoHeader';
 import Tooltip from '@components/Tooltip';
 import { NetRatesTooltipView } from '@components/Tooltips/NetRatesTooltip';
 import { CHAINS, INACTIVE_CHAIN_IDS } from '@constants/chains';
-import { useMarketsContext } from '@contexts/MarketsContext';
 import { assetIconForAssetSymbol, iconNameForChainId } from '@helpers/assets';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
+import { getMarket, getMarketDescriptors } from '@helpers/markets';
 import { formatRateFactor, formatValueInDollars, PRICE_PRECISION } from '@helpers/numbers';
+import { useMarkets } from '@hooks/useMarkets';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 
-import { LatestMarketSummaries, MarketSummary } from '../../../types';
+import { LatestMarketSummaries, MarketSummary, StateType } from '../../../types';
 import { BoostedRateInfo } from '../BoostedRateInfo';
 
 import InstitutionalRateInfo from './InstitutionalRateInfo';
 
-const MARKET_UNAVAILABLE = 'Market temporarily unavailable. Please check back shortly.';
-const MARKET_PARTIALLY_UNAVAILABLE = 'Market partially unavailable';
+const MARKET_UNAVAILABLE = 'Market temporarily unavailable.';
+const MARKET_PARTIALLY_UNAVAILABLE = 'Market partially unavailable.';
 const COLLATERAL_UNAVAILABLE = 'Collateral temporarily unavailable.';
 
 const SORT_BY_OPTIONS = [
@@ -248,7 +249,8 @@ type PanelProps = {
   institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
 };
 const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: PanelProps) => {
-  const { getMarket } = useMarketsContext();
+  const [marketsStateType, marketsState] = useMarkets();
+  const markets = marketsStateType === StateType.Hydrated ? marketsState.markets : [];
   const chainName = CHAINS[chainId].name;
 
   const headerWithLogo = (
@@ -260,7 +262,7 @@ const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: Panel
 
   // Institutional markets are pinned above the rest of the network's markets, regardless of sort
   const isInstitutional = (marketSummary: MarketSummary) =>
-    getMarket(marketSummary.chainId, marketSummary.comet.address)?.institutional === true;
+    getMarket(markets, marketSummary.chainId, marketSummary.comet.address)?.institutional === true;
   const institutionalSummaries: MarketSummary[] = [];
   const standardSummaries: MarketSummary[] = [];
   for (const marketSummary of marketSummaries) {
@@ -312,9 +314,14 @@ type PanelRowProps = {
 };
 
 const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps) => {
-  const { getMarket, getMarketDescriptors } = useMarketsContext();
-  const [assetSymbol, chainName, assetName] = getMarketDescriptors(marketSummary.comet.address, marketSummary.chainId);
-  const market = getMarket(marketSummary.chainId, marketSummary.comet.address);
+  const [marketsStateType, marketsState] = useMarkets();
+  const markets = marketsStateType === StateType.Hydrated ? marketsState.markets : [];
+  const [assetSymbol, chainName, assetName] = getMarketDescriptors(
+    markets,
+    marketSummary.comet.address,
+    marketSummary.chainId
+  );
+  const market = getMarket(markets, marketSummary.chainId, marketSummary.comet.address);
   const showNewBadge = market?.isNew === true;
 
   const utilization = formatRateFactor(marketSummary.utilization);

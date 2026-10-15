@@ -115,10 +115,10 @@ type Web3ProviderProps = {
   children?: ReactNode;
 };
 
-// Initial read network; selecting a market switches it to the market's chain
-const DEFAULT_READ_CHAIN_ID = 1;
-
 export const Web3Provider = ({ children }: Web3ProviderProps) => {
+  // Initial read network; selecting a market switches it to the market's chain
+  const DEFAULT_READ_CHAIN_ID = 1;
+
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   // Only the setter is read: the preference is written to localStorage by

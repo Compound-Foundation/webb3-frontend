@@ -350,9 +350,8 @@ export type LatestMarketSummaryResponse = {
   chainId: number;
   comet: {
     address: string;
-    // The market's other contracts, when it has them
-    bulker?: string;
-    rewards?: string;
+    bulker: string;
+    rewards: string;
   };
   deploymentKey?: string;
   displayName?: string;
@@ -384,10 +383,12 @@ export type MarketData = {
   chainInformation: ChainInformation;
   iconPair: [string, string];
   marketAddress: string;
-  // A market can come without a bulker: it then only takes actions sent to the comet directly
-  bulkerAddress?: string;
+  bulkerAddress: string;
   fauceteerAddress?: string;
   rewardsAddress?: string;
+  // Statuses from the latest market summary
+  status?: MarketStatus;
+  collaterals?: LatestMarketSummaryResponse['collaterals'];
   // Overrides the base-asset part of the market's URL key (e.g. 'usdc-institutional' -> '?market=usdc-institutional-mainnet').
   // Required when multiple markets on the same chain share a base asset symbol.
   slug?: string;
@@ -477,7 +478,6 @@ export type SelectedMarketData = {
   selectedMarket: MarketDataState;
   selectMarket: (market: MarketData, switchWriteNetwork?: boolean) => void;
   selectMarketByAddress: (chainId: number, comet: string, switchWriteNetwork?: boolean) => void;
-  isSelectedMarketError: boolean;
 };
 
 export type CometStateLoading = [StateType.Loading, undefined | ProtocolState];

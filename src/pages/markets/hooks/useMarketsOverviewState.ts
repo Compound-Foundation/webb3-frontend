@@ -1,17 +1,16 @@
-import { keepPreviousData, QueryClient, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { getAddress } from 'ethers/lib/utils';
-import { useContext } from 'react';
+import { useContext, useMemo } from 'react';
 
-import { useMarketsContext } from '@contexts/MarketsContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { isNonStablecoinMarket } from '@helpers/baseAssetPrice';
 import { convertApiResponse } from '@helpers/functions';
-import { latestMarketSummaryQueryOptions, LATEST_MARKET_SUMMARY_REFRESH_INTERVAL } from '@helpers/latestMarketSummary';
 import { filterLegacyCollateralSymbols } from '@helpers/legacyCollateral';
 import { getMarket, getMarketDescriptors } from '@helpers/markets';
 import { BASE_FACTOR, FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import { getHistoricalMarketSummaryEndpoint } from '@helpers/urls';
+import { useMarkets } from '@hooks/useMarkets';
 import {
   AggregatedHistoricalSummary,
   LatestMarketSummaryResponse,
@@ -22,36 +21,38 @@ import {
   StateType,
 } from '@types';
 
-export function useMarketsOverviewState(): MarketOverviewState {
-  const { isLoading: marketsLoading, markets } = useMarketsContext();
-  const rewardsState = useContext(RewardsStateContext);
-  const queryClient = useQueryClient();
+const LATEST_SUMMARY_REFRESH_INTERVAL = 1000 * 60 * 10; // 10 minutes
 
-  const query = useQuery({
-    queryKey: ['marketOverviewState', rewardsState[0]],
-    queryFn: () => getState(queryClient, markets, rewardsState),
-    // Keep showing the summaries fetched before rewards loaded while the query refetches with them
-    placeholderData: keepPreviousData,
-    refetchInterval: LATEST_MARKET_SUMMARY_REFRESH_INTERVAL,
-    enabled: !marketsLoading,
+export function useMarketsOverviewState(): MarketOverviewState {
+  const [marketsStateType, marketsState] = useMarkets();
+  const rewardsState = useContext(RewardsStateContext);
+  const markets = marketsStateType === StateType.Hydrated ? marketsState.markets : [];
+
+  const { data: historicalMarketSummaries } = useQuery({
+    queryKey: ['historicalMarketSummaries'],
+    queryFn: () => getHistoricalMarketSummaries(markets),
+    refetchInterval: LATEST_SUMMARY_REFRESH_INTERVAL,
+    enabled: marketsStateType === StateType.Hydrated,
   });
 
-  return query.data ?? [StateType.Loading];
+  // Rewards APRs are plain math over the loaded summaries, so rewards loading needs no new request
+  return useMemo((): MarketOverviewState => {
+    if (marketsStateType !== StateType.Hydrated || historicalMarketSummaries === undefined) {
+      return [StateType.Loading];
+    }
+
+    const latestMarketSummaries = marketsState.summaries.map((marketSummary) =>
+      sanitizeMarketSummary(marketsState.markets, marketSummary, rewardsState)
+    );
+
+    return [StateType.Hydrated, { latestMarketSummaries, historicalMarketSummaries }];
+  }, [marketsStateType, marketsState, rewardsState, historicalMarketSummaries]);
 }
 
-const getState = async (
-  queryClient: QueryClient,
+const getHistoricalMarketSummaries = async (
   markets: MarketData[],
-  rewardsState: RewardsState,
   includeTestnets = false
-): Promise<MarketOverviewState> => {
-  // Same cache entry as MarketsContext's statuses, so the page makes one request for the latest summaries
-  const latestMarketSummaries = await queryClient.fetchQuery(latestMarketSummaryQueryOptions);
-
-  const sanitizedLatestMarketSummaries: MarketSummary[] = latestMarketSummaries.map((marketSummary) =>
-    sanitizeMarketSummary(markets, marketSummary, rewardsState)
-  );
-
+): Promise<AggregatedHistoricalSummary[]> => {
   const historicalMarketSummariesResponse = await fetch(getHistoricalMarketSummaryEndpoint(includeTestnets));
   const historicalMarketSummaries = await historicalMarketSummariesResponse.json();
   const sanitizedHistoricalMarketSummaries: MarketSummary[] = historicalMarketSummaries
@@ -81,10 +82,7 @@ const getState = async (
     []
   );
 
-  return [
-    StateType.Hydrated,
-    { latestMarketSummaries: sanitizedLatestMarketSummaries, historicalMarketSummaries: aggregatedHistoricalSummaries },
-  ];
+  return aggregatedHistoricalSummaries;
 };
 
 /**

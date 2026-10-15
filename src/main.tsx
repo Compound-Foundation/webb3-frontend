@@ -1,16 +1,11 @@
 import { SafeProvider } from '@safe-global/safe-apps-react-sdk';
-import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
-import { QueryClient } from '@tanstack/react-query';
-import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter as Router, Routes, Route } from 'react-router';
 import { WagmiProvider } from 'wagmi';
 
-import { MarketsProvider } from '@contexts/MarketsContext';
 import { Web3Provider } from '@contexts/Web3Context';
-import { MARKET_LIST_LOCAL_STORAGE_KEY } from '@helpers/constants';
-import { MARKET_LIST_CACHE_BUSTER, MARKET_LIST_CACHE_MAX_AGE, shouldPersistQuery } from '@helpers/marketList';
 import { SAFE_ALLOWED_DOMAINS } from '@helpers/safe';
 
 import App from './App';
@@ -29,10 +24,6 @@ import Vote from './pages/vote';
 const { pathname } = window.location;
 const ipfsMatch = new RegExp('.*/ba[a-zA-Z0-9]{57}/').exec(pathname);
 const queryClient = new QueryClient();
-const persister = createAsyncStoragePersister({
-  storage: window.localStorage,
-  key: MARKET_LIST_LOCAL_STORAGE_KEY,
-});
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
@@ -48,32 +39,22 @@ createRoot(document.getElementById('root') as HTMLElement).render(
       */}
       <WagmiProvider config={config} reconnectOnMount={false}>
         <SafeProvider opts={{ allowedDomains: SAFE_ALLOWED_DOMAINS }}>
-          <PersistQueryClientProvider
-            client={queryClient}
-            persistOptions={{
-              persister,
-              maxAge: MARKET_LIST_CACHE_MAX_AGE,
-              buster: MARKET_LIST_CACHE_BUSTER,
-              dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
-            }}
-          >
-            <MarketsProvider>
-              <Web3Provider>
-                <Routes>
-                  <Route path="/" element={<App Component={Home} pageProps={{}} />} />
-                  <Route path="/markets/:marketId" element={<App Component={Market} pageProps={{}} />} />
-                  <Route path="/markets" element={<App Component={MarketOverview} pageProps={{}} />} />
-                  <Route path="/extensions/:extensionId" element={<App Component={Extension} pageProps={{}} />} />
-                  <Route path="/extensions" element={<App Component={ExtensionList} pageProps={{}} />} />
-                  <Route path="/vote" element={<App Component={Vote} pageProps={{}} />} />
-                  <Route path="/transactions" element={<App Component={TransactionHistory} pageProps={{}} />} />
-                  <Route path="/rewards" element={<App Component={Rewards} pageProps={{}} />} />
-                  {/* Standalone interstitial: no header, footer, or wallet chrome. */}
-                  <Route path="/redirect" element={<Redirect />} />
-                </Routes>
-              </Web3Provider>
-            </MarketsProvider>
-          </PersistQueryClientProvider>
+          <QueryClientProvider client={queryClient}>
+            <Web3Provider>
+              <Routes>
+                <Route path="/" element={<App Component={Home} pageProps={{}} />} />
+                <Route path="/markets/:marketId" element={<App Component={Market} pageProps={{}} />} />
+                <Route path="/markets" element={<App Component={MarketOverview} pageProps={{}} />} />
+                <Route path="/extensions/:extensionId" element={<App Component={Extension} pageProps={{}} />} />
+                <Route path="/extensions" element={<App Component={ExtensionList} pageProps={{}} />} />
+                <Route path="/vote" element={<App Component={Vote} pageProps={{}} />} />
+                <Route path="/transactions" element={<App Component={TransactionHistory} pageProps={{}} />} />
+                <Route path="/rewards" element={<App Component={Rewards} pageProps={{}} />} />
+                {/* Standalone interstitial: no header, footer, or wallet chrome. */}
+                <Route path="/redirect" element={<Redirect />} />
+              </Routes>
+            </Web3Provider>
+          </QueryClientProvider>
         </SafeProvider>
       </WagmiProvider>
     </Router>
