@@ -38,11 +38,15 @@ const MarketSelector = () => {
   if (loadFailed) {
     return (
       <div className="header__pill-dropdown market-selector">
-        <label className="text-color--2">
+        <label className="label label--secondary market-selector__unavailable-label market-selector__unavailable-label-container">
           {MARKETS_UNAVAILABLE}
         </label>
       </div>
     );
+  }
+
+  if (currentMarket === undefined) {
+    return null;
   }
 
   return (
@@ -81,7 +85,7 @@ const MarketSelector = () => {
 
 type SelectedMarketProps = {
   active: boolean;
-  market: MarketData | MarketDataLoaded | undefined;
+  market: MarketData | MarketDataLoaded;
   onClick: () => void;
 };
 
@@ -89,22 +93,21 @@ const SelectedMarket = ({ active, market, onClick }: SelectedMarketProps) => {
   const { getMarket } = useMarketsContext();
   // The market list symbol stays the same once the market loads, unlike the on-chain one
   // (e.g. USDC-cr of a test market becomes USDC), so the label doesn't change
-  const configMarket = market !== undefined ? getMarket(market.chainInformation.chainId, market.marketAddress) : undefined;
-  const [currentChainName, currentBaseToken] =
-    market !== undefined
-      ? [market.chainInformation.name, configMarket?.baseAsset.symbol ?? market.baseAsset.symbol]
-      : ['Connecting', undefined];
+  const configMarket = getMarket(market.chainInformation.chainId, market.marketAddress);
+  const currentChainName = market.chainInformation.name;
+  const currentBaseToken = configMarket?.baseAsset.symbol ?? market.baseAsset.symbol;
+
   return (
     <div
       className={`button market-selector__selected-market${active ? ' market-selector__selected-market--active' : ''}`}
       onClick={onClick}
     >
-      {market !== undefined && market.iconPair ? (
+      {market.iconPair ? (
         <IconPair className="mobile-hide" icon1={market.iconPair[1]} icon2={market.iconPair[0]} />
       ) : null}
 
       <div className="market-selector__selected-market__info">
-        {currentBaseToken && <label className="label text-color--1 L1">{currentBaseToken}</label>}
+        <label className="label text-color--1 L1">{currentBaseToken}</label>
       </div>
       <div className="market-selector__selected-market__info">
         <label className="label text-color--2 L1">{currentChainName}</label>

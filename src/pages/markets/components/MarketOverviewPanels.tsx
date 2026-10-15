@@ -85,6 +85,13 @@ const MarketOverviewPanels = ({ latestMarketSummaries, institutionalWhitelistSta
 
     // Ascending, sort "a to z", descending sort "z to a"
     marketSummaries.sort((a, z) => {
+      // A market in the error status has no data to sort by, so it stays at the bottom in either order
+      const aIsError = a.status === 'error';
+      const zIsError = z.status === 'error';
+      if (aIsError !== zIsError) {
+        return aIsError ? 1 : -1;
+      }
+
       const aVal = getSortValue(a);
       const zVal = getSortValue(z);
 
