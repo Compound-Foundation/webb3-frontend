@@ -2,6 +2,9 @@ import { ChainInformation } from '@types';
 
 export const assetIconForAssetSymbol = (symbol: string): string => {
   switch (symbol) {
+    case 'USDC-cr':
+    case 'USDC-br':
+      return 'USDC';
     case 'USDC.e':
       return 'USDC';
     case 'USDbC':
