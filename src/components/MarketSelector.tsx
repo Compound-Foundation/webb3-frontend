@@ -1,4 +1,4 @@
-import { useState, useRef, useContext, Fragment, ReactElement } from 'react';
+import { useState, useRef, useContext, Fragment } from 'react';
 
 import Tooltip from '@components/Tooltip';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
@@ -191,7 +191,9 @@ type MarketOptionProps = {
 };
 
 const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loading }: MarketOptionProps) => {
-  const exclamationRef = useRef<HTMLSpanElement>(null);
+  // The status tooltip opens on hovering the whole option, but points at the exclamation icon
+  const [hovered, setHovered] = useState(false);
+  const hoverHandlers = { onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false) };
   const content = (
     <>
       <MarketNetworkIcon icon={market.iconPair[1]} className={`${isError ? 'icon-disabled' : ''}`}/>
@@ -200,9 +202,16 @@ const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loa
         {loading && <span className="label label--secondary text-color--2">{APPROVE_IN_WALLET}</span>}
       </div>
       {isError && (
-        <span ref={exclamationRef} className="market-selector__option__exclamation">
-          <CircleExclamation className="svg--icon--3 market-selector__option__exclamation-icon" />
-        </span>
+        <Tooltip
+          open={hovered}
+          width={200}
+          yOffset={12}
+          content={<span className="market-selector__tooltip-text">{MARKET_UNAVAILABLE}</span>}
+        >
+          <span className="market-selector__option__exclamation">
+            <CircleExclamation className="svg--icon--3 market-selector__option__exclamation-icon" />
+          </span>
+        </Tooltip>
       )}
       {market.isNew && <span className="new-badge label label--secondary">{NEW}</span>}
       {isCurrentMarket && <CheckMark className="svg--supply" />}
@@ -210,21 +219,9 @@ const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loa
     </>
   );
 
-  const withUnavailableTooltip = (option: ReactElement) => (
-    <Tooltip
-      disabled={!isError}
-      width={200}
-      yOffset={12}
-      anchorRef={exclamationRef}
-      content={<span className="market-selector__tooltip-text">{MARKET_UNAVAILABLE}</span>}
-    >
-      {option}
-    </Tooltip>
-  );
-
   if (isV2Market(market) && pathname === '/') {
     // V2 market isn't supported so should link out to the V2 app
-    return withUnavailableTooltip(
+    return (
       <a
         key={market.baseAsset.symbol}
         className={`market-selector__option`}
@@ -232,18 +229,20 @@ const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loa
         target="_blank"
         rel="noreferrer"
         onClick={onClick}
+        {...hoverHandlers}
       >
         {content}
       </a>
     );
   }
 
-  return withUnavailableTooltip(
+  return (
     <div
       key={market.baseAsset.symbol}
       className={`market-selector__option`}
       aria-disabled={isError}
       onClick={onClick}
+      {...hoverHandlers}
     >
       {content}
     </div>

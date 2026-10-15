@@ -28,7 +28,7 @@ const Tooltip = ({
   yOffset = 20,
   x,
   y,
-  anchorRef,
+  open,
 }: {
   width: number;
   children: React.ReactElement;
@@ -45,8 +45,8 @@ const Tooltip = ({
   yOffset?: number;
   x?: number;
   y?: number;
-  // The element to place the tooltip over, when it isn't the hovered trigger itself
-  anchorRef?: React.RefObject<HTMLElement | null>;
+  // Shows the tooltip from the parent, when another element (e.g. the whole row) triggers it
+  open?: boolean;
 }) => {
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
   const [coordinates, setCoordinates] = useState<TooltipCoordinates>({ x: 0, y: 0 });
@@ -69,7 +69,7 @@ const Tooltip = ({
     if (!disabled && tooltipRef.current) {
       triggerRef.current = e.currentTarget;
       setShowTooltip(true);
-      const triggerEl = (anchorRef?.current ?? e.currentTarget).getBoundingClientRect();
+      const triggerEl = e.currentTarget.getBoundingClientRect();
 
       const tooltipHeight = tooltipRef.current.clientHeight;
       // By default, try to set the tooltip above the hovered element.
@@ -144,6 +144,15 @@ const Tooltip = ({
     }
   };
 
+  useEffect(() => {
+    if (open === undefined) return;
+    if (open && triggerRef.current) {
+      handleMouseOver({ currentTarget: triggerRef.current });
+    } else {
+      setShowTooltip(false);
+    }
+  }, [open]);
+
   // While an interactive tooltip is open, a tap anywhere outside it (and outside
   // its trigger, whose own touchend handles the toggle) dismisses it.
   useEffect(() => {
@@ -161,8 +170,9 @@ const Tooltip = ({
       {disabled
         ? children
         : cloneElement(children, {
-            onMouseOver: handleMouseOver,
-            onMouseOut: handleMouseOut,
+            ...(open === undefined
+              ? { onMouseOver: handleMouseOver, onMouseOut: handleMouseOut }
+              : { ref: triggerRef }),
             ...(interactive &&
               (touchToggle
                 ? {

@@ -22,7 +22,7 @@ import {
   Transaction,
 } from '@types';
 
-const COLLATERAL_UNAVAILABLE = 'Collateral temporarily unavailable.';
+const COLLATERAL_UNAVAILABLE = 'Collateral temporarily unavailable';
 
 type AssetRowLoading = [StateType.Loading];
 type AssetRowNoWallet = [StateType.NoWallet, { asset: TokenWithState; isCollateralError?: boolean }];
@@ -316,8 +316,6 @@ const AssetRow = ({ state }: AssetRowProps) => {
   const [detailsActive, setDetailsActive] = useState(false);
   const { currency } = useCurrencyContext();
   const prevActionAmount = useRef<bigint | undefined>();
-  // The status tooltip of a collateral in the error status points at the error badge
-  const errorIconRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (stateType === StateType.Hydrated) {
@@ -369,17 +367,7 @@ const AssetRow = ({ state }: AssetRowProps) => {
     >
       <div className={`asset-row__hover${hoverModifier}`}></div>
       {/* A collateral in the error status shows its status over the error badge instead of the asset details */}
-      <Tooltip
-        content={
-          isCollateralError ? <span className="asset-row__tooltip-text">{COLLATERAL_UNAVAILABLE}</span> : tooltipContent
-        }
-        width={isCollateralError ? 214 : 340}
-        hideArrow={!isCollateralError}
-        // Hover-only tooltips are hidden on small screens, the status one opens on tap there
-        interactive={isCollateralError}
-        yOffset={isCollateralError ? 12 : 30}
-        anchorRef={errorIconRef}
-      >
+      <Tooltip content={tooltipContent} width={340} hideArrow={true} yOffset={30} disabled={isCollateralError}>
         <div
           className="asset-row__detail-content"
           onMouseEnter={() => {
@@ -392,9 +380,18 @@ const AssetRow = ({ state }: AssetRowProps) => {
           {isCollateralError ? (
             <span className="asset-row__icon-container">
               {assetIcon}
-              <span ref={errorIconRef} className="asset-row__error-icon">
-                <CircleExclamationSmall />
-              </span>
+              <Tooltip
+                open={hoverModifier !== ''}
+                content={<span className="asset-row__tooltip-text">{COLLATERAL_UNAVAILABLE}</span>}
+                width={214}
+                // Hover-only tooltips are hidden on small screens, the status one opens on tap there
+                interactive={true}
+                yOffset={12}
+              >
+                <span className="asset-row__error-icon">
+                  <CircleExclamationSmall />
+                </span>
+              </Tooltip>
             </span>
           ) : (
             assetIcon
