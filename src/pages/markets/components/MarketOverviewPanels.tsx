@@ -68,6 +68,9 @@ const MarketOverviewPanels = ({ latestMarketSummaries, institutionalWhitelistSta
   // Sort the markets in place
   Object.values(marketSummariesByChain).forEach((marketSummaries) => {
     const getSortValue = (marketSummary: MarketSummary): bigint => {
+      if (marketSummary.status === 'error') {
+        return 0n;
+      }
       switch (sortBy) {
         case 'Utilization':
           return marketSummary.utilization;
@@ -86,13 +89,6 @@ const MarketOverviewPanels = ({ latestMarketSummaries, institutionalWhitelistSta
 
     // Ascending, sort "a to z", descending sort "z to a"
     marketSummaries.sort((a, z) => {
-      // A market in the error status has no data to sort by, so it stays at the bottom in either order
-      const aIsError = a.status === 'error';
-      const zIsError = z.status === 'error';
-      if (aIsError !== zIsError) {
-        return aIsError ? 1 : -1;
-      }
-
       const aVal = getSortValue(a);
       const zVal = getSortValue(z);
 
