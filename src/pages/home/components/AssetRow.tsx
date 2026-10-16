@@ -36,7 +36,6 @@ type AssetRowHydrated = [
     transaction?: Transaction;
     unwrappedAssetSupplyAction?: Action;
     wrappedAsset?: TokenWithAccountState;
-    // The market summary reports this collateral in the error status: it can't be supplied
     isCollateralError: boolean;
     onCancelClicked: () => void;
     onEditClicked: () => void;

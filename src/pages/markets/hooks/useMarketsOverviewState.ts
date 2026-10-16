@@ -35,7 +35,6 @@ export function useMarketsOverviewState(): MarketOverviewState {
     enabled: marketsStateType === StateType.Hydrated,
   });
 
-  // Rewards APRs are plain math over the loaded summaries, so rewards loading needs no new request
   return useMemo((): MarketOverviewState => {
     if (marketsStateType !== StateType.Hydrated || historicalMarketSummaries === undefined) {
       return [StateType.Loading];
