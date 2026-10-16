@@ -182,11 +182,7 @@ const RecentTransactions = ({ connectedAccount, trxHistoryItems }: RecentTransac
 };
 
 const WalletTrxHistory = ({ connectedAccount, trxHistoryLoading, trxHistoryItems }: WalletTrxHistoryProps) => {
-  const [marketsStateType] = useMarkets();
-  const marketsLoading = marketsStateType === StateType.Loading;
-  const loading = trxHistoryLoading || marketsLoading;
-  const items = marketsLoading ? [] : trxHistoryItems;
-  const hideWalletTrxHistory = !loading && items.length === 0;
+  const hideWalletTrxHistory = !trxHistoryLoading && trxHistoryItems.length === 0;
 
   return (
     <>
@@ -195,7 +191,7 @@ const WalletTrxHistory = ({ connectedAccount, trxHistoryLoading, trxHistoryItems
           <div className="dropdown__content__row">
             <div className="divider" />
           </div>
-          {(items.length > 0 || loading) && (
+          {(trxHistoryItems.length > 0 || trxHistoryLoading) && (
             <>
               <div className="dropdown__content__header-row">
                 <label className="label text-color--2">Recent Transactions</label>
@@ -203,10 +199,10 @@ const WalletTrxHistory = ({ connectedAccount, trxHistoryLoading, trxHistoryItems
                   <span className="label text-color--supply">See All</span>
                 </SimpleLink>
               </div>
-              <RecentTransactions connectedAccount={connectedAccount} trxHistoryItems={items} />
+              <RecentTransactions connectedAccount={connectedAccount} trxHistoryItems={trxHistoryItems} />
             </>
           )}
-          {items.length === 0 && loading && <TransactionsLoader />}
+          {trxHistoryItems.length === 0 && trxHistoryLoading && <TransactionsLoader />}
           <div className="dropdown__content__row">
             <div className="divider" />
           </div>
