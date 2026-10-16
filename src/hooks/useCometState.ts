@@ -59,27 +59,23 @@ export function useCometState(
         web3.read.chainId === marketStateData?.chainInformation.chainId
       ) {
         let newState: CometState;
-        try {
-          if (account) {
-            const cometResponse = await queryCometDataWithAccount(
-              web3.read.provider.connection,
-              marketStateData,
-              account
-            );
-            newState = formatCometStateHydrated(cometResponse, marketStateData, rewards);
-            const ethcallProvider = new Provider(web3.read.provider, marketStateData.chainInformation.chainId);
-            await maybeHydrateStEthCollateral(newState, marketStateData, account, ethcallProvider);
-          } else {
-            const cometResponse = await queryCometData(web3.read.provider.connection, marketStateData);
-            newState = formatCometStateNoWallet(cometResponse, marketStateData, rewards);
-          }
-        } catch (e) {
-          return;
+        if (account) {
+          const cometResponse = await queryCometDataWithAccount(
+            web3.read.provider.connection,
+            marketStateData,
+            account
+          );
+          newState = formatCometStateHydrated(cometResponse, marketStateData, rewards);
+          const ethcallProvider = new Provider(web3.read.provider, marketStateData.chainInformation.chainId);
+          await maybeHydrateStEthCollateral(newState, marketStateData, account, ethcallProvider);
+        } else {
+          const cometResponse = await queryCometData(web3.read.provider.connection, marketStateData);
+          newState = formatCometStateNoWallet(cometResponse, marketStateData, rewards);
         }
 
         // Only update state if chainId has not changed since the start of this callback
         // We compare to a ref because the `marketState` in the callback can be stale
-        if (marketState[1]?.marketAddress.toLowerCase() === marketRef.current[1]?.marketAddress.toLowerCase()) {
+        if (marketState[1]?.marketAddress === marketRef.current[1]?.marketAddress) {
           waitFor(
             (transactions) => transactions.length === 0,
             async () => {
@@ -305,6 +301,7 @@ const maybeHydrateStEthCollateral = async (
                 );
                 return tokenWithAccountState;
               } else {
+                console.error('Unknown handling for extra collateral asset: ', unwrappedAsset);
                 return Promise.reject();
               }
             })
