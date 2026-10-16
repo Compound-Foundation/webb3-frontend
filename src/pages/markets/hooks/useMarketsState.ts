@@ -54,12 +54,7 @@ export function useMarketsState(web3: Web3, marketState: MarketDataState): Marke
       if (new URLSearchParams(location.search).has('mock')) {
         state = getMockMarketState();
       } else {
-        try {
-          state = await getState(web3.read.provider, marketState[1], rewardsState);
-        } catch (e) {
-          console.error('Error fetching market state: ', e);
-          return;
-        }
+        state = await getState(web3.read.provider, marketState[1], rewardsState);
       }
 
       // Only update state if chainId has not changed since the start of this callback
@@ -164,9 +159,8 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     ...collateralReservesCalls,
   ]);
 
-  // TEMP: until this data comes from the backend. A reverting price feed reverts the whole
-  // multicall, so collateral prices are read on their own and, if that fails, one by one,
-  // with a reverting feed priced at 0 like in the Sleuth query
+  // A reverting price feed reverts the whole multicall, so collateral prices are read on their own
+  // and, if that fails, one by one, with a reverting feed priced at 0 like in the Sleuth query
   const collateralPrices: BigNumber[] = await ethcallProvider
     .all(priceCalls)
     .catch(() =>
