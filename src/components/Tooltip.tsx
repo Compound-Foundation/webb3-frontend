@@ -45,7 +45,6 @@ const Tooltip = ({
   yOffset?: number;
   x?: number;
   y?: number;
-  // Shows the tooltip from the parent, when another element (e.g. the whole row) triggers it
   open?: boolean;
 }) => {
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
@@ -145,7 +144,6 @@ const Tooltip = ({
   };
 
   useEffect(() => {
-    if (open === undefined) return;
     if (open && triggerRef.current) {
       handleMouseOver({ currentTarget: triggerRef.current });
     } else {
@@ -170,9 +168,9 @@ const Tooltip = ({
       {disabled
         ? children
         : cloneElement(children, {
-            ...(open === undefined
-              ? { onMouseOver: handleMouseOver, onMouseOut: handleMouseOut }
-              : { ref: triggerRef }),
+            ref: triggerRef,
+            onMouseOver: handleMouseOver,
+            onMouseOut: handleMouseOut,
             ...(interactive &&
               (touchToggle
                 ? {
@@ -189,7 +187,7 @@ const Tooltip = ({
       {disabled || (
         <Portal>
           <span
-            className={`tooltip tooltip${!showTooltip && '--inactive'} tooltip${hideArrow && '--hide-arrow'} tooltip${
+            className={`tooltip tooltip${!(open || showTooltip) && '--inactive'} tooltip${hideArrow && '--hide-arrow'} tooltip${
               mini && '--mini'
             } tooltip${placement === 'below' && '--below'} tooltip${interactive && '--interactive'}`}
             id="tooltip"

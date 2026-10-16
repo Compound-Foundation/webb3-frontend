@@ -191,7 +191,6 @@ type MarketOptionProps = {
 };
 
 const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loading }: MarketOptionProps) => {
-  // The status tooltip opens on hovering the whole option, but points at the exclamation icon
   const [hovered, setHovered] = useState(false);
   const hoverHandlers = { onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false) };
   const content = (

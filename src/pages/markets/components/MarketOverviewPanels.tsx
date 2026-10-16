@@ -339,7 +339,6 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
 
   const isError = marketSummary.status === 'error';
   const isPartially = marketSummary.status === 'partially';
-  // The status tooltip opens on hovering the whole row, but points at the exclamation icon
   const [hovered, setHovered] = useState(false);
 
   const navigate = useNavigate();
