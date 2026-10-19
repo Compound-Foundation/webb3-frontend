@@ -15,12 +15,12 @@ const AlertBanner = ({ web3 }: AlertBannerProps) => {
   const { selectedMarket } = useContext(getSelectedMarketContext());
   const { pathname } = useLocation();
 
-  // The selected market persists across pages, but its status only matters on Home and the market page
   const isMarketPage = pathname === '/' || /^\/markets\/[^/]+/.test(pathname);
+
   const isMarketUnavailable = isMarketPage && selectedMarket[1]?.status === 'error';
 
   const messages: string[] = [];
-  // Until the market list loads every network would look unsupported
+
   if (
     marketsStateType === StateType.Hydrated &&
     web3.write.chainId &&
