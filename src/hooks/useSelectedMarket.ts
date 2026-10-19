@@ -88,8 +88,15 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
       }
 
       const [, currentMarket] = state;
-      // if we've already selected the desired market, return
-      if (currentMarket !== undefined && areSameMarket(currentMarket, desiredMarket)) return;
+      // if we've already selected the desired market, only take the statuses from the refreshed market list
+      if (currentMarket !== undefined && areSameMarket(currentMarket, desiredMarket)) {
+        const { status, collaterals } = desiredMarket;
+        if (status !== currentMarket.status || collaterals !== currentMarket.collaterals) {
+          setState([state[0], { ...currentMarket, status, collaterals }] as MarketDataState);
+        }
+        return;
+      }
+
       const switched = await web3.switchReadNetwork(desiredMarket.chainInformation.chainId);
 
       if (switched) {
