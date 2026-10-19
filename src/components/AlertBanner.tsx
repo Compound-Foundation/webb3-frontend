@@ -30,7 +30,7 @@ const AlertBanner = ({ web3 }: AlertBannerProps) => {
   }
 
   if (isMarketUnavailable) {
-    messages.push('Market unavailable. Please check back shortly.');
+    messages.push('Market temporarily unavailable. Please check back shortly.');
   }
 
   return (
