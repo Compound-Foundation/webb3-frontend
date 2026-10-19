@@ -145,7 +145,6 @@ function getFormattedState(
 
 export type AssetRowProps = {
   state: AssetRowState;
-  // A collateral in the error status has no price, so its dollar values aren't known
   isCollateralError?: boolean;
 };
 
@@ -155,11 +154,7 @@ enum SupplyCapData {
   Remain = 'Remaining Capacity',
 }
 
-const NOT_AVAILABLE = <span className="text-color--3">N/A</span>;
-const COLLATERAL_UNAVAILABLE = 'Collateral temporarily unavailable';
-
 const AssetsTableRow = ({ state, isCollateralError = false }: AssetRowProps) => {
-  // The tooltip of a collateral in the error status opens on hovering the whole row, but points at the error badge
   const [hovered, setHovered] = useState(false);
   const currency = Currency.USD;
   const [stateType] = state;
@@ -201,14 +196,13 @@ const AssetsTableRow = ({ state, isCollateralError = false }: AssetRowProps) => 
     <tr className="assets-table__row" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       <td className="assets-table__row__asset-icon">
         {isCollateralError ? (
-          // The badge sits beside the dimmed icon, not inside it, so it isn't dimmed too
           <span className="assets-table__row__icon-container">
             {assetIcon}
             <Tooltip
               open={hovered}
               width={214}
               yOffset={12}
-              content={<span className="assets-table__tooltip-text">{COLLATERAL_UNAVAILABLE}</span>}
+              content={<span className="assets-table__tooltip-text">{'Collateral temporarily unavailable'}</span>}
             >
               <span className="assets-table__row__error-icon">
                 <CircleExclamationSmall />
@@ -265,7 +259,7 @@ const AssetsTableRow = ({ state, isCollateralError = false }: AssetRowProps) => 
         >
           <div className={`tooltip__trigger${isCollateralError ? ' tooltip__trigger--disabled' : ''}`}>
             {isCollateralError ? (
-              NOT_AVAILABLE
+              <span className="text-color--3">N/A</span>
             ) : (
               <IconTextPair
                 value={totalSupply}
@@ -281,7 +275,7 @@ const AssetsTableRow = ({ state, isCollateralError = false }: AssetRowProps) => 
       </td>
       <td className="body assets-table__row__reserves">
         {isCollateralError ? (
-          NOT_AVAILABLE
+          <span className="text-color--3">N/A</span>
         ) : (
           <IconTextPair
             value={reserves}
@@ -294,7 +288,7 @@ const AssetsTableRow = ({ state, isCollateralError = false }: AssetRowProps) => 
       </td>
       <td className="body assets-table__row__oracle-price">
         {isCollateralError ? (
-          NOT_AVAILABLE
+          <span className="text-color--3">N/A</span>
         ) : (
           <IconTextPair
             value={price}

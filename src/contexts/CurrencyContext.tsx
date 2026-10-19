@@ -93,19 +93,18 @@ export const CurrencyContextProvider = ({ children }: { children: ReactNode | Re
   const [showCurrencyToggle, updateShowCurrencyToggle] = useState(false);
   const [marketsStateType, marketsState] = useMarkets();
 
-  const getPreferredCurrency = () => {
-    const market = getMarketData();
-    // Until the market list loads there is no market to derive the currency from
-    return market !== undefined ? loadPreferredCurrency(market) : initialCurrencyManagerContext.currency;
-  };
-
-  const getMarketData = (): MarketData | undefined => {
+  const marketData = (() => {
     if (marketsStateType !== StateType.Hydrated) return undefined;
     const marketKey = searchParams.get('market') ?? window.localStorage.getItem(MARKET_LOCAL_STORAGE_KEY);
     return parseMarketKeyOrDefault(marketsState.markets, marketsState.defaultMarket, marketKey);
+  })();
+
+  const getPreferredCurrency = () => {
+    // Until the market list loads there is no market to derive the currency from
+    return marketData !== undefined ? loadPreferredCurrency(marketData) : initialCurrencyManagerContext.currency;
   };
 
-  const baseAssetSymbol = getMarketData()?.baseAsset.symbol ?? initialCurrencyManagerContext.baseAssetSymbol;
+  const baseAssetSymbol = marketData?.baseAsset.symbol ?? initialCurrencyManagerContext.baseAssetSymbol;
   const preferredCurrency = getPreferredCurrency() as Currency;
 
   const [currency, setCurrency] = useState<Currency>(preferredCurrency);

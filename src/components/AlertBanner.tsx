@@ -1,21 +1,30 @@
+import { useContext } from 'react';
+import { useLocation } from 'react-router';
+
+import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
 import { useMarkets } from '@hooks/useMarkets';
-import { MarketData, StateType } from '@types';
+import { StateType } from '@types';
 
 export type AlertBannerProps = {
   web3: Web3;
-  isMarketUnavailable: boolean;
 };
 
-const AlertBanner = ({ web3, isMarketUnavailable }: AlertBannerProps) => {
+const AlertBanner = ({ web3 }: AlertBannerProps) => {
   const [marketsStateType, marketsState] = useMarkets();
+  const { selectedMarket } = useContext(getSelectedMarketContext());
+  const { pathname } = useLocation();
+
+  // The selected market persists across pages, but its status only matters on Home and the market page
+  const isMarketPage = pathname === '/' || /^\/markets\/[^/]+/.test(pathname);
+  const isMarketUnavailable = isMarketPage && selectedMarket[1]?.status === 'error';
 
   const messages: string[] = [];
   // Until the market list loads every network would look unsupported
   if (
     marketsStateType === StateType.Hydrated &&
     web3.write.chainId &&
-    !isSupportedNetwork(marketsState.markets, web3.write.chainId)
+    !marketsState.markets.some((market) => market.chainInformation.chainId === web3.write.chainId)
   ) {
     messages.push('Compound III is not supported on this network. Please switch to a supported network.');
   }
@@ -24,10 +33,8 @@ const AlertBanner = ({ web3, isMarketUnavailable }: AlertBannerProps) => {
     messages.push('Market unavailable. Please check back shortly.');
   }
 
-  const hideBannerClass = messages.length === 0 ? '--hide' : '';
-
   return (
-    <div className={`alert-banner${hideBannerClass}`}>
+    <div className={`alert-banner${messages.length === 0 ? '--hide' : ''}`}>
       {messages.map((message) => (
         <div key={message} className="message">
           {message}
@@ -36,10 +43,5 @@ const AlertBanner = ({ web3, isMarketUnavailable }: AlertBannerProps) => {
     </div>
   );
 };
-
-function isSupportedNetwork(markets: MarketData[], chainId: number): boolean {
-  const marketForChainId = markets.find((market) => market.chainInformation.chainId === chainId);
-  return marketForChainId !== undefined;
-}
 
 export default AlertBanner;

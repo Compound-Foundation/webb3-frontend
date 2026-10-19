@@ -218,7 +218,7 @@ const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loa
     </>
   );
 
-  if (isV2Market(market) && pathname === '/') {
+  if (isV2Market(market) && pathname === '/' && !isError) {
     // V2 market isn't supported so should link out to the V2 app
     return (
       <a

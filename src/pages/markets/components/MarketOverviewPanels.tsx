@@ -22,10 +22,6 @@ import { BoostedRateInfo } from '../BoostedRateInfo';
 
 import InstitutionalRateInfo from './InstitutionalRateInfo';
 
-const MARKET_UNAVAILABLE = 'Market temporarily unavailable';
-const MARKET_PARTIALLY_UNAVAILABLE = 'Market partially unavailable';
-const COLLATERAL_UNAVAILABLE = 'Collateral temporarily unavailable';
-
 const SORT_BY_OPTIONS = [
   'Utilization',
   'Earn APR',
@@ -354,7 +350,6 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
   return (
     // The Link component doesn't work here because tr must be
     // a direct child of tbody and td must be a direct child of tr.
-    // A market in the error status has no data to show, so its page isn't opened
     <tr
       className={`market-overview-panels__table-row${rowModifier}`}
       onClick={isError ? undefined : handleRowClick}
@@ -383,7 +378,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
                   yOffset={12}
                   content={
                     <span className={`market-overview-panels__tooltip-text ${isPartially ? 'market-overview-panels__tooltip-text-centered' : ''}`}>
-                      {isError ? MARKET_UNAVAILABLE : MARKET_PARTIALLY_UNAVAILABLE}
+                      {isError ? 'Market temporarily unavailable' : 'Market partially unavailable'}
                     </span>
                   }
                 >
@@ -515,12 +510,11 @@ const CollateralAssets = ({ collateralAssets, errorCollateralAssets }: Collatera
               yOffset={12}
               content={
                 <span className="market-overview-panels__tooltip-text market-overview-panels__tooltip-text-centered">
-                  {COLLATERAL_UNAVAILABLE}
+                  {'Collateral temporarily unavailable'}
                 </span>
               }
             >
               {isError ? (
-                // The badge sits beside the dimmed icon, not inside it, so it isn't dimmed too
                 <div className="market-overview-panels__collateral-asset-icon-container">
                   <div
                     className={`asset asset--${assetIconForAssetSymbol(

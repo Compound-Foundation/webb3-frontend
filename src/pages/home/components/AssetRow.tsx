@@ -22,8 +22,6 @@ import {
   Transaction,
 } from '@types';
 
-const COLLATERAL_UNAVAILABLE = 'Collateral temporarily unavailable';
-
 type AssetRowLoading = [StateType.Loading];
 type AssetRowNoWallet = [StateType.NoWallet, { asset: TokenWithState; isCollateralError?: boolean }];
 type AssetRowHydrated = [
@@ -97,7 +95,7 @@ type Content = {
 };
 
 function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency: Currency): Content {
-  const [stateType, { asset }] = state;
+  const [stateType, { asset, isCollateralError }] = state;
   const tooltipContent = getTooltipContent(state, currency);
 
   if (stateType === StateType.NoWallet) {
@@ -116,7 +114,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
 
     return {
       asset,
-      assetRowModifier: state[1].isCollateralError ? ' asset-row--error' : '',
+      assetRowModifier:  isCollateralError ? ' asset-row--error' : '',
       collateralValue: null,
       assetBalance: <p className="body text-color--3">0.0000</p>,
       displayWalletBalance: '',
@@ -132,7 +130,6 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
     pendingAction,
     transaction,
     unwrappedAssetSupplyAction,
-    isCollateralError,
     onCancelClicked,
     onEditClicked,
     onSupplyClicked,
@@ -381,7 +378,7 @@ const AssetRow = ({ state }: AssetRowProps) => {
               {assetIcon}
               <Tooltip
                 open={hoverModifier !== ''}
-                content={<span className="asset-row__tooltip-text">{COLLATERAL_UNAVAILABLE}</span>}
+                content={<span className="asset-row__tooltip-text">{'Collateral temporarily unavailable'}</span>}
                 width={214}
                 // Hover-only tooltips are hidden on small screens, the status one opens on tap there
                 interactive={true}

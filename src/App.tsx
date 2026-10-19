@@ -80,12 +80,6 @@ function App({ Component, pageProps }: any) {
   const cometState = useCometState(web3, selectedMarketState.selectedMarket, transactions, rewardsState);
   initializeContext(selectedMarketState);
 
-  // The summary reports the selected market in the error status
-  const isHomePage = location.pathname === '/';
-  const isMarketPage = /^\/markets\/[^/]+/.test(location.pathname);
-  const isMarketUnavailable =
-    (isHomePage || isMarketPage) && selectedMarketState.selectedMarket[1]?.status === 'error';
-
   const handleRequestNetworkSwitch = (fromChainId: number, toChainId: number, description?: string) => {
     setNetworkSwitchState({
       fromChainId,
@@ -175,7 +169,7 @@ function App({ Component, pageProps }: any) {
           <CurrencyContextProvider>
             <MerklRedirectModalProvider>
               <SafeAutoConnect />
-              <AlertBanner web3={web3} isMarketUnavailable={isMarketUnavailable} />
+              <AlertBanner web3={web3} />
               <MerklRedirectModal web3={web3}/>
               <Header
                 web3={web3}
