@@ -35,8 +35,8 @@ const Market = ({ web3 }: MarketsProps) => {
   const marketCurrencyToShow = Currency.USD;
 
   const state = useMarketsState(web3, selectedMarket);
-  const [marketStateType, marketStateData] = state;
   const [, market] = selectedMarket;
+  const [marketStateType, marketStateData] = market?.status === 'error' ? [StateType.Loading] : state;
   const [currentChainName, currentChainId, currentBaseToken] =
     market !== undefined
       ? [market.chainInformation.name, market.chainInformation.chainId, market.baseAsset.symbol]
