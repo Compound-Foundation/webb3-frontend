@@ -356,8 +356,7 @@ const Home = ({
           setPendingAction(undefined);
         },
         onPendingActionConfirm: (amount: bigint) => {
-          // The collateral can turn to the error status after the action input was opened
-          if (pendingAction !== undefined && getCollateralStatusFor(pendingAction[1].address) !== 'error') {
+          if (pendingAction !== undefined) {
             const action = getActionFromPendingAction(pendingAction, amount);
             const confirmAction = () => {
               setPendingAction(undefined);
@@ -394,10 +393,6 @@ const Home = ({
           }
         },
         onSubmitClicked: () => {
-          // An action queued before its collateral turned to the error status must not be sent
-          if (actions.some((action) => getCollateralStatusFor(action[1].address) === 'error')) {
-            return;
-          }
           setPendingAction(undefined);
 
           if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
@@ -560,11 +555,7 @@ const Home = ({
 
   return (
     <div className="page home">
-      <ActionModal
-        isBulkerAllowed={isBulkerAllowed}
-        state={isMarketStatusError ? undefined : actionModalState}
-        transactions={transactions}
-      />
+      <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
       <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
       <div className="home__content grid-container">
