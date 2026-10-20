@@ -378,7 +378,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
                   yOffset={12}
                   content={
                     <span className={`market-overview-panels__tooltip-text ${isPartially ? 'market-overview-panels__tooltip-text-centered' : ''}`}>
-                      {isError ? 'Market temporarily unavailable' : 'Market partially unavailable'}
+                      {isError ? 'Market temporarily unavailable.' : 'Market partially unavailable.'}
                     </span>
                   }
                 >
@@ -510,7 +510,7 @@ const CollateralAssets = ({ collateralAssets, errorCollateralAssets }: Collatera
               yOffset={12}
               content={
                 <span className="market-overview-panels__tooltip-text market-overview-panels__tooltip-text-centered">
-                  {'Collateral temporarily unavailable'}
+                  {'Collateral temporarily unavailable.'}
                 </span>
               }
             >

@@ -378,7 +378,7 @@ const AssetRow = ({ state }: AssetRowProps) => {
               {assetIcon}
               <Tooltip
                 open={hoverModifier !== ''}
-                content={<span className="asset-row__tooltip-text">{'Collateral temporarily unavailable'}</span>}
+                content={<span className="asset-row__tooltip-text">{'Collateral temporarily unavailable.'}</span>}
                 width={214}
                 // Hover-only tooltips are hidden on small screens, the status one opens on tap there
                 interactive={true}

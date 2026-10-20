@@ -19,7 +19,7 @@ const INSTITUTIONAL = 'Institutional';
 const MARKETS_SECTION = 'Markets';
 const NEW = 'New';
 const MARKETS_UNAVAILABLE = 'Markets unavailable';
-const MARKET_UNAVAILABLE = 'Market temporarily unavailable';
+const MARKET_UNAVAILABLE = 'Market temporarily unavailable.';
 
 const MarketSelector = () => {
   const [marketDropdownActive, setMarketDropdownActive] = useState<boolean>(false);

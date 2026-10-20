@@ -1,5 +1,3 @@
-import { useState } from 'react';
-
 import CircleMeter from '@components/CircleMeter';
 import { CircleExclamationSmall } from '@components/Icons';
 import IconTextPair, { IconTextPairSize } from '@components/IconTextPair';
@@ -155,7 +153,6 @@ enum SupplyCapData {
 }
 
 const AssetsTableRow = ({ state, isCollateralError = false }: AssetRowProps) => {
-  const [hovered, setHovered] = useState(false);
   const currency = Currency.USD;
   const [stateType] = state;
   if (stateType === StateType.Loading) {
@@ -193,22 +190,21 @@ const AssetsTableRow = ({ state, isCollateralError = false }: AssetRowProps) => 
   );
 
   return (
-    <tr className="assets-table__row" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+    <tr className="assets-table__row">
       <td className="assets-table__row__asset-icon">
         {isCollateralError ? (
-          <span className="assets-table__row__icon-container">
-            {assetIcon}
-            <Tooltip
-              open={hovered}
-              width={214}
-              yOffset={12}
-              content={<span className="assets-table__tooltip-text">{'Collateral temporarily unavailable'}</span>}
-            >
+          <Tooltip
+            width={214}
+            yOffset={12}
+            content={<span className="assets-table__tooltip-text">{'Collateral temporarily unavailable.'}</span>}
+          >
+            <span className="assets-table__row__icon-container">
+              {assetIcon}
               <span className="assets-table__row__error-icon">
                 <CircleExclamationSmall />
               </span>
-            </Tooltip>
-          </span>
+            </span>
+          </Tooltip>
         ) : (
           assetIcon
         )}
