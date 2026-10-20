@@ -34,7 +34,7 @@ export const BASE_MAINNET_URL = import.meta.env.VITE_BASE_URL;
 export const MANTLE_URL = import.meta.env.VITE_MANTLE_URL;
 export const LINEA_URL = import.meta.env.VITE_LINEA_URL;
 export const UNICHAIN_URL = import.meta.env.VITE_UNICHAIN_URL;
-export const RONIN_URL = `https://rpc.ankr.com/ronin/${import.meta.env.VITE_ANKR_KEY}`;
+export const RONIN_URL = import.meta.env.VITE_RONIN_URL;
 
 /**
  * Local-dev escape hatch for wallet screening.
