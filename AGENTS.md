@@ -1,6 +1,6 @@
 # webb3-frontend
 
-The Compound web app: a React and TypeScript single-page app built with Vite and published to IPFS. `README.md` covers local setup, environment variables and running the backend; this file holds the rules for changing the repository. Claude Code and Codex both read it, and so do the automated PR reviewers.
+The Compound web app: a React and TypeScript single-page app built with Vite and published to IPFS. `README.md` covers local setup, environment variables and running the backend. This file holds the rules for changing the repository. Claude Code and Codex both read it, and so do the automated PR reviewers.
 
 ## Agent setup
 
@@ -13,10 +13,10 @@ No dev-fleet project plugin covers this repository, so agents and reviewers work
 
 ## Develop
 
-- Install with `yarn install`. The repository pins Yarn 1 (`packageManager` in `package.json`); with Node 24 or later, run `corepack enable` first. CI uses Node 25.
-- `yarn dev` serves the app on `http://127.0.0.1:5173`. The dev and preview servers bind to loopback on purpose; do not add `--host` or `host: true`.
-- Import through the path aliases in `tsconfig.json` (`@components`, `@helpers`, `@hooks` and the rest), and keep `jest.config.js`'s `moduleNameMapper` in step when adding one.
-- Configuration comes from `VITE_*` variables, read in `envVars.ts`. Vite embeds them in the public bundle, so never add a secret as a `VITE_*` variable.
+- Install with `yarn install`. The repository pins Node 22 through Volta and Yarn 1 through `packageManager`, both in `package.json`. Run `corepack enable` first if `yarn` is missing. Node 25 no longer ships Corepack, so install it there with `npm install -g corepack`.
+- `yarn dev` serves the app on `http://127.0.0.1:5173`. The dev and preview servers bind to loopback so that nobody else on the network can reach them. Do not add `--host` or `host: true`.
+- Path aliases (`@components`, `@helpers`, `@hooks` and the rest) are defined three times: in `tsconfig.json`, in `jest.config.js`'s `moduleNameMapper` and in `vite.config.js`'s `resolve.alias`. Keep the three in step. `@pages` is missing from Vite, so only tests can use it.
+- Configuration comes from `VITE_*` variables, read in `envVars.ts`, `src/init.ts`, `src/helpers/` and `src/pages/extensions/helpers/list.ts`. Vite embeds them in the public bundle, so never add a secret as a `VITE_*` variable.
 
 ## Validate
 
@@ -29,23 +29,23 @@ yarn test          # Jest in UTC; CI does not run it, so run it locally
 yarn build         # the production build CI publishes to IPFS
 ```
 
-Format with Prettier under `.prettierrc`, as the README's editor setup does. Prettier is not a dependency and CI does not check formatting, so format the files you change. Tests live in `__tests__/` and beside components in `__tests__` directories, and mock API responses come from the `msw` handlers in `handlers/`. A change to behaviour gets a test, and a bugfix gets a regression test observed failing before the fix.
+Format with Prettier under `.prettierrc`, as the README's editor setup does. Prettier is not a dependency and CI does not check formatting, so format the files you change. Tests live in `__tests__/` and in `__tests__` directories beside the code. Mock API responses come from the `msw` handlers in `handlers/`. A change to behaviour gets a test, and a bugfix gets a regression test observed failing before the fix.
 
 ## Review standards
 
-Code and reviews follow `cf-core`'s `code-review-checklist`, `naming-standards` and `writing-standards`. The frontend has no protocol spec; behaviour on-chain is the contracts' and the backend's.
+Code and reviews follow `cf-core`'s `code-review-checklist`, `naming-standards` and `writing-standards`. The frontend has no protocol spec. On-chain behaviour belongs to the contracts and the backend.
 
 Treat these as security-sensitive. `.github/CODEOWNERS` lists them between the `security-sensitive` markers, and a PR that changes one also gets a security review:
 
-- Transactions: what the app asks a wallet to sign, built in `src/helpers/` (actions, bulker actions, contract addresses and ABIs) and queued through `src/contexts/` and `useActionQueue`. A wrong amount, token, market, chain or recipient loses users' funds.
-- Wallet connection and framing: EIP-6963 discovery, WalletConnect and Ledger, the Safe App parent-frame check in `src/helpers/safe.ts`, and the extension frames and messages in `src/pages/extensions/`.
-- Address screening and sanctions: screening fails closed in a deployed build. A change must not let a blocked or unscreened address reach a signing flow, and the dev-server bypass must never apply to `vite build`.
-- Build and release: `envVars.ts`, `vite.config.js`, the HTML entry points, dependencies, CI workflows and the IPFS build, preview and release scripts. Fork PRs build without publishing credentials, and that separation must hold.
+- Transactions: what the app asks a wallet to sign. Actions, bulker actions, contract addresses and ABIs are in `src/helpers/` and `src/constants/`. `useWriteCometState` and `useWriteVoteState` build the approve, allow, supply, withdraw, bulker, delegate and vote transactions, and `useTransactionManager` submits them. The home page chooses the approval spender. A wrong amount, token, market, chain, spender or recipient loses users' funds.
+- Wallet connection and framing: EIP-6963 discovery, WalletConnect and Ledger, the wallet modal, Safe auto-connect and the Safe App parent-frame check in `src/helpers/safe.ts`. Extensions in `src/pages/extensions/` run third-party apps in frames, exchange messages with them and can ask users to allow an operator.
+- Sanctions and address checks: a deployed build screens every connected address and fails closed. A change must not let a blocked or unscreened address reach a signing flow, and the dev-server bypass must never apply to `vite build`.
+- Build and release: `.env` files, `envVars.ts`, `vite.config.js`, the HTML entry points, dependencies, CI workflows and the IPFS build, preview and release scripts. A committed `.env` file reaches the production build and can change the extension operator and frame sources. Fork PRs build without publishing credentials, and that separation must hold.
 
 ## Automated PR reviews
 
-dev-fleet's PR-agent service reviews this repository's PRs. When a PR is opened ready for review, or a draft is marked ready, it runs `code-reviewer`, and `security-reviewer` as well when the PR changes a security-sensitive path, and posts one PR review on the head commit. It never pushes to the branch. Reviewers follow this file as it is on the base branch; a PR that changes `AGENTS.md` has the change reviewed, not followed. The [pr-agents README](https://github.com/Compound-Foundation/dev-fleet/blob/main/services/pr-agents/README.md) explains how to re-run a review, pause the service or turn reviews off for this repository.
+dev-fleet's PR-agent service reviews this repository's PRs and never pushes to their branches. When a PR is opened ready for review, or a draft is marked ready, it runs `code-reviewer`. It adds `security-reviewer` when the PR changes a security-sensitive path, then posts one PR review on the head commit. Reviewers follow this file as it is on the base branch, so a PR that changes `AGENTS.md` has the change reviewed, not followed. The [pr-agents README](https://github.com/Compound-Foundation/dev-fleet/blob/main/services/pr-agents/README.md) explains how to re-run a review, pause the service or turn reviews off for this repository.
 
 ## Git
 
-Branch from `main` and open a PR; do not push to `main`.
+Branch from `main` and open a PR. Do not push to `main`.
