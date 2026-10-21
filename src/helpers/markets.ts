@@ -38,7 +38,7 @@ export function marketKey(market: MarketData | MarketDataLoaded): string {
 }
 
 // A market is identified by its chain and comet address. The base asset symbol isn't part of it:
-// a loaded market carries the on-chain symbol, which can differ from the market list one (e.g. USDC-cr)
+// a loaded market carries the on-chain symbol, which can differ from the market list one
 export function areSameMarket(market1: MarketData | MarketDataLoaded, market2: MarketData | MarketDataLoaded): boolean {
   return (
     market1.chainInformation.chainId === market2.chainInformation.chainId &&

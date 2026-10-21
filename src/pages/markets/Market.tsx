@@ -47,8 +47,8 @@ const Market = ({ web3 }: MarketsProps) => {
     market !== undefined && marketsStateType === StateType.Hydrated
       ? getMarket(marketsState.markets, market.chainInformation.chainId, market.marketAddress)
       : undefined;
-  // The market list symbol stays the same once the market loads, unlike the on-chain one
-  // (e.g. USDC-cr of a test market becomes USDC), so the title doesn't change
+  // The market list symbol stays the same once the market loads, unlike the on-chain one,
+  // so the title doesn't change
   const marketDisplayName = configMarket?.institutional
     ? configMarket.baseAsset.name
     : (configMarket?.baseAsset.symbol ?? currentBaseToken);

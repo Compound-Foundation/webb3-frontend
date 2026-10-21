@@ -89,8 +89,8 @@ type SelectedMarketProps = {
 
 const SelectedMarket = ({ active, market, onClick }: SelectedMarketProps) => {
   const [marketsStateType, marketsState] = useMarkets();
-  // The market list symbol stays the same once the market loads, unlike the on-chain one
-  // (e.g. USDC-cr of a test market becomes USDC), so the label doesn't change
+  // The market list symbol stays the same once the market loads, unlike the on-chain one,
+  // so the label doesn't change
   const configMarket =
     marketsStateType === StateType.Hydrated
       ? getMarket(marketsState.markets, market.chainInformation.chainId, market.marketAddress)

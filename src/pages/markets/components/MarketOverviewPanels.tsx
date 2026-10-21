@@ -349,7 +349,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
 
   return (
     // The Link component doesn't work here because tr must be
-    // a direct child of tbody and td must be a direct child of tr.
+    // a direct child of tbody and td must be a direct child of tr
     <tr
       className={`market-overview-panels__table-row${rowModifier}`}
       onClick={isError ? undefined : handleRowClick}
