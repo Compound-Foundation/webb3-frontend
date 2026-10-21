@@ -140,3 +140,5 @@ VITE_EXTRA_EXTENSIONS=cool VITE_COOL_SOURCE=... yarn dev
 ```
 
 This will add a new blank extension named `cool`.
+
+<!-- COM-293 end-to-end test of pr-agents; this PR is closed without merging. -->
