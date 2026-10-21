@@ -1,0 +1,27 @@
+# The paths between the security-sensitive markers get a security review from the
+# dev-fleet PR-agent service as well as the code review every PR gets. They name no
+# owners, so GitHub requests no reviewers for them.
+
+# security-sensitive: begin
+# Transaction building, contract addresses and ABIs, wallet connection, Safe App
+# framing, address screening and sanctions checks.
+/src/helpers/
+/src/contexts/
+/src/constants/
+/src/hooks/useActionQueue.ts
+/src/hooks/useAddressScreening.ts
+/src/hooks/useDisconnectBlockedWallet.ts
+# Extensions run third-party apps in frames and exchange messages with them.
+/src/pages/extensions/
+# Build-time configuration embedded in the bundle, and the HTML entry points.
+/envVars.ts
+/vite.config.js
+/*.html
+/*/index.html
+/*/ipfs-404.html
+# Dependencies, CI, and the IPFS build, preview and release scripts.
+/package.json
+/yarn.lock
+/.github/
+/scripts/
+# security-sensitive: end
