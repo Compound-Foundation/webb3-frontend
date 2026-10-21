@@ -89,11 +89,9 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
     const actualUtilizationPercentage = getUtilizationPercentage(state[1].utilization);
     // loaded state
     const mouseMove: MouseEventHandler<HTMLDivElement> = (e: MouseEvent<HTMLDivElement>) => {
-      const targetElement = e.currentTarget;
-
-      const targetWidth = targetElement.getBoundingClientRect().width;
-      const widthThreshold = targetWidth - targetWidth * 0.03;
-      const utilizationPercent = Math.min(Math.max(e.nativeEvent.offsetX / widthThreshold, 0), 1);
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) * width) / rect.width;
+      const utilizationPercent = Math.min(Math.max((x - minX) / (maxX - minX), 0), 1);
 
       setUtilizationPercentage(utilizationPercent);
 
