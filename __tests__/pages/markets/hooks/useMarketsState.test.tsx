@@ -11,13 +11,17 @@ import { MarketDataLoaded, MarketDataState, StateType, V3MarketApiBucket } from 
 
 import { rest, server } from '../../../../handlers/server';
 
-// Every on-chain read returns 1e18, which is enough for the hook to build its state without a node
+// On-chain reads return the value set in mockReads for that contract function, or 1e18,
+// which is enough for the hook to build its state without a node
+let mockReads: Record<string, bigint> = {};
+
 jest.mock('ethers-multicall', () => {
   const { BigNumber } = jest.requireActual('@ethersproject/bignumber');
   return {
-    Contract: jest.fn(() => new Proxy({}, { get: () => () => undefined })),
+    Contract: jest.fn(() => new Proxy({}, { get: (_target, name) => () => name })),
     Provider: jest.fn(() => ({
-      all: (calls: unknown[]) => Promise.resolve(calls.map(() => BigNumber.from(10).pow(18))),
+      all: (calls: string[]) =>
+        Promise.resolve(calls.map((name) => BigNumber.from((mockReads[name] ?? 10n ** 18n).toString()))),
     })),
   };
 });
@@ -64,15 +68,37 @@ const serveHistory = (buckets: V3MarketApiBucket[]) =>
     rest.get(`${getMarketDataUrlForMarket(market)}/historical/summary`, (_req, res, ctx) => res(ctx.json(buckets)))
   );
 
-const renderMarketHistory = async () => {
+const renderMarketState = async () => {
   const { result } = renderHook(() => useMarketsState(web3, marketState), { wrapper: Wrapper });
   await waitFor(() => expect(result.current[0]).toEqual(StateType.Hydrated));
 
   if (result.current[0] !== StateType.Hydrated || result.current[1].type !== 'ProtocolAndMarketState') {
     throw new Error('Expected a hydrated market state');
   }
-  return result.current[1].marketHistory;
+  return result.current[1];
 };
+
+const renderMarketHistory = async () => (await renderMarketState()).marketHistory;
+
+afterEach(() => {
+  mockReads = {};
+});
+
+describe('useMarketsState current APRs', () => {
+  test('are the base rates when nothing is borrowed', async () => {
+    const secondsPerYear = 31_536_000n;
+    mockReads = {
+      getUtilization: 0n,
+      borrowPerSecondInterestRateBase: 475_646_879n,
+      supplyPerSecondInterestRateBase: 317_097_919n,
+    };
+
+    const { borrowAPR, earnAPR } = await renderMarketState();
+
+    expect(borrowAPR).toEqual(475_646_879n * secondsPerYear);
+    expect(earnAPR).toEqual(317_097_919n * secondsPerYear);
+  });
+});
 
 describe('useMarketsState history APRs', () => {
   test('parses the backend decimal APR strings at 18 decimals', async () => {
