@@ -14,7 +14,9 @@
 /src/constants/
 /src/hooks/
 /src/pages/home/index.tsx
-# Wallet connection, Safe App framing and the screening gate.
+# Wallet connection, Safe App framing and the screening gate. main.tsx sets the
+# allowed Safe domains and turns off Wagmi's own reconnect.
+/src/main.tsx
 /src/components/ConnectWalletModal.tsx
 /src/components/SafeAutoConnect.tsx
 /src/components/ScreeningErrorOverlay.tsx
