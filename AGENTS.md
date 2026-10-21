@@ -42,9 +42,16 @@ Treat these as security-sensitive. `.github/CODEOWNERS` lists them between the `
 - Sanctions and address checks: a deployed build screens every connected address and fails closed. A change must not let a blocked or unscreened address reach a signing flow, and the dev-server bypass must never apply to `vite build`.
 - Build and release: `.env` files, `envVars.ts`, `vite.config.js`, the HTML entry points, dependencies, CI workflows and the IPFS build, preview and release scripts. A committed `.env` file reaches the production build and can change the extension operator and frame sources. Fork PRs build without publishing credentials, and that separation must hold.
 
-## Automated PR reviews
+## Automated PR workflows
 
-dev-fleet's PR-agent service reviews this repository's PRs and never pushes to their branches. When a PR is opened ready for review, or a draft is marked ready, it runs `code-reviewer`. It adds `security-reviewer` when the PR changes a security-sensitive path, then posts one PR review on the head commit. Reviewers follow this file as it is on the base branch, so a PR that changes `AGENTS.md` has the change reviewed, not followed. The [pr-agents README](https://github.com/Compound-Foundation/dev-fleet/blob/main/services/pr-agents/README.md) explains how to re-run a review, pause the service or turn reviews off for this repository.
+dev-fleet's PR-agent service runs four workflows on this repository's PRs. Three of them push commits to PR branches:
+
+- Review: when a PR is opened ready for review, or a draft is marked ready, the service runs `code-reviewer`. It adds `security-reviewer` when the PR changes a security-sensitive path, then posts one PR review on the head commit. Reviewers follow this file as it is on the base branch, so a PR that changes `AGENTS.md` has the change reviewed, not followed.
+- Branch updates: when a PR's branch lacks the latest commit of its base, the service merges the base into it in a new merge commit.
+- Merge conflicts: when a PR conflicts with its base, the service resolves mechanical conflicts in a new merge commit. Otherwise it comments the conflicting files and leaves the branch unchanged.
+- Failed checks: when a required check fails, the service pushes a simple fix, such as formatting or lint, as a new commit. Otherwise it comments its assessment. It never edits CI, check configuration, `vite.config.js`, `.env` files, `yarn.lock`, the audit allowlist or tests beyond formatting, so it never changes dependencies. It acts only on required checks, so it does nothing until branch protection or a ruleset on `main` requires some.
+
+The service skips PRs from forks and from authors outside the Compound-Foundation organisation, so those get no automated review. It adds commits to PR branches after the review has run, so pull before you push, and read its commits before merging. The [pr-agents README](https://github.com/Compound-Foundation/dev-fleet/blob/main/services/pr-agents/README.md) explains how to re-run a review, pause a workflow or turn one off for this repository.
 
 ## Git
 
