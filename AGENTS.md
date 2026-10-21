@@ -55,4 +55,14 @@ The service skips PRs from forks and from authors outside the Compound-Foundatio
 
 ## Git
 
-Branch from `main` and open a PR. Do not push to `main`.
+Do each task in its own Git worktree on its own branch, cut from the latest `origin/main`, and open a PR. Do not push to `main`. A separate worktree keeps one task's branch switches and installs out of another session's checkout.
+
+```bash
+git fetch origin
+git worktree add -b <branch> ../webb3-frontend-<branch-slug> origin/main
+cd ../webb3-frontend-<branch-slug> && yarn install
+```
+
+- Put the worktree beside the main checkout, not inside it. `tsconfig.json` includes every `.ts` file below the root, and `yarn lint` lints `.`. A worktree inside the checkout is then type-checked and linted with it. Jest skips only `.claude/`.
+- A new worktree holds tracked files only. Run `yarn install` in it, and copy any `.env.local` or `.env.stage.local` you need from the main checkout.
+- Reuse the worktree when you return to the task. After the PR merges, remove it with `git worktree remove ../webb3-frontend-<branch-slug>` and delete the branch.
