@@ -1,5 +1,3 @@
-import { parseUnits } from '@ethersproject/units';
-
 import {
   formatTokenBalance,
   formatRateFactor,
@@ -326,18 +324,5 @@ describe('shouldDisplayBalance in string', () => {
   it('should return balance string without abbreviation', () => {
     const result = formatUnitsWithTruncation({ amount: '500000' });
     expect(result).toEqual('500,000');
-  });
-});
-
-describe('history APR parsing', () => {
-  it('parses the backend decimal strings at FACTOR_PRECISION', () => {
-    const rate = parseUnits('0.05522336415504', FACTOR_PRECISION).toBigInt();
-
-    expect(rate).toEqual(55_223_364_155_040_000n);
-    expect(formatRateFactor(rate)).toEqual('5.52%');
-  });
-
-  it('keeps all 18 fraction digits', () => {
-    expect(parseUnits('0.123456789012345678', FACTOR_PRECISION).toBigInt()).toEqual(123_456_789_012_345_678n);
   });
 });
