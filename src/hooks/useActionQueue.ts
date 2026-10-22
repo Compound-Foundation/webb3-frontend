@@ -1,5 +1,6 @@
 import { useEffect, useReducer } from 'react';
 
+import type { WriteWeb3 } from '@contexts/Web3Context';
 import { isSameAction, isSameToken } from '@helpers/actions';
 import { filterMap } from '@helpers/functions';
 import { getRewardsForMarket } from '@helpers/rewards';
@@ -15,14 +16,20 @@ import {
   TokenWithAccountState,
 } from '@types';
 
-/** The wallet session a queue belongs to. */
+/**
+ * The wallet session a queue belongs to. The wallet's network is not part of it, so a queue made
+ * while the wallet is on another network survives the switch to the market's network and can then
+ * be submitted.
+ */
 export type QueueSession = {
   account: string | undefined;
   /** The wallet connection: the wagmi connector's `uid`, which is different for each connector. */
   connector: string | undefined;
+  /** wagmi's connection status. A reconnect with the same account and connector changes it. */
+  status: WriteWeb3['status'];
 };
 
-const NO_SESSION: QueueSession = { account: undefined, connector: undefined };
+const NO_SESSION: QueueSession = { account: undefined, connector: undefined, status: 'disconnected' };
 
 /** The session and market a queue was built for, each as a key. */
 type QueueIdentity = { session: string; market: string };
@@ -58,8 +65,8 @@ type ResetAction = [QueueActionType.Reset, QueueIdentity];
 
 type QueueAction = AddOrUpdateAction | ClearAction | RemoveAction | SetPendingAction | DeferAction | ResetAction;
 
-function sessionKey({ account, connector }: QueueSession): string {
-  return `${account?.toLowerCase() ?? ''}|${connector ?? ''}`;
+function sessionKey({ account, connector, status }: QueueSession): string {
+  return `${account?.toLowerCase() ?? ''}|${connector ?? ''}|${status}`;
 }
 
 /** A market is its chain and Comet address. One Comet address can be listed on two chains. */
@@ -117,9 +124,10 @@ function queueReducer(state: QueueState, queueAction: QueueAction): QueueState {
 /**
  * useActionQueue is a hook that keeps track of pending bulker actions.
  *
- * The queue, the open amount form and deferred actions belong to the session (account and
- * connector) and the market (chain and Comet) they were made for. A change of either clears them
- * all in the same render. A market change then queues the actions deferred for the new market.
+ * The queue, the open amount form and deferred actions belong to the session (account, connector
+ * and connection status) and the market (chain and Comet) they were made for. A change of either
+ * clears them all in the same render. A market change then queues the actions deferred for the new
+ * market.
  */
 export function useActionQueue(
   market: MarketDataState,

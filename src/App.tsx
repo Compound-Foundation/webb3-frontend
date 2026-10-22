@@ -181,7 +181,7 @@ function App({ Component, pageProps }: any) {
     (actions: Action[]) => {
       preEstimateGas(actions);
     },
-    { account: web3.write.account, connector: web3.write.connector?.uid }
+    { account: web3.write.account, connector: web3.write.connector?.uid, status: web3.write.status }
   );
 
   useEffect(() => {
