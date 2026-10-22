@@ -616,7 +616,7 @@ describe('WrappedSupply', () => {
       expect(dialog).toHaveTextContent('Approve 1,000.000000 USDC for the wrapper');
       expect(dialog).toHaveTextContent('Supply 1,000.000000 USDC through the wrapper');
       expect(dialog).toHaveTextContent('1,000.000000 USDC');
-      // The amount in the token's base units, as Anchorage's approval screen shows it.
+      // The amount in the token's base units. Porto's approval screen showed a withdrawal's amount so (COM-284).
       expect(dialog).toHaveTextContent('1000000000');
       fireEvent.click(within(dialog).getByRole('button', { name: /reset allowance/i }));
       expect(onConfirm).toHaveBeenCalledTimes(1);

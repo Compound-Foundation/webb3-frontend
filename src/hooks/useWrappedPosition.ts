@@ -70,7 +70,7 @@ export function useWrappedPosition({
   /** Any value that changes whenever the position needs reading again, such as after a transaction. */
   refreshToken?: unknown;
   /**
-   * The block a read should show, such as the block of a wrapper transaction that just settled. A
+   * The block a read waits for, such as the block of a wrapper transaction that just settled. A
    * read waits for the provider to reach it, and reads anyway after `blockWait`: the timed refresh
    * corrects a read that was still behind.
    */

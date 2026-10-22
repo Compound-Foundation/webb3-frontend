@@ -165,6 +165,52 @@ describe('useWrappedPosition', () => {
     expect(read).not.toHaveBeenCalled();
   });
 
+  describe('after a wrapper transaction settles', () => {
+    /** A provider at `block`, which the test moves on. */
+    function providerAt(block: { number: number }) {
+      return { getBlockNumber: jest.fn(async () => block.number) } as unknown as JsonRpcProvider;
+    }
+
+    it('waits for the provider to reach the transaction block before it reads', async () => {
+      const block = { number: 100 };
+      const provider = providerAt(block);
+      const read = jest.fn(async () => position(5n));
+      renderHook(() =>
+        useWrappedPosition({
+          route: wrappedRoute('key-1'),
+          account: ACCOUNT,
+          provider,
+          minBlock: 101,
+          blockWait: { attempts: 200, intervalMs: 5 },
+          read,
+        })
+      );
+
+      await waitFor(() => expect((provider.getBlockNumber as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(3));
+      expect(read).not.toHaveBeenCalled();
+      block.number = 101;
+      await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    });
+
+    it('reads anyway once the wait is over, since the timed refresh catches up later', async () => {
+      const provider = providerAt({ number: 100 });
+      const read = jest.fn(async () => position(5n));
+      const { result } = renderHook(() =>
+        useWrappedPosition({
+          route: wrappedRoute('key-1'),
+          account: ACCOUNT,
+          provider,
+          minBlock: 101,
+          blockWait: { attempts: 2, intervalMs: 1 },
+          read,
+        })
+      );
+
+      await waitFor(() => expect(result.current.state).toEqual({ status: 'loaded', position: position(5n) }));
+      expect(provider.getBlockNumber).toHaveBeenCalledTimes(3);
+    });
+  });
+
   it('reads again when the refresh token changes and keeps the last position meanwhile', async () => {
     const { read, pending } = deferredReader();
     const route = wrappedRoute('key-a');
