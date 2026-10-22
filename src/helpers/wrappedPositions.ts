@@ -144,3 +144,14 @@ export async function readWrappedPosition(
     snapshot: { totalSupply, totalAssets, baseSupplyIndex },
   };
 }
+
+export type SupplyIncentives = { earnRewardsAPR: bigint | undefined; isInstitutional: boolean | undefined };
+
+/**
+ * The supply incentives the dashboard shows for a route. No COMP, Merkl or institutional boost
+ * rate is verified for wrapped positions, so the wrapped route shows none and keeps only the
+ * market's base lending rate. Borrow-side figures are not affected.
+ */
+export function supplyIncentivesForRoute(isWrappedRoute: boolean, incentives: SupplyIncentives): SupplyIncentives {
+  return isWrappedRoute ? { earnRewardsAPR: 0n, isInstitutional: false } : incentives;
+}
