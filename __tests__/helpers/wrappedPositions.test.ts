@@ -7,6 +7,7 @@ import {
   getRedeemBuffer,
   getWrappedPositionValueInDollars,
   readWrappedPosition,
+  supplyIncentivesForRoute,
   WrappedPositionReadError,
 } from '@helpers/wrappedPositions';
 
@@ -169,5 +170,17 @@ describe('readWrappedPosition', () => {
     const market = usdcMarket();
     const multicall = { all: jest.fn().mockRejectedValue(new Error('rpc down')) };
     await expect(readWrappedPosition(multicall, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
+  });
+});
+
+describe('supplyIncentivesForRoute', () => {
+  const incentives = { earnRewardsAPR: 12_000_000_000_000_000n, isInstitutional: true };
+
+  it('shows no supply reward or institutional boost on the wrapped route', () => {
+    expect(supplyIncentivesForRoute(true, incentives)).toEqual({ earnRewardsAPR: 0n, isInstitutional: false });
+  });
+
+  it('keeps the market incentives on the standard route', () => {
+    expect(supplyIncentivesForRoute(false, incentives)).toEqual(incentives);
   });
 });
