@@ -51,6 +51,7 @@ import {
 } from '@types';
 
 import ActionModal from './components/ActionModal';
+import WrappedSupplyModal from './components/ActionModal/WrappedSupplyModal';
 import AssetRow from './components/AssetRow';
 import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadState } from './components/Masthead';
@@ -691,18 +692,29 @@ const Home = ({
   }
 
   let wrappedPanel: ReactNode = null;
-  const { route: wrappedRoute } = wrappedLending;
+  // The direct Comet borrow a wrapped supply's dialog warns about, or undefined while unknown.
+  let directBorrowBalance: bigint | undefined;
+  const { route: wrappedRoute, action: wrappedAction } = wrappedLending;
   if (wrappedRoute.kind === 'wrapped') {
     // The rate and price belong to the market whose Comet state this is, which can still be
     // the previous market for a render after a switch.
     const cometMarket = cometStateMarket.current.market;
-    const cometForRoute =
-      cometState !== StateType.Loading &&
+    const isCometStateForRoute =
       cometMarket !== undefined &&
       cometMarket.chainId === wrappedRoute.chainId &&
-      cometMarket.cometAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase()
-        ? state[1]
-        : undefined;
+      cometMarket.cometAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase();
+    const cometForRoute = cometState !== StateType.Loading && isCometStateForRoute ? state[1] : undefined;
+    // The borrow comes from the Comet state read for this market and the connected account only.
+    const cometAccount = cometStateMarket.current.account;
+    if (
+      state[0] === StateType.Hydrated &&
+      isCometStateForRoute &&
+      cometAccount !== undefined &&
+      cometAccount.toLowerCase() === web3.write.account?.toLowerCase()
+    ) {
+      const { balance } = state[1].baseAsset;
+      directBorrowBalance = balance < 0n ? -balance : 0n;
+    }
     // Only the loaded figures need the Comet state. A read failure or an unavailable wrapper
     // shows at once, so its Retry or Reload is never hidden behind a slow Comet read.
     const position =
@@ -721,9 +733,14 @@ const Home = ({
           }
         }
         earnAPR={cometForRoute?.earnAPR ?? 0n}
-        session={wrappedLending.action.session}
-        canDismissRecovered={wrappedLending.action.canDismissRecovered}
-        onDismissRecovered={wrappedLending.action.dismissRecovered}
+        session={wrappedAction.session}
+        canDismissRecovered={wrappedAction.canDismissRecovered}
+        onDismissRecovered={wrappedAction.dismissRecovered}
+        supply={{
+          blockedReason: wrappedAction.blockedReason('supply'),
+          // The form keeps this callback. One from an earlier visit starts no review.
+          onReview: (amount) => (isFromEarlierVisit() ? 'identity-changed' : wrappedLending.write.supply(amount)),
+        }}
         onRetry={wrappedLending.retry}
       />
     );
@@ -732,6 +749,14 @@ const Home = ({
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
+      <WrappedSupplyModal
+        state={wrappedAction.state}
+        symbol={selectedMarket[1]?.baseAsset.symbol ?? ''}
+        decimals={wrappedRoute.kind === 'wrapped' ? wrappedRoute.market?.baseDecimals : undefined}
+        directBorrowBalance={directBorrowBalance}
+        onConfirm={wrappedAction.confirm}
+        onClose={wrappedAction.discard}
+      />
       <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
       {wrappedPanel}

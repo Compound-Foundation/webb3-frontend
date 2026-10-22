@@ -77,6 +77,7 @@ function wrappedLending(): WrappedLending {
     position: { status: 'loading' },
     retry: jest.fn(),
     action: STANDARD_LENDING.action,
+    write: STANDARD_LENDING.write,
   };
 }
 

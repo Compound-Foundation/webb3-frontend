@@ -26,7 +26,8 @@ import { useSelectedMarketState } from '@hooks/useSelectedMarket';
 import { useThemeManager } from '@hooks/useThemeManager';
 import { useTransactionManager } from '@hooks/useTransactionManager';
 import { useWrappedAction } from '@hooks/useWrappedAction';
-import { useWrappedPosition } from '@hooks/useWrappedPosition';
+import { positionRefreshToken, useWrappedPosition } from '@hooks/useWrappedPosition';
+import { useWriteWrappedState } from '@hooks/useWriteWrappedState';
 import { Action, MarketDataLoaded, StateType } from '@types';
 
 import { allExtensions } from './pages/extensions/helpers/list';
@@ -103,8 +104,8 @@ function App({ Component, pageProps }: any) {
     route: lendingRoute,
     account: web3.write.account,
     provider: wrappedChainProvider,
-    // Read again whenever a transaction is added or settles.
-    refreshToken: transactions.length,
+    // Read again whenever a transaction is added or settles, such as a wrapped supply's approval.
+    refreshToken: positionRefreshToken(transactions, settledTransactions),
   });
   const wrappedAction = useWrappedAction({
     session: {
@@ -124,11 +125,18 @@ function App({ Component, pageProps }: any) {
     },
     readProvider: wrappedChainProvider,
   });
+  const wrappedWrite = useWriteWrappedState({
+    action: wrappedAction,
+    route: lendingRoute,
+    readProvider: wrappedChainProvider,
+    baseSymbol: selectedMarketState.selectedMarket[1]?.baseAsset.symbol,
+  });
   const wrappedLending = {
     route: lendingRoute,
     position: wrappedPosition.state,
     retry: wrappedPosition.retry,
     action: wrappedAction,
+    write: wrappedWrite,
   };
 
   const handleRequestNetworkSwitch = (fromChainId: number, toChainId: number, description?: string) => {

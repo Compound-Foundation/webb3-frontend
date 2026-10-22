@@ -1,10 +1,17 @@
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 
-import { Eligibility, LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
+import { assetIconForAssetSymbol } from '@helpers/assets';
+import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { formatRateFactor, formatValue, formatValueInDollars } from '@helpers/numbers';
+import { WrappedBlockReason } from '@helpers/wrappedActions';
 import { getWithdrawableCash, getWrappedPositionValueInDollars, WithdrawableCash } from '@helpers/wrappedPositions';
 import { WalletSessionHealth } from '@hooks/useWrappedAction';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
+import {
+  parseWrappedSupplyAmount,
+  sanitizeWrappedSupplyInput,
+  toWrappedSupplyInput,
+} from '@hooks/useWriteWrappedState';
 
 export type WrappedRoute = Extract<LendingRoute, { kind: 'wrapped' }>;
 
@@ -20,6 +27,13 @@ type WrappedPositionPanelProps = {
   /** An interrupted wallet request holds back new wrapped actions, and the user can stop waiting. */
   canDismissRecovered?: boolean;
   onDismissRecovered?: () => void;
+  /** The wrapped supply entry. Without it, the deposit control stays disabled. */
+  supply?: {
+    /** Why a wrapped supply cannot start now, as the wrapper action lifecycle reports it. */
+    blockedReason: WrappedBlockReason | undefined;
+    /** Starts a review of `amount` raw base-token units. Returns why it was refused, if it was. */
+    onReview: (amount: bigint) => WrappedBlockReason | undefined;
+  };
   onRetry: () => void;
 };
 
@@ -51,9 +65,8 @@ function unavailableMessage(reason: WriteBlockReason): { message: string; canRel
   }
 }
 
-function writeBlockMessage(eligibility: Eligibility, action: 'deposits' | 'withdrawals'): string {
-  if (eligibility.isEligible) return `Wrapped ${action} are not available in this version of the app.`;
-  switch (eligibility.reason) {
+function writeBlockMessage(reason: WrappedBlockReason, action: 'deposits' | 'withdrawals'): string {
+  switch (reason) {
     case 'deposits-disabled':
     case 'exits-disabled':
       return `Wrapped ${action} are not open yet.`;
@@ -63,10 +76,94 @@ function writeBlockMessage(eligibility: Eligibility, action: 'deposits' | 'withd
     case 'no-signer':
     case 'validation-pending':
       return 'Waiting for your wallet and the wrapper check.';
+    case 'transaction-pending':
+      return 'Waiting for your earlier wrapped transaction to settle.';
+    case 'action-in-progress':
+      return 'A wrapped transaction is already in review.';
+    case 'session-unusable':
+      return 'Reload the page and reconnect your wallet first.';
     default:
       return `Wrapped ${action} are unavailable for this session.`;
   }
 }
+
+/** The amount form of a wrapped supply, modelled on the standard supply's. */
+const WrappedSupplyForm = ({
+  symbol,
+  decimals,
+  walletBalance,
+  onCancel,
+  onReview,
+}: {
+  symbol: string;
+  decimals: number;
+  walletBalance: bigint;
+  onCancel: () => void;
+  onReview: (amount: bigint) => WrappedBlockReason | undefined;
+}) => {
+  const [input, setInput] = useState('');
+  const [refusal, setRefusal] = useState<WrappedBlockReason | undefined>(undefined);
+  const amount = parseWrappedSupplyAmount(input, decimals);
+  const isAboveBalance = amount !== undefined && amount > walletBalance;
+  const reviewedAmount = amount !== undefined && amount > 0n && !isAboveBalance ? amount : undefined;
+
+  const change = (value: string) => {
+    setInput(value);
+    setRefusal(undefined);
+  };
+
+  return (
+    <div
+      className={`action-input-view action-input-view--${
+        isAboveBalance ? 'error' : 'supply'
+      } L2 wrapped-position-panel__form`}
+    >
+      <div className="action-input-view__title">
+        <label className="label">Supply {symbol}</label>
+        {isAboveBalance && <label className="label text-color--2">Exceeds your wallet balance</label>}
+      </div>
+      <div className="action-input-view__input-row">
+        <input
+          className="action-input-view__input"
+          placeholder="0"
+          inputMode="decimal"
+          aria-label={`Amount of ${symbol} to supply`}
+          value={input}
+          onChange={(event) => change(sanitizeWrappedSupplyInput(event.target.value, decimals))}
+          autoComplete="off"
+        />
+        <button className="button button--small" onClick={() => change(toWrappedSupplyInput(walletBalance, decimals))}>
+          Max
+        </button>
+      </div>
+      <div className="action-input-view__detail-row">
+        <div className={`asset asset--${assetIconForAssetSymbol(symbol)}`}></div>
+        <p className="L4 meta">{formatValue(decimals, walletBalance)} Available</p>
+      </div>
+      <div className="action-input-view__hint-row">
+        <p className="L4 meta text-color--2">
+          {refusal === undefined
+            ? 'You review each transaction before your wallet signs it. An approval, if one is needed, is for exactly this amount.'
+            : writeBlockMessage(refusal, 'deposits')}
+        </p>
+      </div>
+      <div className="action-input-view__buttons">
+        <button className="button" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          className="button"
+          disabled={reviewedAmount === undefined}
+          onClick={() => {
+            if (reviewedAmount !== undefined) setRefusal(onReview(reviewedAmount));
+          }}
+        >
+          Review
+        </button>
+      </div>
+    </div>
+  );
+};
 
 function withdrawableNote({ limit }: WithdrawableCash): string {
   switch (limit) {
@@ -91,9 +188,12 @@ const WrappedPositionPanel = ({
   session = { status: 'not-applicable' },
   canDismissRecovered = false,
   onDismissRecovered = () => undefined,
+  supply,
   onRetry,
 }: WrappedPositionPanelProps) => {
   const { symbol } = baseAsset;
+  // The supply form belongs to the route it was opened on, so a change of session or market closes it.
+  const [supplyFormRoute, setSupplyFormRoute] = useState<string | undefined>(undefined);
   let content: ReactNode;
 
   switch (position.status) {
@@ -179,6 +279,31 @@ const WrappedPositionPanel = ({
     }
   }
 
+  // A wrapped supply can start when the route allows deposits, the lifecycle allows a new review,
+  // and the position, with the wallet balance it reads, is loaded.
+  const supplyBlock = !route.deposit.isEligible ? route.deposit.reason : supply?.blockedReason;
+  let supplyForm:
+    | { decimals: number; walletBalance: bigint; onReview: (amount: bigint) => WrappedBlockReason | undefined }
+    | undefined;
+  let supplyMessage: string;
+  if (supplyBlock !== undefined) {
+    supplyMessage = writeBlockMessage(supplyBlock, 'deposits');
+  } else if (supply === undefined) {
+    supplyMessage = 'Wrapped deposits are not available in this version of the app.';
+  } else if (session.status === 'unusable') {
+    supplyMessage = writeBlockMessage('session-unusable', 'deposits');
+  } else if (position.status !== 'loaded') {
+    supplyMessage = 'Waiting for your wrapped position to load.';
+  } else {
+    supplyMessage = `Lends ${symbol} from your wallet to the market through the wrapper.`;
+    supplyForm = {
+      decimals: position.position.baseDecimals,
+      walletBalance: position.position.baseWalletBalance,
+      onReview: supply.onReview,
+    };
+  }
+  const isSupplyFormOpen = supplyFormRoute !== undefined && supplyFormRoute === route.validationKey;
+
   return (
     <div className="panel wrapped-position-panel L2">
       <div className="panel__header-row">
@@ -213,18 +338,40 @@ const WrappedPositionPanel = ({
       {content}
       <div className="wrapped-position-panel__actions">
         <div className="wrapped-position-panel__action">
-          <button className="button button--supply" disabled>
+          <button
+            className="button button--supply"
+            disabled={supplyForm === undefined}
+            onClick={() => setSupplyFormRoute(isSupplyFormOpen ? undefined : route.validationKey)}
+          >
             Supply {symbol} through the wrapper
           </button>
-          <p className="L4 meta text-color--2">{writeBlockMessage(route.deposit, 'deposits')}</p>
+          <p className="L4 meta text-color--2">{supplyMessage}</p>
         </div>
         <div className="wrapped-position-panel__action">
           <button className="button button--supply" disabled>
             Withdraw {symbol} from the wrapper
           </button>
-          <p className="L4 meta text-color--2">{writeBlockMessage(route.exit, 'withdrawals')}</p>
+          <p className="L4 meta text-color--2">
+            {route.exit.isEligible
+              ? 'Wrapped withdrawals are not available in this version of the app.'
+              : writeBlockMessage(route.exit.reason, 'withdrawals')}
+          </p>
         </div>
       </div>
+      {isSupplyFormOpen && supplyForm !== undefined && (
+        <WrappedSupplyForm
+          symbol={symbol}
+          decimals={supplyForm.decimals}
+          walletBalance={supplyForm.walletBalance}
+          onCancel={() => setSupplyFormRoute(undefined)}
+          onReview={(amount) => {
+            const refusal = supplyForm.onReview(amount);
+            // Once the review starts, its dialog takes over.
+            if (refusal === undefined) setSupplyFormRoute(undefined);
+            return refusal;
+          }}
+        />
+      )}
     </div>
   );
 };
