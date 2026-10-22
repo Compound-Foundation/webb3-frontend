@@ -1032,6 +1032,33 @@ describe('useWriteWrappedState', () => {
       });
     });
 
+    it('treats a revert the node reports without data as a revert: it says so and does not simulate again', async () => {
+      const chain = chainFor(USDT_MARKET, { allowance: AMOUNT });
+      const { result, events } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+      events.length = 0;
+
+      // USDT's require failures revert with no data. Ethers wraps the node's error twice.
+      chain.simulationRevert = Object.assign(new Error('missing revert data in call exception'), {
+        code: 'CALL_EXCEPTION',
+        data: '0x',
+        error: Object.assign(new Error('processing response error (body=..., url="https://rpc.example")'), {
+          reason: 'processing response error',
+          code: 'SERVER_ERROR',
+          error: Object.assign(new Error('execution reverted'), { code: -32000 }),
+        }),
+      });
+      await confirmStep(result);
+
+      expect(events.filter((event) => event === 'simulate')).toHaveLength(1);
+      const [step] = stepsOf(result.current.action.state);
+      expect(step).toMatchObject({
+        status: 'blocked',
+        message: expect.stringMatching(/execution reverted \(-32000\)/),
+      });
+      expect(step).not.toMatchObject({ message: expect.stringMatching(/processing response error|rpc\.example/) });
+    });
+
     it('describes an HTTP failure by its status, without the request it sent', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: AMOUNT });
       const { result } = renderSupply(chain);

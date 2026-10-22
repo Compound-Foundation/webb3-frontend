@@ -180,24 +180,49 @@ function describeRevertData(data: string): string {
   }
 }
 
+type CallFailure = { code?: unknown; message?: unknown; reason?: unknown; status?: unknown; error?: unknown };
+
+/** The error and the errors ethers wraps it around, outermost first. */
+function failureChain(error: unknown): CallFailure[] {
+  const chain: CallFailure[] = [];
+  for (let current = error; typeof current === 'object' && current !== null && chain.length < 8; ) {
+    if (chain.includes(current as CallFailure)) break;
+    chain.push(current as CallFailure);
+    current = (current as CallFailure).error;
+  }
+  return chain;
+}
+
+/** The node's own JSON-RPC error inside ethers' wrappers, which carries a numeric code. */
+function nodeError(error: unknown): CallFailure | undefined {
+  return failureChain(error).find(({ code }) => typeof code === 'number');
+}
+
 /**
  * Why a call through the provider failed. Ethers reports every `eth_call` that fails without
- * revert data as a revert without a reason string, a timeout or a rate limit included, and keeps
- * the provider's own error in `error`. That error says what happened, so it is described instead.
- * Ethers' own errors give a short `reason`, and an HTTP failure its `status`: their `message` also
- * lists the request, with the account and call data, the response headers and the provider's URL.
+ * revert data as a revert without a reason string, a timeout or a rate limit included, and wraps
+ * the provider's own error. The node's error says what happened, so it is described when there is
+ * one. Otherwise ethers' short `reason` is, with an HTTP failure's `status`: ethers' `message`
+ * also lists the request, with the account and call data, the response headers and the URL.
  */
 function describeCallFailure(error: unknown): string {
-  const outer = typeof error === 'object' && error !== null ? (error as { error?: unknown }) : undefined;
-  const failure = outer?.error ?? error;
-  const { reason, status } = (typeof failure === 'object' && failure !== null ? failure : {}) as {
-    reason?: unknown;
-    status?: unknown;
-  };
-  if (typeof reason === 'string' && reason !== '') {
-    return typeof status === 'number' ? `${reason}, status ${status}` : reason;
-  }
-  return describeWalletError(failure);
+  const fromNode = nodeError(error);
+  if (fromNode !== undefined) return describeWalletError(fromNode);
+  const chain = failureChain(error);
+  const withReason = [...chain].reverse().find(({ reason }) => typeof reason === 'string' && reason !== '');
+  if (withReason === undefined) return describeWalletError(chain[chain.length - 1] ?? error);
+  const status = chain.find((failure) => typeof failure.status === 'number')?.status;
+  return status === undefined ? String(withReason.reason) : `${String(withReason.reason)}, status ${status}`;
+}
+
+/**
+ * Whether a call reverted. A revert with data carries it. A node that reports a revert without
+ * data, as USDT's failed `require` gives, says so in its error's message.
+ */
+function isRevert(error: unknown): boolean {
+  if (revertData(error) !== undefined) return true;
+  const message = nodeError(error)?.message;
+  return typeof message === 'string' && /revert/i.test(message);
 }
 
 /** Why a simulation failed: the revert it carries, or why the call failed. */
@@ -236,7 +261,7 @@ async function simulateSupplyAndWrap(
       result = await reads.call(request, blockNumber);
       break;
     } catch (error) {
-      if (revertData(error) !== undefined || retries >= CALL_RETRIES) return refuse(describeSimulationFailure(error));
+      if (isRevert(error) || retries >= CALL_RETRIES) return refuse(describeSimulationFailure(error));
       await new Promise((resolve) => setTimeout(resolve, reads.retryIntervalMs));
     }
   }
