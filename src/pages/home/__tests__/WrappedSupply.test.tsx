@@ -483,14 +483,33 @@ describe('WrappedSupply', () => {
       expect(onReview).toHaveBeenCalledWith(42_500_001n);
     });
 
-    it('drops a seventh decimal as it is typed', () => {
-      renderPanel(lendingWith(controller()));
+    it.each(['1.1234567', '1,5', '1.000.000', '1e6', '-1', '0x10', 'one'])(
+      'keeps %p as typed and refuses to review it, rather than dropping characters',
+      (value) => {
+        const onReview = renderPanel(lendingWith(controller()));
+
+        fireEvent.click(supplyButton());
+        const input = screen.getByRole('textbox', { name: /amount of usdc to supply/i });
+        fireEvent.change(input, { target: { value } });
+
+        expect(input).toHaveValue(value);
+        expect(screen.getByText(/use digits and one point, with up to 6 decimals/i)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Review' })).toBeDisabled();
+        fireEvent.click(screen.getByRole('button', { name: 'Review' }));
+        expect(onReview).not.toHaveBeenCalled();
+      }
+    );
+
+    it('reviews an amount pasted with spaces around it', () => {
+      const onReview = renderPanel(lendingWith(controller()));
 
       fireEvent.click(supplyButton());
-      const input = screen.getByRole('textbox', { name: /amount of usdc to supply/i });
-      fireEvent.change(input, { target: { value: '1.1234567' } });
+      fireEvent.change(screen.getByRole('textbox', { name: /amount of usdc to supply/i }), {
+        target: { value: ' 2.5 ' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Review' }));
 
-      expect(input).toHaveValue('1.123456');
+      expect(onReview).toHaveBeenCalledWith(2_500_000n);
     });
 
     it.each<[string, string]>([

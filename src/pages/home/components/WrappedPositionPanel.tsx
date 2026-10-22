@@ -7,11 +7,7 @@ import { WrappedBlockReason } from '@helpers/wrappedActions';
 import { getWithdrawableCash, getWrappedPositionValueInDollars, WithdrawableCash } from '@helpers/wrappedPositions';
 import { WalletSessionHealth } from '@hooks/useWrappedAction';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
-import {
-  parseWrappedSupplyAmount,
-  sanitizeWrappedSupplyInput,
-  toWrappedSupplyInput,
-} from '@hooks/useWriteWrappedState';
+import { parseWrappedSupplyAmount, toWrappedSupplyInput } from '@hooks/useWriteWrappedState';
 
 export type WrappedRoute = Extract<LendingRoute, { kind: 'wrapped' }>;
 
@@ -87,7 +83,11 @@ function writeBlockMessage(reason: WrappedBlockReason, action: 'deposits' | 'wit
   }
 }
 
-/** The amount form of a wrapped supply, modelled on the standard supply's. */
+/**
+ * The amount form of a wrapped supply, modelled on the standard supply's. It keeps what the user
+ * types: an amount it cannot read exactly, such as one with a comma or a seventh decimal, is
+ * refused with a message rather than changed.
+ */
 const WrappedSupplyForm = ({
   symbol,
   decimals,
@@ -103,9 +103,16 @@ const WrappedSupplyForm = ({
 }) => {
   const [input, setInput] = useState('');
   const [refusal, setRefusal] = useState<WrappedBlockReason | undefined>(undefined);
-  const amount = parseWrappedSupplyAmount(input, decimals);
+  const typed = input.trim();
+  const amount = typed === '' ? undefined : parseWrappedSupplyAmount(typed, decimals);
+  const isMalformed = typed !== '' && amount === undefined;
   const isAboveBalance = amount !== undefined && amount > walletBalance;
   const reviewedAmount = amount !== undefined && amount > 0n && !isAboveBalance ? amount : undefined;
+  const inputError = isMalformed
+    ? `Use digits and one point, with up to ${decimals} decimals`
+    : isAboveBalance
+    ? 'Exceeds your wallet balance'
+    : undefined;
 
   const change = (value: string) => {
     setInput(value);
@@ -115,21 +122,21 @@ const WrappedSupplyForm = ({
   return (
     <div
       className={`action-input-view action-input-view--${
-        isAboveBalance ? 'error' : 'supply'
+        inputError === undefined ? 'supply' : 'error'
       } L2 wrapped-position-panel__form`}
     >
       <div className="action-input-view__title">
         <label className="label">Supply {symbol}</label>
-        {isAboveBalance && <label className="label text-color--2">Exceeds your wallet balance</label>}
+        {inputError !== undefined && <label className="label text-color--2">{inputError}</label>}
       </div>
       <div className="action-input-view__input-row">
         <input
           className="action-input-view__input"
           placeholder="0"
-          inputMode="decimal"
           aria-label={`Amount of ${symbol} to supply`}
+          aria-invalid={inputError !== undefined}
           value={input}
-          onChange={(event) => change(sanitizeWrappedSupplyInput(event.target.value, decimals))}
+          onChange={(event) => change(event.target.value)}
           autoComplete="off"
         />
         <button className="button button--small" onClick={() => change(toWrappedSupplyInput(walletBalance, decimals))}>

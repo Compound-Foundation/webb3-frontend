@@ -59,15 +59,6 @@ export function parseWrappedSupplyAmount(input: string, decimals: number): bigin
   );
 }
 
-/**
- * What an amount input keeps of what the user types: digits and the first decimal point, with at
- * most `decimals` fraction digits. Every other character is dropped.
- */
-export function sanitizeWrappedSupplyInput(input: string, decimals: number): string {
-  const [whole, ...fractions] = input.replace(/[^\d.]/g, '').split('.');
-  return fractions.length === 0 ? whole : `${whole}.${fractions.join('').slice(0, decimals)}`;
-}
-
 /** `value` as an amount input accepts it: digits and a decimal point, with no trailing zeros. */
 export function toWrappedSupplyInput(value: bigint, decimals: number): string {
   const scale = 10n ** BigInt(decimals);
