@@ -1,11 +1,14 @@
-import { ReactNode, useContext, useEffect, useState } from 'react';
+import { ReactNode, useContext, useEffect, useRef, useState } from 'react';
 
 import { isUnwrappedCollateralAsset } from '@constants/chains';
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
+import { useWrappedLending } from '@contexts/WrappedLendingContext';
 import {
+  ActionRules,
+  addsDirectBaseSupply,
   isSameToken,
   calculateUpdatedBalances,
   getActionFromPendingAction,
@@ -17,6 +20,7 @@ import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
+import { supplyIncentivesForRoute } from '@helpers/wrappedPositions';
 import { Theme } from '@hooks/useThemeManager';
 import { AddTransaction } from '@hooks/useTransactionManager';
 import { useWriteCometState, WriteCometState } from '@hooks/useWriteCometState';
@@ -44,6 +48,7 @@ import AssetRow from './components/AssetRow';
 import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadState } from './components/Masthead';
 import PositionCard, { PositionCardState } from './components/PositionCard';
+import WrappedPositionPanel from './components/WrappedPositionPanel';
 
 const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.name ? 1 : a.name === b.name ? 0 : -1);
 
@@ -87,6 +92,14 @@ const Home = ({
   const [compare, setCompare] = useState(false);
   const [cometState] = state;
 
+  const wrappedLending = useWrappedLending();
+  const isWrappedRoute = wrappedLending.route.kind === 'wrapped';
+  const actionRules: ActionRules = { blockDirectBaseSupply: isWrappedRoute };
+  // Submissions can start from a callback a dialog kept from an earlier render, so they check
+  // the route as it is now, not as it was when the callback was made.
+  const liveRoute = useRef(wrappedLending.route);
+  liveRoute.current = wrappedLending.route;
+
   let assetRows: ReactNode[];
   let otherAssetRows: ReactNode[] = [];
   let mastheadState: MastheadState;
@@ -112,6 +125,10 @@ const Home = ({
       isRewardsLoading,
     } = state[1];
 
+    const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, {
+      earnRewardsAPR: supplyRewardsAPR,
+      isInstitutional,
+    });
     mastheadState = [StateType.NoWallet, { baseAsset, earnAPR }];
     assetRows = collateralAssets
       .sort(sortTokensAlphabetically)
@@ -124,9 +141,9 @@ const Home = ({
         rewardsAssetSymbol,
         borrowRewardsAPR,
         earnAPR,
-        earnRewardsAPR: supplyRewardsAPR,
+        earnRewardsAPR: supplyIncentives.earnRewardsAPR,
         institutionalWhitelistStatus: whitelistStatus,
-        isInstitutional: isInstitutional,
+        isInstitutional: supplyIncentives.isInstitutional,
         isRewardsLoading,
         theme,
       },
@@ -147,6 +164,13 @@ const Home = ({
       isRewardsLoading
     } = state[1];
     isBulkerAllowed = state[1].isBulkerAllowed;
+    const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, {
+      earnRewardsAPR: supplyRewardsAPR,
+      isInstitutional,
+    });
+    // True when the route is wrapped now and the actions would add to the direct Comet supply.
+    const isBlockedOnLiveRoute = (actionsToSubmit: Action[]) =>
+      liveRoute.current.kind === 'wrapped' && addsDirectBaseSupply(baseAsset, collateralAssets, actionsToSubmit);
 
     const actions = getActions(baseAsset, collateralAssets, rewards);
     const actionsForCompare = compare ? [] : actions;
@@ -155,6 +179,10 @@ const Home = ({
 
     const onRequestClose = () => setActionModalState(undefined);
     const submitBulkerAction = () => {
+      if (isBlockedOnLiveRoute(actions)) {
+        setActionModalState(undefined);
+        return;
+      }
       const description = `${actions.length} Action${actions.length > 1 ? 's' : ''}`;
       const estimatedGasLimit = estimatedGasMap.get(getKeyForActions(actions)) || 0;
       writeState.invokeBulker(market, actions, baseAsset, collateralAssets, description, estimatedGasLimit, () => {
@@ -168,6 +196,10 @@ const Home = ({
     };
 
     const submitSingleAction = (singleAction: Action) => {
+      if (isBlockedOnLiveRoute([singleAction])) {
+        setActionModalState(undefined);
+        return;
+      }
       const [actionType, assetInfo, amount] = singleAction;
 
       const submitSingleActionCallback = () => {
@@ -275,8 +307,9 @@ const Home = ({
         collateralValuePost: updatedDataPostActions.collateralValue,
         compare,
         earnAPR,
-        earnRewardsAPR: supplyRewardsAPR,
-        isInstitutional: isInstitutional ?? false,
+        earnRewardsAPR: supplyIncentives.earnRewardsAPR,
+        isInstitutional: supplyIncentives.isInstitutional ?? false,
+        isDirectBaseSupplyBlocked: isWrappedRoute,
         institutionalWhitelistStatus: whitelistStatus,
         liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
@@ -288,6 +321,7 @@ const Home = ({
           setPendingAction(pendingAction);
         },
         onSupplyAction: (pendingAction?: PendingAction) => {
+          if (isWrappedRoute && pendingAction?.[0] === ActionType.Supply) return;
           if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
             setPendingAction(pendingAction);
             setActionModalState(undefined);
@@ -309,9 +343,10 @@ const Home = ({
         collateralValue: collateralValue,
         collateralValuePost: updatedDataPostActions.collateralValue,
         earnAPR,
-        earnRewardsAPR: supplyRewardsAPR,
-        isInstitutional: isInstitutional,
+        earnRewardsAPR: supplyIncentives.earnRewardsAPR,
+        isInstitutional: supplyIncentives.isInstitutional,
         institutionalWhitelistStatus: whitelistStatus,
+        actionRules,
         rewardsAssetSymbol,
         liquidationCapacity: liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
@@ -340,6 +375,8 @@ const Home = ({
         onPendingActionConfirm: (amount: bigint) => {
           if (pendingAction !== undefined) {
             const action = getActionFromPendingAction(pendingAction, amount);
+            // The form already refuses these; this also keeps a Comet approval from being requested.
+            if (isWrappedRoute && action[0] === ActionType.Supply) return;
             const confirmAction = () => {
               setPendingAction(undefined);
               addOrUpdateAction(action);
@@ -376,6 +413,7 @@ const Home = ({
         },
         onSubmitClicked: () => {
           setPendingAction(undefined);
+          if (isBlockedOnLiveRoute(actions)) return;
 
           if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
             if (web3.write.chainId !== web3.read.chainId) {
@@ -533,11 +571,33 @@ const Home = ({
     });
   }
 
+  let wrappedPanel: ReactNode = null;
+  const { route: wrappedRoute } = wrappedLending;
+  if (wrappedRoute.kind === 'wrapped' && cometState !== StateType.Loading) {
+    const { baseAsset, earnAPR } = state[1];
+    // Comet state trails a market change by a render; its price applies only to its own market.
+    const isCometStateForRoute =
+      selectedMarket[1] !== undefined &&
+      selectedMarket[1].marketAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase() &&
+      (wrappedRoute.market === undefined ||
+        baseAsset.address.toLowerCase() === wrappedRoute.market.baseTokenAddress.toLowerCase());
+    wrappedPanel = (
+      <WrappedPositionPanel
+        route={wrappedRoute}
+        position={isCometStateForRoute ? wrappedLending.position : { status: 'loading' }}
+        baseAsset={baseAsset}
+        earnAPR={earnAPR}
+        onRetry={wrappedLending.retry}
+      />
+    );
+  }
+
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
       <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
+      {wrappedPanel}
       <div className="home__content grid-container">
         <div className="home__assets grid-column--7">
           <div className="panel panel--assets">

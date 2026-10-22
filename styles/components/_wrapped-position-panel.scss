@@ -1,0 +1,47 @@
+@use '../abstracts/variables' as *;
+
+.wrapped-position-panel {
+  margin-bottom: 1rem;
+
+  &__figures {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 1rem 0;
+  }
+
+  &__figure {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  &__notice {
+    align-items: center;
+    display: flex;
+    gap: 1rem;
+    padding: 1rem 0;
+  }
+
+  &__actions {
+    display: flex;
+    gap: 1rem;
+  }
+
+  &__action {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  @media (max-width: $device--sm) {
+    &__figures {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    &__actions {
+      flex-direction: column;
+    }
+  }
+}
