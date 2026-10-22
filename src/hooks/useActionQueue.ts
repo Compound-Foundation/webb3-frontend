@@ -190,6 +190,9 @@ export function useActionQueue(
           if (rewards === undefined) return undefined;
           return [action[0], rewards.rewardAsset, rewards.amountOwed, rewards];
         }
+        default:
+          // Kept, not dropped, so that submission refuses the whole queue instead of sending the rest.
+          return action;
       }
     });
   };

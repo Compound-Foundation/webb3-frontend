@@ -24,6 +24,7 @@ import { useRewardsState } from '@hooks/useRewardsState';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
 import { useThemeManager } from '@hooks/useThemeManager';
 import { useTransactionManager } from '@hooks/useTransactionManager';
+import { useWrappedAction } from '@hooks/useWrappedAction';
 import { useWrappedPosition } from '@hooks/useWrappedPosition';
 import { Action, MarketDataLoaded, StateType } from '@types';
 
@@ -42,7 +43,8 @@ function App({ Component, pageProps }: any) {
 
   const location = useLocation();
 
-  const { transactions, addTransaction, clearTransactions } = useTransactionManager(web3);
+  const { transactions, settledTransactions, walletFailure, addTransaction, submitTransaction, clearTransactions } =
+    useTransactionManager(web3);
   const rewardsState = useRewardsState(web3, transactions);
   const { theme, setTheme } = useThemeManager();
   const themeRef = useRef(theme);
@@ -95,7 +97,23 @@ function App({ Component, pageProps }: any) {
     // Read again whenever a transaction is added or settles.
     refreshToken: transactions.length,
   });
-  const wrappedLending = { route: lendingRoute, position: wrappedPosition.state, retry: wrappedPosition.retry };
+  const wrappedAction = useWrappedAction({
+    session: {
+      route: lendingRoute,
+      account: web3.write.account,
+      chainId: web3.write.chainId,
+      screeningStatus: web3.screeningStatus,
+      provider: web3.write.provider,
+    },
+    manager: { transactions, settledTransactions, walletFailure, submitTransaction },
+    readProvider: wrappedChainProvider,
+  });
+  const wrappedLending = {
+    route: lendingRoute,
+    position: wrappedPosition.state,
+    retry: wrappedPosition.retry,
+    action: wrappedAction,
+  };
 
   const handleRequestNetworkSwitch = (fromChainId: number, toChainId: number, description?: string) => {
     setNetworkSwitchState({
