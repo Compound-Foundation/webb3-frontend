@@ -25,10 +25,12 @@ polling periodically to see if the transaction has resolved.
 
 Transactions are written to localStorage, so pending transactions will be
 reloaded on page refresh. A reload restores only the connected account's
-transactions on the connected chain, and looks each one up before resuming it:
-a settled transaction is reported in `settledTransactions` with its outcome, and
-only a receipt that shows success counts as one. A restored transaction has no
-callback, so nothing that was to follow it is sent.
+transactions on the connected chain. Each one is tracked as soon as the chain is
+known, before it is looked up, and `restoredSession` then names that session.
+The poll looks each one up: a settled transaction is reported in
+`settledTransactions` with its outcome, and only a receipt that shows success
+counts as one. A restored transaction has no callback, so nothing that was to
+follow it is sent.
 
 For example:
 
@@ -286,6 +288,9 @@ export type SubmitTransaction = (request: TransactionRequest) => Promise<SendRes
 /** A wallet provider that threw as a broken provider does, as after an extension update. */
 export type WalletFailure = { provider: object; message: string };
 
+/** A wallet session whose stored transactions are restored: its provider, its sender in lower case and its chain. */
+export type RestoredSession = { provider: object; account: string; chainId: number };
+
 export type TransactionManager = {
   /** Transactions awaiting a wallet's confirmation or a receipt. */
   transactions: Transaction[];
@@ -293,6 +298,12 @@ export type TransactionManager = {
   settledTransactions: SettledTransaction[];
   /** The last wallet provider found broken, if any. */
   walletFailure: WalletFailure | undefined;
+  /**
+   * The last wallet session whose stored transactions were restored into `transactions`. Until it
+   * is the live session, `transactions` can lack a transaction the live session sent before a
+   * reload, so a caller that must wait for earlier transactions waits for this too.
+   */
+  restoredSession: RestoredSession | undefined;
   addTransaction: AddTransaction;
   submitTransaction: SubmitTransaction;
   /** Clears the list, except wrapper steps, which stay until they settle or are dismissed. */
@@ -305,12 +316,11 @@ export function useTransactionManager(web3: Web3): TransactionManager {
   const [transactions, updateTransactions] = useReducer(txReducer, []);
   const [settledTransactions, setSettledTransactions] = useState<SettledTransaction[]>([]);
   const [walletFailure, setWalletFailure] = useState<WalletFailure | undefined>(undefined);
+  const [restoredSession, setRestoredSession] = useState<RestoredSession | undefined>(undefined);
   const settledIds = useRef(new Set<string>());
   // Callbacks by transaction id. A copy of a transaction read back from storage has none, so the
   // callback runs once whichever copy settles first.
   const callbacks = useRef(new Map<string, (outcome: TransactionOutcome) => void>());
-  const trackedTransactions = useRef(transactions);
-  trackedTransactions.current = transactions;
   const { provider, account } = web3.write;
 
   const noteWalletError = useCallback((failedProvider: object, error: unknown) => {
@@ -330,62 +340,54 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     callback?.(outcome);
   }, []);
 
-  // Restore the connected account's broadcast transactions on the connected chain, looking each
-  // one up first. Other accounts' and chains' records stay stored until they connect.
+  // Restore the connected account's transactions on the connected chain. Each one is tracked as
+  // soon as the chain is known, before anything looks it up, so no render shows the session
+  // without them. The poll then looks each one up. Other accounts' and chains' records stay stored
+  // until they connect.
   useEffect(() => {
     if (provider === undefined || account === undefined) return;
     let isCurrent = true;
+    let retryId: ReturnType<typeof setTimeout> | undefined;
     const sender = account.toLowerCase();
 
-    provider.getNetwork().then(
-      ({ chainId }) => {
-        if (!isCurrent) return;
-        const storedTransactions = readStoredTransactions();
-        const isOwn = (tx: Transaction) => tx.networkId === chainId && tx.account?.toLowerCase() === sender;
-        const isInterrupted = (tx: Transaction): tx is AwaitingConfirmationTransaction =>
-          isOwn(tx) && tx.state === TransactionState.AwaitingConfirmation && isWrapperStep(tx);
-        // A record with no sender cannot be tied to an account, and a wallet request with no hash
-        // cannot be looked up. A wrapper step stays, though: its wallet request can still be open,
-        // so the next review of its action waits until the user dismisses it.
-        updateStoredTransactions((stored) =>
-          stored.filter(
-            (tx) =>
-              tx.account !== undefined && (!isOwn(tx) || tx.state === TransactionState.Pending || isInterrupted(tx))
-          )
-        );
-        storedTransactions.filter(isInterrupted).forEach((transaction) => {
-          updateTransactions([ActionType.Add, { ...transaction, isInterrupted: true }]);
-        });
-        // A transaction this session already tracks is followed by the poll, with its callback.
-        const isTracked = (tx: Transaction) => trackedTransactions.current.some((tracked) => tracked.id === tx.id);
-        const ownTransactions = filterMap<Transaction, PendingTransaction>(storedTransactions, (tx) =>
-          isOwn(tx) && tx.state === TransactionState.Pending && !isTracked(tx) ? tx : undefined
-        );
-        ownTransactions.forEach((transaction) => {
-          resolveTransaction(provider, transaction).then(
-            (resolution) => {
-              if (!isCurrent) return;
-              if (resolution.status === 'pending')
-                updateTransactions([ActionType.Add, withOwnNonce(transaction, resolution)]);
-              else settle(transaction, resolution.outcome);
-            },
-            (error) => {
-              // Unknown, so it stays tracked as pending.
-              console.error(`Could not look up transaction ${transaction.hash}:`, error);
-              noteWalletError(provider, error);
-              if (isCurrent) updateTransactions([ActionType.Add, transaction]);
-            }
+    const restore = () =>
+      provider.getNetwork().then(
+        ({ chainId }) => {
+          if (!isCurrent) return;
+          const storedTransactions = readStoredTransactions();
+          const isOwn = (tx: Transaction) => tx.networkId === chainId && tx.account?.toLowerCase() === sender;
+          // A record with no sender cannot be tied to an account, and a wallet request with no hash
+          // cannot be looked up. A wrapper step stays, though: its wallet request can still be open,
+          // so the next review of its action waits until the user dismisses it.
+          const isRestorable = (tx: Transaction) => tx.state === TransactionState.Pending || isWrapperStep(tx);
+          updateStoredTransactions((stored) =>
+            stored.filter((tx) => tx.account !== undefined && (!isOwn(tx) || isRestorable(tx)))
           );
-        });
-      },
-      (error) => {
-        console.error('Could not restore transactions:', error);
-        noteWalletError(provider, error);
-      }
-    );
+          // The reducer ignores a transaction this session already tracks, so a wallet request still
+          // open in this session is not marked interrupted, and no transaction is tracked twice.
+          storedTransactions
+            .filter((tx) => isOwn(tx) && isRestorable(tx))
+            .forEach((transaction) => {
+              updateTransactions([
+                ActionType.Add,
+                transaction.state === TransactionState.Pending ? transaction : { ...transaction, isInterrupted: true },
+              ]);
+            });
+          setRestoredSession({ provider, account: sender, chainId });
+        },
+        (error) => {
+          console.error('Could not restore transactions:', error);
+          noteWalletError(provider, error);
+          // `restoredSession` stays another session's until a restore succeeds, so callers that wait
+          // for it keep waiting. Trying again lets them continue once the wallet answers.
+          if (isCurrent) retryId = setTimeout(restore, TRX_REFRESH_INTERVAL);
+        }
+      );
+    restore();
 
     return () => {
       isCurrent = false;
+      if (retryId !== undefined) clearTimeout(retryId);
     };
   }, [provider, account]);
 
@@ -570,6 +572,7 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     transactions,
     settledTransactions,
     walletFailure,
+    restoredSession,
     addTransaction,
     submitTransaction,
     clearTransactions,

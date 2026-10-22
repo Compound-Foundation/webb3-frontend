@@ -152,7 +152,12 @@ export type UseWrappedActionOptions = {
   session: WrappedSession;
   manager: Pick<
     TransactionManager,
-    'transactions' | 'settledTransactions' | 'walletFailure' | 'submitTransaction' | 'dismissTransaction'
+    | 'transactions'
+    | 'settledTransactions'
+    | 'walletFailure'
+    | 'restoredSession'
+    | 'submitTransaction'
+    | 'dismissTransaction'
   >;
   /** The configured chain's public provider, for the market restriction read. */
   readProvider: Pick<JsonRpcProvider, 'call'> | undefined;
@@ -358,6 +363,8 @@ function isTarget<T extends { provider: object; key: string }>(
  *   release control
  * - the step's call, Comet's pause for the action, and the step's own check
  * - a read through the wallet
+ * - no other wrapper transaction of this account on this chain is pending, and the transaction
+ *   manager has restored this session's stored transactions
  *
  * It checks the identity and eligibility again after those reads, after the gas estimate, and
  * immediately before the wallet is asked. A change of identity at any point discards the draft
@@ -417,11 +424,34 @@ export function useWrappedAction({
     pending: manager.transactions.filter(isOwnWrapperTransaction),
     settled: manager.settledTransactions.filter(isOwnWrapperTransaction),
   };
+  // Until the manager has restored this session's stored transactions, `recovered.pending` can lack
+  // a wrapper transaction sent before a reload. Otherwise a second supply can start while the first
+  // one is still pending.
+  const { restoredSession } = manager;
+  const isRestored =
+    restoredSession !== undefined &&
+    restoredSession.provider === provider &&
+    restoredSession.account === account?.toLowerCase() &&
+    restoredSession.chainId === chainId;
 
   // Callbacks run after later renders, so they read everything through this ref.
-  const rendered = { session, probeTarget, health, state, recovered, manager, readProvider, probe, checkRestriction };
+  const rendered = {
+    session,
+    probeTarget,
+    health,
+    state,
+    recovered,
+    isRestored,
+    manager,
+    readProvider,
+    probe,
+    checkRestriction,
+  };
   const live = useRef(rendered);
   live.current = rendered;
+
+  /** Whether an earlier wrapper transaction of this account on this chain holds back a new one. */
+  const isEarlierTransactionPending = () => !live.current.isRestored || live.current.recovered.pending.length > 0;
 
   useEffect(() => {
     if (!isStale) return;
@@ -481,7 +511,7 @@ export function useWrappedAction({
     if (wrappedActionIdentity(type, current.session) === undefined) return 'no-signer';
     // A fresh review waits until an earlier wrapper transaction has settled, so it reads the
     // balances and allowance that transaction leaves.
-    if (current.recovered.pending.length > 0) return 'transaction-pending';
+    if (isEarlierTransactionPending()) return 'transaction-pending';
     return undefined;
   };
 
@@ -520,13 +550,18 @@ export function useWrappedAction({
     };
     const recheck = () =>
       checkBeforeSignature(draft, step, live.current.session, live.current.health.status === 'unusable');
+    // Another wrapper transaction of this account on this chain, restored or sent since the review,
+    // also holds the signature back. The manager tracks this step's own request before it calls
+    // `send`, so this check runs only before the request reaches the manager.
+    const recheckBeforeSubmitting = () =>
+      recheck() ?? (isEarlierTransactionPending() ? ('transaction-pending' as const) : undefined);
     const target: ProbeTarget = {
       provider: draft.identity.provider,
       key: `${draft.identity.account}|${draft.identity.chainId}`,
       chainId: draft.identity.chainId,
     };
 
-    const firstProblem = recheck();
+    const firstProblem = recheckBeforeSubmitting();
     if (firstProblem !== undefined) return block(firstProblem);
 
     const restriction = await restrictionOf(draft.identity);
@@ -549,7 +584,7 @@ export function useWrappedAction({
     if (probed.status === 'unusable') return block('session-unusable');
 
     // The session can change while the reads above run, so everything is checked once more.
-    const lastProblem = recheck();
+    const lastProblem = recheckBeforeSubmitting();
     if (lastProblem !== undefined) return block(lastProblem);
 
     dispatch({ type: 'step', index, step: { status: 'awaiting-signature' } });

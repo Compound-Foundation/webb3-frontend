@@ -1,5 +1,5 @@
 import { Interface } from '@ethersproject/abi';
-import { TransactionReceipt } from '@ethersproject/providers';
+import { JsonRpcProvider, TransactionReceipt } from '@ethersproject/providers';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { BigNumber } from 'ethers';
 
@@ -9,10 +9,16 @@ import {
   HARDCODED_WRAPPED_LENDING_SOURCE,
   WrappedMarketRegistry,
 } from '@constants/wrappedMarkets';
+import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { LendingSession, resolveLendingRoute, ValidationStatus, wrappedRouteKey } from '@helpers/lendingRoute';
 import { NotSentError, SendWithdrawnError, SessionProbeResult } from '@helpers/walletErrors';
 import { MarketRestriction, WrappedActionIdentity, WrappedSession, WrappedStep } from '@helpers/wrappedActions';
-import type { SendResult, TransactionManager, TransactionRequest } from '@hooks/useTransactionManager';
+import {
+  SendResult,
+  TransactionManager,
+  TransactionRequest,
+  useTransactionManager,
+} from '@hooks/useTransactionManager';
 import { useWrappedAction, WrappedActionController } from '@hooks/useWrappedAction';
 import {
   AwaitingConfirmationTransaction,
@@ -21,6 +27,12 @@ import {
   Transaction,
   TransactionState,
 } from '@types';
+
+import { mockWeb3 } from '../mocks/mockWeb3';
+
+// uuid ships ESM only, which Jest does not load here. The transaction manager uses it.
+let mockNextId = 0;
+jest.mock('uuid', () => ({ v4: () => `transaction-${++mockNextId}` }));
 
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
@@ -121,16 +133,25 @@ function sessionFor(wallet: Wallet, setup: SessionSetup = {}): WrappedSession {
 
 type Manager = Pick<
   TransactionManager,
-  'transactions' | 'settledTransactions' | 'walletFailure' | 'submitTransaction' | 'dismissTransaction'
+  | 'transactions'
+  | 'settledTransactions'
+  | 'walletFailure'
+  | 'restoredSession'
+  | 'submitTransaction'
+  | 'dismissTransaction'
 >;
 
-/** A transaction manager whose sends resolve only when the test says so. */
-function fakeManager() {
+/**
+ * A transaction manager whose sends resolve only when the test says so. It has restored the stored
+ * transactions of the default session through `wallet`.
+ */
+function fakeManager(wallet: Wallet) {
   const requests: { request: TransactionRequest; resolve: (result: SendResult) => void }[] = [];
   const manager: Manager = {
     transactions: [],
     settledTransactions: [],
     walletFailure: undefined,
+    restoredSession: { provider: wallet, account: ACCOUNT, chainId: 1 },
     dismissTransaction: jest.fn(),
     submitTransaction: jest.fn(
       (request: TransactionRequest) => new Promise<SendResult>((resolve) => requests.push({ request, resolve }))
@@ -205,7 +226,7 @@ describe('useWrappedAction', () => {
     it.each(MATRIX)(
       'discards late reads, closes review, and requires fresh confirmation after an identity change: %s, %s',
       async (stage, _change, changedSession) => {
-        const { manager, requests } = fakeManager();
+        const { manager, requests } = fakeManager(wallet);
         const original = sessionFor(wallet);
         const { result, rerender } = renderAction({ session: original, manager });
         let finishRead: () => void = () => undefined;
@@ -258,7 +279,7 @@ describe('useWrappedAction', () => {
     );
 
     it.each(CHANGES)('never renders the review after a change of %s', async (_change, changedSession) => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const phases: string[] = [];
       const { result, rerender } = renderHook(
         ({ session }: { session: WrappedSession }) => {
@@ -283,7 +304,7 @@ describe('useWrappedAction', () => {
     });
 
     it('drops a late read even when the session returns to the one it started in', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const original = sessionFor(wallet);
       const { result, rerender } = renderAction({ session: original, manager });
       let finishRead: () => void = () => undefined;
@@ -300,7 +321,7 @@ describe('useWrappedAction', () => {
   });
 
   it('keeps a read from an earlier start out of a fresh review', async () => {
-    const { manager } = fakeManager();
+    const { manager } = fakeManager(wallet);
     const original = sessionFor(wallet);
     const { result, rerender } = renderAction({ session: original, manager });
     let finishEarlierRead: () => void = () => undefined;
@@ -344,7 +365,7 @@ describe('useWrappedAction', () => {
     it.each(CHECKS)(
       'rechecks signer, chain, wrapper, screening, release controls, and restrictions before each signature: %s',
       async (_name, changedSession, outcome) => {
-        const { manager, requests } = fakeManager();
+        const { manager, requests } = fakeManager(wallet);
         const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
         await reachReview(result);
         await confirmAndWaitForWallet(result, requests, 1);
@@ -372,7 +393,7 @@ describe('useWrappedAction', () => {
     it.each(CHECKS)(
       'rechecks signer, chain, wrapper, screening, release controls, and restrictions before each signature, while its checks run: %s',
       async (_name, changedSession, outcome) => {
-        const { manager, requests } = fakeManager();
+        const { manager, requests } = fakeManager(wallet);
         let releaseRestriction: () => void = () => undefined;
         const restriction = jest
           .fn<Promise<MarketRestriction | undefined>, [WrappedActionIdentity]>()
@@ -404,7 +425,7 @@ describe('useWrappedAction', () => {
     );
 
     it('rechecks signer, chain, wrapper, screening, release controls, and restrictions before each signature: restrictions', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const restriction = jest.fn(async (): Promise<MarketRestriction | undefined> => undefined);
       const { result } = renderAction({ session: sessionFor(wallet), manager }, { restriction });
       await reachReview(result);
@@ -424,7 +445,7 @@ describe('useWrappedAction', () => {
     });
 
     it('checks the first signature too, and sends nothing when the market is paused', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const restriction = jest.fn(async (): Promise<MarketRestriction | undefined> => 'supply-paused');
       const { result } = renderAction({ session: sessionFor(wallet), manager }, { restriction });
       await reachReview(result);
@@ -437,7 +458,7 @@ describe('useWrappedAction', () => {
     });
 
     it('checks again after its reads, so a change during them stops the signature', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       let releaseRestriction: () => void = () => undefined;
       const restriction = jest.fn(
         () => new Promise<MarketRestriction | undefined>((resolve) => (releaseRestriction = () => resolve(undefined)))
@@ -455,7 +476,7 @@ describe('useWrappedAction', () => {
     });
 
     it('checks again after its reads, so a signer that stops being ready during them is caught', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       let releaseRestriction: () => void = () => undefined;
       const restriction = jest.fn(
         () => new Promise<MarketRestriction | undefined>((resolve) => (releaseRestriction = () => resolve(undefined)))
@@ -477,7 +498,7 @@ describe('useWrappedAction', () => {
     });
 
     it('makes no reads for a signature the live session already refuses', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const restriction = jest.fn(async (): Promise<MarketRestriction | undefined> => undefined);
       const { result, rerender } = renderAction({ session: sessionFor(wallet), manager }, { restriction });
       await reachReview(result);
@@ -495,7 +516,7 @@ describe('useWrappedAction', () => {
     });
 
     it("runs the step's own check just before signing and stops when it refuses", async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const check = jest.fn(async () => ({ ok: false as const, message: 'Simulation reverted: ZeroSharesMinted()' }));
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       act(() => {
@@ -514,7 +535,7 @@ describe('useWrappedAction', () => {
     });
 
     it('treats a step check that throws as a refusal', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const check = jest.fn(async () => Promise.reject(new Error('execution reverted')));
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       act(() => {
@@ -532,7 +553,7 @@ describe('useWrappedAction', () => {
     });
 
     it("signs once the step's own check passes", async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const check = jest.fn(async () => ({ ok: true as const }));
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       act(() => {
@@ -554,7 +575,7 @@ describe('useWrappedAction', () => {
           return PAUSES.encodeFunctionResult('isSupplyPaused', [true]);
         }),
       };
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const { result, rerender } = renderHook(
         ({ reader }: { reader: typeof readProvider | undefined }) =>
           useWrappedAction({ session: sessionFor(wallet), manager, readProvider: reader }),
@@ -581,7 +602,7 @@ describe('useWrappedAction', () => {
     });
 
     it('reads through the wallet immediately before each signature', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       const readsBeforeConfirming = wallet.send.mock.calls.length;
@@ -595,7 +616,7 @@ describe('useWrappedAction', () => {
     });
 
     it('reports a read that throws as a failed read', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
 
       act(() => {
@@ -611,7 +632,7 @@ describe('useWrappedAction', () => {
     });
 
     it("refuses a step that does not call the reviewed market's own contracts", async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       const toAnotherWrapper: WrappedStep = { ...SUPPLY, request: { ...SUPPLY.request, to: USDT_WRAPPER } };
 
@@ -626,7 +647,7 @@ describe('useWrappedAction', () => {
 
   describe('unusable sessions', () => {
     it('provider failure after an extension update disables submission and offers reload/reconnect', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       await waitFor(() => expect(result.current.session.status).toBe('usable'));
       await reachReview(result);
@@ -650,7 +671,7 @@ describe('useWrappedAction', () => {
     });
 
     it('provider failure after an extension update disables submission and offers reload/reconnect: reported by another write', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
 
@@ -667,7 +688,7 @@ describe('useWrappedAction', () => {
     });
 
     it('provider failure after an extension update disables submission and offers reload/reconnect: found when sending', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
@@ -680,7 +701,7 @@ describe('useWrappedAction', () => {
     });
 
     it('an acknowledged network switch with failed reads remains unusable', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
       await waitFor(() => expect(result.current.session.status).toBe('usable'));
 
@@ -706,7 +727,7 @@ describe('useWrappedAction', () => {
     });
 
     it('treats a session check that throws as unusable', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const probe = jest.fn<Promise<SessionProbeResult>, []>().mockRejectedValue(new Error('probe failed'));
       const { result } = renderAction({ session: sessionFor(wallet), manager }, { probe });
 
@@ -716,7 +737,7 @@ describe('useWrappedAction', () => {
     });
 
     it('stays unusable when an earlier, slower read through the same session succeeds', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       let finishFirstProbe: (result: SessionProbeResult) => void = () => undefined;
       const probe = jest
         .fn<Promise<SessionProbeResult>, []>()
@@ -734,7 +755,7 @@ describe('useWrappedAction', () => {
     });
 
     it("keeps the next account's unusable session when the earlier account's last check fails late", async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       let finishEarlierProbe: (result: SessionProbeResult) => void = () => undefined;
       const probe = jest
         .fn<Promise<SessionProbeResult>, []>()
@@ -759,7 +780,7 @@ describe('useWrappedAction', () => {
     });
 
     it("keeps the next account's unusable session when the earlier account's send reports a broken session", async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const probe = jest
         .fn<Promise<SessionProbeResult>, []>()
         .mockResolvedValueOnce({ status: 'usable' })
@@ -780,7 +801,7 @@ describe('useWrappedAction', () => {
 
   describe('submission outcomes', () => {
     it('shows awaiting the wallet until it returns a hash, then the broadcast hash', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
 
@@ -798,7 +819,7 @@ describe('useWrappedAction', () => {
     });
 
     it('signs each step only after its own confirmation, through the wallet, from the reviewed account', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
@@ -833,7 +854,7 @@ describe('useWrappedAction', () => {
     });
 
     it('ignores a confirmation kept from an earlier draft, after an account round trip', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const original = sessionFor(wallet);
       const { result, rerender } = renderAction({ session: original, manager });
       await reachReview(result);
@@ -851,7 +872,7 @@ describe('useWrappedAction', () => {
     });
 
     it('ignores a confirmation kept from an earlier step once that step has settled', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       const confirmApproval = result.current.confirm;
@@ -879,7 +900,7 @@ describe('useWrappedAction', () => {
       ['a revert', 'reverted', 'reverted'],
       ['a replacement', 'replaced', 'replaced'],
     ])('stops on %s without retrying or sending the next step', async (_name, outcome, status) => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
@@ -903,7 +924,7 @@ describe('useWrappedAction', () => {
     });
 
     it('keeps an outcome that arrives before the hash it belongs to is recorded', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
@@ -918,7 +939,7 @@ describe('useWrappedAction', () => {
     });
 
     it('reports an open wallet request as a provider failure when the session breaks', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
@@ -938,7 +959,7 @@ describe('useWrappedAction', () => {
     });
 
     it('stops a step the transaction manager refuses because the session moved on', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
@@ -952,7 +973,7 @@ describe('useWrappedAction', () => {
     });
 
     it('marks a broadcast step unresolved when the session breaks before its receipt', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
@@ -976,7 +997,7 @@ describe('useWrappedAction', () => {
     ])(
       'withdraws the request before the wallet is asked when %s while the manager prepares it',
       async (_name, change, outcome) => {
-        const { manager, requests } = fakeManager();
+        const { manager, requests } = fakeManager(wallet);
         const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
         await reachReview(result);
         // The manager has the request and is reading the network and nonce; it has not called send.
@@ -1001,7 +1022,7 @@ describe('useWrappedAction', () => {
     );
 
     it('reports a step that failed before the wallet was asked as not sent', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       wallet.estimateGas.mockRejectedValueOnce({ code: -32000, message: 'execution reverted' });
       await reachReview(result);
@@ -1021,7 +1042,7 @@ describe('useWrappedAction', () => {
     });
 
     it('withdraws the request when the draft is cleared while gas is estimated', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       let finishEstimate: (gas: BigNumber) => void = () => undefined;
       wallet.estimateGas.mockImplementationOnce(() => new Promise((resolve) => (finishEstimate = resolve)));
@@ -1038,7 +1059,7 @@ describe('useWrappedAction', () => {
     });
 
     it('sends the call it checked, even if the step it was given changes afterwards', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       const supply: WrappedStep = { ...SUPPLY, request: { ...SUPPLY.request } };
       act(() => {
@@ -1062,7 +1083,7 @@ describe('useWrappedAction', () => {
     });
 
     it('clears a draft without cancelling what the wallet already has', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
@@ -1117,7 +1138,7 @@ describe('useWrappedAction', () => {
     }
 
     it('requires an earlier wrapper transaction to settle before a fresh review, and resumes nothing', async () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const pending = wrapperTransaction();
       const { result, rerender } = renderAction({
         session: sessionFor(wallet),
@@ -1144,7 +1165,7 @@ describe('useWrappedAction', () => {
     });
 
     it('waits for a wallet request left open at a reload, until the user dismisses it', () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const interrupted: Transaction = {
         id: 'interrupted',
         key: USDC_WRAPPER,
@@ -1170,8 +1191,46 @@ describe('useWrappedAction', () => {
       expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
 
+    it('checks again at the signature for another wrapper transaction of the account, and sends nothing', async () => {
+      const { manager } = fakeManager(wallet);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      // The manager starts tracking an earlier wrapper supply of the account after the review began.
+      rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [wrapperTransaction()] } });
+
+      act(() => result.current.confirm());
+      await act(async () => undefined);
+
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+      expect(result.current.state).toMatchObject({
+        phase: 'stopped',
+        steps: [{ status: 'blocked', reason: 'transaction-pending' }, { status: 'waiting' }],
+      });
+    });
+
+    it('checks again after its reads for another wrapper transaction of the account', async () => {
+      const { manager } = fakeManager(wallet);
+      let releaseRestriction: () => void = () => undefined;
+      const restriction = jest.fn(
+        () => new Promise<MarketRestriction | undefined>((resolve) => (releaseRestriction = () => resolve(undefined)))
+      );
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager }, { restriction });
+      await reachReview(result);
+
+      act(() => result.current.confirm());
+      rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [interruptedRequest()] } });
+      await act(async () => releaseRestriction());
+      await act(async () => undefined);
+
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+      expect(result.current.state).toMatchObject({
+        phase: 'stopped',
+        steps: [{ status: 'blocked', reason: 'transaction-pending' }, { status: 'waiting' }],
+      });
+    });
+
     it('keeps waiting for a broadcast wrapper transaction until it settles', () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const broadcast = wrapperTransaction({ id: 'broadcast' });
       const { result } = renderAction({
         session: sessionFor(wallet),
@@ -1186,7 +1245,7 @@ describe('useWrappedAction', () => {
     });
 
     it('does not dismiss an interrupted request while a draft is in progress', async () => {
-      const { manager, requests } = fakeManager();
+      const { manager, requests } = fakeManager(wallet);
       const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
@@ -1203,7 +1262,7 @@ describe('useWrappedAction', () => {
     });
 
     it("ignores other accounts', chains' and contracts' transactions", () => {
-      const { manager } = fakeManager();
+      const { manager } = fakeManager(wallet);
       const transactions = [
         wrapperTransaction({ id: 'a', account: OTHER_ACCOUNT }),
         wrapperTransaction({ id: 'b', networkId: 8453 }),
@@ -1217,7 +1276,7 @@ describe('useWrappedAction', () => {
   });
 
   it('refuses to start outside the wrapped route or when the release control is off', () => {
-    const { manager } = fakeManager();
+    const { manager } = fakeManager(wallet);
     const standard: WrappedSession = {
       ...sessionFor(wallet),
       route: { kind: 'standard', writes: { isEligible: true } },
@@ -1230,5 +1289,123 @@ describe('useWrappedAction', () => {
     rerender({ session: sessionFor(wallet, { registry: openRegistry({ deposits: false }) }), manager });
     expect(result.current.start('supply', prepareSupply)).toBe('deposits-disabled');
     expect(result.current.state).toEqual({ phase: 'idle' });
+  });
+});
+
+describe('useWrappedAction with the transaction manager', () => {
+  const EARLIER_SUPPLY = `0x${'ab'.repeat(32)}`;
+
+  /** A promise the test settles. */
+  function deferred<T>() {
+    let resolve: (value: T) => void = () => undefined;
+    const promise = new Promise<T>((settle) => (resolve = settle));
+    return { promise, resolve };
+  }
+
+  /** A wallet whose chain and receipt the test answers, after a reload with a wrapped supply still pending. */
+  function reloadedWallet() {
+    window.localStorage.setItem(
+      TRANSACTION_LOCALSTORAGE_KEY,
+      JSON.stringify([
+        {
+          id: 'earlier-supply',
+          key: USDC_WRAPPER,
+          networkId: 1,
+          networkName: 'homestead',
+          description: 'Supply USDC through the wrapper',
+          nonce: 5,
+          nonceSource: 'transaction',
+          account: ACCOUNT,
+          step: 'supply',
+          state: TransactionState.Pending,
+          hash: EARLIER_SUPPLY,
+        },
+      ])
+    );
+    const network = deferred<{ chainId: number; name: string }>();
+    const supplyReceipt = deferred<TransactionReceipt | null>();
+    const wallet = Object.assign(walletProvider(), {
+      getNetwork: jest.fn(() => network.promise),
+      getTransactionReceipt: jest.fn(() => supplyReceipt.promise),
+      getTransaction: jest.fn(async () => ({ nonce: 5 })),
+      getTransactionCount: jest.fn(async () => 5),
+    });
+    return { wallet, network, supplyReceipt };
+  }
+
+  function renderWithManager(wallet: Wallet) {
+    const web3 = {
+      ...mockWeb3,
+      write: { ...mockWeb3.write, account: ACCOUNT, chainId: 1, provider: wallet as unknown as JsonRpcProvider },
+    };
+    return renderHook(() =>
+      useWrappedAction({
+        session: sessionFor(wallet),
+        manager: useTransactionManager(web3),
+        readProvider: undefined,
+        checkRestriction: async () => undefined,
+      })
+    );
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('holds back a fresh review until the stored transactions are restored', async () => {
+    const { wallet, network } = reloadedWallet();
+    const { result } = renderWithManager(wallet);
+    await waitFor(() => expect(result.current.session.status).toBe('usable'));
+
+    // The manager cannot read the chain yet, so the earlier supply is not tracked.
+    expect(result.current.recovered.pending).toEqual([]);
+    expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+
+    await act(async () => network.resolve({ chainId: 1, name: 'homestead' }));
+    // Tracked while its receipt is looked up.
+    expect(result.current.recovered.pending).toEqual([expect.objectContaining({ hash: EARLIER_SUPPLY })]);
+    expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+    expect(result.current.state).toEqual({ phase: 'idle' });
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+  });
+
+  it("holds back a fresh review while a restored supply's receipt lookup is slow, until it settles", async () => {
+    const { wallet, network, supplyReceipt } = reloadedWallet();
+    network.resolve({ chainId: 1, name: 'homestead' });
+    const { result } = renderWithManager(wallet);
+    await waitFor(() => expect(wallet.getTransactionReceipt).toHaveBeenCalledWith(EARLIER_SUPPLY));
+    await waitFor(() => expect(result.current.session.status).toBe('usable'));
+
+    expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+
+    await act(async () => supplyReceipt.resolve({ transactionHash: EARLIER_SUPPLY, status: 1 } as TransactionReceipt));
+    await waitFor(() => expect(result.current.recovered.settled).toHaveLength(1));
+    expect(result.current.recovered.pending).toEqual([]);
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    // A fresh review starts from the first step, once the earlier supply has settled.
+    await reachReview(result);
+    expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
+  });
+
+  it('signs both steps of a supply, each after the one before it settles', async () => {
+    let sentCount = 0;
+    const wallet = Object.assign(walletProvider(), {
+      getNetwork: jest.fn(async () => ({ chainId: 1, name: 'homestead' })),
+      getTransactionReceipt: jest.fn(async (hash: string) => ({ transactionHash: hash, status: 1 })),
+      getTransaction: jest.fn(async () => null),
+      getTransactionCount: jest.fn(async () => 5),
+    });
+    wallet.sendUncheckedTransaction.mockImplementation(async () => `0x${String(++sentCount).padStart(64, '0')}`);
+    const { result } = renderWithManager(wallet);
+    await waitFor(() => expect(result.current.blockedReason('supply')).toBeUndefined());
+
+    await reachReview(result);
+    act(() => result.current.confirm());
+    await waitFor(() => expect(result.current.state).toMatchObject({ phase: 'review', stepIndex: 1 }));
+    act(() => result.current.confirm());
+    await waitFor(() => expect(result.current.state.phase).toBe('complete'));
+
+    expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(2);
+    expect(stepStatuses(result)).toEqual(['confirmed', 'confirmed']);
   });
 });
