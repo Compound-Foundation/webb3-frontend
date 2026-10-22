@@ -4,8 +4,10 @@
  *   viem's `UserRejectedRequestError`, or ethers' `ACTION_REJECTED`, which ethers raises when the
  *   wallet says the user denied the request.
  * - `session-broken`: the provider itself is broken. An extension that updates under an open tab
- *   leaves the page showing the wallet as connected while every call throws a JavaScript error,
- *   such as `Cannot read properties of undefined (reading 'sendMessage')`.
+ *   leaves the page showing the wallet as connected while every call throws, for example
+ *   `Cannot read properties of undefined (reading 'sendMessage')`. Only these messages count: any
+ *   other JavaScript error, such as a failed fetch, is a provider failure. A read through the
+ *   wallet (`probeWalletSession`) catches a provider broken some other way.
  * - `provider-failure`: anything else, an unknown outcome. Anchorage reports a refusal as a bare
  *   `-32603 Internal error`, which does not show whether the user declined or whether the request
  *   reached the chain.
@@ -36,9 +38,8 @@ function isRejection({ code, name }: ErrorFields): boolean {
   return code === USER_REJECTED_REQUEST || code === 'ACTION_REJECTED' || name === 'UserRejectedRequestError';
 }
 
-function isBrokenProvider(fields: ErrorFields): boolean {
-  if (fields instanceof TypeError || fields.name === 'TypeError') return true;
-  return typeof fields.message === 'string' && BROKEN_EXTENSION_MESSAGE.test(fields.message);
+function isBrokenProvider({ message }: ErrorFields): boolean {
+  return typeof message === 'string' && BROKEN_EXTENSION_MESSAGE.test(message);
 }
 
 export function classifyWalletError(error: unknown): WalletErrorKind {
@@ -53,6 +54,17 @@ export function describeWalletError(error: unknown): string {
   const [first] = errorChain(error);
   const message = typeof first?.message === 'string' && first.message !== '' ? first.message : 'Unknown error';
   return typeof first?.code === 'number' || typeof first?.code === 'string' ? `${message} (${first.code})` : message;
+}
+
+/**
+ * Thrown by a request's `send` to withdraw it before the wallet is asked, for example because the
+ * session changed while the transaction manager read the network and nonce. Nothing is sent.
+ */
+export class SendWithdrawnError extends Error {
+  constructor(message = 'The request was withdrawn before the wallet was asked.') {
+    super(message);
+    this.name = 'SendWithdrawnError';
+  }
 }
 
 export type SessionProbeResult =

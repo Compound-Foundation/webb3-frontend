@@ -7,8 +7,9 @@ import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { filterMap } from '@helpers/functions';
 import { TRX_REFRESH_INTERVAL } from '@helpers/numbers';
-import { classifyWalletError, describeWalletError } from '@helpers/walletErrors';
+import { classifyWalletError, describeWalletError, SendWithdrawnError } from '@helpers/walletErrors';
 import {
+  AwaitingConfirmationTransaction,
   BaseTransaction,
   PendingTransaction,
   SettledTransaction,
@@ -77,49 +78,98 @@ type ClearAction = [ActionType.Clear];
 
 type Action = AddAction | UpdateAction | RemoveAction | ClearAction;
 
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const TRANSACTION_HASH = /^0x[0-9a-fA-F]{64}$/;
+
+/** Whether a stored value is a well-formed transaction record. Any script on the page can write storage. */
+function isStoredTransaction(value: unknown): value is Transaction {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  const isCount = (field: unknown, minimum: number) =>
+    typeof field === 'number' && Number.isSafeInteger(field) && field >= minimum;
+  return (
+    typeof record.id === 'string' &&
+    typeof record.key === 'string' &&
+    isCount(record.networkId, 1) &&
+    typeof record.networkName === 'string' &&
+    typeof record.description === 'string' &&
+    isCount(record.nonce, 0) &&
+    (record.nonceSource === undefined ||
+      record.nonceSource === 'transaction' ||
+      record.nonceSource === 'lower-bound') &&
+    (record.account === undefined || (typeof record.account === 'string' && ADDRESS.test(record.account))) &&
+    (record.step === undefined || typeof record.step === 'string') &&
+    (record.state === TransactionState.AwaitingConfirmation ||
+      (record.state === TransactionState.Pending &&
+        typeof record.hash === 'string' &&
+        TRANSACTION_HASH.test(record.hash)))
+  );
+}
+
+/** The well-formed stored records. Anything else is dropped at the next write. */
 function readStoredTransactions(): Transaction[] {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]');
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.filter(isStoredTransaction) : [];
   } catch {
     return [];
   }
 }
 
-function writeStoredTransactions(transactions: Transaction[]) {
-  window.localStorage.setItem(TRANSACTION_LOCALSTORAGE_KEY, JSON.stringify(transactions));
+/** Applies `change` to the stored records. Storage that is full or unavailable never throws here. */
+function updateStoredTransactions(change: (stored: Transaction[]) => Transaction[]) {
+  try {
+    window.localStorage.setItem(TRANSACTION_LOCALSTORAGE_KEY, JSON.stringify(change(readStoredTransactions())));
+  } catch (error) {
+    console.error('Could not store transactions:', error);
+  }
+}
+
+/**
+ * Whether the record is one step of a multi-step action, such as a wrapper supply. While such a
+ * step may still be live, the next review of its action waits, so neither a reload nor clearing
+ * the list drops it.
+ */
+function isActionStep(transaction: Transaction): boolean {
+  return transaction.step !== undefined;
 }
 
 function txReducer(currentTransactions: Transaction[], action: Action): Transaction[] {
   const [type] = action;
   let updatedTransactions: Transaction[];
+  let storedChange: (stored: Transaction[]) => Transaction[];
   // Storage also holds other accounts' and other chains' transactions, so each change is applied
   // to it record by record instead of replacing it with this list.
-  let storedTransactions = readStoredTransactions();
   switch (type) {
-    case ActionType.Add:
-      if (currentTransactions.some((tx) => tx.id === action[1].id)) return currentTransactions;
-      updatedTransactions = [...currentTransactions, action[1]];
-      storedTransactions = [...storedTransactions.filter((tx) => tx.id !== action[1].id), action[1]];
+    case ActionType.Add: {
+      const added = action[1];
+      if (currentTransactions.some((tx) => tx.id === added.id)) return currentTransactions;
+      updatedTransactions = [...currentTransactions, added];
+      storedChange = (stored) => [...stored.filter((tx) => tx.id !== added.id), added];
       break;
-    case ActionType.Update:
-      updatedTransactions = currentTransactions.map((tx) => (tx.id === action[1].id ? action[1] : tx));
-      storedTransactions = [...storedTransactions.filter((tx) => tx.id !== action[1].id), action[1]];
+    }
+    case ActionType.Update: {
+      const updated = action[1];
+      updatedTransactions = currentTransactions.map((tx) => (tx.id === updated.id ? updated : tx));
+      storedChange = (stored) => [...stored.filter((tx) => tx.id !== updated.id), updated];
       break;
-    case ActionType.Remove:
-      updatedTransactions = currentTransactions.filter((tx) => tx.id !== action[1]);
-      storedTransactions = storedTransactions.filter((tx) => tx.id !== action[1]);
+    }
+    case ActionType.Remove: {
+      const removedId = action[1];
+      updatedTransactions = currentTransactions.filter((tx) => tx.id !== removedId);
+      storedChange = (stored) => stored.filter((tx) => tx.id !== removedId);
       break;
+    }
     case ActionType.Clear: {
-      const clearedIds = new Set(currentTransactions.map((tx) => tx.id));
-      updatedTransactions = [];
-      storedTransactions = storedTransactions.filter((tx) => !clearedIds.has(tx.id));
+      updatedTransactions = currentTransactions.filter(isActionStep);
+      const clearedIds = new Set(currentTransactions.filter((tx) => !isActionStep(tx)).map((tx) => tx.id));
+      storedChange = (stored) => stored.filter((tx) => !clearedIds.has(tx.id));
       break;
     }
     default:
       throw new Error();
   }
-  writeStoredTransactions(storedTransactions);
+  updateStoredTransactions(storedChange);
   return updatedTransactions;
 }
 
@@ -130,28 +180,45 @@ function outcomeOf(receipt: TransactionReceipt): TransactionOutcome {
   return receipt.status === 1 ? { status: 'confirmed', receipt } : { status: 'reverted', receipt };
 }
 
+type Resolution =
+  | { status: 'settled'; outcome: TransactionOutcome }
+  /** `ownNonce` is the transaction's own nonce, when the node reported one. */
+  | { status: 'pending'; ownNonce?: number };
+
 /**
  * What became of a broadcast transaction, or `pending` while that is unknown. A receipt shows it
  * was mined, successfully or not. Without one, it was replaced only once its sender's confirmed
- * nonce has passed the transaction's nonce and a second lookup still finds no receipt. The nonce
- * comes from the node's record of the transaction when it has one, since a wallet can queue the
- * transaction behind another with a higher nonce than the one read before sending.
+ * nonce has passed the transaction's nonce and a second lookup still finds no receipt.
+ *
+ * The nonce read before sending is only a lower bound: a wallet that queues the transaction behind
+ * another sends it with a higher one. The node's record of the transaction gives its own nonce. A
+ * step of a multi-step action is judged replaced only by its own nonce, since reporting it
+ * replaced lets a fresh review of the action start, and a lower bound could report a transaction
+ * that is still pending.
  */
-async function resolveTransaction(
-  provider: TransactionReader,
-  transaction: PendingTransaction
-): Promise<TransactionOutcome | 'pending'> {
+async function resolveTransaction(provider: TransactionReader, transaction: PendingTransaction): Promise<Resolution> {
   const receipt = await provider.getTransactionReceipt(transaction.hash);
-  if (receipt) return outcomeOf(receipt);
-  if (transaction.account === undefined) return 'pending';
+  if (receipt) return { status: 'settled', outcome: outcomeOf(receipt) };
+  if (transaction.account === undefined) return { status: 'pending' };
 
   const sentTransaction = await provider.getTransaction(transaction.hash);
-  const nonce = sentTransaction?.nonce ?? transaction.nonce;
+  const reportedNonce = typeof sentTransaction?.nonce === 'number' ? sentTransaction.nonce : undefined;
+  const ownNonce = reportedNonce ?? (transaction.nonceSource === 'transaction' ? transaction.nonce : undefined);
+  const nonce = ownNonce ?? (isActionStep(transaction) ? undefined : transaction.nonce);
+  const pending: Resolution = { status: 'pending', ownNonce: reportedNonce };
+  if (nonce === undefined) return pending;
   const confirmedNonce = await provider.getTransactionCount(transaction.account);
-  if (confirmedNonce <= nonce) return 'pending';
+  if (confirmedNonce <= nonce) return pending;
 
   const lateReceipt = await provider.getTransactionReceipt(transaction.hash);
-  return lateReceipt ? outcomeOf(lateReceipt) : { status: 'replaced' };
+  return { status: 'settled', outcome: lateReceipt ? outcomeOf(lateReceipt) : { status: 'replaced' } };
+}
+
+/** The record with the transaction's own nonce, once the node has reported it. */
+function withOwnNonce(transaction: PendingTransaction, resolution: Resolution): PendingTransaction {
+  if (resolution.status !== 'pending' || resolution.ownNonce === undefined) return transaction;
+  if (transaction.nonceSource === 'transaction' && transaction.nonce === resolution.ownNonce) return transaction;
+  return { ...transaction, nonce: resolution.ownNonce, nonceSource: 'transaction' };
 }
 
 /** How many settled transactions `settledTransactions` keeps, newest last. */
@@ -193,7 +260,10 @@ export type TransactionRequest = {
   /** What the UI groups the transaction under, such as the contract it calls. */
   key: string;
   description: string;
-  /** Asks the wallet to send the transaction. Resolves with its hash or response once broadcast. */
+  /**
+   * Asks the wallet to send the transaction. Resolves with its hash or response once broadcast.
+   * Throwing `SendWithdrawnError` withdraws the request before the wallet is asked.
+   */
   send: () => Promise<TransactionResponse | string>;
   /** For one transaction of a multi-step action, the step it is. */
   step?: string;
@@ -218,7 +288,10 @@ export type TransactionManager = {
   walletFailure: WalletFailure | undefined;
   addTransaction: AddTransaction;
   submitTransaction: SubmitTransaction;
+  /** Clears the list, except steps of multi-step actions, which stay until they settle or are dismissed. */
   clearTransactions: () => void;
+  /** Stops tracking one transaction, with no outcome and no callback. */
+  dismissTransaction: (id: string) => void;
 };
 
 export function useTransactionManager(web3: Web3): TransactionManager {
@@ -256,13 +329,20 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         if (!isCurrent) return;
         const storedTransactions = readStoredTransactions();
         const isOwn = (tx: Transaction) => tx.networkId === chainId && tx.account?.toLowerCase() === sender;
-        // A record with no sender cannot be tied to an account, and one this account never got a
-        // hash for cannot be looked up. Neither can be recovered.
-        writeStoredTransactions(
-          storedTransactions.filter(
-            (tx) => tx.account !== undefined && !(isOwn(tx) && tx.state !== TransactionState.Pending)
+        const isInterrupted = (tx: Transaction): tx is AwaitingConfirmationTransaction =>
+          isOwn(tx) && tx.state === TransactionState.AwaitingConfirmation && isActionStep(tx);
+        // A record with no sender cannot be tied to an account, and a wallet request with no hash
+        // cannot be looked up. A step of a multi-step action stays, though: its wallet request may
+        // still be open, so the next review of its action waits until the user dismisses it.
+        updateStoredTransactions((stored) =>
+          stored.filter(
+            (tx) =>
+              tx.account !== undefined && (!isOwn(tx) || tx.state === TransactionState.Pending || isInterrupted(tx))
           )
         );
+        storedTransactions.filter(isInterrupted).forEach((transaction) => {
+          updateTransactions([ActionType.Add, { ...transaction, isInterrupted: true }]);
+        });
         const ownTransactions = filterMap<Transaction, PendingTransaction>(storedTransactions, (tx) =>
           isOwn(tx) && tx.state === TransactionState.Pending ? tx : undefined
         );
@@ -270,8 +350,9 @@ export function useTransactionManager(web3: Web3): TransactionManager {
           resolveTransaction(provider, transaction).then(
             (resolution) => {
               if (!isCurrent) return;
-              if (resolution === 'pending') updateTransactions([ActionType.Add, transaction]);
-              else settle(transaction, resolution);
+              if (resolution.status === 'pending')
+                updateTransactions([ActionType.Add, withOwnNonce(transaction, resolution)]);
+              else settle(transaction, resolution.outcome);
             },
             (error) => {
               // Unknown, so it stays tracked as pending.
@@ -313,7 +394,13 @@ export function useTransactionManager(web3: Web3): TransactionManager {
           // typically do this with a "Cancel" or "Speed up" option.
           resolveTransaction(provider, transaction).then(
             (resolution) => {
-              if (isCurrent && resolution !== 'pending') settle(transaction, resolution);
+              if (!isCurrent) return;
+              if (resolution.status === 'settled') {
+                settle(transaction, resolution.outcome);
+                return;
+              }
+              const learned = withOwnNonce(transaction, resolution);
+              if (learned !== transaction) updateTransactions([ActionType.Update, learned]);
             },
             (error) => {
               console.error(`Could not look up transaction ${transaction.hash}:`, error);
@@ -364,22 +451,27 @@ export function useTransactionManager(web3: Web3): TransactionManager {
 
         const response = await request.send();
         const hash = typeof response === 'string' ? response : response.hash;
+        // A hash alone, or a `connectUnchecked` signer's response, gives no nonce.
+        const ownNonce =
+          typeof response !== 'string' && typeof response.nonce === 'number' ? response.nonce : undefined;
         updateTransactions([
           ActionType.Update,
           {
             ...baseTransaction,
             state: TransactionState.Pending,
             hash,
-            // A hash alone, or a `connectUnchecked` signer's response, gives no nonce.
-            nonce: (typeof response === 'string' ? undefined : response.nonce) ?? currentNonce,
+            ...(ownNonce === undefined
+              ? { nonce: currentNonce, nonceSource: 'lower-bound' as const }
+              : { nonce: ownNonce, nonceSource: 'transaction' as const }),
           },
         ]);
         return typeof response === 'string'
           ? { status: 'submitted', id, hash }
           : { status: 'submitted', id, hash, response };
       } catch (error) {
-        console.log(error);
         if (isRecorded) updateTransactions([ActionType.Remove, id]);
+        if (error instanceof SendWithdrawnError) return { status: 'session-changed' };
+        console.log(error);
         noteWalletError(provider, error);
         const kind = classifyWalletError(error);
         return kind === 'rejected' ? { status: 'rejected' } : { status: kind, message: describeWalletError(error) };
@@ -412,6 +504,10 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     updateTransactions([ActionType.Clear]);
   };
 
+  const dismissTransaction = useCallback((id: string) => {
+    updateTransactions([ActionType.Remove, id]);
+  }, []);
+
   return {
     transactions,
     settledTransactions,
@@ -419,5 +515,6 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     addTransaction,
     submitTransaction,
     clearTransactions,
+    dismissTransaction,
   };
 }

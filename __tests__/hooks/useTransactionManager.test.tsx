@@ -4,6 +4,7 @@ import { BigNumber } from 'ethers';
 
 import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
+import { SendWithdrawnError } from '@helpers/walletErrors';
 import { SendResult, useTransactionManager } from '@hooks/useTransactionManager';
 import { PendingTransaction, SettledTransaction, Transaction, TransactionState } from '@types';
 
@@ -17,6 +18,11 @@ const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
 const WRAPPER = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73';
 const COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
+
+/** A transaction hash made from a label, so that the test reads by name. */
+function tx(label: string): string {
+  return `0x${Buffer.from(label).toString('hex').padEnd(64, '0')}`;
+}
 
 type Chain = {
   chainId?: number;
@@ -70,7 +76,7 @@ function storedRecord(hash: string, overrides: Partial<PendingTransaction> = {})
   };
 }
 
-function store(records: object[]) {
+function store(records: unknown[]) {
   window.localStorage.setItem(TRANSACTION_LOCALSTORAGE_KEY, JSON.stringify(records));
 }
 
@@ -113,15 +119,15 @@ describe('useTransactionManager', () => {
   it('restores submitted hashes for the originating account and chain without replaying an unsigned next step', async () => {
     store([
       // The approval step of a wrapper supply, mined. The supply step after it was never signed.
-      storedRecord('0xapproved', { key: WRAPPER, step: 'approve' }),
-      storedRecord('0xreverted'),
-      storedRecord('0xreplaced', { nonce: 4 }),
-      storedRecord('0xunresolved', { nonce: 9 }),
-      storedRecord('0xother-account', { account: OTHER_ACCOUNT, nonce: 300 }),
-      storedRecord('0xother-chain', { networkId: 137, networkName: 'matic' }),
+      storedRecord(tx('approved'), { key: WRAPPER, step: 'approve' }),
+      storedRecord(tx('reverted')),
+      storedRecord(tx('replaced'), { nonce: 4 }),
+      storedRecord(tx('unresolved'), { nonce: 9 }),
+      storedRecord(tx('other-account'), { account: OTHER_ACCOUNT, nonce: 300 }),
+      storedRecord(tx('other-chain'), { networkId: 137, networkName: 'matic' }),
     ]);
     const provider = walletProvider({
-      receipts: { '0xapproved': 1, '0xreverted': 0 },
+      receipts: { [tx('approved')]: 1, [tx('reverted')]: 0 },
       confirmedNonces: { [ACCOUNT]: 7, [OTHER_ACCOUNT]: 250 },
     });
 
@@ -129,35 +135,35 @@ describe('useTransactionManager', () => {
 
     await waitFor(() => expect(result.current.settledTransactions).toHaveLength(3));
     expect(outcomes(result.current.settledTransactions)).toEqual({
-      '0xapproved': 'confirmed',
-      '0xreverted': 'reverted',
-      '0xreplaced': 'replaced',
+      [tx('approved')]: 'confirmed',
+      [tx('reverted')]: 'reverted',
+      [tx('replaced')]: 'replaced',
     });
-    expect(result.current.settledTransactions.find((tx) => tx.hash === '0xapproved')).toMatchObject({
+    expect(result.current.settledTransactions.find((settled) => settled.hash === tx('approved'))).toMatchObject({
       account: ACCOUNT,
       networkId: 1,
       key: WRAPPER,
       step: 'approve',
     });
     // Still pending: the sender's confirmed nonce has not passed it.
-    expect(hashes(result.current.transactions)).toEqual(['0xunresolved']);
+    expect(hashes(result.current.transactions)).toEqual([tx('unresolved')]);
     // Replacement is judged by the nonce of the account that sent the transaction.
     expect(provider.getTransactionCount.mock.calls.every(([address]) => address === ACCOUNT)).toBe(true);
     // Nothing was signed or sent, so the step after the approval was not replayed.
     expect(provider.getSigner).not.toHaveBeenCalled();
     expect(provider.send).not.toHaveBeenCalled();
     // Settled records are gone. The other account's and the other chain's stay for when they return.
-    expect(storedHashes()).toEqual(['0xother-account', '0xother-chain', '0xunresolved']);
+    expect(storedHashes()).toEqual([tx('other-account'), tx('other-chain'), tx('unresolved')]);
 
     rerender({ web3: web3For(OTHER_ACCOUNT, provider) });
     await waitFor(() =>
-      expect(hashes(result.current.transactions).sort()).toEqual(['0xother-account', '0xunresolved'])
+      expect(hashes(result.current.transactions).sort()).toEqual([tx('other-account'), tx('unresolved')])
     );
-    expect(storedHashes()).toEqual(['0xother-account', '0xother-chain', '0xunresolved']);
+    expect(storedHashes()).toEqual([tx('other-account'), tx('other-chain'), tx('unresolved')]);
   });
 
   it('restores each transaction once when the wallet provider is rebuilt', async () => {
-    store([storedRecord('0xunresolved', { nonce: 9 })]);
+    store([storedRecord(tx('unresolved'), { nonce: 9 })]);
     const chain = { confirmedNonces: { [ACCOUNT]: 7 } };
     const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
     await waitFor(() => expect(result.current.transactions).toHaveLength(1));
@@ -172,24 +178,24 @@ describe('useTransactionManager', () => {
 
   it('drops stored records it can never recover: no hash, or no sender', async () => {
     store([
-      { ...storedRecord('0xlegacy'), account: undefined },
-      { ...storedRecord('0xawaiting'), state: TransactionState.AwaitingConfirmation, hash: undefined },
-      storedRecord('0xunresolved', { nonce: 9 }),
+      { ...storedRecord(tx('legacy')), account: undefined },
+      { ...storedRecord(tx('awaiting')), state: TransactionState.AwaitingConfirmation, hash: undefined },
+      storedRecord(tx('unresolved'), { nonce: 9 }),
     ]);
     const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
     const { result } = renderManager(web3For(ACCOUNT, provider));
 
     await waitFor(() => expect(provider.getTransactionReceipt).toHaveBeenCalled());
     await settleLookups();
-    expect(hashes(result.current.transactions)).toEqual(['0xunresolved']);
-    expect(storedHashes()).toEqual(['0xunresolved']);
+    expect(hashes(result.current.transactions)).toEqual([tx('unresolved')]);
+    expect(storedHashes()).toEqual([tx('unresolved')]);
   });
 
   it('judges replacement by the nonce of the account that sent the transaction', async () => {
     const chain = { confirmedNonces: { [ACCOUNT]: 7, [OTHER_ACCOUNT]: 100 } };
     const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
     await act(async () => {
-      await result.current.addTransaction(COMET, 'Borrow USDC', sent('0xsent', null), 100_000, jest.fn(), []);
+      await result.current.addTransaction(COMET, 'Borrow USDC', sent(tx('sent'), null), 100_000, jest.fn(), []);
     });
 
     const otherWallet = walletProvider(chain);
@@ -197,40 +203,145 @@ describe('useTransactionManager', () => {
     await waitFor(() => expect(otherWallet.getTransactionCount).toHaveBeenCalled());
 
     expect(otherWallet.getTransactionCount.mock.calls.every(([address]) => address === ACCOUNT)).toBe(true);
-    expect(hashes(result.current.transactions)).toEqual(['0xsent']);
+    expect(hashes(result.current.transactions)).toEqual([tx('sent')]);
   });
 
   it('uses the nonce the node reports for the transaction when it has one', async () => {
     // The wallet queues the transaction behind an earlier one, so it is sent with nonce 8 although
     // the confirmed nonce read before sending was 7.
-    const chain: Chain = { known: { '0xqueued': 8 }, confirmedNonces: { [ACCOUNT]: 7 } };
+    const chain: Chain = { known: { [tx('queued')]: 8 }, confirmedNonces: { [ACCOUNT]: 7 } };
     const provider = walletProvider(chain);
     const { result } = renderManager(web3For(ACCOUNT, provider));
     const sendQueuedTransaction = async () => {
       // The earlier transaction is mined while the wallet sends this one.
       chain.confirmedNonces = { [ACCOUNT]: 8 };
-      return sent('0xqueued', null)();
+      return sent(tx('queued'), null)();
     };
     await act(async () => {
       await result.current.addTransaction(COMET, 'Borrow USDC', sendQueuedTransaction, 1, jest.fn(), []);
     });
 
-    await waitFor(() => expect(provider.getTransactionCount).toHaveBeenCalledTimes(2));
+    // The node's nonce for the transaction replaces the lower bound, in memory and in storage.
+    await waitFor(() =>
+      expect(result.current.transactions).toEqual([expect.objectContaining({ nonce: 8, nonceSource: 'transaction' })])
+    );
     await settleLookups();
 
-    expect(hashes(result.current.transactions)).toEqual(['0xqueued']);
+    expect(hashes(result.current.transactions)).toEqual([tx('queued')]);
     expect(result.current.settledTransactions).toEqual([]);
+    expect(JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]')).toEqual([
+      expect.objectContaining({ hash: tx('queued'), nonce: 8, nonceSource: 'transaction' }),
+    ]);
+  });
+
+  describe('a step of a multi-step action', () => {
+    /** Renders again with a rebuilt wallet provider on the same chain, which looks every transaction up again. */
+    async function lookUpAgain(rerender: (props: Props) => void, chain: Chain) {
+      const provider = walletProvider(chain);
+      rerender({ web3: web3For(ACCOUNT, provider) });
+      await waitFor(() => expect(provider.getTransactionReceipt).toHaveBeenCalled());
+      await settleLookups();
+    }
+
+    it('is reported replaced only by its own nonce, never by the lower bound read before sending', async () => {
+      const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
+      const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
+      await act(async () => {
+        await result.current.submitTransaction({
+          key: WRAPPER,
+          description: 'Supply USDC',
+          step: 'supply',
+          send: async () => tx('supply'),
+        });
+      });
+      expect(result.current.transactions).toEqual([expect.objectContaining({ nonce: 7, nonceSource: 'lower-bound' })]);
+
+      // An earlier transaction from the account is mined, and the node has not seen this one yet.
+      chain.confirmedNonces = { [ACCOUNT]: 8 };
+      await lookUpAgain(rerender, chain);
+      expect(hashes(result.current.transactions)).toEqual([tx('supply')]);
+      expect(result.current.settledTransactions).toEqual([]);
+
+      // Once its own nonce is known and passed with no receipt, it was replaced.
+      chain.known = { [tx('supply')]: 8 };
+      await lookUpAgain(rerender, chain);
+      expect(result.current.transactions).toEqual([expect.objectContaining({ nonce: 8, nonceSource: 'transaction' })]);
+      chain.known = {};
+      chain.confirmedNonces = { [ACCOUNT]: 9 };
+      await lookUpAgain(rerender, chain);
+      expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('supply')]: 'replaced' });
+    });
+
+    it('keeps the lower bound for other transactions, as before', async () => {
+      const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
+      const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
+      await act(async () => {
+        await result.current.addTransaction(COMET, 'Borrow USDC', sent(tx('sent'), null), 1, jest.fn(), []);
+      });
+
+      chain.confirmedNonces = { [ACCOUNT]: 8 };
+      await lookUpAgain(rerender, chain);
+
+      expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('sent')]: 'replaced' });
+    });
+
+    it('stays tracked when its wallet request was open at a reload, until it is dismissed', async () => {
+      store([
+        {
+          ...storedRecord('', { key: WRAPPER, step: 'supply' }),
+          state: TransactionState.AwaitingConfirmation,
+          hash: undefined,
+        },
+      ]);
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
+
+      await waitFor(() =>
+        expect(result.current.transactions).toEqual([
+          expect.objectContaining({
+            state: TransactionState.AwaitingConfirmation,
+            step: 'supply',
+            isInterrupted: true,
+          }),
+        ])
+      );
+      expect(JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]')).toHaveLength(1);
+
+      act(() => result.current.clearTransactions());
+      expect(result.current.transactions).toHaveLength(1);
+
+      act(() => result.current.dismissTransaction(result.current.transactions[0].id));
+      expect(result.current.transactions).toEqual([]);
+      expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
+    });
+
+    it('stays in the list when the list is cleared, while other transactions go', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+      await act(async () => {
+        await result.current.addTransaction(COMET, 'Borrow USDC', sent(tx('sent'), 7), 1, jest.fn(), []);
+        await result.current.submitTransaction({
+          key: WRAPPER,
+          description: 'Supply',
+          step: 'supply',
+          send: async () => tx('supply'),
+        });
+      });
+
+      act(() => result.current.clearTransactions());
+
+      expect(hashes(result.current.transactions)).toEqual([tx('supply')]);
+      expect(storedHashes()).toEqual([tx('supply')]);
+    });
   });
 
   it('reports whether a transaction succeeded to its callback', async () => {
-    const provider = walletProvider({ receipts: { '0xsucceeded': 1, '0xfailed': 0 } });
+    const provider = walletProvider({ receipts: { [tx('succeeded')]: 1, [tx('failed')]: 0 } });
     const { result } = renderManager(web3For(ACCOUNT, provider));
     const onSucceeded = jest.fn();
     const onFailed = jest.fn();
 
     await act(async () => {
-      await result.current.addTransaction(COMET, 'Supply', sent('0xsucceeded', 3), 1, jest.fn(), [], 0n, onSucceeded);
-      await result.current.addTransaction(COMET, 'Withdraw', sent('0xfailed', 4), 1, jest.fn(), [], 0n, onFailed);
+      await result.current.addTransaction(COMET, 'Supply', sent(tx('succeeded'), 3), 1, jest.fn(), [], 0n, onSucceeded);
+      await result.current.addTransaction(COMET, 'Withdraw', sent(tx('failed'), 4), 1, jest.fn(), [], 0n, onFailed);
     });
 
     await waitFor(() => expect(onFailed).toHaveBeenCalledTimes(1));
@@ -240,31 +351,53 @@ describe('useTransactionManager', () => {
     expect(result.current.transactions).toEqual([]);
   });
 
+  it('ignores malformed stored records and restores the valid ones', async () => {
+    store([
+      null,
+      42,
+      'record',
+      { id: 7 },
+      { ...storedRecord(tx('bad-account')), account: 7 },
+      { ...storedRecord(tx('bad-nonce')), nonce: '9' },
+      { ...storedRecord(tx('bad-hash')), hash: 12 },
+      { ...storedRecord(tx('bad-state')), state: 'confirmed' },
+      storedRecord(tx('unresolved'), { nonce: 9 }),
+    ]);
+    const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
+    const { result } = renderManager(web3For(ACCOUNT, provider));
+
+    await waitFor(() => expect(hashes(result.current.transactions)).toEqual([tx('unresolved')]));
+    await settleLookups();
+    expect(hashes(result.current.transactions)).toEqual([tx('unresolved')]);
+    expect(provider.getTransactionReceipt.mock.calls.map(([hash]) => hash)).not.toContain(tx('bad-account'));
+    expect(storedHashes()).toEqual([tx('unresolved')]);
+  });
+
   it('keeps tracking a restored transaction whose lookup fails, and records a broken provider', async () => {
-    store([storedRecord('0xunknown', { nonce: 9 })]);
+    store([storedRecord(tx('unknown'), { nonce: 9 })]);
     const provider = walletProvider();
     provider.getTransactionReceipt.mockRejectedValue(
       new TypeError("Cannot read properties of undefined (reading 'sendMessage')")
     );
     const { result } = renderManager(web3For(ACCOUNT, provider));
 
-    await waitFor(() => expect(hashes(result.current.transactions)).toEqual(['0xunknown']));
+    await waitFor(() => expect(hashes(result.current.transactions)).toEqual([tx('unknown')]));
     expect(result.current.settledTransactions).toEqual([]);
     expect(result.current.walletFailure?.provider).toBe(provider);
   });
 
   it("clears this session's transactions and keeps other accounts' stored records", async () => {
-    store([storedRecord('0xother-account', { account: OTHER_ACCOUNT })]);
+    store([storedRecord(tx('other-account'), { account: OTHER_ACCOUNT })]);
     const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
     await act(async () => {
-      await result.current.addTransaction(COMET, 'Supply', sent('0xsent', 1), 1, jest.fn(), []);
+      await result.current.addTransaction(COMET, 'Supply', sent(tx('sent'), 1), 1, jest.fn(), []);
     });
-    expect(storedHashes()).toEqual(['0xother-account', '0xsent']);
+    expect(storedHashes()).toEqual([tx('other-account'), tx('sent')]);
 
     act(() => result.current.clearTransactions());
 
     expect(result.current.transactions).toEqual([]);
-    expect(storedHashes()).toEqual(['0xother-account']);
+    expect(storedHashes()).toEqual([tx('other-account')]);
   });
 
   describe('submitTransaction', () => {
@@ -292,12 +425,18 @@ describe('useTransactionManager', () => {
         ])
       );
 
-      await act(async () => broadcast('0xapproval'));
+      await act(async () => broadcast(tx('approval')));
 
-      await expect(submission).resolves.toEqual({ status: 'submitted', id: expect.any(String), hash: '0xapproval' });
-      expect(hashes(result.current.transactions)).toEqual(['0xapproval']);
+      await expect(submission).resolves.toEqual({ status: 'submitted', id: expect.any(String), hash: tx('approval') });
+      expect(hashes(result.current.transactions)).toEqual([tx('approval')]);
       expect(JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]')).toEqual([
-        expect.objectContaining({ hash: '0xapproval', account: ACCOUNT, networkId: 1, key: WRAPPER, step: 'approve' }),
+        expect.objectContaining({
+          hash: tx('approval'),
+          account: ACCOUNT,
+          networkId: 1,
+          key: WRAPPER,
+          step: 'approve',
+        }),
       ]);
     });
 
@@ -349,6 +488,24 @@ describe('useTransactionManager', () => {
       expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
     });
 
+    it('sends nothing when the caller withdraws the request at the last moment', async () => {
+      const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
+      const { result } = renderManager(web3For(ACCOUNT, provider));
+
+      let submission: SendResult | undefined;
+      await act(async () => {
+        submission = await result.current.submitTransaction({
+          key: WRAPPER,
+          description: 'Approve USDC',
+          send: async () => Promise.reject(new SendWithdrawnError()),
+        });
+      });
+
+      expect(submission).toEqual({ status: 'session-changed' });
+      expect(result.current.transactions).toEqual([]);
+      expect(result.current.walletFailure).toBeUndefined();
+    });
+
     it('records which provider broke, so the session can be marked unusable', async () => {
       const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
       provider.getTransactionCount.mockRejectedValue(BROKEN_EXTENSION);
@@ -395,7 +552,7 @@ describe('useTransactionManager', () => {
       let response: TransactionResponse | undefined;
       let failed: TransactionResponse | undefined;
       await act(async () => {
-        response = await result.current.addTransaction(COMET, 'Supply', sent('0xsent', 1), 1, jest.fn(), []);
+        response = await result.current.addTransaction(COMET, 'Supply', sent(tx('sent'), 1), 1, jest.fn(), []);
         failed = await result.current.addTransaction(
           COMET,
           'Supply',
@@ -406,14 +563,14 @@ describe('useTransactionManager', () => {
         );
       });
 
-      expect(response?.hash).toBe('0xsent');
+      expect(response?.hash).toBe(tx('sent'));
       expect(failed).toBeUndefined();
-      expect(hashes(result.current.transactions)).toEqual(['0xsent']);
+      expect(hashes(result.current.transactions)).toEqual([tx('sent')]);
     });
 
     it('estimates gas when no estimate is given, and passes the value and limit to the transaction', async () => {
       const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
-      const transactionFunction = jest.fn(sent('0xsent', 1));
+      const transactionFunction = jest.fn(sent(tx('sent'), 1));
       const estimateGas = jest.fn(async () => BigNumber.from(100_000));
 
       await act(async () => {
