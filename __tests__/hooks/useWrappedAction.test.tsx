@@ -1066,6 +1066,21 @@ describe('useWrappedAction', () => {
       expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
 
+    it('keeps waiting for a broadcast wrapper transaction until it settles', () => {
+      const { manager } = fakeManager();
+      const broadcast = wrapperTransaction({ id: 'broadcast' });
+      const { result } = renderAction({
+        session: sessionFor(wallet),
+        manager: { ...manager, transactions: [broadcast] },
+      });
+
+      expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+      expect(result.current.canDismissRecovered).toBe(false);
+      act(() => result.current.dismissRecovered());
+
+      expect(manager.dismissTransaction).not.toHaveBeenCalled();
+    });
+
     it('does not dismiss anything while a draft is in progress', async () => {
       const { manager, requests } = fakeManager();
       const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });

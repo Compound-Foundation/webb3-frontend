@@ -17,7 +17,7 @@ type WrappedPositionPanelProps = {
   earnAPR: bigint;
   /** The wallet session's check. An unusable session stops every write until reload or reconnect. */
   session?: WalletSessionHealth;
-  /** Earlier wrapper transactions hold back new wrapped actions, and the user can stop waiting. */
+  /** An interrupted wallet request holds back new wrapped actions, and the user can stop waiting. */
   canDismissRecovered?: boolean;
   onDismissRecovered?: () => void;
   onRetry: () => void;
@@ -201,9 +201,9 @@ const WrappedPositionPanel = ({
       {canDismissRecovered && (
         <div className="wrapped-position-panel__notice">
           <p className="L3 meta text-color--2">
-            An earlier wrapped transaction from this account has not settled, or its wallet request can still be open.
-            New wrapped deposits and withdrawals wait for it. Stop waiting only after checking your wallet and the block
-            explorer: the earlier transaction can still go through.
+            A wallet request for an earlier wrapped transaction from this account was left open, and this page cannot
+            follow it. New wrapped deposits and withdrawals wait for it. Stop waiting only after checking your wallet:
+            the request can still go through.
           </p>
           <button className="button button--small" onClick={onDismissRecovered}>
             Stop waiting

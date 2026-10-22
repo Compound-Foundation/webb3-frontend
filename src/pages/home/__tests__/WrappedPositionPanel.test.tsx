@@ -201,7 +201,7 @@ describe('WrappedPositionPanel', () => {
       />
     );
 
-    expect(screen.getByText(/has not settled, or its wallet request can still be open/)).toBeInTheDocument();
+    expect(screen.getByText(/was left open, and this page cannot follow it/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Stop waiting' }));
     expect(onDismissRecovered).toHaveBeenCalledTimes(1);
   });
