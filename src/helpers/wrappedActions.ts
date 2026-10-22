@@ -314,6 +314,8 @@ export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem
 export type MarketRestriction = 'supply-paused' | 'withdraw-paused' | 'restriction-unknown';
 
 export type WrappedBlockReason =
+  /** The session does not lend the selected market through a wrapper. */
+  | 'not-wrapped'
   /** The account, connector, chain, market, wrapper, route, screening, release control or wallet provider changed. */
   | 'identity-changed'
   /** The wallet provider is broken or cannot read its chain. */
