@@ -444,6 +444,92 @@ describe('useWrappedAction', () => {
       expect(wallet.send).toHaveBeenCalledTimes(readsBeforeConfirming);
     });
 
+    it("runs the step's own check just before signing and stops when it refuses", async () => {
+      const { manager } = fakeManager();
+      const check = jest.fn(async () => ({ ok: false as const, message: 'Simulation reverted: ZeroSharesMinted()' }));
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      act(() => {
+        result.current.start('supply', async () => ({ amount: 1n, steps: [{ ...SUPPLY, check }] }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      act(() => result.current.confirm());
+      await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+      expect(check).toHaveBeenCalledTimes(1);
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+      expect(result.current.state).toMatchObject({
+        steps: [{ status: 'blocked', reason: 'step-check-failed', message: 'Simulation reverted: ZeroSharesMinted()' }],
+      });
+    });
+
+    it('treats a step check that throws as a refusal', async () => {
+      const { manager } = fakeManager();
+      const check = jest.fn(async () => Promise.reject(new Error('execution reverted')));
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      act(() => {
+        result.current.start('supply', async () => ({ amount: 1n, steps: [{ ...SUPPLY, check }] }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      act(() => result.current.confirm());
+      await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+      expect(result.current.state).toMatchObject({
+        steps: [{ status: 'blocked', reason: 'step-check-failed', message: 'execution reverted' }],
+      });
+    });
+
+    it("signs once the step's own check passes", async () => {
+      const { manager, requests } = fakeManager();
+      const check = jest.fn(async () => ({ ok: true as const }));
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      act(() => {
+        result.current.start('supply', async () => ({ amount: 1n, steps: [{ ...SUPPLY, check }] }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      expect(check).toHaveBeenCalledTimes(1);
+      expect(requests[0].request.step).toBe('supply');
+    });
+
+    it("reads Comet's pause through the configured chain's provider, and refuses without one", async () => {
+      const PAUSES = new Interface(['function isSupplyPaused() view returns (bool)']);
+      const readProvider = {
+        call: jest.fn(async ({ to }: { to?: string }) => {
+          if (to !== USDC_COMET) throw new Error('not the Comet');
+          return PAUSES.encodeFunctionResult('isSupplyPaused', [true]);
+        }),
+      };
+      const { manager } = fakeManager();
+      const { result, rerender } = renderHook(
+        ({ reader }: { reader: typeof readProvider | undefined }) =>
+          useWrappedAction({ session: sessionFor(wallet), manager, readProvider: reader }),
+        { initialProps: { reader: readProvider as typeof readProvider | undefined } }
+      );
+      await reachReview(result);
+
+      act(() => result.current.confirm());
+      await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+      expect(readProvider.call).toHaveBeenCalledTimes(1);
+      expect(result.current.state).toMatchObject({
+        steps: [{ status: 'blocked', reason: 'supply-paused' }, { status: 'waiting' }],
+      });
+
+      rerender({ reader: undefined });
+      act(() => result.current.discard());
+      await reachReview(result);
+      act(() => result.current.confirm());
+      await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+      expect(result.current.state).toMatchObject({
+        steps: [{ status: 'blocked', reason: 'restriction-unknown' }, { status: 'waiting' }],
+      });
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
     it('reads through the wallet immediately before each signature', async () => {
       const { manager, requests } = fakeManager();
       const { result } = renderAction({ session: sessionFor(wallet), manager });
@@ -569,6 +655,16 @@ describe('useWrappedAction', () => {
       expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
 
+    it('treats a session check that throws as unusable', async () => {
+      const { manager } = fakeManager();
+      const probe = jest.fn<Promise<SessionProbeResult>, []>().mockRejectedValue(new Error('probe failed'));
+      const { result } = renderAction({ session: sessionFor(wallet), manager }, { probe });
+
+      await waitFor(() =>
+        expect(result.current.session).toMatchObject({ status: 'unusable', reason: 'reads-failing' })
+      );
+    });
+
     it('stays unusable when an earlier, slower read through the same session succeeds', async () => {
       const { manager } = fakeManager();
       let finishFirstProbe: (result: SessionProbeResult) => void = () => undefined;
@@ -679,6 +775,40 @@ describe('useWrappedAction', () => {
 
       expect(result.current.state).toMatchObject({ phase: 'review', current: 1 });
       expect(stepStatuses(result)).toEqual(['confirmed', 'waiting']);
+    });
+
+    it('reports an open wallet request as a provider failure when the session breaks', async () => {
+      const { manager, requests } = fakeManager();
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      rerender({
+        session: sessionFor(wallet),
+        manager: { ...manager, walletFailure: { provider: wallet, message: 'sendMessage' } },
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+      expect(result.current.state).toMatchObject({
+        steps: [
+          { status: 'provider-failure', message: expect.stringMatching(/may still be approved in the wallet/) },
+          { status: 'waiting' },
+        ],
+      });
+    });
+
+    it('stops a step the transaction manager refuses because the session moved on', async () => {
+      const { manager, requests } = fakeManager();
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      await act(async () => requests[0].resolve({ status: 'session-changed' }));
+
+      expect(result.current.state).toMatchObject({
+        phase: 'stopped',
+        steps: [{ status: 'blocked', reason: 'identity-changed' }, { status: 'waiting' }],
+      });
     });
 
     it('marks a broadcast step unresolved when the session breaks before its receipt', async () => {
