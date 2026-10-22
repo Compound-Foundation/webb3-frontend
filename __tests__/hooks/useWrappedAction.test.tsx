@@ -1194,15 +1194,20 @@ describe('useWrappedAction', () => {
 
     it('checks again at the signature for another wrapper transaction of the account, and sends nothing', async () => {
       const { manager } = fakeManager(wallet);
-      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      const restriction = jest.fn(async (): Promise<MarketRestriction | undefined> => undefined);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager }, { restriction });
       await reachReview(result);
       // The manager starts tracking an earlier wrapper supply of the account after the review began.
       rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [wrapperTransaction()] } });
+      const readsBeforeConfirming = wallet.send.mock.calls.length;
 
       act(() => result.current.confirm());
       await act(async () => undefined);
 
       expect(manager.submitTransaction).not.toHaveBeenCalled();
+      // Refused before the signature's own reads.
+      expect(restriction).not.toHaveBeenCalled();
+      expect(wallet.send).toHaveBeenCalledTimes(readsBeforeConfirming);
       expect(result.current.state).toMatchObject({
         phase: 'stopped',
         steps: [{ status: 'blocked', reason: 'transaction-pending' }, { status: 'waiting' }],
