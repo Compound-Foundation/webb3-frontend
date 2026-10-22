@@ -216,7 +216,8 @@ describe('useWrappedAction', () => {
       ['account', (wallet) => sessionFor(wallet, { account: OTHER_ACCOUNT })],
       ['connector', (wallet) => sessionFor(wallet, { connector: { id: ANCHORAGE_CONNECTOR_ID, uid: 'uid-2' } })],
       ['reconnect', (wallet) => sessionFor(wallet, { status: 'reconnecting' })],
-      ['chain', (wallet) => sessionFor(wallet, { chainId: 8453 })],
+      // The wallet moves to Base while the selected market stays on Ethereum.
+      ['wallet network', (wallet) => sessionFor(wallet, { chainId: 8453 })],
       ['market', (wallet) => sessionFor(wallet, { cometAddress: USDT_COMET })],
       ['wallet provider', () => sessionFor(walletProvider())],
     ];
