@@ -43,8 +43,15 @@ function App({ Component, pageProps }: any) {
 
   const location = useLocation();
 
-  const { transactions, settledTransactions, walletFailure, addTransaction, submitTransaction, clearTransactions } =
-    useTransactionManager(web3);
+  const {
+    transactions,
+    settledTransactions,
+    walletFailure,
+    addTransaction,
+    submitTransaction,
+    clearTransactions,
+    dismissTransaction,
+  } = useTransactionManager(web3);
   const rewardsState = useRewardsState(web3, transactions);
   const { theme, setTheme } = useThemeManager();
   const themeRef = useRef(theme);
@@ -105,7 +112,7 @@ function App({ Component, pageProps }: any) {
       screeningStatus: web3.screeningStatus,
       provider: web3.write.provider,
     },
-    manager: { transactions, settledTransactions, walletFailure, submitTransaction },
+    manager: { transactions, settledTransactions, walletFailure, submitTransaction, dismissTransaction },
     readProvider: wrappedChainProvider,
   });
   const wrappedLending = {

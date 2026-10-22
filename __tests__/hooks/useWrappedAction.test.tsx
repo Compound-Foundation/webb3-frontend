@@ -9,11 +9,11 @@ import {
   WrappedMarketRegistry,
 } from '@constants/wrappedMarkets';
 import { LendingSession, resolveLendingRoute, ValidationStatus, wrappedRouteKey } from '@helpers/lendingRoute';
-import { SessionProbeResult } from '@helpers/walletErrors';
+import { SendWithdrawnError, SessionProbeResult } from '@helpers/walletErrors';
 import { MarketRestriction, WrappedActionIdentity, WrappedSession, WrappedStep } from '@helpers/wrappedActions';
 import type { SendResult, TransactionManager, TransactionRequest } from '@hooks/useTransactionManager';
 import { useWrappedAction, WrappedActionController } from '@hooks/useWrappedAction';
-import { PendingTransaction, SettledTransaction, TransactionState } from '@types';
+import { PendingTransaction, SettledTransaction, Transaction, TransactionState } from '@types';
 
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
@@ -111,7 +111,10 @@ function sessionFor(wallet: Wallet, setup: SessionSetup = {}): WrappedSession {
   };
 }
 
-type Manager = Pick<TransactionManager, 'transactions' | 'settledTransactions' | 'walletFailure' | 'submitTransaction'>;
+type Manager = Pick<
+  TransactionManager,
+  'transactions' | 'settledTransactions' | 'walletFailure' | 'submitTransaction' | 'dismissTransaction'
+>;
 
 /** A transaction manager whose sends resolve only when the test says so. */
 function fakeManager() {
@@ -120,6 +123,7 @@ function fakeManager() {
     transactions: [],
     settledTransactions: [],
     walletFailure: undefined,
+    dismissTransaction: jest.fn(),
     submitTransaction: jest.fn(
       (request: TransactionRequest) => new Promise<SendResult>((resolve) => requests.push({ request, resolve }))
     ),
@@ -299,7 +303,11 @@ describe('useWrappedAction', () => {
     rerender({ session: original, manager });
 
     let finishFreshRead: () => void = () => undefined;
-    const freshPlan = { amount: 2_000_000n, steps: [SUPPLY] };
+    const freshSupply: WrappedStep = {
+      ...SUPPLY,
+      request: { ...SUPPLY.request, data: CALLS.encodeFunctionData('supplyAndWrap', [2_000_000n]) },
+    };
+    const freshPlan = { amount: 2_000_000n, steps: [freshSupply] };
     act(() => {
       result.current.start('supply', () => new Promise((resolve) => (finishFreshRead = () => resolve(freshPlan))));
     });
@@ -449,7 +457,7 @@ describe('useWrappedAction', () => {
       const check = jest.fn(async () => ({ ok: false as const, message: 'Simulation reverted: ZeroSharesMinted()' }));
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       act(() => {
-        result.current.start('supply', async () => ({ amount: 1n, steps: [{ ...SUPPLY, check }] }));
+        result.current.start('supply', async () => ({ amount: 1_000_000n, steps: [{ ...SUPPLY, check }] }));
       });
       await waitFor(() => expect(result.current.state.phase).toBe('review'));
 
@@ -468,7 +476,7 @@ describe('useWrappedAction', () => {
       const check = jest.fn(async () => Promise.reject(new Error('execution reverted')));
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       act(() => {
-        result.current.start('supply', async () => ({ amount: 1n, steps: [{ ...SUPPLY, check }] }));
+        result.current.start('supply', async () => ({ amount: 1_000_000n, steps: [{ ...SUPPLY, check }] }));
       });
       await waitFor(() => expect(result.current.state.phase).toBe('review'));
 
@@ -486,7 +494,7 @@ describe('useWrappedAction', () => {
       const check = jest.fn(async () => ({ ok: true as const }));
       const { result } = renderAction({ session: sessionFor(wallet), manager });
       act(() => {
-        result.current.start('supply', async () => ({ amount: 1n, steps: [{ ...SUPPLY, check }] }));
+        result.current.start('supply', async () => ({ amount: 1_000_000n, steps: [{ ...SUPPLY, check }] }));
       });
       await waitFor(() => expect(result.current.state.phase).toBe('review'));
 
@@ -712,7 +720,7 @@ describe('useWrappedAction', () => {
       expect(requests[0].request).toMatchObject({ key: USDC_WRAPPER, step: 'approve', account: ACCOUNT, chainId: 1 });
       await expect(requests[0].request.send()).resolves.toBe('0xsent');
       expect(wallet.getSigner).toHaveBeenCalledWith(ACCOUNT);
-      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledWith(APPROVE.request);
+      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledWith({ ...APPROVE.request, chainId: 1 });
 
       await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xapproval' }));
       act(() => requests[0].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xapproval') }));
@@ -722,7 +730,7 @@ describe('useWrappedAction', () => {
       await confirmAndWaitForWallet(result, requests, 2);
       expect(requests[1].request).toMatchObject({ key: USDC_WRAPPER, step: 'supply' });
       await requests[1].request.send();
-      expect(wallet.sendUncheckedTransaction).toHaveBeenLastCalledWith(SUPPLY.request);
+      expect(wallet.sendUncheckedTransaction).toHaveBeenLastCalledWith({ ...SUPPLY.request, chainId: 1 });
       await act(async () => requests[1].resolve({ status: 'submitted', id: 'id-2', hash: '0xsupply' }));
       act(() => requests[1].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xsupply') }));
 
@@ -829,6 +837,57 @@ describe('useWrappedAction', () => {
       });
     });
 
+    it.each<[string, (wallet: Wallet) => WrappedSession | 'discard', string]>([
+      ['the draft is cleared', () => 'discard', 'discarded'],
+      ['the account changes', (wallet) => sessionFor(wallet, { account: OTHER_ACCOUNT }), 'discarded'],
+      ['the signer stops being ready', (wallet) => sessionFor(wallet, { isSignerReady: false }), 'no-signer'],
+    ])(
+      'withdraws the request before the wallet is asked when %s while the manager prepares it',
+      async (_name, change, outcome) => {
+        const { manager, requests } = fakeManager();
+        const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+        await reachReview(result);
+        // The manager has the request and is reading the network and nonce; it has not called send.
+        await confirmAndWaitForWallet(result, requests, 1);
+
+        const changed = change(wallet);
+        if (changed === 'discard') act(() => result.current.discard());
+        else rerender({ session: changed, manager });
+
+        await expect(requests[0].request.send()).rejects.toBeInstanceOf(SendWithdrawnError);
+        expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+        await act(async () => requests[0].resolve({ status: 'session-changed' }));
+        if (outcome === 'discarded') {
+          expect(result.current.state.phase).toBe('discarded');
+        } else {
+          expect(result.current.state).toMatchObject({
+            phase: 'stopped',
+            steps: [{ status: 'blocked', reason: outcome }, { status: 'waiting' }],
+          });
+        }
+      }
+    );
+
+    it('sends the call it checked, even if the step it was given changes afterwards', async () => {
+      const { manager, requests } = fakeManager();
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const supply: WrappedStep = { ...SUPPLY, request: { ...SUPPLY.request } };
+      act(() => {
+        result.current.start('supply', async () => ({ amount: 1_000_000n, steps: [supply] }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      supply.request.to = USDC_COMET;
+      supply.request.data = CALLS.encodeFunctionData('supplyAndWrap', [1n]);
+      await confirmAndWaitForWallet(result, requests, 1);
+      await requests[0].request.send();
+
+      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledWith({ ...SUPPLY.request, chainId: 1 });
+      const { state } = result.current;
+      if (state.phase !== 'signing') throw new Error('the step must be signing');
+      expect(Object.isFrozen(state.draft.steps[0].request)).toBe(true);
+    });
+
     it('clears a draft without cancelling what the wallet already has', async () => {
       const { manager, requests } = fakeManager();
       const { result } = renderAction({ session: sessionFor(wallet), manager });
@@ -892,6 +951,46 @@ describe('useWrappedAction', () => {
       expect(manager.submitTransaction).not.toHaveBeenCalled();
       await reachReview(result);
       expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
+    });
+
+    it('waits for a wallet request left open at a reload, until the user dismisses it', () => {
+      const { manager } = fakeManager();
+      const interrupted: Transaction = {
+        id: 'interrupted',
+        key: USDC_WRAPPER,
+        networkId: 1,
+        networkName: 'homestead',
+        description: 'Supply USDC through the wrapper',
+        nonce: 7,
+        account: ACCOUNT,
+        step: 'supply',
+        state: TransactionState.AwaitingConfirmation,
+        isInterrupted: true,
+      };
+      const { result } = renderAction({
+        session: sessionFor(wallet),
+        manager: { ...manager, transactions: [interrupted] },
+      });
+
+      expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+      act(() => result.current.dismissRecovered());
+
+      expect(manager.dismissTransaction).toHaveBeenCalledWith('interrupted');
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('does not dismiss anything while a draft is in progress', async () => {
+      const { manager, requests } = fakeManager();
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+      // The manager now holds the step's own record, awaiting the wallet.
+      const inFlight = wrapperTransaction({ id: 'in-flight' });
+      rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [inFlight] } });
+
+      act(() => result.current.dismissRecovered());
+
+      expect(manager.dismissTransaction).not.toHaveBeenCalled();
     });
 
     it("ignores other accounts', chains' and contracts' transactions", () => {

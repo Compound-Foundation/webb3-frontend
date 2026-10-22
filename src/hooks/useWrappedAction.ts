@@ -1,7 +1,13 @@
 import { JsonRpcProvider, TransactionReceipt } from '@ethersproject/providers';
 import { useEffect, useReducer, useRef, useState } from 'react';
 
-import { describeWalletError, probeWalletSession, ProbedProvider, SessionProbeResult } from '@helpers/walletErrors';
+import {
+  describeWalletError,
+  probeWalletSession,
+  ProbedProvider,
+  SendWithdrawnError,
+  SessionProbeResult,
+} from '@helpers/walletErrors';
 import {
   checkBeforeSignature,
   checkWrappedDraft,
@@ -113,6 +119,12 @@ export type WrappedActionController = {
   confirm: () => void;
   /** Clears the draft, or the notice left by one. Nothing already sent is cancelled. */
   discard: () => void;
+  /**
+   * Stops tracking this account's earlier wrapper transactions on this chain, including wallet
+   * requests open at a reload, so that a fresh review can start. Only for the user to call after
+   * checking their wallet and the explorer: a dismissed request or transaction can still go through.
+   */
+  dismissRecovered: () => void;
 };
 
 /** The controller outside the wrapped route. */
@@ -124,11 +136,15 @@ export const IDLE_WRAPPED_ACTION: WrappedActionController = Object.freeze({
   start: () => 'not-wrapped',
   confirm: () => undefined,
   discard: () => undefined,
+  dismissRecovered: () => undefined,
 });
 
 export type UseWrappedActionOptions = {
   session: WrappedSession;
-  manager: Pick<TransactionManager, 'transactions' | 'settledTransactions' | 'walletFailure' | 'submitTransaction'>;
+  manager: Pick<
+    TransactionManager,
+    'transactions' | 'settledTransactions' | 'walletFailure' | 'submitTransaction' | 'dismissTransaction'
+  >;
   /** The configured chain's public provider, for the market restriction read. */
   readProvider: Pick<JsonRpcProvider, 'call'> | undefined;
   probe?: (provider: ProbedProvider, chainId: number) => Promise<SessionProbeResult>;
@@ -250,12 +266,41 @@ function outcomeState(outcome: TransactionOutcome, hash: string): WrappedStepSta
   }
 }
 
-/** Asks the wallet to sign and broadcast a step, returning its hash as soon as the wallet has one. */
+/**
+ * Asks the wallet to sign and broadcast a step, returning its hash as soon as the wallet has one.
+ * The chain id is sent too, so a wallet that checks it refuses a request for another chain.
+ */
 function sendStep(identity: WrappedActionIdentity, step: WrappedStep): Promise<string> {
   const provider = identity.provider as Pick<JsonRpcProvider, 'getSigner'>;
   return provider
     .getSigner(identity.account)
-    .sendUncheckedTransaction({ to: step.request.to, data: step.request.data });
+    .sendUncheckedTransaction({ to: step.request.to, data: step.request.data, chainId: identity.chainId });
+}
+
+/**
+ * The draft's own copy of the calls `prepare` returned. It is frozen, so the call that was checked
+ * is the call that is sent, whatever later happens to the objects `prepare` built.
+ */
+function frozenDraft(
+  id: string,
+  identity: WrappedActionIdentity,
+  amount: bigint,
+  steps: readonly WrappedStep[]
+): WrappedActionDraft {
+  return Object.freeze({
+    kind: WRAPPED_ACTION,
+    id,
+    identity: Object.freeze({ ...identity }),
+    amount,
+    steps: Object.freeze(
+      steps.map((step) =>
+        Object.freeze({
+          ...step,
+          request: Object.freeze({ to: String(step.request.to), data: String(step.request.data) }),
+        })
+      )
+    ),
+  });
 }
 
 type ProbeTarget = { provider: object; key: string; chainId: number };
@@ -408,13 +453,7 @@ export function useWrappedAction({
     reading.then(
       ({ amount, steps }) => {
         if (runId.current !== run) return;
-        const draft: WrappedActionDraft = {
-          kind: WRAPPED_ACTION,
-          id: `wrapped-action-${++draftCount.current}`,
-          identity,
-          amount,
-          steps,
-        };
+        const draft = frozenDraft(`wrapped-action-${++draftCount.current}`, identity, amount, steps);
         const problem = checkWrappedDraft(draft);
         if (problem === undefined) dispatch({ type: 'drafted', draft });
         else dispatch({ type: 'read-failed', message: `The prepared transactions are not allowed (${problem}).` });
@@ -468,6 +507,7 @@ export function useWrappedAction({
 
     dispatch({ type: 'step', index, step: { status: 'awaiting-signature' } });
     let hash = '';
+    let withdrawnBecause: WrappedBlockReason | undefined;
     const result = await live.current.manager.submitTransaction({
       key: draft.identity.wrapperAddress,
       description: step.description,
@@ -475,6 +515,10 @@ export function useWrappedAction({
       account: draft.identity.account,
       chainId: draft.identity.chainId,
       send: async () => {
+        // The manager reads the network and nonce through the wallet before it calls this, so the
+        // session is checked once more, immediately before the wallet is asked.
+        withdrawnBecause = isCurrentRun() ? recheck() : 'identity-changed';
+        if (withdrawnBecause !== undefined) throw new SendWithdrawnError();
         hash = await sendStep(draft.identity, step);
         return hash;
       },
@@ -496,7 +540,7 @@ export function useWrappedAction({
         dispatch({ type: 'step', index, step: { status: 'provider-failure', message: result.message } });
         break;
       case 'session-changed':
-        block('identity-changed');
+        block(withdrawnBecause ?? 'identity-changed');
         break;
     }
   };
@@ -516,5 +560,11 @@ export function useWrappedAction({
     else dispatch({ type: 'reset' });
   };
 
-  return { state, session: health, recovered, blockedReason, start, confirm, discard };
+  const dismissRecovered = () => {
+    const current = live.current;
+    if (isInProgress(current.state)) return;
+    current.recovered.pending.forEach((transaction) => current.manager.dismissTransaction(transaction.id));
+  };
+
+  return { state, session: health, recovered, blockedReason, start, confirm, discard, dismissRecovered };
 }
