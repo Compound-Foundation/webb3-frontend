@@ -304,6 +304,26 @@ describe('useWrappedAction', () => {
       expect(phases.every((phase) => phase === 'discarded')).toBe(true);
     });
 
+    it('names the action and the chain of a discarded draft, so what it sent can be found', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+      await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xapproval' }));
+
+      // The wallet moves to Base. The approval was sent on Ethereum.
+      rerender({ session: sessionFor(wallet, { chainId: 8453 }), manager });
+
+      expect(result.current.state).toEqual({
+        phase: 'discarded',
+        reason: 'identity-changed',
+        type: 'supply',
+        chainId: 1,
+        submittedHashes: ['0xapproval'],
+        isWalletRequestOpen: false,
+      });
+    });
+
     it('drops a late read even when the session returns to the one it started in', async () => {
       const { manager } = fakeManager(wallet);
       const original = sessionFor(wallet);
@@ -1093,6 +1113,8 @@ describe('useWrappedAction', () => {
       expect(result.current.state).toEqual({
         phase: 'discarded',
         reason: 'cleared',
+        type: 'supply',
+        chainId: 1,
         submittedHashes: [],
         isWalletRequestOpen: true,
       });

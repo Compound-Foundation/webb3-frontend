@@ -98,6 +98,9 @@ export type WrappedActionState =
   | {
       phase: 'discarded';
       reason: 'identity-changed' | 'session-unusable' | 'cleared';
+      /** The action the draft was for, and the chain its transactions were sent on. */
+      type: WrappedActionType;
+      chainId: number;
       submittedHashes: readonly string[];
       /** A wallet request was open. The user can still approve it there. */
       isWalletRequestOpen: boolean;
@@ -196,12 +199,15 @@ const SETTLED_STEP_STATUSES = new Set<WrappedStepState['status']>(['confirmed', 
 
 function discardedFrom(
   state: WrappedActionState,
+  identity: WrappedActionIdentity,
   reason: Extract<WrappedActionState, { phase: 'discarded' }>['reason']
 ): WrappedActionState {
   const steps = hasProgress(state) ? state.steps : [];
   return {
     phase: 'discarded',
     reason,
+    type: identity.type,
+    chainId: identity.chainId,
     submittedHashes: steps.flatMap((step) => ('hash' in step ? [step.hash] : [])),
     isWalletRequestOpen: steps.some((step) => step.status === 'awaiting-signature'),
   };
@@ -229,7 +235,7 @@ function withStep(state: WrappedActionState, index: number, step: WrappedStepSta
 
 /** A broken session stops a draft. What was sent stays sent and is shown as unresolved. */
 function stoppedByUnusableSession(state: WrappedActionState): WrappedActionState {
-  if (state.phase === 'reading') return discardedFrom(state, 'session-unusable');
+  if (state.phase === 'reading') return discardedFrom(state, state.identity, 'session-unusable');
   if (!hasProgress(state) || state.phase === 'complete' || state.phase === 'stopped') return state;
   const step = state.steps[state.stepIndex];
   let stopped: WrappedStepState;
@@ -268,8 +274,11 @@ function lifecycleReducer(state: WrappedActionState, event: LifecycleEvent): Wra
       return withStep(state, event.index, event.step);
     case 'session-unusable':
       return stoppedByUnusableSession(state);
-    case 'discarded':
-      return state.phase === 'idle' || state.phase === 'discarded' ? state : discardedFrom(state, event.reason);
+    case 'discarded': {
+      // An idle or discarded state has no draft to discard.
+      const identity = identityOf(state);
+      return identity === undefined ? state : discardedFrom(state, identity, event.reason);
+    }
     case 'reset':
       return { phase: 'idle' };
   }
@@ -412,7 +421,8 @@ export function useWrappedAction({
   const isStale =
     activeIdentity !== undefined &&
     !isSameWrappedIdentity(activeIdentity, wrappedActionIdentity(activeIdentity.type, session));
-  const state = isStale ? discardedFrom(lifecycle, 'identity-changed') : lifecycle;
+  const state =
+    isStale && activeIdentity !== undefined ? discardedFrom(lifecycle, activeIdentity, 'identity-changed') : lifecycle;
 
   const wrapperAddress = route.kind === 'wrapped' ? route.market?.wrapperAddress.toLowerCase() : undefined;
   const isOwnWrapperTransaction = (transaction: Transaction | SettledTransaction) =>
