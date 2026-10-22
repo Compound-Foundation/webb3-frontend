@@ -288,6 +288,52 @@ describe('useTransactionManager', () => {
     ]);
   });
 
+  it('ignores a reported nonce below the one read before sending, as a Safe reports before it executes', async () => {
+    // A Safe's provider reports nonce 0 for a transaction its owners have not executed, and the Safe
+    // contract's own account nonce, 1, as the confirmed nonce.
+    const chain: Chain = { known: { [tx('queued')]: 0, [tx('approval')]: 0 }, confirmedNonces: { [ACCOUNT]: 1 } };
+    const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
+    const onSettled = jest.fn();
+    await act(async () => {
+      await result.current.addTransaction(
+        COMET,
+        'Borrow USDC',
+        sent(tx('queued'), null),
+        1,
+        jest.fn(),
+        [],
+        0n,
+        onSettled
+      );
+      await result.current.submitTransaction({
+        key: WRAPPER,
+        description: 'Approve USDC',
+        step: 'approve',
+        send: async () => tx('approval'),
+      });
+    });
+    await settleLookups();
+
+    expect(result.current.settledTransactions).toEqual([]);
+    expect(onSettled).not.toHaveBeenCalled();
+    // Still pending, and the reported nonce was not kept as either transaction's own.
+    expect(result.current.transactions).toEqual([
+      expect.objectContaining({ hash: tx('queued'), nonce: 1, nonceSource: 'lower-bound' }),
+      expect.objectContaining({ hash: tx('approval'), nonce: 1, nonceSource: 'lower-bound' }),
+    ]);
+
+    // The owners execute both. Each one settles by its receipt.
+    chain.receipts = { [tx('queued')]: 1, [tx('approval')]: 1 };
+    rerender({ web3: web3For(ACCOUNT, walletProvider(chain)) });
+    await waitFor(() =>
+      expect(outcomes(result.current.settledTransactions)).toEqual({
+        [tx('queued')]: 'confirmed',
+        [tx('approval')]: 'confirmed',
+      })
+    );
+    expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ status: 'confirmed' }));
+  });
+
   describe('a step of a multi-step action', () => {
     /** Renders again with a rebuilt wallet provider on the same chain, which looks every transaction up again. */
     async function lookUpAgain(rerender: (props: Props) => void, chain: Chain) {
