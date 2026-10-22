@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { WRAPPED_MARKET_REGISTRY, WrappedMarket } from '@constants/wrappedMarkets';
 import { Eligibility, LendingRoute } from '@helpers/lendingRoute';
+import { REFRESH_INTERVAL } from '@helpers/numbers';
 import { WrappedPosition } from '@helpers/wrappedPositions';
 import { useWrappedPosition, WrappedPositionReader } from '@hooks/useWrappedPosition';
 
@@ -174,5 +175,51 @@ describe('useWrappedPosition', () => {
 
     await act(async () => pending[1].resolve(position(2n * 10n ** 18n)));
     expect(result.current.state).toEqual({ status: 'loaded', position: position(2n * 10n ** 18n) });
+  });
+
+  describe('with a read slower than the refresh interval', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it('applies the slow read instead of starting over on every interval', async () => {
+      const { read, pending } = deferredReader();
+      const { result } = renderPosition(read, { route: wrappedRoute('key-a'), account: ACCOUNT });
+
+      await act(async () => {
+        jest.advanceTimersByTime(REFRESH_INTERVAL * 2);
+      });
+      expect(read).toHaveBeenCalledTimes(1);
+
+      await act(async () => pending[0].resolve(position(10n ** 18n)));
+      expect(result.current.state).toEqual({ status: 'loaded', position: position(10n ** 18n) });
+    });
+
+    it('shows a slow failure instead of loading forever', async () => {
+      const { read, pending } = deferredReader();
+      const { result } = renderPosition(read, { route: wrappedRoute('key-a'), account: ACCOUNT });
+
+      await act(async () => {
+        jest.advanceTimersByTime(REFRESH_INTERVAL + 5_000);
+      });
+      await act(async () => pending[0].reject(new Error('timeout')));
+
+      expect(result.current.state.status).toBe('error');
+    });
+
+    it('reads again once an in-flight read finishes when a refresh was asked for meanwhile', async () => {
+      const { read, pending } = deferredReader();
+      const route = wrappedRoute('key-a');
+      const { result, rerender } = renderPosition(read, { route, account: ACCOUNT, refreshToken: 0 });
+
+      rerender({ route, account: ACCOUNT, refreshToken: 1 });
+      expect(read).toHaveBeenCalledTimes(1);
+
+      await act(async () => pending[0].resolve(position(10n ** 18n)));
+      expect(result.current.state).toEqual({ status: 'loaded', position: position(10n ** 18n) });
+      expect(read).toHaveBeenCalledTimes(2);
+
+      await act(async () => pending[1].resolve(position(3n * 10n ** 18n)));
+      expect(result.current.state).toEqual({ status: 'loaded', position: position(3n * 10n ** 18n) });
+    });
   });
 });
