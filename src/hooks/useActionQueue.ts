@@ -3,6 +3,7 @@ import { useEffect, useReducer } from 'react';
 import { isSameAction, isSameToken } from '@helpers/actions';
 import { filterMap } from '@helpers/functions';
 import { getRewardsForMarket } from '@helpers/rewards';
+import { assertDirectActions } from '@helpers/wrappedActions';
 import {
   Action,
   ActionType,
@@ -142,7 +143,10 @@ export function useActionQueue(
     onActionsChanged(state.actions);
   }, [state.actions]);
 
+  // A wrapper action has its own review and lifecycle. Refusing one here, with a typed error,
+  // keeps the queue and the Bulker from ever holding one.
   const addOrUpdateAction = (action: Action) => {
+    assertDirectActions([action]);
     updateQueue([QueueActionType.AddOrUpdate, key, action]);
   };
 
@@ -151,6 +155,7 @@ export function useActionQueue(
   };
 
   const queueActions = (chainId: number, marketAddress: string, actionsToQueue: Action[]) => {
+    assertDirectActions(actionsToQueue);
     updateQueue([QueueActionType.Defer, key, marketKey(chainId, marketAddress), actionsToQueue]);
   };
 
