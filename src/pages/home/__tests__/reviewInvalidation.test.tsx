@@ -77,11 +77,22 @@ const COMP = mockCompCollateralAsset({ walletBalance: 10n ** 20n, allowance: 0n 
 const BORROW: Action = [ActionType.Borrow, BASE_ASSET, 1_000_000_000n];
 const SUPPLY_COMP: Action = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
 
-function web3For({ account = ACCOUNT, connector = 'uid-1', chainId = 1 } = {}): Web3 {
+function web3For({
+  account = ACCOUNT,
+  connector = 'uid-1',
+  chainId = 1,
+  status = 'connected' as Web3['write']['status'],
+} = {}): Web3 {
   return {
     ...mockWeb3,
     read: { ...mockWeb3.read, account, chainId: 1 },
-    write: { ...mockWeb3.write, account, chainId, connector: { uid: connector } as Web3['write']['connector'] },
+    write: {
+      ...mockWeb3.write,
+      account,
+      chainId,
+      status,
+      connector: { uid: connector } as Web3['write']['connector'],
+    },
   };
 }
 
@@ -211,6 +222,7 @@ describe('Home review dialogs', () => {
     ['account', { web3: web3For({ account: OTHER_ACCOUNT }) }],
     ['connector', { web3: web3For({ connector: 'uid-2' }) }],
     ['network', { web3: web3For({ chainId: 137 }) }],
+    ['connection status (a reconnect)', { web3: web3For({ status: 'reconnecting' }) }],
     ['market', { market: USDT_MARKET }],
   ])('closes the review dialog when the %s changes, and does not reopen it on return', (_change, changed) => {
     const queue = actionQueue([BORROW, SUPPLY_COMP]);
@@ -305,6 +317,7 @@ describe('Home submission guards', () => {
     ['account', { web3: web3For({ account: OTHER_ACCOUNT }) }],
     ['connector', { web3: web3For({ connector: 'uid-2' }) }],
     ['wallet network', { web3: web3For({ chainId: 137 }) }],
+    ['connection status (a reconnect)', { web3: web3For({ status: 'reconnecting' }) }],
     ['market', { market: USDT_MARKET }],
   ])(
     'ignores an amount confirmation kept from before a change of %s, and asks the wallet nothing',
@@ -383,6 +396,7 @@ describe('Home submission guards', () => {
     it.each<[string, Partial<Setup>]>([
       ['account', { web3: web3For({ account: OTHER_ACCOUNT }) }],
       ['wallet network', { web3: web3For({ chainId: 137 }) }],
+      ['connection status (a reconnect)', { web3: web3For({ status: 'reconnecting' }) }],
       ['market', { market: USDT_MARKET }],
     ])(
       'withdraws an approval whose visit ends with a change of %s before the wallet is asked',

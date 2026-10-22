@@ -10,7 +10,7 @@ import { mockCompCollateralAsset } from '../mocks/mockCollateralAssets';
 
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
-const SESSION: QueueSession = { account: ACCOUNT, connector: 'connector-uid-1' };
+const SESSION: QueueSession = { account: ACCOUNT, connector: 'connector-uid-1', status: 'connected' };
 
 const MAINNET_USDC = getMarket(1, '0xc3d688B66703497DAA19211EEdff47f25384cdc3') as MarketData;
 const MAINNET_ETH = getMarket(1, '0xA17581A9E3356d9A858b789D68B4d866e593aE94') as MarketData;
@@ -66,12 +66,17 @@ const CHANGES: Change[] = [
   [
     'disconnect',
     { market: MAINNET_USDC, session: SESSION },
-    { market: MAINNET_USDC, session: { account: undefined, connector: undefined } },
+    { market: MAINNET_USDC, session: { account: undefined, connector: undefined, status: 'disconnected' } },
   ],
   [
     'connector/session',
     { market: MAINNET_USDC, session: SESSION },
     { market: MAINNET_USDC, session: { ...SESSION, connector: 'connector-uid-2' } },
+  ],
+  [
+    'reconnect with the same account and connector',
+    { market: MAINNET_USDC, session: SESSION },
+    { market: MAINNET_USDC, session: { ...SESSION, status: 'reconnecting' } },
   ],
   [
     'chain, with the same Comet address',
@@ -181,6 +186,7 @@ describe('useActionQueue', () => {
   it.each<[string, Props]>([
     ['account', { market: MAINNET_USDC, session: { ...SESSION, account: OTHER_ACCOUNT } }],
     ['market', { market: MAINNET_ETH, session: SESSION }],
+    ['connection, across a reconnect', { market: MAINNET_USDC, session: { ...SESSION, status: 'reconnecting' } }],
   ])('ignores a callback kept from an earlier visit to the same %s', (_name, elsewhere) => {
     const { result, rerender } = renderQueue({ market: MAINNET_USDC, session: SESSION });
     // A transaction submitted on the first visit clears the queue and closes the form when it settles.

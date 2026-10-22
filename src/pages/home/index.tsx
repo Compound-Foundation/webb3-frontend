@@ -129,13 +129,15 @@ const Home = ({
     selectedMarket: selectedMarketIdentity,
     comet: cometStateMarket.current,
   };
-  // Review dialogs and writes belong to a visit: the account, connector, wallet network and market
-  // they were made for. A change of any of them starts a new visit in the same render. A callback
-  // kept from an earlier visit, even one to the same account and market, starts no write. It can
-  // open or close only a dialog of its own visit, which is never shown.
+  // Review dialogs and writes belong to a visit: the account, connector, connection status, wallet
+  // network and market they were made for. A change of any of them starts a new visit in the same
+  // render, so a reconnect with the same account and connector does too. A callback kept from an
+  // earlier visit, even one to the same account and market, starts no write. It can open or close
+  // only a dialog of its own visit, which is never shown.
   const visitIdentity = [
     web3.write.account?.toLowerCase() ?? '',
     web3.write.connector?.uid ?? '',
+    web3.write.status,
     web3.write.chainId ?? '',
     selectedMarketIdentity === undefined
       ? ''
