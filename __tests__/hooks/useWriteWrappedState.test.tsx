@@ -27,13 +27,14 @@ import { useWrappedAction, WrappedActionController, WrappedActionState } from '@
 import { positionRefreshToken, useWrappedPosition } from '@hooks/useWrappedPosition';
 import {
   BlockWait,
+  newestReceiptBlock,
   parseWrappedSupplyAmount,
   prepareWrappedSupply,
   useWriteWrappedState,
   WriteWrappedState,
 } from '@hooks/useWriteWrappedState';
 import WrappedSupplyModal from '@pages/home/components/ActionModal/WrappedSupplyModal';
-import { MarketData } from '@types';
+import { MarketData, SettledTransaction, TransactionState } from '@types';
 
 import { mockWeb3 } from '../mocks/mockWeb3';
 
@@ -1203,6 +1204,40 @@ describe('useWriteWrappedState', () => {
         screen.getAllByRole('link', { name: /view on explorer/i }).map((link) => link.getAttribute('href'))
       ).toContain(`${getBlockExplorerUrl(1)}/tx/${supplyHash}`);
     });
+  });
+});
+
+describe('newestReceiptBlock', () => {
+  const settledIn = (id: string, outcome: SettledTransaction['outcome']): SettledTransaction => ({
+    id,
+    key: USDC_MARKET.wrapperAddress,
+    networkId: 1,
+    networkName: 'homestead',
+    description: id,
+    nonce: 1,
+    account: ACCOUNT,
+    step: id,
+    state: TransactionState.Pending,
+    hash: `0x${'1'.repeat(64)}`,
+    outcome,
+  });
+  const mined = (blockNumber: number, status = 1) =>
+    ({ transactionHash: `0x${'1'.repeat(64)}`, status, blockNumber } as TransactionReceipt);
+
+  it('names the newest block a settled transaction was mined in, reverted or not', () => {
+    expect(
+      newestReceiptBlock([
+        settledIn('reset', { status: 'confirmed', receipt: mined(101) }),
+        settledIn('approve', { status: 'reverted', receipt: mined(103, 0) }),
+        settledIn('supply', { status: 'confirmed', receipt: mined(102) }),
+        settledIn('replaced', { status: 'replaced' }),
+      ])
+    ).toBe(103);
+  });
+
+  it('names none before anything settled, or when nothing settled has a receipt', () => {
+    expect(newestReceiptBlock([])).toBeUndefined();
+    expect(newestReceiptBlock([settledIn('replaced', { status: 'replaced' })])).toBeUndefined();
   });
 });
 
