@@ -243,6 +243,24 @@ describe('Home review dialogs', () => {
     expect(mockWriteState.invokeBulker).toHaveBeenCalledTimes(1);
   });
 
+  it('ignores callbacks kept from an earlier visit with the same account', () => {
+    const queue = actionQueue([BORROW, SUPPLY_COMP]);
+    const { rerender } = render(homeElement({ queue }));
+    act(() => positionCard().onSubmitClicked());
+    const { onCompleteClicked: keptSubmit, onRequestClose: keptClose } = openDialog()[1];
+
+    rerender(homeElement({ queue, web3: web3For({ account: OTHER_ACCOUNT }) }));
+    rerender(homeElement({ queue }));
+    act(() => positionCard().onSubmitClicked());
+    expect(openDialog()).toEqual([ModalType.BulkerApprove, expect.anything()]);
+
+    act(() => keptSubmit());
+    act(() => keptClose());
+
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+    expect(openDialog()).toEqual([ModalType.BulkerApprove, expect.anything()]);
+  });
+
   it("does not let a settled transaction's callback close another account's dialog", () => {
     const queue = actionQueue([BORROW, SUPPLY_COMP]);
     const { rerender } = render(homeElement({ queue, isBulkerAllowed: true }));
@@ -315,6 +333,23 @@ describe('Home submission guards', () => {
     expect(mockLastProps.WrappedPositionPanel.canDismissRecovered).toBe(true);
     mockLastProps.WrappedPositionPanel.onDismissRecovered();
     expect(dismissRecovered).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the dialog's operator approval once the wallet session is unusable", () => {
+    const queue = actionQueue([BORROW, SUPPLY_COMP]);
+    const usable = wrappedLending({ status: 'usable' });
+    const { rerender } = render(homeElement({ queue, lending: usable }));
+    act(() => positionCard().onSubmitClicked());
+    const { onActionClicked: approveOperator } = openDialog()[1];
+
+    act(() => approveOperator());
+    expect(mockWriteState.allowOperator).toHaveBeenCalledTimes(1);
+
+    const unusable = wrappedLending({ status: 'unusable', reason: 'chain-mismatch', instruction: 'Reload.' });
+    rerender(homeElement({ queue, lending: unusable }));
+    act(() => approveOperator());
+
+    expect(mockWriteState.allowOperator).toHaveBeenCalledTimes(1);
   });
 
   it('allows direct writes on the wrapped route while the wallet session is usable', () => {

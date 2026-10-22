@@ -29,6 +29,8 @@ type QueueIdentity = { session: string; market: string };
 
 type QueueState = {
   identity: QueueIdentity;
+  /** Counts resets, so a return to an earlier session and market is a new visit. */
+  visit: number;
   actions: Action[];
   pendingAction: PendingAction | undefined;
   /** Actions to queue when a market is next selected, by market key. They belong to `identity`. */
@@ -44,8 +46,9 @@ enum QueueActionType {
   Reset = 'reset',
 }
 
-// Every change except a reset carries the identity key its caller rendered with. It applies only
-// while that identity holds, so a callback kept from an earlier session or market changes nothing.
+// Every change except a reset carries the visit key its caller rendered with. It applies only
+// during that visit, so a callback kept from an earlier session or market, or from an earlier visit
+// to the same ones, changes nothing.
 type AddOrUpdateAction = [QueueActionType.AddOrUpdate, string, Action];
 type ClearAction = [QueueActionType.Clear, string];
 type RemoveAction = [QueueActionType.Remove, string, Action];
@@ -68,8 +71,12 @@ function identityKey({ session, market }: QueueIdentity): string {
   return `${session}#${market}`;
 }
 
-function emptyQueue(identity: QueueIdentity): QueueState {
-  return { identity, actions: [], pendingAction: undefined, deferred: {} };
+function emptyQueue(identity: QueueIdentity, visit = 0): QueueState {
+  return { identity, visit, actions: [], pendingAction: undefined, deferred: {} };
+}
+
+function visitKey(state: QueueState): string {
+  return `${identityKey(state.identity)}@${state.visit}`;
 }
 
 function addOrUpdate(actions: Action[], action: Action): Action[] {
@@ -85,10 +92,10 @@ function queueReducer(state: QueueState, queueAction: QueueAction): QueueState {
     // Nothing queued, open or deferred carries over to a new session or market. When only the
     // market changed, the actions deferred for that market are queued.
     const replay = identity.session === state.identity.session ? state.deferred[identity.market] ?? [] : [];
-    return { ...emptyQueue(identity), actions: replay.reduce(addOrUpdate, []) };
+    return { ...emptyQueue(identity, state.visit + 1), actions: replay.reduce(addOrUpdate, []) };
   }
 
-  if (queueAction[1] !== identityKey(state.identity)) return state;
+  if (queueAction[1] !== visitKey(state)) return state;
   switch (queueAction[0]) {
     case QueueActionType.AddOrUpdate:
       return { ...state, actions: addOrUpdate(state.actions, queueAction[2]) };
@@ -138,6 +145,8 @@ export function useActionQueue(
   const isCurrent = identityKey(state.identity) === key;
   const actions = isCurrent ? state.actions : [];
   const pendingAction = isCurrent ? state.pendingAction : undefined;
+  // What the callbacks below carry: this visit to this session and market.
+  const currentVisit = visitKey(state);
 
   useEffect(() => {
     onActionsChanged(state.actions);
@@ -147,24 +156,24 @@ export function useActionQueue(
   // keeps the queue and the Bulker from ever holding one.
   const addOrUpdateAction = (action: Action) => {
     assertDirectActions([action]);
-    updateQueue([QueueActionType.AddOrUpdate, key, action]);
+    updateQueue([QueueActionType.AddOrUpdate, currentVisit, action]);
   };
 
   const clearActions = () => {
-    updateQueue([QueueActionType.Clear, key]);
+    updateQueue([QueueActionType.Clear, currentVisit]);
   };
 
   const queueActions = (chainId: number, marketAddress: string, actionsToQueue: Action[]) => {
     assertDirectActions(actionsToQueue);
-    updateQueue([QueueActionType.Defer, key, marketKey(chainId, marketAddress), actionsToQueue]);
+    updateQueue([QueueActionType.Defer, currentVisit, marketKey(chainId, marketAddress), actionsToQueue]);
   };
 
   const removeAction = (action: Action) => {
-    updateQueue([QueueActionType.Remove, key, action]);
+    updateQueue([QueueActionType.Remove, currentVisit, action]);
   };
 
   const setPendingAction = (pendingAction?: PendingAction) => {
-    updateQueue([QueueActionType.SetPending, key, pendingAction]);
+    updateQueue([QueueActionType.SetPending, currentVisit, pendingAction]);
   };
 
   const getActions = (
