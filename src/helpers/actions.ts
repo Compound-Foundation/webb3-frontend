@@ -167,7 +167,7 @@ export function sanitizedAmountForAction(
 type Validity = 'ok' | [false, string];
 
 /**
- * Why `action` would add to the account's direct Comet base supply, given the base balance the
+ * Why `action` adds to the account's direct Comet base supply, given the base balance the
  * earlier actions leave: a base supply always does, and so does a repay larger than the debt.
  * A full repay (`MAX_UINT256`) repays the debt exactly.
  */
@@ -319,7 +319,7 @@ export function validateAddingAction(
 }
 
 /**
- * Whether any action in the queue would add to the account's direct Comet base supply: a base
+ * Whether any action in the queue adds to the account's direct Comet base supply: a base
  * supply, or a repay larger than the debt the earlier actions leave.
  */
 export function addsDirectBaseSupply(

@@ -8,6 +8,7 @@ import {
   getFullExitCash,
   getGrossAssets,
   getRedeemBuffer,
+  getWithdrawableCash,
   getWrappedPositionValueInDollars,
   readWrappedPosition,
   supplyIncentivesForRoute,
@@ -34,6 +35,7 @@ type ChainValues = {
   baseSupplyIndex: bigint;
   walletBalance: bigint;
   allowance: bigint;
+  isWithdrawPaused: boolean;
 };
 
 type RecordedCall = { address: string; name: string; params: unknown[] };
@@ -53,6 +55,7 @@ function fakeMulticall(market: WrappedMarket, values: ChainValues, calls: Record
         if (address === market.cometAddress.toLowerCase()) {
           if (name === 'balanceOf') return BigNumber.from(values.totalAssets);
           if (name === 'totalsBasic') return { baseSupplyIndex: BigNumber.from(values.baseSupplyIndex) };
+          if (name === 'isWithdrawPaused') return values.isWithdrawPaused;
         }
         if (address === market.baseTokenAddress.toLowerCase()) {
           if (name === 'balanceOf') return BigNumber.from(values.walletBalance);
@@ -74,6 +77,7 @@ const BASE_VALUES: ChainValues = {
   baseSupplyIndex: 1_050_000_000_000_000n,
   walletBalance: 42_123_456n,
   allowance: 5_000_000n,
+  isWithdrawPaused: false,
 };
 
 describe('getGrossAssets', () => {
@@ -110,10 +114,28 @@ describe('getRedeemBuffer and getFullExitCash', () => {
   });
 });
 
+describe('getWithdrawableCash', () => {
+  it('is the full-exit payout when the market can pay it', () => {
+    expect(getWithdrawableCash(250_124_997n, false, 10n ** 12n)).toEqual({ amount: 250_124_997n, limit: 'none' });
+  });
+
+  it('is capped by the base token the market holds', () => {
+    expect(getWithdrawableCash(250_124_997n, false, 50_000_000n)).toEqual({ amount: 50_000_000n, limit: 'liquidity' });
+  });
+
+  it('is zero while Comet withdrawals are paused', () => {
+    expect(getWithdrawableCash(250_124_997n, true, 10n ** 12n)).toEqual({ amount: 0n, limit: 'paused' });
+  });
+});
+
 describe('getWrappedPositionValueInDollars', () => {
   it('prices underlying base units with the 8-decimal base price, keeping base decimals', () => {
     // 250.125 USDT at $0.9998
-    expect(getWrappedPositionValueInDollars(250_125_000n, 99_980_000n)).toBe(250_074_975n);
+    expect(getWrappedPositionValueInDollars(250_125_000n, 99_980_000n, 'USDT')).toBe(250_074_975n);
+  });
+
+  it('values USDC at one dollar, as the rest of the app does', () => {
+    expect(getWrappedPositionValueInDollars(250_125_000n, 99_980_000n, 'USDC')).toBe(250_125_000n);
   });
 });
 
@@ -135,6 +157,7 @@ describe('readWrappedPosition', () => {
       wrapperAllowance: 5_000_000n,
       redeemBuffer: 3n,
       fullExitCash: 250_124_997n,
+      isWithdrawPaused: false,
       snapshot: {
         totalSupply: 1_000n * 10n ** 18n - 10n ** 12n,
         totalAssets: 1_000_500_000n,
@@ -183,11 +206,16 @@ describe('supplyIncentivesForRoute', () => {
   const incentives = { earnRewardsAPR: 12_000_000_000_000_000n, isInstitutional: true };
 
   it('shows no supply reward or institutional boost on the wrapped route', () => {
-    expect(supplyIncentivesForRoute(true, incentives)).toEqual({ earnRewardsAPR: 0n, isInstitutional: false });
+    expect(supplyIncentivesForRoute(true, 0n, incentives)).toEqual({ earnRewardsAPR: 0n, isInstitutional: false });
+    expect(supplyIncentivesForRoute(true, -5n, incentives)).toEqual({ earnRewardsAPR: 0n, isInstitutional: false });
+  });
+
+  it('keeps the incentives a direct supply earns on the wrapped route', () => {
+    expect(supplyIncentivesForRoute(true, 5n, incentives)).toEqual(incentives);
   });
 
   it('keeps the market incentives on the standard route', () => {
-    expect(supplyIncentivesForRoute(false, incentives)).toEqual(incentives);
+    expect(supplyIncentivesForRoute(false, 0n, incentives)).toEqual(incentives);
   });
 });
 

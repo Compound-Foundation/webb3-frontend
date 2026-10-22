@@ -155,7 +155,7 @@ const Home = ({
       isRewardsLoading,
     } = state[1];
 
-    const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, {
+    const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, 0n, {
       earnRewardsAPR: supplyRewardsAPR,
       isInstitutional,
     });
@@ -194,7 +194,7 @@ const Home = ({
       isRewardsLoading
     } = state[1];
     isBulkerAllowed = state[1].isBulkerAllowed;
-    const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, {
+    const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, baseAsset.balance, {
       earnRewardsAPR: supplyRewardsAPR,
       isInstitutional,
     });

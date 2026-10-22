@@ -47,6 +47,7 @@ function position(shares: bigint): WrappedPosition {
     wrapperAllowance: 0n,
     redeemBuffer: 3n,
     fullExitCash: shares / 10n ** 12n - 3n,
+    isWithdrawPaused: false,
     snapshot: { totalSupply: 0n, totalAssets: 0n, baseSupplyIndex: 0n },
   };
 }
@@ -155,11 +156,12 @@ describe('useWrappedPosition', () => {
     expect(result.current.state).toEqual({ status: 'loaded', position: position(10n ** 18n) });
   });
 
-  it('reports an error when there is no account to read', () => {
+  it('waits, without an error, while the account is not yet available', () => {
+    // Web3Context withholds the account until address screening allows it.
     const { read } = deferredReader();
     const { result } = renderPosition(read, { route: wrappedRoute('key-a'), account: undefined });
 
-    expect(result.current.state.status).toBe('error');
+    expect(result.current.state).toEqual({ status: 'loading' });
     expect(read).not.toHaveBeenCalled();
   });
 
