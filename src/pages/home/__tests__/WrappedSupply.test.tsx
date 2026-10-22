@@ -357,6 +357,39 @@ describe('WrappedSupply', () => {
       expect(warning).not.toHaveTextContent(/2,500/);
     });
 
+    it("warns without an amount when the direct position read is another account's", () => {
+      const otherAccount = { ...WEB3, read: { ...WEB3.read, account: '0x0000000000000000000000000000000000000bb2' } };
+      const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
+      const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
+      const selectedMarketData = {
+        selectedMarket: [StateType.Hydrated, USDC_MARKET],
+        selectMarket: jest.fn(),
+        selectMarketByAddress: jest.fn(),
+      };
+      render(
+        <WrappedLendingContext.Provider value={lendingWith(controller(inReview()))}>
+          <SelectedMarketContext.Provider value={selectedMarketData as never}>
+            <ActionQueueContext.Provider value={actionQueue()}>
+              <Home
+                transactions={[]}
+                web3={otherAccount}
+                selectedMarketData={selectedMarketData as never}
+                cometState={cometState(BORROWER)}
+                addTransaction={jest.fn()}
+                switchWriteNetwork={jest.fn()}
+                estimatedGasMap={new Map()}
+                theme={Theme.Dark}
+              />
+            </ActionQueueContext.Provider>
+          </SelectedMarketContext.Provider>
+        </WrappedLendingContext.Provider>
+      );
+
+      const warning = within(screen.getByRole('dialog')).getByRole('alert');
+      expect(warning).toHaveTextContent(/does not repay/i);
+      expect(warning).not.toHaveTextContent(/2,500/);
+    });
+
     it('shows no warning to an account without a direct borrow', () => {
       render(homeElement(lendingWith(controller(inReview())), cometState({ ...BASE_ASSET, balance: 0n })));
 
@@ -461,6 +494,39 @@ describe('WrappedSupply', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Review' }));
 
       expect(screen.getByText(/earlier wrapped transaction/i)).toBeInTheDocument();
+    });
+
+    it('keeps the supply control disabled when the route refuses deposits, whatever the lifecycle reports', () => {
+      renderPanel(lendingWith(controller(), WRAPPED_MARKET_REGISTRY), { blockedReason: undefined });
+
+      expect(supplyButton()).toBeDisabled();
+      expect(screen.getByText('Wrapped deposits are not open yet.')).toBeInTheDocument();
+    });
+
+    it('waits for the wrapped position, with the wallet balance it reads, before the supply can start', () => {
+      renderPanel({ ...lendingWith(controller()), position: { status: 'loading' } });
+
+      expect(supplyButton()).toBeDisabled();
+      expect(screen.getByText(/waiting for your wrapped position/i)).toBeInTheDocument();
+    });
+
+    it('closes the amount form when the session or market changes', () => {
+      const lending = lendingWith(controller());
+      const props = {
+        position: lending.position,
+        baseAsset: { symbol: 'USDC', baseAssetPriceInDollars: 100_000_000n, balanceOfComet: 10n ** 12n },
+        earnAPR: 0n,
+        supply: { blockedReason: undefined, onReview: jest.fn(() => undefined) },
+        onRetry: jest.fn(),
+      };
+      const { rerender } = render(<WrappedPositionPanel route={routeFor(OPEN)} {...props} />);
+      fireEvent.click(supplyButton());
+      expect(screen.getByRole('textbox', { name: /amount of usdc to supply/i })).toBeInTheDocument();
+
+      // A reconnect gives the route a new validation key.
+      rerender(<WrappedPositionPanel route={{ ...routeFor(OPEN), validationKey: 'another-session' }} {...props} />);
+
+      expect(screen.queryByRole('textbox', { name: /amount of usdc to supply/i })).not.toBeInTheDocument();
     });
 
     it('keeps the withdraw control disabled', () => {

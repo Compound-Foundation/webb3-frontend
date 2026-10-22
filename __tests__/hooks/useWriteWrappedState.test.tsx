@@ -15,7 +15,7 @@ import { LendingSession, resolveLendingRoute, ValidationStatus, wrappedRouteKey 
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { getBlockExplorerUrl } from '@helpers/urls';
-import { WrappedSession } from '@helpers/wrappedActions';
+import { WrappedSession, wrappedActionIdentity } from '@helpers/wrappedActions';
 import { WrappedPosition } from '@helpers/wrappedPositions';
 import {
   SendResult,
@@ -25,7 +25,12 @@ import {
 } from '@hooks/useTransactionManager';
 import { useWrappedAction, WrappedActionController, WrappedActionState } from '@hooks/useWrappedAction';
 import { positionRefreshToken, useWrappedPosition } from '@hooks/useWrappedPosition';
-import { parseWrappedSupplyAmount, useWriteWrappedState, WriteWrappedState } from '@hooks/useWriteWrappedState';
+import {
+  parseWrappedSupplyAmount,
+  prepareWrappedSupply,
+  useWriteWrappedState,
+  WriteWrappedState,
+} from '@hooks/useWriteWrappedState';
 import WrappedSupplyModal from '@pages/home/components/ActionModal/WrappedSupplyModal';
 import { MarketData } from '@types';
 
@@ -735,6 +740,24 @@ describe('useWriteWrappedState', () => {
         message: expect.stringMatching(message),
       });
       expect(walletRequests(wallet)).toEqual([]);
+    });
+
+    it("refuses to plan for a market that is not the reviewed identity's", async () => {
+      const chain = chainFor(USDC_MARKET);
+      const identity = wrappedActionIdentity('supply', sessionFor({}, { cometAddress: USDT_MARKET.cometAddress }));
+      if (identity === undefined) throw new Error('the session must have an identity');
+      const readPosition = jest.fn(async () => positionOf(chain));
+
+      await expect(
+        prepareWrappedSupply({
+          identity,
+          market: USDC_MARKET,
+          amount: AMOUNT,
+          symbol: 'USDC',
+          reads: { readPosition, call: jest.fn() },
+        })
+      ).rejects.toThrow(/wrapper for this market changed/);
+      expect(readPosition).not.toHaveBeenCalled();
     });
 
     it('judges the amount by a fresh read, not by the balance the panel showed', async () => {
