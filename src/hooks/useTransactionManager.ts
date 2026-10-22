@@ -391,8 +391,8 @@ export function useTransactionManager(web3: Web3): TransactionManager {
             stored.filter((tx) => tx.account !== undefined && !isSettled(tx) && (!isOwn(tx) || isRestorable(tx)))
           );
           // A transaction the last render tracked is skipped as well, because its stored record can be
-          // stale until the next render. Otherwise one settled since that render is tracked again, and
-          // a wallet request dismissed or forgotten since then comes back as interrupted.
+          // stale until the next render. Otherwise a wallet request dismissed or forgotten since that
+          // render comes back as interrupted, and holds back the next wrapper review.
           const isTracked = (tx: Transaction) => trackedTransactions.current.some((tracked) => tracked.id === tx.id);
           storedTransactions
             .filter((tx) => isOwn(tx) && isRestorable(tx) && !isTracked(tx) && !isSettled(tx))

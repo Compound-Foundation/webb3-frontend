@@ -630,6 +630,41 @@ describe('useTransactionManager', () => {
     expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('mined')]: 'confirmed' });
   });
 
+  it('does not bring back a wallet request rejected while a restore was reading storage', async () => {
+    const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
+    const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
+    await settleLookups();
+    let rejectInWallet: (error: unknown) => void = () => undefined;
+    let submission: Promise<SendResult> = Promise.resolve({ status: 'session-changed' });
+    act(() => {
+      submission = result.current.submitTransaction({
+        key: WRAPPER,
+        description: 'Supply',
+        step: 'supply',
+        send: () => new Promise((_resolve, reject) => (rejectInWallet = reject)),
+      });
+    });
+    await settleLookups();
+
+    // The wallet provider is rebuilt, and the restore's read of the chain is slow.
+    const rebuilt = walletProvider(chain);
+    let answerRestore: (network: { chainId: number; name: string }) => void = () => undefined;
+    rebuilt.getNetwork.mockImplementationOnce(() => new Promise((resolve) => (answerRestore = resolve)));
+    rerender({ web3: web3For(ACCOUNT, rebuilt) });
+    await act(async () => {
+      // The user rejects the request, and the restore reads storage before the removal is rendered.
+      rejectInWallet({ code: 4001, message: 'User rejected the request.' });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      answerRestore({ chainId: 1, name: 'homestead' });
+    });
+    await settleLookups();
+
+    await expect(submission).resolves.toEqual({ status: 'rejected' });
+    // Not tracked again as an interrupted request, which would hold back the next wrapper review.
+    expect(result.current.transactions).toEqual([]);
+    expect(storedHashes()).toEqual([]);
+  });
+
   it('reports whether a transaction succeeded to its callback', async () => {
     const provider = walletProvider({ receipts: { [tx('succeeded')]: 1, [tx('failed')]: 0 } });
     const { result } = renderManager(web3For(ACCOUNT, provider));
