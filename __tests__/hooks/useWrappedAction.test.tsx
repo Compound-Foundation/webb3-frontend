@@ -732,6 +732,50 @@ describe('useWrappedAction', () => {
       expect(result.current.session).toMatchObject({ status: 'unusable', reason: 'provider-broken' });
       expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
+
+    it("keeps the next account's unusable session when the earlier account's last check fails late", async () => {
+      const { manager } = fakeManager();
+      let finishEarlierProbe: (result: SessionProbeResult) => void = () => undefined;
+      const probe = jest
+        .fn<Promise<SessionProbeResult>, []>()
+        // The first account's session check, then its check before the signature.
+        .mockResolvedValueOnce({ status: 'usable' })
+        .mockImplementationOnce(() => new Promise((resolve) => (finishEarlierProbe = resolve)))
+        // The next account's session check.
+        .mockResolvedValue({ status: 'unusable', reason: 'reads-failing' });
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager }, { probe });
+      await waitFor(() => expect(result.current.session.status).toBe('usable'));
+      await reachReview(result);
+      act(() => result.current.confirm());
+      await waitFor(() => expect(probe).toHaveBeenCalledTimes(2));
+
+      rerender({ session: sessionFor(wallet, { account: OTHER_ACCOUNT }), manager });
+      await waitFor(() => expect(result.current.session.status).toBe('unusable'));
+      await act(async () => finishEarlierProbe({ status: 'unusable', reason: 'provider-broken' }));
+
+      expect(result.current.session).toMatchObject({ status: 'unusable', reason: 'reads-failing' });
+      expect(result.current.blockedReason('supply')).toBe('session-unusable');
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
+    it("keeps the next account's unusable session when the earlier account's send reports a broken session", async () => {
+      const { manager, requests } = fakeManager();
+      const probe = jest
+        .fn<Promise<SessionProbeResult>, []>()
+        .mockResolvedValueOnce({ status: 'usable' })
+        .mockResolvedValueOnce({ status: 'usable' })
+        .mockResolvedValue({ status: 'unusable', reason: 'reads-failing' });
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager }, { probe });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      rerender({ session: sessionFor(wallet, { account: OTHER_ACCOUNT }), manager });
+      await waitFor(() => expect(result.current.session.status).toBe('unusable'));
+      await act(async () => requests[0].resolve({ status: 'session-broken', message: 'sendMessage' }));
+
+      expect(result.current.session).toMatchObject({ status: 'unusable', reason: 'reads-failing' });
+      expect(result.current.blockedReason('supply')).toBe('session-unusable');
+    });
   });
 
   describe('submission outcomes', () => {
