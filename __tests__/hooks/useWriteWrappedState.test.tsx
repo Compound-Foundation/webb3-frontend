@@ -672,7 +672,18 @@ describe('useWriteWrappedState', () => {
         'simulate',
         'send:supplyAndWrap',
       ]);
-      // Simulated at the block its last read came from, after the approval was mined.
+      // The supply's reads and its simulation all come from block 101, which mined the approval.
+      expect(readProvider.call).toHaveBeenCalledWith(
+        { to: USDC_MARKET.baseTokenAddress, data: CALLS.encodeFunctionData('balanceOf', [ACCOUNT]) },
+        101
+      );
+      expect(readProvider.call).toHaveBeenCalledWith(
+        {
+          to: USDC_MARKET.baseTokenAddress,
+          data: CALLS.encodeFunctionData('allowance', [ACCOUNT, USDC_MARKET.wrapperAddress]),
+        },
+        101
+      );
       expect(readProvider.call).toHaveBeenCalledWith(
         { from: ACCOUNT, to: USDC_MARKET.wrapperAddress, data: CALLS.encodeFunctionData('supplyAndWrap', [AMOUNT]) },
         101
