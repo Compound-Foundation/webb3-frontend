@@ -342,8 +342,9 @@ export type WrappedBlockReason =
   /** The wallet provider is broken or cannot read its chain. */
   | 'session-unusable'
   /**
-   * An earlier wrapper transaction for this identity is still waiting for the wallet or a receipt,
-   * or the session's stored transactions are not restored yet, so one can be.
+   * An earlier wrapper transaction for this identity is still waiting for the wallet or a receipt.
+   * Until the session's stored transactions are restored, such a transaction can exist unseen, so
+   * this is also the reason then.
    */
   | 'transaction-pending'
   /** Another wrapper action is being read, reviewed or signed. */

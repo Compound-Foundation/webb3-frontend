@@ -197,8 +197,9 @@ function App({ Component, pageProps }: any) {
     walletSession
   );
 
-  // A change of the wallet's network keeps the queue but drops its estimates, so the queue is
-  // estimated again on the new network.
+  // A change of the wallet's network keeps the queue but drops its estimates. This effect then
+  // estimates the kept queue again on the new network, under its usual conditions: no transaction
+  // is tracked, and the market and Comet state are loaded.
   useEffect(() => {
     // If a user hasn't enabled bulker then they first have to enable bulker
     // while they have actions in the queue so this catches that flow.

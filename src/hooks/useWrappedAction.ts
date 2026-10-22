@@ -642,7 +642,7 @@ export function useWrappedAction({
 
   // A confirmation belongs to the draft and step in review when it was rendered. A handler kept
   // from an earlier render does nothing once another draft or step is in review. Otherwise a
-  // delayed click on one review signs a step the user never saw.
+  // delayed click on one review signs a step the user did not confirm.
   const reviewed = state.phase === 'review' ? { draft: state.draft, stepIndex: state.stepIndex } : undefined;
   const confirm = () => {
     const current = live.current.state;
