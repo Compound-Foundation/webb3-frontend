@@ -41,6 +41,8 @@ export function useCometState(
   const [state, setState] = useState<CometState>([StateType.Loading, undefined]);
   const { waitFor } = useWaiter<Transaction[]>(transactions);
   const marketRef = useRef(marketState);
+  const accountRef = useRef(web3.read.account);
+  accountRef.current = web3.read.account;
 
   // When network is changed, immediately set state to loading and update the chainIdRef
   useEffect(() => {
@@ -81,8 +83,8 @@ export function useCometState(
             (transactions) => transactions.length === 0,
             async () => {
               // The update can be held back until transactions settle, and the user can pick
-              // another market meanwhile, so the market is checked again when it is applied.
-              if (requestedMarketAddress === marketRef.current[1]?.marketAddress) {
+              // another market or account meanwhile, so both are checked again when it is applied.
+              if (requestedMarketAddress === marketRef.current[1]?.marketAddress && account === accountRef.current) {
                 setState(newState);
               }
             },

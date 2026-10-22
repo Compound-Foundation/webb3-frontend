@@ -104,21 +104,28 @@ const Home = ({
     selectedMarket[1] === undefined
       ? undefined
       : { chainId: selectedMarket[1].chainInformation.chainId, cometAddress: selectedMarket[1].marketAddress };
-  // Comet state names no market, and it trails a market change by a render. Each new state is
-  // recorded with the market selected when it arrived, so a stale one keeps its old market.
-  const cometStateMarket = useRef<CometStateWithMarket>({ market: selectedMarketIdentity, state });
+  // Comet state names no market or account, and it trails a change of either by a render. Each
+  // new state is recorded with the market and account current when it arrived, so a stale one
+  // keeps the old ones.
+  const cometStateMarket = useRef<CometStateWithMarket>({
+    market: selectedMarketIdentity,
+    account: web3.read.account,
+    state,
+  });
   if (cometStateMarket.current.state !== state) {
-    cometStateMarket.current = { market: selectedMarketIdentity, state };
+    cometStateMarket.current = { market: selectedMarketIdentity, account: web3.read.account, state };
   }
   // Submissions can start from a callback a dialog kept from an earlier render, so they are
   // judged by the session as it is now, not as it was when the callback was made.
   const liveSession = useRef<LiveSubmissionState>({
     route: wrappedLending.route,
+    account: web3.write.account,
     selectedMarket: selectedMarketIdentity,
     comet: cometStateMarket.current,
   });
   liveSession.current = {
     route: wrappedLending.route,
+    account: web3.write.account,
     selectedMarket: selectedMarketIdentity,
     comet: cometStateMarket.current,
   };
@@ -401,7 +408,8 @@ const Home = ({
         onPendingActionConfirm: (amount: bigint) => {
           if (pendingAction !== undefined) {
             const action = getActionFromPendingAction(pendingAction, amount);
-            // The form already refuses these; this also keeps a Comet approval from being requested.
+            // The form already refuses a base supply on the wrapped route. Refusing it here as well
+            // keeps an approval for it from being requested.
             if (isWrappedRoute && action[0] === ActionType.Supply) return;
             const confirmAction = () => {
               setPendingAction(undefined);

@@ -2,6 +2,7 @@ import { JsonRpcProvider } from '@ethersproject/providers';
 import { act, renderHook } from '@testing-library/react';
 import { BigNumber } from 'ethers';
 
+import { Web3 } from '@contexts/Web3Context';
 import { useCometState } from '@hooks/useCometState';
 import { queryCometData } from '@hooks/useSelectedMarket';
 import { MarketData, MarketDataState, RewardsState, StateType, Transaction } from '@types';
@@ -23,6 +24,13 @@ jest.mock('@hooks/useWaiter', () => ({
     },
   }),
 }));
+
+// The per-account query goes through Sleuth. It never answers here, so only the queries the
+// tests resolve can update the state.
+jest.mock('@helpers/sleuth/sleuth', () => {
+  const Sleuth = jest.fn().mockImplementation(() => ({ fetch: () => new Promise(() => undefined) }));
+  return { Sleuth: Object.assign(Sleuth, { querySol: jest.fn(() => 'query') }) };
+});
 
 const mockQueryCometData = queryCometData as jest.Mock;
 
@@ -47,7 +55,7 @@ const cometResponse = (earnAPR: number) => ({
 
 const MARKET_A: MarketData = mockMarket({ marketAddress: '0x00000000000000000000000000000000000000aa' });
 const MARKET_B: MarketData = mockMarket({ marketAddress: '0x00000000000000000000000000000000000000bb' });
-const WEB3 = {
+const WEB3: Web3 = {
   ...mockWeb3NoWallet,
   read: {
     ...mockWeb3NoWallet.read,
@@ -106,5 +114,26 @@ describe('useCometState', () => {
 
     expect(result.current[0]).toBe(StateType.NoWallet);
     expect(result.current[1]?.earnAPR).toBe(111n);
+  });
+
+  it('drops a held-back result read for an account that is no longer connected', async () => {
+    mockQueryCometData.mockResolvedValue(cometResponse(111));
+    const { result, rerender } = renderHook(
+      ({ web3 }: { web3: Web3 }) => useCometState(web3, [StateType.Hydrated, MARKET_A], PENDING, REWARDS),
+      { initialProps: { web3: WEB3 } }
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(500);
+    });
+    expect(heldUpdates).toHaveLength(1);
+
+    // An account connects while the result read without one waits for a transaction to settle.
+    rerender({ web3: { ...WEB3, read: { ...WEB3.read, account: '0x00000000000000000000000000000000000000b2' } } });
+    await act(async () => {
+      await heldUpdates[0]();
+    });
+
+    expect(result.current[0]).toBe(StateType.Loading);
   });
 });
