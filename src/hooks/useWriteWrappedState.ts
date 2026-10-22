@@ -9,10 +9,9 @@ import { LendingRoute } from '@helpers/lendingRoute';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { describeWalletError } from '@helpers/walletErrors';
 import { WrappedActionIdentity, WrappedBlockReason, WrappedStep, WrappedStepCheck } from '@helpers/wrappedActions';
-import { WrappedPosition } from '@helpers/wrappedPositions';
+import { SettledTransaction } from '@types';
 
 import type { WrappedActionController } from './useWrappedAction';
-import { readWithMulticall, WrappedPositionReader } from './useWrappedPosition';
 
 /** The ids of a wrapped supply's steps, in the order they can come. */
 export const WRAPPED_SUPPLY_STEP_IDS = Object.freeze({
@@ -93,12 +92,69 @@ export class WrappedSupplyError extends Error {
   }
 }
 
+/** The account's base-token balance and its allowance to the wrapper, read at one block. */
+export type SupplyFunds = { blockNumber: number; walletBalance: bigint; allowance: bigint };
+
+/** How a read waits for the configured chain's provider to reach a block: how often it asks, and for how long. */
+export type BlockWait = { attempts: number; intervalMs: number };
+
+/** About half a minute: a few Ethereum blocks. */
+export const DEFAULT_BLOCK_WAIT: BlockWait = Object.freeze({ attempts: 20, intervalMs: 1_500 });
+
+/** The calls a wrapped supply makes to the configured chain's public provider. */
+export type SupplyReadProvider = Pick<JsonRpcProvider, 'call' | 'getBlockNumber'>;
+
+/**
+ * The newest block in which one of the account's wrapper transactions was mined, as the wallet's
+ * node reported its receipt, or undefined when none has settled in this session.
+ */
+export function newestReceiptBlock(settled: readonly SettledTransaction[]): number | undefined {
+  return settled.reduce<number | undefined>((newest, { outcome }) => {
+    if (outcome.status === 'replaced' || typeof outcome.receipt.blockNumber !== 'number') return newest;
+    return newest === undefined || outcome.receipt.blockNumber > newest ? outcome.receipt.blockNumber : newest;
+  }, undefined);
+}
+
+/**
+ * Reads the account's base-token balance and its allowance to the wrapper, both at one block that
+ * is at least `minBlock`. The transaction manager learns of a receipt from the wallet's node, and
+ * the configured chain's provider can trail it, so the read waits until that provider reaches the
+ * block. Otherwise a read just after a confirmed approval misses it, and a fresh review asks for
+ * the approval again. A provider that does not catch up in time fails the read.
+ */
+export async function readSupplyFunds(
+  provider: SupplyReadProvider,
+  identity: WrappedActionIdentity,
+  minBlock: number | undefined,
+  wait: BlockWait = DEFAULT_BLOCK_WAIT
+): Promise<SupplyFunds> {
+  let blockNumber = await provider.getBlockNumber();
+  for (let attempt = 1; minBlock !== undefined && blockNumber < minBlock; attempt++) {
+    if (attempt > wait.attempts) {
+      throw new WrappedSupplyError(
+        "This market's network has not shown your last wrapped transaction yet. Try again in a moment."
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, wait.intervalMs));
+    blockNumber = await provider.getBlockNumber();
+  }
+  const read = (method: 'balanceOf' | 'allowance', args: string[]) =>
+    provider
+      .call({ to: identity.baseTokenAddress, data: baseTokenInterface.encodeFunctionData(method, args) }, blockNumber)
+      .then((result) => BigInt(baseTokenInterface.decodeFunctionResult(method, result)[0].toString()));
+  const [walletBalance, allowance] = await Promise.all([
+    read('balanceOf', [identity.account]),
+    read('allowance', [identity.account, identity.wrapperAddress]),
+  ]);
+  return { blockNumber, walletBalance, allowance };
+}
+
 /** The reads a wrapped supply makes through the configured chain's public provider. */
 export type WrappedSupplyReads = {
-  /** The account's position in the wrapper, with its wallet balance and allowance, from one block. */
-  readPosition: () => Promise<WrappedPosition>;
-  /** An `eth_call`. */
-  call: (request: { from: string; to: string; data: string }) => Promise<string>;
+  /** The balance and allowance at a block no older than the account's last settled wrapper transaction. */
+  readFunds: () => Promise<SupplyFunds>;
+  /** An `eth_call` at a block. */
+  call: (request: { from: string; to: string; data: string }, blockNumber: number) => Promise<string>;
 };
 
 const ERROR_STRING_SELECTOR = '0x08c379a0';
@@ -138,15 +194,16 @@ function describeSimulationFailure(error: unknown): string {
 }
 
 /**
- * Simulates `supplyAndWrap(amount)` from the account with an `eth_call`, just before the wallet is
- * asked to sign it. The call must return a positive number of shares. Ethers returns a revert's
- * data as the call's result, so the result is decoded rather than trusted. A failed simulation
- * refuses the step. Nothing else is tried in its place.
+ * Simulates `supplyAndWrap(amount)` from the account with an `eth_call` at `blockNumber`, just
+ * before the wallet is asked to sign it. The call must return a positive number of shares. Ethers
+ * returns a revert's data as the call's result, so the result is decoded rather than trusted. A
+ * failed simulation refuses the step. Nothing else is tried in its place.
  */
 export async function simulateSupplyAndWrap(
   call: WrappedSupplyReads['call'],
   identity: WrappedActionIdentity,
-  amount: bigint
+  amount: bigint,
+  blockNumber: number
 ): Promise<WrappedStepCheck> {
   const refuse = (detail: string): WrappedStepCheck => ({
     ok: false,
@@ -154,11 +211,14 @@ export async function simulateSupplyAndWrap(
   });
   let shares: bigint;
   try {
-    const result = await call({
-      from: identity.account,
-      to: identity.wrapperAddress,
-      data: wrapperInterface.encodeFunctionData('supplyAndWrap', [amount]),
-    });
+    const result = await call(
+      {
+        from: identity.account,
+        to: identity.wrapperAddress,
+        data: wrapperInterface.encodeFunctionData('supplyAndWrap', [amount]),
+      },
+      blockNumber
+    );
     shares = BigInt(wrapperInterface.decodeFunctionResult('supplyAndWrap', result)[0].toString());
   } catch (error) {
     return refuse(describeSimulationFailure(error));
@@ -203,7 +263,7 @@ export type PrepareWrappedSupplyInput = {
  * the amount, never more. Before each signature, its step reads the balance and allowance again
  * and stops if they are no longer what the review was built from: the user reviews again rather
  * than the sequence changing under them. The supply is simulated from the account just before it
- * is signed.
+ * is signed, at the block of that last read.
  */
 export async function prepareWrappedSupply({
   identity,
@@ -222,36 +282,35 @@ export async function prepareWrappedSupply({
     value >= UNLIMITED_ALLOWANCE
       ? `an unlimited amount of ${symbol}`
       : `${formatExactUnits(value, market.baseDecimals)} ${symbol}`;
-  const position = await reads.readPosition();
-  if (amount > position.baseWalletBalance) {
-    throw new WrappedSupplyError(`The amount is more than the ${exact(position.baseWalletBalance)} in your wallet.`);
+  const funds = await reads.readFunds();
+  if (amount > funds.walletBalance) {
+    throw new WrappedSupplyError(`The amount is more than the ${exact(funds.walletBalance)} in your wallet.`);
   }
 
   const checkBefore = (rule: AllowanceRule, simulate: boolean) => async (): Promise<WrappedStepCheck> => {
-    let live: WrappedPosition;
+    let live: SupplyFunds;
     try {
-      live = await reads.readPosition();
+      live = await reads.readFunds();
     } catch (error) {
       return {
         ok: false,
         message: `Your wallet balance and allowance could not be read again (${describeWalletError(error)}).`,
       };
     }
-    if (live.baseWalletBalance < amount) {
-      const held = exact(live.baseWalletBalance);
+    if (live.walletBalance < amount) {
+      const held = exact(live.walletBalance);
       return { ok: false, message: `Your wallet now holds ${held}, less than this supply. Review the supply again.` };
     }
-    const allowance = live.wrapperAllowance;
+    const { allowance } = live;
     if ('exactly' in rule ? allowance !== rule.exactly : allowance < rule.atLeast) {
-      const approved = exact(allowance);
       return {
         ok: false,
-        message:
-          `The wrapper's allowance is now ${approved}, not what this review expected. ` +
-          'A transaction you just confirmed can take a moment to show. Review the supply again.',
+        message: `The wrapper's allowance is now ${exact(
+          allowance
+        )}, not what this review expected. Review the supply again.`,
       };
     }
-    return simulate ? simulateSupplyAndWrap(reads.call, identity, amount) : { ok: true };
+    return simulate ? simulateSupplyAndWrap(reads.call, identity, amount, live.blockNumber) : { ok: true };
   };
 
   const approval = (id: string, approvedAmount: bigint, description: string, rule: AllowanceRule): WrappedStep => ({
@@ -266,7 +325,7 @@ export async function prepareWrappedSupply({
   });
 
   const steps: WrappedStep[] = [];
-  const allowance = position.wrapperAllowance;
+  const { allowance } = funds;
   if (allowance < amount) {
     const isResetFirst = allowance > 0n && requiresAllowanceReset(identity.chainId, identity.baseTokenAddress);
     if (isResetFirst) {
@@ -307,13 +366,13 @@ export const IDLE_WRITE_WRAPPED_STATE: WriteWrappedState = Object.freeze<WriteWr
 });
 
 export type UseWriteWrappedStateOptions = {
-  action: Pick<WrappedActionController, 'start'>;
+  action: Pick<WrappedActionController, 'start' | 'recovered'>;
   route: LendingRoute;
   /** The configured chain's public provider. The supply's reads and simulation go through it. */
-  readProvider: JsonRpcProvider | undefined;
+  readProvider: SupplyReadProvider | undefined;
   /** The selected market's base asset symbol, for the steps' descriptions. */
   baseSymbol: string | undefined;
-  read?: WrappedPositionReader;
+  blockWait?: BlockWait;
 };
 
 /**
@@ -325,11 +384,12 @@ export function useWriteWrappedState({
   route,
   readProvider,
   baseSymbol,
-  read = readWithMulticall,
+  blockWait = DEFAULT_BLOCK_WAIT,
 }: UseWriteWrappedStateOptions): WriteWrappedState {
-  // A form or dialog can keep `supply` from an earlier render, so it reads the live values.
-  const live = useRef({ action, route, readProvider, baseSymbol, read });
-  live.current = { action, route, readProvider, baseSymbol, read };
+  // A form or dialog can keep `supply` from an earlier render, and steps read when they are
+  // confirmed, so both read the live values.
+  const live = useRef({ action, route, readProvider, baseSymbol, blockWait });
+  live.current = { action, route, readProvider, baseSymbol, blockWait };
 
   const supply = (amount: bigint): WrappedBlockReason | undefined => {
     const current = live.current;
@@ -337,7 +397,6 @@ export function useWriteWrappedState({
     const { market } = current.route;
     const provider = current.readProvider;
     const symbol = current.baseSymbol ?? 'base token';
-    const reader = current.read;
     return current.action.start('supply', async (identity) => {
       if (provider === undefined) {
         throw new WrappedSupplyError("This market's network cannot be read right now. Try again in a moment.");
@@ -348,8 +407,16 @@ export function useWriteWrappedState({
         amount,
         symbol,
         reads: {
-          readPosition: () => reader(provider, market, identity.account),
-          call: (request) => provider.call(request),
+          // Each read waits for the provider to show this account's newest settled wrapper
+          // transaction, such as the approval a review's previous step just confirmed.
+          readFunds: () =>
+            readSupplyFunds(
+              provider,
+              identity,
+              newestReceiptBlock(live.current.action.recovered.settled),
+              live.current.blockWait
+            ),
+          call: (request, blockNumber) => provider.call(request, blockNumber),
         },
       });
     });

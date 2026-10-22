@@ -26,6 +26,7 @@ import {
 import { useWrappedAction, WrappedActionController, WrappedActionState } from '@hooks/useWrappedAction';
 import { positionRefreshToken, useWrappedPosition } from '@hooks/useWrappedPosition';
 import {
+  BlockWait,
   parseWrappedSupplyAmount,
   prepareWrappedSupply,
   useWriteWrappedState,
@@ -72,6 +73,8 @@ const symbolOf = (market: WrappedMarket) => (isSame(market.baseTokenAddress, USD
 
 /** Every call these tests decode, including the ones a wrapped supply must never make. */
 const CALLS = new Interface([
+  'function balanceOf(address account) view returns (uint256)',
+  'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount)',
   'function supplyAndWrap(uint256 amount) returns (uint256 shares)',
   'function supplyAndWrapWithPermit(uint256 amount, uint256 deadline, uint8 v, bytes32 r, bytes32 s)',
@@ -89,6 +92,14 @@ type Chain = {
   balance: bigint;
   allowance: bigint;
   shares: bigint;
+  /** The newest block. Each mined transaction makes a new one. */
+  block: number;
+  /** The balance and allowance at the end of each earlier block. */
+  history: Map<number, { balance: bigint; allowance: bigint }>;
+  /** How many blocks the configured chain's provider trails the wallet's node by. */
+  providerLag: number;
+  /** The provider fails the balance and allowance reads. */
+  failsFundReads: boolean;
   /** The next mined call reverts. */
   revertNext: boolean;
   /** The supply simulation reverts with this error. */
@@ -103,14 +114,31 @@ function chainFor(market: WrappedMarket, { balance = 10_000_000_000n, allowance 
     balance,
     allowance,
     shares: 0n,
+    block: 100,
+    history: new Map(),
+    providerLag: 0,
+    failsFundReads: false,
     revertNext: false,
     simulationRevert: undefined,
     simulationResult: undefined,
   };
 }
 
-/** Mines a call as the base token and the wrapper would. Returns whether it succeeded. */
-function mine(chain: Chain, { to, data }: { to: string; data: string }): boolean {
+/** The balance and allowance at the end of `block`. */
+function stateAt(chain: Chain, block: number) {
+  return block >= chain.block
+    ? { balance: chain.balance, allowance: chain.allowance }
+    : chain.history.get(block) ?? { balance: chain.balance, allowance: chain.allowance };
+}
+
+/** Mines a call, in a new block, as the base token and the wrapper would. Returns whether it succeeded. */
+function mine(chain: Chain, request: { to: string; data: string }): boolean {
+  chain.history.set(chain.block, { balance: chain.balance, allowance: chain.allowance });
+  chain.block += 1;
+  return applyCall(chain, request);
+}
+
+function applyCall(chain: Chain, { to, data }: { to: string; data: string }): boolean {
   if (chain.revertNext) {
     chain.revertNext = false;
     return false;
@@ -162,26 +190,55 @@ const errorString = (reason: string) => `0x08c379a0${utils.defaultAbiCoder.encod
  */
 type Event = 'read' | 'position-read' | 'simulate' | 'send:approve' | 'send:supplyAndWrap';
 
-/** The configured chain's public provider: Comet's pause read and the supply simulation. */
+/**
+ * The configured chain's public provider: Comet's pause read, the supply's balance and allowance
+ * reads, and its simulation. It trails the wallet's node by `providerLag` blocks.
+ */
 function readProviderFor(chain: Chain, events: Event[]) {
+  const latest = () => chain.block - chain.providerLag;
   return {
-    call: jest.fn(async ({ from, to, data }: { from?: string; to?: string; data?: string }) => {
-      const call = CALLS.parseTransaction({ data: data ?? '0x' });
-      if (call.name === 'isSupplyPaused' && isSame(to, chain.market.cometAddress)) {
-        return CALLS.encodeFunctionResult('isSupplyPaused', [false]);
+    getBlockNumber: jest.fn(async () => latest()),
+    call: jest.fn(
+      async ({ from, to, data }: { from?: string; to?: string; data?: string }, blockTag?: number | string) => {
+        const block = typeof blockTag === 'number' ? blockTag : latest();
+        if (block > latest()) throw new Error('header not found');
+        const state = stateAt(chain, block);
+        const call = CALLS.parseTransaction({ data: data ?? '0x' });
+        const { market } = chain;
+        if (call.name === 'isSupplyPaused' && isSame(to, market.cometAddress)) {
+          return CALLS.encodeFunctionResult('isSupplyPaused', [false]);
+        }
+        if (chain.failsFundReads && (call.name === 'balanceOf' || call.name === 'allowance')) {
+          throw new Error('rate limited');
+        }
+        if (call.name === 'balanceOf' && isSame(to, market.baseTokenAddress) && isSame(call.args[0], ACCOUNT)) {
+          events.push('read');
+          return CALLS.encodeFunctionResult('balanceOf', [state.balance]);
+        }
+        if (
+          call.name === 'allowance' &&
+          isSame(to, market.baseTokenAddress) &&
+          isSame(call.args[0], ACCOUNT) &&
+          isSame(call.args[1], market.wrapperAddress)
+        ) {
+          return CALLS.encodeFunctionResult('allowance', [state.allowance]);
+        }
+        if (call.name === 'supplyAndWrap' && isSame(to, market.wrapperAddress) && isSame(from, ACCOUNT)) {
+          events.push('simulate');
+          if (chain.simulationRevert !== undefined) throw chain.simulationRevert;
+          if (chain.simulationResult !== undefined) return chain.simulationResult;
+          const amount = BigInt(call.args[0].toString());
+          if (amount > state.allowance) throw revertWith(errorString('ERC20: transfer amount exceeds allowance'));
+          return CALLS.encodeFunctionResult('supplyAndWrap', [amount * 10n ** 12n]);
+        }
+        throw new Error(`unexpected read of ${to} from ${from}`);
       }
-      if (call.name === 'supplyAndWrap' && isSame(to, chain.market.wrapperAddress) && isSame(from, ACCOUNT)) {
-        events.push('simulate');
-        if (chain.simulationRevert !== undefined) throw chain.simulationRevert;
-        if (chain.simulationResult !== undefined) return chain.simulationResult;
-        const amount = BigInt(call.args[0].toString());
-        if (amount > chain.allowance) throw revertWith(errorString('ERC20: transfer amount exceeds allowance'));
-        return CALLS.encodeFunctionResult('supplyAndWrap', [amount * 10n ** 12n]);
-      }
-      throw new Error(`unexpected read of ${to} from ${from}`);
-    }),
+    ),
   };
 }
+
+/** Lets a read that waits for a block try again quickly. */
+const QUICK_BLOCK_WAIT = { attempts: 200, intervalMs: 5 };
 
 /**
  * The wallet provider. Each request is mined as soon as it is sent. While the test holds receipts
@@ -196,7 +253,7 @@ function walletFor(chain: Chain, events: Event[]) {
     const hash = `0x${(++sentCount).toString(16).padStart(64, '0')}`;
     events.push(`send:${CALLS.parseTransaction({ data: request.data }).name}` as Event);
     const status = mine(chain, request) ? 1 : 0;
-    receipts.set(hash, { transactionHash: hash, status, blockNumber: 100 + sentCount } as TransactionReceipt);
+    receipts.set(hash, { transactionHash: hash, status, blockNumber: chain.block } as TransactionReceipt);
     return hash;
   });
   const wallet = {
@@ -318,13 +375,16 @@ type Result = { current: Pick<Harness, 'action' | 'write'> };
  * The wrapped supply as App wires it: the transaction manager, the lifecycle, the supply and the
  * position read, all through the fake wallet and the fake public provider.
  */
-function renderSupply(chain: Chain, { wallet: givenWallet, events = [] }: { wallet?: Wallet; events?: Event[] } = {}) {
+function renderSupply(
+  chain: Chain,
+  {
+    wallet: givenWallet,
+    events = [],
+    blockWait = QUICK_BLOCK_WAIT,
+  }: { wallet?: Wallet; events?: Event[]; blockWait?: BlockWait } = {}
+) {
   const wallet = givenWallet ?? walletFor(chain, events);
   const readProvider = readProviderFor(chain, events);
-  const read = jest.fn(async () => {
-    events.push('read');
-    return positionOf(chain);
-  });
   const positionRead = jest.fn(async () => {
     events.push('position-read');
     return positionOf(chain);
@@ -340,9 +400,9 @@ function renderSupply(chain: Chain, { wallet: givenWallet, events = [] }: { wall
       const write = useWriteWrappedState({
         action,
         route: session.route,
-        readProvider: readProvider as unknown as JsonRpcProvider,
+        readProvider,
         baseSymbol: symbolOf(chain.market),
-        read,
+        blockWait,
       });
       const position = useWrappedPosition({
         route: session.route,
@@ -355,7 +415,7 @@ function renderSupply(chain: Chain, { wallet: givenWallet, events = [] }: { wall
     },
     { initialProps: { session: sessionFor(wallet, { cometAddress: chain.market.cometAddress }) } }
   );
-  return { ...hook, wallet, readProvider, read, positionRead, events };
+  return { ...hook, wallet, readProvider, positionRead, events };
 }
 
 function stepsOf(state: WrappedActionState) {
@@ -609,11 +669,11 @@ describe('useWriteWrappedState', () => {
         'simulate',
         'send:supplyAndWrap',
       ]);
-      expect(readProvider.call).toHaveBeenCalledWith({
-        from: ACCOUNT,
-        to: USDC_MARKET.wrapperAddress,
-        data: CALLS.encodeFunctionData('supplyAndWrap', [AMOUNT]),
-      });
+      // Simulated at the block its last read came from, after the approval was mined.
+      expect(readProvider.call).toHaveBeenCalledWith(
+        { from: ACCOUNT, to: USDC_MARKET.wrapperAddress, data: CALLS.encodeFunctionData('supplyAndWrap', [AMOUNT]) },
+        101
+      );
     });
 
     it('sends nothing more when the simulation fails, and never falls back to Comet', async () => {
@@ -726,9 +786,9 @@ describe('useWriteWrappedState', () => {
     });
 
     it.each<[string, bigint, RegExp]>([
-      ['above the refreshed wallet balance', 10_000_000_001n, /wallet/i],
+      ['above the refreshed wallet balance', 10_000_000_001n, /in your wallet/i],
       ['zero', 0n, /greater than/i],
-      ['the unlimited sentinel', MAX_UINT256, /wallet|unlimited/i],
+      ['the unlimited sentinel', MAX_UINT256, /unlimited/i],
     ])('refuses an amount %s before any review', async (_name, amount, message) => {
       const chain = chainFor(USDC_MARKET, { balance: 10_000_000_000n });
       const { result, wallet } = renderSupply(chain);
@@ -743,10 +803,9 @@ describe('useWriteWrappedState', () => {
     });
 
     it("refuses to plan for a market that is not the reviewed identity's", async () => {
-      const chain = chainFor(USDC_MARKET);
       const identity = wrappedActionIdentity('supply', sessionFor({}, { cometAddress: USDT_MARKET.cometAddress }));
       if (identity === undefined) throw new Error('the session must have an identity');
-      const readPosition = jest.fn(async () => positionOf(chain));
+      const readFunds = jest.fn(async () => ({ blockNumber: 100, walletBalance: AMOUNT, allowance: 0n }));
 
       await expect(
         prepareWrappedSupply({
@@ -754,10 +813,28 @@ describe('useWriteWrappedState', () => {
           market: USDC_MARKET,
           amount: AMOUNT,
           symbol: 'USDC',
-          reads: { readPosition, call: jest.fn() },
+          reads: { readFunds, call: jest.fn() },
         })
       ).rejects.toThrow(/wrapper for this market changed/);
-      expect(readPosition).not.toHaveBeenCalled();
+      expect(readFunds).not.toHaveBeenCalled();
+    });
+
+    it('stops without sending when the balance and allowance cannot be read again', async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: 0n });
+      const { result, wallet } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+
+      chain.failsFundReads = true;
+      await confirmStep(result);
+
+      expect(result.current.action.state).toMatchObject({
+        phase: 'stopped',
+        steps: [
+          { status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/could not be read again/) },
+          { status: 'waiting' },
+        ],
+      });
+      expect(walletRequests(wallet)).toEqual([]);
     });
 
     it('judges the amount by a fresh read, not by the balance the panel showed', async () => {
@@ -774,6 +851,65 @@ describe('useWriteWrappedState', () => {
         message: expect.stringMatching(/wallet/i),
       });
       expect(walletRequests(wallet)).toEqual([]);
+    });
+
+    it("waits for the market's provider to show the confirmed approval before checking the supply", async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: 0n });
+      const { result, wallet, readProvider } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+      await confirmStep(result);
+      expect(chain.block).toBe(101);
+
+      // The wallet's node has the approval's block. The market's provider is one block behind.
+      chain.providerLag = 1;
+      const asked = readProvider.getBlockNumber.mock.calls.length;
+      act(() => result.current.action.confirm());
+      await waitFor(() => expect(readProvider.getBlockNumber.mock.calls.length).toBeGreaterThan(asked + 2));
+      expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
+      expect(stepStatuses(result)).toEqual(['confirmed', 'checking']);
+
+      chain.providerLag = 0;
+      await waitFor(() => expect(result.current.action.state.phase).toBe('complete'));
+      expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT), supplyAndWrap(USDC_MARKET, AMOUNT)]);
+    });
+
+    it("plans a fresh review from the confirmed approval while the market's provider trails, and asks for no second approval", async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: 0n });
+      const { result, wallet } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+      await confirmStep(result);
+      act(() => result.current.action.discard());
+
+      chain.providerLag = 1;
+      act(() => {
+        result.current.write.supply(AMOUNT);
+      });
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+      expect(result.current.action.state.phase).toBe('reading');
+
+      chain.providerLag = 0;
+      await waitFor(() => expect(result.current.action.state.phase).toBe('review'));
+      expect(draftCalls(result).map(({ id }) => id)).toEqual(['supply']);
+      expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
+    });
+
+    it("signs nothing when the market's provider does not catch up", async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: 0n });
+      const { result, wallet } = renderSupply(chain, { blockWait: { attempts: 3, intervalMs: 5 } });
+      await startSupply(result, AMOUNT);
+      await confirmStep(result);
+
+      chain.providerLag = 1;
+      await confirmStep(result);
+
+      expect(result.current.action.state).toMatchObject({
+        phase: 'stopped',
+        steps: [
+          { status: 'confirmed' },
+          { status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/has not shown/) },
+        ],
+      });
+      expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
     });
 
     const CHANGES: [string, (wallet: Wallet) => WrappedSession][] = [
@@ -924,9 +1060,9 @@ describe('useWriteWrappedState', () => {
           const write = useWriteWrappedState({
             action,
             route: sessionFor(wallet).route,
-            readProvider: readProvider as unknown as JsonRpcProvider,
+            readProvider,
             baseSymbol: 'USDC',
-            read: async () => positionOf(chain),
+            blockWait: QUICK_BLOCK_WAIT,
           });
           return { action, write };
         },
