@@ -607,21 +607,35 @@ const Home = ({
 
   let wrappedPanel: ReactNode = null;
   const { route: wrappedRoute } = wrappedLending;
-  if (wrappedRoute.kind === 'wrapped' && cometState !== StateType.Loading) {
-    const { baseAsset, earnAPR } = state[1];
+  if (wrappedRoute.kind === 'wrapped') {
     // The rate and price belong to the market whose Comet state this is, which can still be
     // the previous market for a render after a switch.
     const cometMarket = cometStateMarket.current.market;
-    const isCometStateForRoute =
+    const cometForRoute =
+      cometState !== StateType.Loading &&
       cometMarket !== undefined &&
       cometMarket.chainId === wrappedRoute.chainId &&
-      cometMarket.cometAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase();
+      cometMarket.cometAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase()
+        ? state[1]
+        : undefined;
+    // Only the loaded figures need the Comet state. A read failure or an unavailable wrapper
+    // shows at once, so its Retry or Reload is never hidden behind a slow Comet read.
+    const position =
+      wrappedLending.position.status === 'loaded' && cometForRoute === undefined
+        ? { status: 'loading' as const }
+        : wrappedLending.position;
     wrappedPanel = (
       <WrappedPositionPanel
         route={wrappedRoute}
-        position={isCometStateForRoute ? wrappedLending.position : { status: 'loading' }}
-        baseAsset={baseAsset}
-        earnAPR={earnAPR}
+        position={position}
+        baseAsset={
+          cometForRoute?.baseAsset ?? {
+            symbol: selectedMarket[1]?.baseAsset.symbol ?? '',
+            baseAssetPriceInDollars: 0n,
+            balanceOfComet: 0n,
+          }
+        }
+        earnAPR={cometForRoute?.earnAPR ?? 0n}
         onRetry={wrappedLending.retry}
       />
     );

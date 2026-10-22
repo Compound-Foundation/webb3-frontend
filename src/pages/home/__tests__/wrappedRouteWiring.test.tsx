@@ -73,6 +73,22 @@ function wrappedLending(cometAddress = USDC_COMET): WrappedLending {
   return { route, position: { status: 'loading' }, retry: jest.fn() };
 }
 
+const LOADED: WrappedLending['position'] = {
+  status: 'loaded',
+  position: {
+    shares: 1n,
+    shareDecimals: 18,
+    grossAssets: 0n,
+    baseDecimals: 6,
+    baseWalletBalance: 0n,
+    wrapperAllowance: 0n,
+    redeemBuffer: 3n,
+    fullExitCash: 0n,
+    isWithdrawPaused: false,
+    snapshot: { totalSupply: 0n, totalAssets: 0n, baseSupplyIndex: 0n },
+  },
+};
+
 const STANDARD: WrappedLending = {
   route: { kind: 'standard', writes: { isEligible: true } },
   position: { status: 'not-applicable' },
@@ -238,10 +254,7 @@ describe('Home on the wrapped route', () => {
 
   it('shows the panel loading while the Comet state still belongs to the previous market', () => {
     const state = cometState(EMPTY_ACCOUNT);
-    const loaded: WrappedLending = {
-      ...wrappedLending(),
-      position: { status: 'error', message: 'stand-in for a loaded position' },
-    };
+    const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
     const { rerender } = render(
       homeElement({ lending: wrappedLending(USDT_COMET), market: USDT_MARKET, state, queue: actionQueue([]) })
     );
@@ -253,6 +266,39 @@ describe('Home on the wrapped route', () => {
       homeElement({ lending: loaded, market: USDC_MARKET, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) })
     );
     expect(mockLastProps.WrappedPositionPanel.position).toEqual(loaded.position);
+  });
+});
+
+describe('Home on the wrapped route while Comet state loads', () => {
+  const LOADING: CometState = [StateType.Loading, undefined];
+
+  beforeEach(() => {
+    delete mockLastProps.WrappedPositionPanel;
+  });
+
+  it('still shows a wrapped read failure and its retry', () => {
+    const failed: WrappedLending = { ...wrappedLending(), position: { status: 'error', message: 'Read failed.' } };
+    render(homeElement({ lending: failed, state: LOADING, queue: actionQueue([]) }));
+
+    expect(mockLastProps.WrappedPositionPanel.position).toEqual(failed.position);
+    expect(mockLastProps.WrappedPositionPanel.onRetry).toBe(failed.retry);
+  });
+
+  it('still shows why wrapped reads are unavailable', () => {
+    const unavailable: WrappedLending = {
+      ...wrappedLending(),
+      position: { status: 'unavailable', reason: 'validation-failed' },
+    };
+    render(homeElement({ lending: unavailable, state: LOADING, queue: actionQueue([]) }));
+
+    expect(mockLastProps.WrappedPositionPanel.position).toEqual(unavailable.position);
+  });
+
+  it('holds back loaded figures until the Comet state for the market arrives', () => {
+    render(homeElement({ lending: { ...wrappedLending(), position: LOADED }, state: LOADING, queue: actionQueue([]) }));
+
+    expect(mockLastProps.WrappedPositionPanel.position).toEqual({ status: 'loading' });
+    expect(mockLastProps.WrappedPositionPanel.baseAsset.symbol).toBe('USDC');
   });
 });
 
