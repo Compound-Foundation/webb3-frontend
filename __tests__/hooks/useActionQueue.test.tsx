@@ -178,6 +178,29 @@ describe('useActionQueue', () => {
     expect(visibleActions(result.current)).toEqual([BORROW]);
   });
 
+  it.each<[string, Props]>([
+    ['account', { market: MAINNET_USDC, session: { ...SESSION, account: OTHER_ACCOUNT } }],
+    ['market', { market: MAINNET_ETH, session: SESSION }],
+  ])('ignores a callback kept from an earlier visit to the same %s', (_name, elsewhere) => {
+    const { result, rerender } = renderQueue({ market: MAINNET_USDC, session: SESSION });
+    // A transaction submitted on the first visit clears the queue and closes the form when it settles.
+    const { clearActions: clearOnSettle, setPendingAction: closeFormOnSettle } = result.current;
+
+    rerender(elsewhere);
+    rerender({ market: MAINNET_USDC, session: SESSION });
+    act(() => {
+      result.current.addOrUpdateAction(BORROW);
+      result.current.setPendingAction(PENDING_REPAY);
+    });
+    act(() => {
+      clearOnSettle();
+      closeFormOnSettle(undefined);
+    });
+
+    expect(visibleActions(result.current)).toEqual([BORROW]);
+    expect(pendingAction(result.current)).toEqual(PENDING_REPAY);
+  });
+
   it('refuses a wrapper action with a typed error and leaves the queue as it was', () => {
     const { result, rerender } = renderQueue({ market: MAINNET_USDC, session: SESSION });
     act(() => result.current.addOrUpdateAction(BORROW));

@@ -129,9 +129,10 @@ const Home = ({
     selectedMarket: selectedMarketIdentity,
     comet: cometStateMarket.current,
   };
-  // A review dialog belongs to the account, connector, network and market it was opened for, and
-  // closes in the same render when any of them changes. A callback kept from an earlier one can
-  // open or close only a dialog of its own, which is never shown.
+  // A review dialog belongs to the visit to the account, connector, network and market it was opened
+  // for, and closes in the same render when any of them changes. A callback kept from an earlier
+  // visit, even one to the same account and market, can open or close only a dialog of its own,
+  // which is never shown.
   const dialogIdentity = [
     web3.write.account?.toLowerCase() ?? '',
     web3.write.connector?.uid ?? '',
@@ -140,18 +141,23 @@ const Home = ({
       ? ''
       : `${selectedMarketIdentity.chainId}:${selectedMarketIdentity.cometAddress.toLowerCase()}`,
   ].join('|');
-  const [openDialog, setOpenDialog] = useState<{ identity: string; state: ActionModalState }>();
-  const actionModalState = openDialog?.identity === dialogIdentity ? openDialog.state : undefined;
+  const dialogVisit = useRef({ identity: dialogIdentity, count: 0 });
+  if (dialogVisit.current.identity !== dialogIdentity) {
+    dialogVisit.current = { identity: dialogIdentity, count: dialogVisit.current.count + 1 };
+  }
+  const dialogKey = `${dialogIdentity}#${dialogVisit.current.count}`;
+  const [openDialog, setOpenDialog] = useState<{ key: string; state: ActionModalState }>();
+  const actionModalState = openDialog?.key === dialogKey ? openDialog.state : undefined;
   const setActionModalState = (dialog: ActionModalState) =>
     setOpenDialog((current) => {
-      if (dialog !== undefined) return { identity: dialogIdentity, state: dialog };
-      return current?.identity === dialogIdentity ? undefined : current;
+      if (dialog !== undefined) return { key: dialogKey, state: dialog };
+      return current?.key === dialogKey ? undefined : current;
     });
   useEffect(() => {
-    if (openDialog !== undefined && openDialog.identity !== dialogIdentity) setOpenDialog(undefined);
-  }, [openDialog, dialogIdentity]);
-  const liveDialogIdentity = useRef(dialogIdentity);
-  liveDialogIdentity.current = dialogIdentity;
+    if (openDialog !== undefined && openDialog.key !== dialogKey) setOpenDialog(undefined);
+  }, [openDialog, dialogKey]);
+  const liveDialogKey = useRef(dialogKey);
+  liveDialogKey.current = dialogKey;
   // On the wrapped route, a wallet session found unusable stops direct writes as well.
   const liveWalletUnusable = useRef(false);
   liveWalletUnusable.current = wrappedLending.action.session.status === 'unusable';
@@ -225,7 +231,7 @@ const Home = ({
       isInstitutional,
     });
     // Dialogs keep the callbacks below, so they check the session when they run.
-    const isFromEarlierDialog = () => liveDialogIdentity.current !== dialogIdentity;
+    const isFromEarlierDialog = () => liveDialogKey.current !== dialogKey;
     const isBlockedOnLiveRoute = (actionsToSubmit: Action[]) =>
       liveWalletUnusable.current ||
       // A queue holding a wrapper action is refused whole, never submitted without it.
@@ -242,6 +248,11 @@ const Home = ({
     const pendingAction = getPendingAction(updatedDataPostActions.baseAsset, updatedDataPostActions.collateralAssets);
 
     const onRequestClose = () => setActionModalState(undefined);
+    // The approval dialog keeps this, so it checks the session when the user clicks.
+    const allowOperatorWhileCurrent: WriteCometState['allowOperator'] = async (...args) => {
+      if (isFromEarlierDialog() || liveWalletUnusable.current) return;
+      return writeState.allowOperator(...args);
+    };
     const submitBulkerAction = () => {
       if (isFromEarlierDialog()) return;
       if (isBlockedOnLiveRoute(actions)) {
@@ -500,7 +511,7 @@ const Home = ({
                     market,
                     state[1],
                     transactions,
-                    writeState,
+                    { ...writeState, allowOperator: allowOperatorWhileCurrent },
                     estimatedGasMap,
                     onRequestClose,
                     submitBulkerAction
