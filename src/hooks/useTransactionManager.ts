@@ -8,6 +8,7 @@ import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { filterMap } from '@helpers/functions';
 import { TRX_REFRESH_INTERVAL } from '@helpers/numbers';
 import { classifyWalletError, describeWalletError, SendWithdrawnError } from '@helpers/walletErrors';
+import { isWrapperAddress } from '@helpers/wrappedActions';
 import {
   AwaitingConfirmationTransaction,
   BaseTransaction,
@@ -126,12 +127,13 @@ function updateStoredTransactions(change: (stored: Transaction[]) => Transaction
 }
 
 /**
- * Whether the record is one step of a multi-step action, such as a wrapper supply. While such a
- * step may still be live, the next review of its action waits, so neither a reload nor clearing
- * the list drops it.
+ * Whether the record is a step of a wrapper action. While such a step may still be live, the next
+ * review of its action waits, so neither a reload nor clearing the list drops it. Only records
+ * keyed to a configured wrapper qualify, so a record written to storage by anyone else cannot
+ * hold any other contract's buttons.
  */
-function isActionStep(transaction: Transaction): boolean {
-  return transaction.step !== undefined;
+function isWrapperStep(transaction: Transaction): boolean {
+  return transaction.step !== undefined && isWrapperAddress(transaction.key);
 }
 
 function txReducer(currentTransactions: Transaction[], action: Action): Transaction[] {
@@ -161,8 +163,8 @@ function txReducer(currentTransactions: Transaction[], action: Action): Transact
       break;
     }
     case ActionType.Clear: {
-      updatedTransactions = currentTransactions.filter(isActionStep);
-      const clearedIds = new Set(currentTransactions.filter((tx) => !isActionStep(tx)).map((tx) => tx.id));
+      updatedTransactions = currentTransactions.filter(isWrapperStep);
+      const clearedIds = new Set(currentTransactions.filter((tx) => !isWrapperStep(tx)).map((tx) => tx.id));
       storedChange = (stored) => stored.filter((tx) => !clearedIds.has(tx.id));
       break;
     }
@@ -192,9 +194,8 @@ type Resolution =
  *
  * The nonce read before sending is only a lower bound: a wallet that queues the transaction behind
  * another sends it with a higher one. The node's record of the transaction gives its own nonce. A
- * step of a multi-step action is judged replaced only by its own nonce, since reporting it
- * replaced lets a fresh review of the action start, and a lower bound could report a transaction
- * that is still pending.
+ * wrapper step is judged replaced only by its own nonce, since reporting it replaced lets a fresh
+ * review of the action start, and a lower bound could report a transaction that is still pending.
  */
 async function resolveTransaction(provider: TransactionReader, transaction: PendingTransaction): Promise<Resolution> {
   const receipt = await provider.getTransactionReceipt(transaction.hash);
@@ -204,7 +205,7 @@ async function resolveTransaction(provider: TransactionReader, transaction: Pend
   const sentTransaction = await provider.getTransaction(transaction.hash);
   const reportedNonce = typeof sentTransaction?.nonce === 'number' ? sentTransaction.nonce : undefined;
   const ownNonce = reportedNonce ?? (transaction.nonceSource === 'transaction' ? transaction.nonce : undefined);
-  const nonce = ownNonce ?? (isActionStep(transaction) ? undefined : transaction.nonce);
+  const nonce = ownNonce ?? (isWrapperStep(transaction) ? undefined : transaction.nonce);
   const pending: Resolution = { status: 'pending', ownNonce: reportedNonce };
   if (nonce === undefined) return pending;
   const confirmedNonce = await provider.getTransactionCount(transaction.account);
@@ -288,7 +289,7 @@ export type TransactionManager = {
   walletFailure: WalletFailure | undefined;
   addTransaction: AddTransaction;
   submitTransaction: SubmitTransaction;
-  /** Clears the list, except steps of multi-step actions, which stay until they settle or are dismissed. */
+  /** Clears the list, except wrapper steps, which stay until they settle or are dismissed. */
   clearTransactions: () => void;
   /** Stops tracking one transaction, with no outcome and no callback. */
   dismissTransaction: (id: string) => void;
@@ -330,10 +331,10 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         const storedTransactions = readStoredTransactions();
         const isOwn = (tx: Transaction) => tx.networkId === chainId && tx.account?.toLowerCase() === sender;
         const isInterrupted = (tx: Transaction): tx is AwaitingConfirmationTransaction =>
-          isOwn(tx) && tx.state === TransactionState.AwaitingConfirmation && isActionStep(tx);
+          isOwn(tx) && tx.state === TransactionState.AwaitingConfirmation && isWrapperStep(tx);
         // A record with no sender cannot be tied to an account, and a wallet request with no hash
-        // cannot be looked up. A step of a multi-step action stays, though: its wallet request may
-        // still be open, so the next review of its action waits until the user dismisses it.
+        // cannot be looked up. A wrapper step stays, though: its wallet request may still be open,
+        // so the next review of its action waits until the user dismisses it.
         updateStoredTransactions((stored) =>
           stored.filter(
             (tx) =>

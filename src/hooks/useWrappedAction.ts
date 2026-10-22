@@ -111,6 +111,8 @@ export type WrappedActionController = {
   session: WalletSessionHealth;
   /** This account's wrapper transactions on this chain: still pending, and settled this session. */
   recovered: { pending: readonly Transaction[]; settled: readonly SettledTransaction[] };
+  /** Whether earlier wrapper transactions are holding back a fresh review, with no draft in progress. */
+  canDismissRecovered: boolean;
   /** Why `start(type)` would be refused now, or undefined. */
   blockedReason: (type: WrappedActionType) => WrappedBlockReason | undefined;
   /** Starts a fresh review. Returns why it was refused, if it was. */
@@ -128,10 +130,11 @@ export type WrappedActionController = {
 };
 
 /** The controller outside the wrapped route. */
-export const IDLE_WRAPPED_ACTION: WrappedActionController = Object.freeze({
+export const IDLE_WRAPPED_ACTION: WrappedActionController = Object.freeze<WrappedActionController>({
   state: { phase: 'idle' },
   session: { status: 'not-applicable' },
   recovered: { pending: [], settled: [] },
+  canDismissRecovered: false,
   blockedReason: () => 'not-wrapped',
   start: () => 'not-wrapped',
   confirm: () => undefined,
@@ -268,14 +271,26 @@ function outcomeState(outcome: TransactionOutcome, hash: string): WrappedStepSta
 
 /**
  * Asks the wallet to sign and broadcast a step, returning its hash as soon as the wallet has one.
- * The chain id is sent too, so a wallet that checks it refuses a request for another chain.
+ * Gas is estimated first, so that `beforeSending`, which throws to withdraw the request, runs
+ * immediately before the wallet is asked. The chain id is sent too, so a wallet that checks it
+ * refuses a request for another chain.
  */
-function sendStep(identity: WrappedActionIdentity, step: WrappedStep): Promise<string> {
-  const provider = identity.provider as Pick<JsonRpcProvider, 'getSigner'>;
+async function sendStep(
+  identity: WrappedActionIdentity,
+  step: WrappedStep,
+  beforeSending: () => void
+): Promise<string> {
+  const provider = identity.provider as Pick<JsonRpcProvider, 'getSigner' | 'estimateGas'>;
+  const request = { to: step.request.to, data: step.request.data, chainId: identity.chainId };
+  const estimatedGas = await provider.estimateGas({ ...request, from: identity.account });
+  beforeSending();
   return provider
     .getSigner(identity.account)
-    .sendUncheckedTransaction({ to: step.request.to, data: step.request.data, chainId: identity.chainId });
+    .sendUncheckedTransaction({ ...request, gasLimit: estimatedGas.mul(GAS_LIMIT_PERCENT).div(100) });
 }
+
+/** The gas limit sent, as a percentage of the estimate: the app's usual 20% margin. */
+const GAS_LIMIT_PERCENT = 120;
 
 /**
  * The draft's own copy of the calls `prepare` returned. It is frozen, so the call that was checked
@@ -515,11 +530,14 @@ export function useWrappedAction({
       account: draft.identity.account,
       chainId: draft.identity.chainId,
       send: async () => {
-        // The manager reads the network and nonce through the wallet before it calls this, so the
-        // session is checked once more, immediately before the wallet is asked.
-        withdrawnBecause = isCurrentRun() ? recheck() : 'identity-changed';
-        if (withdrawnBecause !== undefined) throw new SendWithdrawnError();
-        hash = await sendStep(draft.identity, step);
+        // The manager reads the network and nonce through the wallet before it calls this, and gas
+        // is estimated before the wallet is asked, so the session is checked again after each.
+        const withdrawIfChanged = () => {
+          withdrawnBecause = isCurrentRun() ? recheck() : 'identity-changed';
+          if (withdrawnBecause !== undefined) throw new SendWithdrawnError();
+        };
+        withdrawIfChanged();
+        hash = await sendStep(draft.identity, step, withdrawIfChanged);
         return hash;
       },
       onSettled: (outcome) => {
@@ -566,5 +584,15 @@ export function useWrappedAction({
     current.recovered.pending.forEach((transaction) => current.manager.dismissTransaction(transaction.id));
   };
 
-  return { state, session: health, recovered, blockedReason, start, confirm, discard, dismissRecovered };
+  return {
+    state,
+    session: health,
+    recovered,
+    canDismissRecovered: recovered.pending.length > 0 && !isInProgress(state),
+    blockedReason,
+    start,
+    confirm,
+    discard,
+    dismissRecovered,
+  };
 }

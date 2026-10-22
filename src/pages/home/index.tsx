@@ -683,6 +683,8 @@ const Home = ({
         }
         earnAPR={cometForRoute?.earnAPR ?? 0n}
         session={wrappedLending.action.session}
+        canDismissRecovered={wrappedLending.action.canDismissRecovered}
+        onDismissRecovered={wrappedLending.action.dismissRecovered}
         onRetry={wrappedLending.retry}
       />
     );

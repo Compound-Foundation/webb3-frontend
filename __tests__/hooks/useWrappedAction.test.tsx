@@ -1,6 +1,7 @@
 import { Interface } from '@ethersproject/abi';
 import { TransactionReceipt } from '@ethersproject/providers';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { BigNumber } from 'ethers';
 
 import {
   ANCHORAGE_CONNECTOR_ID,
@@ -58,6 +59,7 @@ const OPEN = openRegistry();
 function walletProvider() {
   const sendUncheckedTransaction = jest.fn(async () => '0xsent');
   const wallet = {
+    estimateGas: jest.fn(async () => BigNumber.from(100_000)),
     chainId: 1,
     readError: undefined as unknown,
     send: jest.fn(async (method: string): Promise<unknown> => {
@@ -720,7 +722,12 @@ describe('useWrappedAction', () => {
       expect(requests[0].request).toMatchObject({ key: USDC_WRAPPER, step: 'approve', account: ACCOUNT, chainId: 1 });
       await expect(requests[0].request.send()).resolves.toBe('0xsent');
       expect(wallet.getSigner).toHaveBeenCalledWith(ACCOUNT);
-      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledWith({ ...APPROVE.request, chainId: 1 });
+      expect(wallet.estimateGas).toHaveBeenCalledWith({ ...APPROVE.request, chainId: 1, from: ACCOUNT });
+      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledWith({
+        ...APPROVE.request,
+        chainId: 1,
+        gasLimit: BigNumber.from(120_000),
+      });
 
       await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xapproval' }));
       act(() => requests[0].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xapproval') }));
@@ -730,7 +737,11 @@ describe('useWrappedAction', () => {
       await confirmAndWaitForWallet(result, requests, 2);
       expect(requests[1].request).toMatchObject({ key: USDC_WRAPPER, step: 'supply' });
       await requests[1].request.send();
-      expect(wallet.sendUncheckedTransaction).toHaveBeenLastCalledWith({ ...SUPPLY.request, chainId: 1 });
+      expect(wallet.sendUncheckedTransaction).toHaveBeenLastCalledWith({
+        ...SUPPLY.request,
+        chainId: 1,
+        gasLimit: BigNumber.from(120_000),
+      });
       await act(async () => requests[1].resolve({ status: 'submitted', id: 'id-2', hash: '0xsupply' }));
       act(() => requests[1].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xsupply') }));
 
@@ -868,6 +879,23 @@ describe('useWrappedAction', () => {
       }
     );
 
+    it('withdraws the request when the draft is cleared while gas is estimated', async () => {
+      const { manager, requests } = fakeManager();
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      let finishEstimate: (gas: BigNumber) => void = () => undefined;
+      wallet.estimateGas.mockImplementationOnce(() => new Promise((resolve) => (finishEstimate = resolve)));
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      const sending = requests[0].request.send();
+      await waitFor(() => expect(wallet.estimateGas).toHaveBeenCalledTimes(1));
+      act(() => result.current.discard());
+      finishEstimate(BigNumber.from(100_000));
+
+      await expect(sending).rejects.toBeInstanceOf(SendWithdrawnError);
+      expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    });
+
     it('sends the call it checked, even if the step it was given changes afterwards', async () => {
       const { manager, requests } = fakeManager();
       const { result } = renderAction({ session: sessionFor(wallet), manager });
@@ -882,7 +910,11 @@ describe('useWrappedAction', () => {
       await confirmAndWaitForWallet(result, requests, 1);
       await requests[0].request.send();
 
-      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledWith({ ...SUPPLY.request, chainId: 1 });
+      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledWith({
+        ...SUPPLY.request,
+        chainId: 1,
+        gasLimit: BigNumber.from(120_000),
+      });
       const { state } = result.current;
       if (state.phase !== 'signing') throw new Error('the step must be signing');
       expect(Object.isFrozen(state.draft.steps[0].request)).toBe(true);
@@ -973,6 +1005,7 @@ describe('useWrappedAction', () => {
       });
 
       expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+      expect(result.current.canDismissRecovered).toBe(true);
       act(() => result.current.dismissRecovered());
 
       expect(manager.dismissTransaction).toHaveBeenCalledWith('interrupted');
@@ -988,6 +1021,7 @@ describe('useWrappedAction', () => {
       const inFlight = wrapperTransaction({ id: 'in-flight' });
       rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [inFlight] } });
 
+      expect(result.current.canDismissRecovered).toBe(false);
       act(() => result.current.dismissRecovered());
 
       expect(manager.dismissTransaction).not.toHaveBeenCalled();

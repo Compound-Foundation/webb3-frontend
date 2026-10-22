@@ -314,6 +314,46 @@ describe('useTransactionManager', () => {
       expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
     });
 
+    it('is an ordinary transaction when it is not keyed to a wrapper', async () => {
+      store([
+        {
+          ...storedRecord('', { key: COMET, step: 'supply' }),
+          state: TransactionState.AwaitingConfirmation,
+          hash: undefined,
+        },
+      ]);
+      const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
+      const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
+      await settleLookups();
+      // A wallet request with no hash, not kept for a wrapper, cannot be recovered.
+      expect(result.current.transactions).toEqual([]);
+      expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
+
+      await act(async () => {
+        await result.current.submitTransaction({
+          key: COMET,
+          description: 'Repay',
+          step: 'repay',
+          send: async () => tx('repay'),
+        });
+      });
+      act(() => result.current.clearTransactions());
+      expect(result.current.transactions).toEqual([]);
+
+      await act(async () => {
+        await result.current.submitTransaction({
+          key: COMET,
+          description: 'Repay',
+          step: 'repay',
+          send: async () => tx('repay'),
+        });
+      });
+      chain.confirmedNonces = { [ACCOUNT]: 8 };
+      await lookUpAgain(rerender, chain);
+      // Judged by the lower bound, like any other transaction not keyed to a wrapper.
+      expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('repay')]: 'replaced' });
+    });
+
     it('stays in the list when the list is cleared, while other transactions go', async () => {
       const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
       await act(async () => {
