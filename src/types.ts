@@ -571,7 +571,6 @@ export type BaseTransaction = {
   account?: string;
   /** For one transaction of a multi-step action, such as a wrapper supply, the step it is. */
   step?: string;
-  callback?: (outcome: TransactionOutcome) => void;
 };
 export type AwaitingConfirmationTransaction = BaseTransaction & {
   state: TransactionState.AwaitingConfirmation;
@@ -594,7 +593,7 @@ export type TransactionOutcome =
   | { status: 'replaced' };
 
 /** A broadcast transaction and what became of it. */
-export type SettledTransaction = Omit<PendingTransaction, 'callback'> & { outcome: TransactionOutcome };
+export type SettledTransaction = PendingTransaction & { outcome: TransactionOutcome };
 
 export type MarketsByNetwork = {
   [key: number]: { chainInformation: ChainInformation; markets: MarketData[] };

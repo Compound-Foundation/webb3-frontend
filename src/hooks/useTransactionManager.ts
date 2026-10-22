@@ -318,8 +318,8 @@ export function useTransactionManager(web3: Web3): TransactionManager {
   const [walletFailure, setWalletFailure] = useState<WalletFailure | undefined>(undefined);
   const [restoredSession, setRestoredSession] = useState<RestoredSession | undefined>(undefined);
   const settledIds = useRef(new Set<string>());
-  // Callbacks by transaction id. A copy of a transaction read back from storage has none, so the
-  // callback runs once whichever copy settles first.
+  // Callbacks by transaction id. Records are stored, and a stored record cannot hold a function,
+  // so no record carries its callback. `settle` runs once for each id, so each callback runs once.
   const callbacks = useRef(new Map<string, (outcome: TransactionOutcome) => void>());
   const { provider, account } = web3.write;
 
@@ -333,10 +333,9 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     if (settledIds.current.has(transaction.id)) return;
     settledIds.current.add(transaction.id);
     updateTransactions([ActionType.Remove, transaction.id]);
-    const { callback: recordCallback, ...record } = transaction;
-    const callback = callbacks.current.get(transaction.id) ?? recordCallback;
+    const callback = callbacks.current.get(transaction.id);
     callbacks.current.delete(transaction.id);
-    setSettledTransactions((settled) => [...settled, { ...record, outcome }].slice(-MAX_SETTLED_TRANSACTIONS));
+    setSettledTransactions((settled) => [...settled, { ...transaction, outcome }].slice(-MAX_SETTLED_TRANSACTIONS));
     callback?.(outcome);
   }, []);
 
@@ -481,7 +480,6 @@ export function useTransactionManager(web3: Web3): TransactionManager {
           nonce: confirmedNonceBefore,
           account: account.toLowerCase(),
           step: request.step,
-          callback: request.onSettled,
         };
         record = { ...baseTransaction, state: TransactionState.AwaitingConfirmation };
         updateTransactions([ActionType.Add, record]);
