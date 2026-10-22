@@ -19,6 +19,7 @@ const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
 const WRAPPER = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73';
 const COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
+const BROKEN_EXTENSION = new TypeError("Cannot read properties of undefined (reading 'sendMessage')");
 
 /** A transaction hash made from a label, so that the test reads by name. */
 function tx(label: string): string {
@@ -531,6 +532,39 @@ describe('useTransactionManager', () => {
       expect(onSettled).toHaveBeenCalledTimes(1);
       expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('supply')]: 'confirmed' });
     });
+
+    it.each(['restore', 'receipt lookup', 'wallet request'] as const)(
+      'keeps the rebuilt provider recorded as broken when a request through the earlier provider fails late: %s',
+      async (request) => {
+        const earlier = walletProvider();
+        let failEarlierRequest: (error: unknown) => void = () => undefined;
+        const openRequest = jest.fn(() => new Promise<never>((_resolve, reject) => (failEarlierRequest = reject)));
+        if (request === 'restore') earlier.getNetwork.mockImplementationOnce(openRequest);
+        if (request === 'receipt lookup') {
+          store([storedRecord(tx('pending'))]);
+          earlier.getTransactionReceipt.mockImplementationOnce(openRequest);
+        }
+        const { result, rerender } = renderManager(web3For(ACCOUNT, earlier));
+        if (request === 'wallet request') {
+          act(() => {
+            void result.current.submitTransaction({ key: COMET, description: 'Repay', send: openRequest });
+          });
+        }
+        await waitFor(() => expect(openRequest).toHaveBeenCalled());
+
+        // The rebuilt provider throws as an extension broken by an update does.
+        const rebuilt = walletProvider();
+        rebuilt.getNetwork.mockRejectedValue(BROKEN_EXTENSION);
+        rerender({ web3: web3For(ACCOUNT, rebuilt) });
+        await waitFor(() => expect(result.current.walletFailure?.provider).toBe(rebuilt));
+
+        // The earlier provider's request then fails the same way.
+        act(() => failEarlierRequest(BROKEN_EXTENSION));
+        await settleLookups();
+
+        expect(result.current.walletFailure?.provider).toBe(rebuilt);
+      }
+    );
   });
 
   it('does not track again a transaction it settled while a restore was reading storage', async () => {
@@ -733,8 +767,6 @@ describe('useTransactionManager', () => {
   });
 
   describe('submitTransaction', () => {
-    const BROKEN_EXTENSION = new TypeError("Cannot read properties of undefined (reading 'sendMessage')");
-
     it('shows the request as awaiting the wallet until the wallet returns a hash', async () => {
       const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
       const { result } = renderManager(web3For(ACCOUNT, provider));
