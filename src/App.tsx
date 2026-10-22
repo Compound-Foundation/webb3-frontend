@@ -47,6 +47,7 @@ function App({ Component, pageProps }: any) {
     transactions,
     settledTransactions,
     walletFailure,
+    restoredSession,
     addTransaction,
     submitTransaction,
     clearTransactions,
@@ -112,7 +113,14 @@ function App({ Component, pageProps }: any) {
       screeningStatus: web3.screeningStatus,
       provider: web3.write.provider,
     },
-    manager: { transactions, settledTransactions, walletFailure, submitTransaction, dismissTransaction },
+    manager: {
+      transactions,
+      settledTransactions,
+      walletFailure,
+      restoredSession,
+      submitTransaction,
+      dismissTransaction,
+    },
     readProvider: wrappedChainProvider,
   });
   const wrappedLending = {

@@ -171,6 +171,51 @@ describe('useTransactionManager', () => {
     expect(storedHashes()).toEqual([tx('other-account'), tx('other-chain'), tx('unresolved')]);
   });
 
+  it('tracks each stored transaction before its lookup finishes, in the render that names the restored session', async () => {
+    store([storedRecord(tx('supply'), { key: WRAPPER, step: 'supply', nonce: 9, nonceSource: 'transaction' })]);
+    const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
+    let finishLookup: (receipt: null) => void = () => undefined;
+    provider.getTransactionReceipt.mockImplementation(() => new Promise((resolve) => (finishLookup = resolve)));
+    const rendered: { isRestored: boolean; tracked: (string | undefined)[] }[] = [];
+    const { result } = renderHook(() => {
+      const manager = useTransactionManager(web3For(ACCOUNT, provider));
+      rendered.push({ isRestored: manager.restoredSession !== undefined, tracked: hashes(manager.transactions) });
+      return manager;
+    });
+
+    await waitFor(() => expect(provider.getTransactionReceipt).toHaveBeenCalledWith(tx('supply')));
+    expect(result.current.restoredSession).toEqual({ provider, account: ACCOUNT, chainId: 1 });
+    expect(hashes(result.current.transactions)).toEqual([tx('supply')]);
+    // No render names the session restored without the transaction it restored.
+    expect(rendered.filter((render) => render.isRestored).every((render) => render.tracked.length === 1)).toBe(true);
+
+    await act(async () => finishLookup(null));
+    expect(hashes(result.current.transactions)).toEqual([tx('supply')]);
+  });
+
+  it('names no restored session until it can read the chain, and tries again', async () => {
+    jest.useFakeTimers();
+    try {
+      store([storedRecord(tx('unresolved'), { nonce: 9 })]);
+      const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
+      provider.getNetwork.mockRejectedValueOnce(new Error('could not detect network'));
+      const { result } = renderManager(web3For(ACCOUNT, provider));
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1_000);
+      });
+      expect(result.current.restoredSession).toBeUndefined();
+      expect(result.current.transactions).toEqual([]);
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(TRX_REFRESH_INTERVAL);
+      });
+      expect(result.current.restoredSession).toEqual({ provider, account: ACCOUNT, chainId: 1 });
+      expect(hashes(result.current.transactions)).toEqual([tx('unresolved')]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('restores each transaction once when the wallet provider is rebuilt', async () => {
     store([storedRecord(tx('unresolved'), { nonce: 9 })]);
     const chain = { confirmedNonces: { [ACCOUNT]: 7 } };
@@ -411,7 +456,7 @@ describe('useTransactionManager', () => {
       }
     });
 
-    it("runs the transaction's callback once when the restore settles it first", async () => {
+    it("runs the transaction's callback once when the provider is rebuilt after the transaction is mined", async () => {
       const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
       const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
       const onSettled = jest.fn();
