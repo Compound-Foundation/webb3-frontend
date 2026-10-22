@@ -5,6 +5,7 @@ import IconPair from '@components/IconPair';
 import { ArrowLeft, ExternalLink } from '@components/Icons';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
+import { useWrappedLending } from '@contexts/WrappedLendingContext';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, isV2Market } from '@helpers/markets';
 import { formatTokenBalance, getTokenValue, PRICE_PRECISION } from '@helpers/numbers';
@@ -21,6 +22,7 @@ import MarketRatesPanel from './components/MarketRatesPanel';
 import MarketStatsPanel from './components/MarketStatsPanel';
 import RateModelPanel from './components/RateModelPanel';
 import WhitelistStatusBanner from './components/WhitelistStatusBanner';
+import WrappedRouteNotice from './components/WrappedRouteNotice';
 import { useMarketsState } from './hooks/useMarketsState';
 
 type MarketsProps = {
@@ -35,6 +37,12 @@ const Market = ({ web3 }: MarketsProps) => {
   const state = useMarketsState(web3, selectedMarket);
   const [marketStateType, marketStateData] = state;
   const [, market] = selectedMarket;
+  const { route } = useWrappedLending();
+  const isWrappedRoute =
+    route.kind === 'wrapped' &&
+    market !== undefined &&
+    route.chainId === market.chainInformation.chainId &&
+    route.cometAddress.toLowerCase() === market.marketAddress.toLowerCase();
   const [currentChainName, currentChainId, currentBaseToken] =
     market !== undefined
       ? [market.chainInformation.name, market.chainInformation.chainId, market.baseAsset.symbol]
@@ -153,8 +161,9 @@ const Market = ({ web3 }: MarketsProps) => {
     } = marketStateData;
 
     // While the boost is paying, a banner describes the connected account's
-    // access to it
-    if (isInstitutional && supplyRewardsAPR > 0n) {
+    // access to it. The boost does not reach a wrapped position, so the wrapped
+    // route shows no banner.
+    if (isInstitutional && supplyRewardsAPR > 0n && !isWrappedRoute) {
       whitelistStatusBanner = (
         <WhitelistStatusBanner whitelistStatus={institutionalWhitelistStatus(web3.read.account)} />
       );
@@ -336,6 +345,7 @@ const Market = ({ web3 }: MarketsProps) => {
         {marketStatsPanel}
         {v2Markets ? marketOverviewPanel : marketRatesPanel}
         {interestRateModelPanel}
+        {isWrappedRoute && market !== undefined && <WrappedRouteNotice baseSymbol={market.baseAsset.symbol} />}
         {whitelistStatusBanner}
         {assetRows}
         {!configMarket?.institutional && additionalMarketDataPanel}
