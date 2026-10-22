@@ -100,6 +100,8 @@ type Chain = {
   providerLag: number;
   /** The provider fails the balance and allowance reads. */
   failsFundReads: boolean;
+  /** How many more balance reads fail as a node a block behind fails them. */
+  laggingNodeReads: number;
   /** The next mined call reverts. */
   shouldRevertNext: boolean;
   /** The supply simulation reverts with this error. */
@@ -118,6 +120,7 @@ function chainFor(market: WrappedMarket, { balance = 10_000_000_000n, allowance 
     history: new Map(),
     providerLag: 0,
     failsFundReads: false,
+    laggingNodeReads: 0,
     shouldRevertNext: false,
     simulationRevert: undefined,
     simulationResult: undefined,
@@ -210,6 +213,10 @@ function readProviderFor(chain: Chain, events: Event[]) {
         }
         if (chain.failsFundReads && (call.name === 'balanceOf' || call.name === 'allowance')) {
           throw new Error('rate limited');
+        }
+        if (chain.laggingNodeReads > 0 && call.name === 'balanceOf') {
+          chain.laggingNodeReads -= 1;
+          throw new Error('header not found');
         }
         if (call.name === 'balanceOf' && isSame(to, market.baseTokenAddress) && isSame(call.args[0], ACCOUNT)) {
           events.push('read');
@@ -958,6 +965,19 @@ describe('useWriteWrappedState', () => {
         })
       ).rejects.toThrow(/wrapper for this market changed/);
       expect(readFunds).not.toHaveBeenCalled();
+    });
+
+    it('reads again when a node of a load-balanced provider is still a block behind', async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: 0n });
+      const { result, wallet } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+
+      // The next pinned read lands on a node that has not reached its block yet.
+      chain.laggingNodeReads = 1;
+      await confirmStep(result);
+
+      expect(stepStatuses(result)).toEqual(['confirmed', 'waiting']);
+      expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
     });
 
     it('stops without sending when the balance and allowance cannot be read again', async () => {

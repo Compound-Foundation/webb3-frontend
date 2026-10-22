@@ -97,11 +97,18 @@ export function newestReceiptBlock(settled: readonly SettledTransaction[]): numb
   }, undefined);
 }
 
+/** How many more times a failed balance and allowance read is made, at the provider's newest block. */
+const FUND_READ_RETRIES = 2;
+
 /**
  * Reads the account's base-token balance and its allowance to the wrapper, both at one block that
  * is at least `minBlock`, the block of the account's newest settled wrapper transaction. Otherwise
  * a read just after a confirmed approval can miss it, and a fresh review asks for the approval
  * again. A provider that does not reach the block in time fails the read.
+ *
+ * A load-balanced provider can answer a read from a node still behind the block number another
+ * node gave, and that node fails a read pinned to the block. A failed read is made again, from the
+ * provider's newest block, up to `FUND_READ_RETRIES` times.
  */
 async function readSupplyFunds(
   provider: SupplyReadProvider,
@@ -109,21 +116,28 @@ async function readSupplyFunds(
   minBlock: number | undefined,
   wait: BlockWait = DEFAULT_BLOCK_WAIT
 ): Promise<SupplyFunds> {
-  const blockNumber = await waitForBlock(provider, minBlock, wait);
-  if (blockNumber === undefined) {
-    throw new WrappedSupplyError(
-      "This market's network has not shown your last wrapped transaction yet. Try again in a moment."
-    );
+  for (let retries = 0; ; retries++) {
+    const blockNumber = await waitForBlock(provider, minBlock, wait);
+    if (blockNumber === undefined) {
+      throw new WrappedSupplyError(
+        "This market's network has not shown your last wrapped transaction yet. Try again in a moment."
+      );
+    }
+    const read = (method: 'balanceOf' | 'allowance', args: string[]) =>
+      provider
+        .call({ to: identity.baseTokenAddress, data: baseTokenInterface.encodeFunctionData(method, args) }, blockNumber)
+        .then((result) => BigInt(baseTokenInterface.decodeFunctionResult(method, result)[0].toString()));
+    try {
+      const [walletBalance, allowance] = await Promise.all([
+        read('balanceOf', [identity.account]),
+        read('allowance', [identity.account, identity.wrapperAddress]),
+      ]);
+      return { blockNumber, walletBalance, allowance };
+    } catch (error) {
+      if (retries >= FUND_READ_RETRIES) throw error;
+      await new Promise((resolve) => setTimeout(resolve, wait.intervalMs));
+    }
   }
-  const read = (method: 'balanceOf' | 'allowance', args: string[]) =>
-    provider
-      .call({ to: identity.baseTokenAddress, data: baseTokenInterface.encodeFunctionData(method, args) }, blockNumber)
-      .then((result) => BigInt(baseTokenInterface.decodeFunctionResult(method, result)[0].toString()));
-  const [walletBalance, allowance] = await Promise.all([
-    read('balanceOf', [identity.account]),
-    read('allowance', [identity.account, identity.wrapperAddress]),
-  ]);
-  return { blockNumber, walletBalance, allowance };
 }
 
 /** The reads a wrapped supply makes through the configured chain's public provider. */
