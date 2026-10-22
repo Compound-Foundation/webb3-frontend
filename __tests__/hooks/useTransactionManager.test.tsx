@@ -240,6 +240,33 @@ describe('useTransactionManager', () => {
     expect(result.current.transactions).toEqual([]);
   });
 
+  it('keeps tracking a restored transaction whose lookup fails, and records a broken provider', async () => {
+    store([storedRecord('0xunknown', { nonce: 9 })]);
+    const provider = walletProvider();
+    provider.getTransactionReceipt.mockRejectedValue(
+      new TypeError("Cannot read properties of undefined (reading 'sendMessage')")
+    );
+    const { result } = renderManager(web3For(ACCOUNT, provider));
+
+    await waitFor(() => expect(hashes(result.current.transactions)).toEqual(['0xunknown']));
+    expect(result.current.settledTransactions).toEqual([]);
+    expect(result.current.walletFailure?.provider).toBe(provider);
+  });
+
+  it("clears this session's transactions and keeps other accounts' stored records", async () => {
+    store([storedRecord('0xother-account', { account: OTHER_ACCOUNT })]);
+    const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
+    await act(async () => {
+      await result.current.addTransaction(COMET, 'Supply', sent('0xsent', 1), 1, jest.fn(), []);
+    });
+    expect(storedHashes()).toEqual(['0xother-account', '0xsent']);
+
+    act(() => result.current.clearTransactions());
+
+    expect(result.current.transactions).toEqual([]);
+    expect(storedHashes()).toEqual(['0xother-account']);
+  });
+
   describe('submitTransaction', () => {
     const BROKEN_EXTENSION = new TypeError("Cannot read properties of undefined (reading 'sendMessage')");
 
