@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 
 import { getMarket } from '@helpers/markets';
+import { WRAPPED_ACTION, WrappedExecutionError } from '@helpers/wrappedActions';
 import { QueueSession, useActionQueue } from '@hooks/useActionQueue';
 import { Action, ActionQueue, ActionType, MarketData, PendingAction, RewardsState, StateType } from '@types';
 
@@ -175,6 +176,23 @@ describe('useActionQueue', () => {
     act(() => clearOnSettle());
 
     expect(visibleActions(result.current)).toEqual([BORROW]);
+  });
+
+  it('refuses a wrapper action with a typed error and leaves the queue as it was', () => {
+    const { result, rerender } = renderQueue({ market: MAINNET_USDC, session: SESSION });
+    act(() => result.current.addOrUpdateAction(BORROW));
+    const draft = { kind: WRAPPED_ACTION, id: 'draft-1', steps: [] } as unknown as Action;
+    const shares = { ...COMP, address: '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73' };
+    const wrapperShareSupply: Action = [ActionType.SupplyCollateral, shares, 1n];
+
+    expect(() => result.current.addOrUpdateAction(draft)).toThrow(WrappedExecutionError);
+    expect(() => result.current.addOrUpdateAction(wrapperShareSupply)).toThrow(WrappedExecutionError);
+    // The direct action deferred with the draft is refused with it, not deferred alone.
+    expect(() => defer(result.current, MAINNET_ETH, [SUPPLY_COMP, draft])).toThrow(WrappedExecutionError);
+    expect(visibleActions(result.current)).toEqual([BORROW]);
+
+    rerender({ market: MAINNET_ETH, session: SESSION });
+    expect(visibleActions(result.current)).toEqual([]);
   });
 
   describe('with an unchanged session and market', () => {
