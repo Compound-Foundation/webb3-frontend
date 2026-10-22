@@ -256,6 +256,7 @@ export type WrappedStepProblem =
   | 'wrong-target'
   | 'wrong-method'
   | 'wrong-spender'
+  | 'wrong-amount'
   | 'malformed-call'
   | 'bad-sequence';
 
@@ -278,7 +279,9 @@ const ALLOWED_STEPS: Record<WrappedActionType, readonly WrappedStepKind[]> = {
  * Checks that a step makes only the call its kind allows, on the draft's own contracts: the base
  * token's `approve` to the wrapper, or the wrapper's own supply or exit method, canonically
  * encoded. The contracts come from the draft's identity, which comes from the route, so a step can
- * never reach Comet, the Bulker or any other contract.
+ * never reach Comet, the Bulker or any other contract. The amount is the draft's own: base units
+ * for a supply and shares for a withdrawal. An approval is for exactly that amount, or zero to
+ * reset an allowance first, and never more.
  */
 export function checkWrappedStep(draft: WrappedActionDraft, step: WrappedStep): WrappedStepProblem | undefined {
   const { identity } = draft;
@@ -298,10 +301,12 @@ export function checkWrappedStep(draft: WrappedActionDraft, step: WrappedStep): 
   if (calls.encodeFunctionData(call.functionFragment, call.args) !== step.request.data.toLowerCase()) {
     return 'malformed-call';
   }
-  if (step.kind === 'approve' && String(call.args[0]).toLowerCase() !== identity.wrapperAddress.toLowerCase()) {
-    return 'wrong-spender';
+  if (step.kind === 'approve') {
+    if (String(call.args[0]).toLowerCase() !== identity.wrapperAddress.toLowerCase()) return 'wrong-spender';
+    const approved = BigInt(call.args[1].toString());
+    return approved === 0n || approved === draft.amount ? undefined : 'wrong-amount';
   }
-  return undefined;
+  return BigInt(call.args[0].toString()) === draft.amount ? undefined : 'wrong-amount';
 }
 
 /**

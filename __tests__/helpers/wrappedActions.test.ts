@@ -102,10 +102,12 @@ const supplyAndWrap = (to = USDC_WRAPPER) =>
 const unwrapAndWithdraw = (to = USDC_WRAPPER) =>
   step('unwrap-and-withdraw', to, CALLS.encodeFunctionData('unwrapAndWithdraw', [10n ** 18n]));
 
+/** A draft for 1 USDC in base units when supplying, or for one share when withdrawing. */
 function draft(type: WrappedActionType, steps: WrappedStep[], session = liveSession()): WrappedActionDraft {
   const identity = wrappedActionIdentity(type, session);
   if (identity === undefined) throw new Error('the session must have a wrapped identity');
-  return { kind: WRAPPED_ACTION, id: 'draft-1', identity, amount: 1_000_000n, steps };
+  const amount = type === 'supply' ? 1_000_000n : 10n ** 18n;
+  return { kind: WRAPPED_ACTION, id: 'draft-1', identity, amount, steps };
 }
 
 const BASE_ASSET = mockBaseAsset({ address: USDC });
@@ -256,6 +258,20 @@ describe('wrappedActions', () => {
       ["another market's wrapper", 'supply', supplyAndWrap(USDT_WRAPPER), 'wrong-target'],
       ['an exit in a supply', 'supply', unwrapAndWithdraw(), 'step-not-allowed'],
       ['an approval in a withdrawal', 'withdraw', approve(), 'step-not-allowed'],
+      [
+        'a supply of another amount',
+        'supply',
+        step('supply-and-wrap', USDC_WRAPPER, CALLS.encodeFunctionData('supplyAndWrap', [999_999n])),
+        'wrong-amount',
+      ],
+      ['an approval above the amount', 'supply', approve(USDC_WRAPPER, 1_000_001n), 'wrong-amount'],
+      ['an unlimited approval', 'supply', approve(USDC_WRAPPER, 2n ** 256n - 1n), 'wrong-amount'],
+      [
+        'a withdrawal of other shares',
+        'withdraw',
+        step('unwrap-and-withdraw', USDC_WRAPPER, CALLS.encodeFunctionData('unwrapAndWithdraw', [1n])),
+        'wrong-amount',
+      ],
       [
         'unwrapAndWithdraw labelled as a supply',
         'supply',
