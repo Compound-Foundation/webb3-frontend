@@ -565,6 +565,8 @@ export type BaseTransaction = {
   description: string;
   /** The sender's confirmed nonce just before sending, or the transaction's own nonce once known. */
   nonce: number;
+  /** Whether `nonce` is the transaction's own, or only a lower bound read before sending. */
+  nonceSource?: 'transaction' | 'lower-bound';
   /** The sender, in lower case. Records stored before this field existed have none. */
   account?: string;
   /** For one transaction of a multi-step action, such as a wrapper supply, the step it is. */
@@ -573,6 +575,8 @@ export type BaseTransaction = {
 };
 export type AwaitingConfirmationTransaction = BaseTransaction & {
   state: TransactionState.AwaitingConfirmation;
+  /** Restored after a reload: the wallet request may still be open, but its result cannot be followed. */
+  isInterrupted?: boolean;
 };
 export type PendingTransaction = BaseTransaction & {
   state: TransactionState.Pending;

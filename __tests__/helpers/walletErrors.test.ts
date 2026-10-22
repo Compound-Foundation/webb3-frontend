@@ -22,6 +22,7 @@ describe('classifyWalletError', () => {
     ['WalletConnect code 5000 (not EIP-1193 4001)', { code: 5000, message: 'User rejected.' }],
     ['a message that only mentions rejection', new Error('The request was rejected by the backend')],
     ['a timeout', new Error('timeout')],
+    ['a JavaScript error that is not a broken extension, like a failed fetch', new TypeError('Failed to fetch')],
     ['a string', 'failed'],
     ['nothing', undefined],
   ])('treats %s as an unknown outcome, not a rejection', (_name, error) => {
