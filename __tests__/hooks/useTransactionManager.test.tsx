@@ -210,10 +210,17 @@ describe('useTransactionManager', () => {
       expect(result.current.restoredSession).toBeUndefined();
       expect(result.current.transactions).toEqual([]);
 
+      // The wait doubles, so nothing more is tried in the next second.
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1_000);
+      });
+      expect(provider.getNetwork).toHaveBeenCalledTimes(2);
+
       // The third attempt, two seconds after the second, succeeds.
       await act(async () => {
-        await jest.advanceTimersByTimeAsync(2_000);
+        await jest.advanceTimersByTimeAsync(1_000);
       });
+      expect(provider.getNetwork).toHaveBeenCalledTimes(3);
       expect(result.current.restoredSession).toEqual({ provider, account: ACCOUNT, chainId: 1 });
       expect(hashes(result.current.transactions)).toEqual([tx('unresolved')]);
     } finally {
@@ -558,6 +565,69 @@ describe('useTransactionManager', () => {
     expect(storedHashes()).toEqual([]);
     expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('mined')]: 'confirmed' });
     expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not write back a transaction that a late lookup reports after it settled', async () => {
+    jest.useFakeTimers();
+    try {
+      const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
+      const provider = walletProvider(chain);
+      let answerSlowLookup: (value: { hash: string; nonce: number } | null) => void = () => undefined;
+      provider.getTransaction.mockImplementationOnce(() => new Promise((resolve) => (answerSlowLookup = resolve)));
+      const { result, rerender } = renderManager(web3For(ACCOUNT, provider));
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(100);
+      });
+      await act(async () => {
+        await result.current.submitTransaction({ key: COMET, description: 'Supply', send: async () => tx('mined') });
+      });
+      // The first lookup finds no receipt, and the node's record of the transaction is slow to come.
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(100);
+      });
+      expect(provider.getTransaction).toHaveBeenCalledTimes(1);
+
+      // Mined. The next poll settles it, and then the slow lookup answers with the transaction's nonce.
+      chain.receipts = { [tx('mined')]: 1 };
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(TRX_REFRESH_INTERVAL + 100);
+        answerSlowLookup({ hash: tx('mined'), nonce: 8 });
+        await jest.advanceTimersByTimeAsync(10);
+      });
+      expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('mined')]: 'confirmed' });
+      expect(storedHashes()).toEqual([]);
+
+      // A later restore finds nothing to track.
+      rerender({ web3: web3For(ACCOUNT, walletProvider(chain)) });
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1_000);
+      });
+      expect(result.current.transactions).toEqual([]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not track again a settled transaction that another tab writes back', async () => {
+    const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
+    const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
+    await settleLookups();
+    await act(async () => {
+      await result.current.submitTransaction({ key: COMET, description: 'Supply', send: async () => tx('mined') });
+    });
+    // Mined, and found by the lookup that follows a rebuilt wallet provider.
+    chain.receipts = { [tx('mined')]: 1 };
+    rerender({ web3: web3For(ACCOUNT, walletProvider(chain)) });
+    await waitFor(() => expect(result.current.settledTransactions).toHaveLength(1));
+
+    // Another tab that still tracks the transaction writes its record back to storage.
+    store([{ ...result.current.settledTransactions[0], outcome: undefined }]);
+    rerender({ web3: web3For(ACCOUNT, walletProvider(chain)) });
+    await settleLookups();
+
+    expect(result.current.transactions).toEqual([]);
+    expect(storedHashes()).toEqual([]);
+    expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('mined')]: 'confirmed' });
   });
 
   it('reports whether a transaction succeeded to its callback', async () => {
