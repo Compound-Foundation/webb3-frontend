@@ -193,21 +193,26 @@ describe('useTransactionManager', () => {
     expect(hashes(result.current.transactions)).toEqual([tx('supply')]);
   });
 
-  it('names no restored session until it can read the chain, and tries again', async () => {
+  it('names no restored session until it can read the chain, and tries again, sooner at first', async () => {
     jest.useFakeTimers();
     try {
       store([storedRecord(tx('unresolved'), { nonce: 9 })]);
       const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
-      provider.getNetwork.mockRejectedValueOnce(new Error('could not detect network'));
+      provider.getNetwork
+        .mockRejectedValueOnce(new Error('could not detect network'))
+        .mockRejectedValueOnce(new Error('could not detect network'));
       const { result } = renderManager(web3For(ACCOUNT, provider));
+      // The first attempt fails, and so does the second, a second later.
       await act(async () => {
-        await jest.advanceTimersByTimeAsync(1_000);
+        await jest.advanceTimersByTimeAsync(1_500);
       });
+      expect(provider.getNetwork).toHaveBeenCalledTimes(2);
       expect(result.current.restoredSession).toBeUndefined();
       expect(result.current.transactions).toEqual([]);
 
+      // The third attempt, two seconds after the second, succeeds.
       await act(async () => {
-        await jest.advanceTimersByTimeAsync(TRX_REFRESH_INTERVAL);
+        await jest.advanceTimersByTimeAsync(2_000);
       });
       expect(result.current.restoredSession).toEqual({ provider, account: ACCOUNT, chainId: 1 });
       expect(hashes(result.current.transactions)).toEqual([tx('unresolved')]);
@@ -519,6 +524,40 @@ describe('useTransactionManager', () => {
       expect(onSettled).toHaveBeenCalledTimes(1);
       expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('supply')]: 'confirmed' });
     });
+  });
+
+  it('does not track again a transaction it settled while a restore was reading storage', async () => {
+    const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
+    const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
+    await settleLookups();
+    const onSettled = jest.fn();
+    await act(async () => {
+      await result.current.submitTransaction({
+        key: COMET,
+        description: 'Supply',
+        send: async () => tx('mined'),
+        onSettled,
+      });
+    });
+
+    // The transaction is mined. The wallet provider is rebuilt, and the restore's read of the chain is slow.
+    chain.receipts = { [tx('mined')]: 1 };
+    const rebuilt = walletProvider(chain);
+    let answerRestore: (network: { chainId: number; name: string }) => void = () => undefined;
+    rebuilt.getNetwork.mockImplementationOnce(() => new Promise((resolve) => (answerRestore = resolve)));
+    rerender({ web3: web3For(ACCOUNT, rebuilt) });
+    await act(async () => {
+      // The poll settles the transaction. Its removal is not rendered yet when the restore reads storage.
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(onSettled).toHaveBeenCalledTimes(1);
+      answerRestore({ chainId: 1, name: 'homestead' });
+    });
+    await settleLookups();
+
+    expect(result.current.transactions).toEqual([]);
+    expect(storedHashes()).toEqual([]);
+    expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('mined')]: 'confirmed' });
+    expect(onSettled).toHaveBeenCalledTimes(1);
   });
 
   it('reports whether a transaction succeeded to its callback', async () => {

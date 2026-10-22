@@ -235,6 +235,12 @@ function withOwnNonce(transaction: PendingTransaction, resolution: Resolution): 
 /** How many settled transactions `settledTransactions` keeps, newest last. */
 const MAX_SETTLED_TRANSACTIONS = 20;
 
+/**
+ * How long the restore waits before its first new attempt to read the chain, in milliseconds. The
+ * wait doubles after each failure, up to the poll interval.
+ */
+const FIRST_RESTORE_RETRY_MS = 1_000;
+
 export type AddTransaction = (
   key: string,
   description: string,
@@ -329,6 +335,11 @@ export function useTransactionManager(web3: Web3): TransactionManager {
   // Callbacks by transaction id. Records are stored, and a stored record cannot hold a function,
   // so no record carries its callback. `settle` runs once for each id, so each callback runs once.
   const callbacks = useRef(new Map<string, (outcome: TransactionOutcome) => void>());
+  // The transactions as of the last render. The reducer writes storage only when it runs, in the
+  // next render, so storage can still hold a transaction that this session has since settled,
+  // dismissed or cleared.
+  const trackedTransactions = useRef(transactions);
+  trackedTransactions.current = transactions;
   const { provider, account } = web3.write;
 
   const noteWalletError = useCallback((failedProvider: object, error: unknown) => {
@@ -355,6 +366,7 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     if (provider === undefined || account === undefined) return;
     let isCurrent = true;
     let retryId: ReturnType<typeof setTimeout> | undefined;
+    let failedReadCount = 0;
     const sender = account.toLowerCase();
 
     const restore = () =>
@@ -370,10 +382,12 @@ export function useTransactionManager(web3: Web3): TransactionManager {
           updateStoredTransactions((stored) =>
             stored.filter((tx) => tx.account !== undefined && (!isOwn(tx) || isRestorable(tx)))
           );
-          // The reducer ignores a transaction this session already tracks, so a wallet request still
-          // open in this session is not marked interrupted, and no transaction is tracked twice.
+          // A transaction the last render tracked is skipped, because its stored record can be stale.
+          // Otherwise a transaction settled since that render is tracked again and stays pending until
+          // a reload, and a wallet request still open in this session is marked interrupted.
+          const isTracked = (tx: Transaction) => trackedTransactions.current.some((tracked) => tracked.id === tx.id);
           storedTransactions
-            .filter((tx) => isOwn(tx) && isRestorable(tx))
+            .filter((tx) => isOwn(tx) && isRestorable(tx) && !isTracked(tx))
             .forEach((transaction) => {
               updateTransactions([
                 ActionType.Add,
@@ -385,9 +399,12 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         (error) => {
           console.error('Could not restore transactions:', error);
           noteWalletError(provider, error);
-          // `restoredSession` stays another session's until a restore succeeds, so callers that wait
-          // for it keep waiting. Trying again lets them continue once the wallet answers.
-          if (isCurrent) retryId = setTimeout(restore, TRX_REFRESH_INTERVAL);
+          // Until a restore succeeds, `restoredSession` is undefined or names another session, so
+          // callers that wait for it keep waiting. The restore tries again, soon at first, so that
+          // they can continue once the wallet answers.
+          const retryDelayMs = Math.min(FIRST_RESTORE_RETRY_MS * 2 ** failedReadCount, TRX_REFRESH_INTERVAL);
+          failedReadCount++;
+          if (isCurrent) retryId = setTimeout(restore, retryDelayMs);
         }
       );
     restore();
