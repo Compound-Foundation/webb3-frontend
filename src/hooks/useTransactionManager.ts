@@ -348,9 +348,9 @@ export function useTransactionManager(web3: Web3): TransactionManager {
   }, []);
 
   // Restore the connected account's transactions on the connected chain. Each one is tracked as
-  // soon as the chain is known, before anything looks it up, so no render shows the session
-  // without them. The poll then looks each one up. Other accounts' and chains' records stay stored
-  // until they connect.
+  // soon as the chain is known, before anything looks it up, so no render names the session
+  // restored without them. The poll then looks each one up. Other accounts' and chains' records
+  // stay stored until they connect.
   useEffect(() => {
     if (provider === undefined || account === undefined) return;
     let isCurrent = true;

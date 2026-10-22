@@ -366,10 +366,10 @@ function isTarget<T extends { provider: object; key: string }>(
  * - no other wrapper transaction of this account on this chain is pending, and the transaction
  *   manager has restored this session's stored transactions
  *
- * It checks the identity and eligibility again after those reads, after the gas estimate, and
- * immediately before the wallet is asked. A change of identity at any point discards the draft
- * and drops every late result, so a later step is never sent without a fresh review and
- * confirmation.
+ * It checks the identity, the eligibility and the other pending transactions again after those
+ * reads. It checks the identity and the eligibility once more after the gas estimate, immediately
+ * before the wallet is asked. A change of identity at any point discards the draft and drops every
+ * late result, so a later step is never sent without a fresh review and confirmation.
  */
 export function useWrappedAction({
   session,
@@ -425,8 +425,8 @@ export function useWrappedAction({
     settled: manager.settledTransactions.filter(isOwnWrapperTransaction),
   };
   // Until the manager has restored this session's stored transactions, `recovered.pending` can lack
-  // a wrapper transaction sent before a reload. Otherwise a second supply can start while the first
-  // one is still pending.
+  // a wrapper transaction sent before a reload, so new wrapper actions wait for the restore too.
+  // Otherwise a second supply can start while the first one is still pending.
   const { restoredSession } = manager;
   const isRestored =
     restoredSession !== undefined &&
@@ -450,7 +450,10 @@ export function useWrappedAction({
   const live = useRef(rendered);
   live.current = rendered;
 
-  /** Whether an earlier wrapper transaction of this account on this chain holds back a new one. */
+  /**
+   * Whether an earlier wrapper transaction of this account on this chain holds back a new one. Until
+   * the restore has run, one can, so this is true.
+   */
   const isEarlierTransactionPending = () => !live.current.isRestored || live.current.recovered.pending.length > 0;
 
   useEffect(() => {
