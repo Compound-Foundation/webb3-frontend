@@ -7,6 +7,7 @@ import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { filterMap } from '@helpers/functions';
 import { TRX_REFRESH_INTERVAL } from '@helpers/numbers';
+import { classifyWalletError, describeWalletError } from '@helpers/walletErrors';
 import {
   BaseTransaction,
   PendingTransaction,
@@ -170,20 +171,68 @@ export type AddTransaction = (
   callback?: (outcome: TransactionOutcome) => void
 ) => Promise<TransactionResponse | undefined>;
 
+/**
+ * What became of asking the wallet to send a transaction.
+ * - `submitted`: the wallet returned a hash, so the transaction was broadcast. Until then it shows
+ *   as awaiting the wallet, which can take minutes when it is approved on a mobile device.
+ * - `rejected`: the user declined, by an explicit rejection only.
+ * - `provider-failure`: the wallet reported another error. Whether anything reached the chain is
+ *   unknown, so this is never shown as a rejection and never retried automatically.
+ * - `session-broken`: the provider itself is broken, as after an extension update.
+ * - `session-changed`: the session is gone, or is not the account or chain the caller checked.
+ *   Nothing was sent.
+ */
+export type SendResult =
+  | { status: 'submitted'; id: string; hash: string; response?: TransactionResponse }
+  | { status: 'rejected' }
+  | { status: 'provider-failure'; message: string }
+  | { status: 'session-broken'; message: string }
+  | { status: 'session-changed' };
+
+export type TransactionRequest = {
+  /** What the UI groups the transaction under, such as the contract it calls. */
+  key: string;
+  description: string;
+  /** Asks the wallet to send the transaction. Resolves with its hash or response once broadcast. */
+  send: () => Promise<TransactionResponse | string>;
+  /** For one transaction of a multi-step action, the step it is. */
+  step?: string;
+  /** The sender the caller checked. Nothing is sent if the session's account differs. */
+  account?: string;
+  /** The chain the caller checked. Nothing is sent if the wallet reports another. */
+  chainId?: number;
+  onSettled?: (outcome: TransactionOutcome) => void;
+};
+
+export type SubmitTransaction = (request: TransactionRequest) => Promise<SendResult>;
+
+/** A wallet provider that threw as a broken provider does, as after an extension update. */
+export type WalletFailure = { provider: object; message: string };
+
 type TransactionManager = {
   /** Transactions awaiting a wallet's confirmation or a receipt. */
   transactions: Transaction[];
   /** Transactions this session saw settle, including restored ones, with what became of them. */
   settledTransactions: SettledTransaction[];
+  /** The last wallet provider found broken, if any. */
+  walletFailure: WalletFailure | undefined;
   addTransaction: AddTransaction;
+  submitTransaction: SubmitTransaction;
   clearTransactions: () => void;
 };
 
 export function useTransactionManager(web3: Web3): TransactionManager {
   const [transactions, updateTransactions] = useReducer(txReducer, []);
   const [settledTransactions, setSettledTransactions] = useState<SettledTransaction[]>([]);
+  const [walletFailure, setWalletFailure] = useState<WalletFailure | undefined>(undefined);
   const settledIds = useRef(new Set<string>());
   const { provider, account } = web3.write;
+
+  const noteWalletError = useCallback((failedProvider: object, error: unknown) => {
+    if (classifyWalletError(error) === 'session-broken') {
+      setWalletFailure({ provider: failedProvider, message: describeWalletError(error) });
+    }
+  }, []);
 
   const settle = useCallback((transaction: PendingTransaction, outcome: TransactionOutcome) => {
     if (settledIds.current.has(transaction.id)) return;
@@ -227,12 +276,16 @@ export function useTransactionManager(web3: Web3): TransactionManager {
             (error) => {
               // Unknown, so it stays tracked as pending.
               console.error(`Could not look up transaction ${transaction.hash}:`, error);
+              noteWalletError(provider, error);
               if (isCurrent) updateTransactions([ActionType.Add, transaction]);
             }
           );
         });
       },
-      (error) => console.error('Could not restore transactions:', error)
+      (error) => {
+        console.error('Could not restore transactions:', error);
+        noteWalletError(provider, error);
+      }
     );
 
     return () => {
@@ -262,7 +315,10 @@ export function useTransactionManager(web3: Web3): TransactionManager {
             (resolution) => {
               if (isCurrent && resolution !== 'pending') settle(transaction, resolution);
             },
-            (error) => console.error(`Could not look up transaction ${transaction.hash}:`, error)
+            (error) => {
+              console.error(`Could not look up transaction ${transaction.hash}:`, error);
+              noteWalletError(provider, error);
+            }
           );
         });
         timeoutId = setTimeout(pollForTransactionReceipt, TRX_REFRESH_INTERVAL);
@@ -277,71 +333,79 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     };
   }, [transactions, provider]);
 
-  const addTransaction = useCallback(
-    async function (
-      key: string,
-      description: string,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      trxFn: (...args: any[]) => Promise<TransactionResponse>,
-      estimatedGas: number,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      trxEstimateGasFn: (...args: any[]) => Promise<BigNumber>,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      fnArgs: any[],
-      value = 0n,
-      callback?: (outcome: TransactionOutcome) => void
-    ): Promise<TransactionResponse | undefined> {
-      if (provider && account !== undefined) {
-        const id = uuidv4();
-        const networkId = provider.network.chainId;
-        const networkName = provider.network.name;
+  const submitTransaction = useCallback<SubmitTransaction>(
+    async (request) => {
+      if (provider === undefined || account === undefined) return { status: 'session-changed' };
+      if (request.account !== undefined && request.account.toLowerCase() !== account.toLowerCase()) {
+        return { status: 'session-changed' };
+      }
+
+      const id = uuidv4();
+      let isRecorded = false;
+      try {
+        // Throws if the wallet changed network since the provider was built.
+        const network = await provider.getNetwork();
+        if (request.chainId !== undefined && network.chainId !== request.chainId) return { status: 'session-changed' };
         const currentNonce = await provider.getTransactionCount(account);
 
         const baseTransaction: BaseTransaction = {
           id,
-          key,
-          networkId,
-          networkName,
-          description,
+          key: request.key,
+          networkId: network.chainId,
+          networkName: network.name,
+          description: request.description,
           nonce: currentNonce,
           account: account.toLowerCase(),
-          callback,
+          step: request.step,
+          callback: request.onSettled,
         };
+        updateTransactions([ActionType.Add, { ...baseTransaction, state: TransactionState.AwaitingConfirmation }]);
+        isRecorded = true;
+
+        const response = await request.send();
+        const hash = typeof response === 'string' ? response : response.hash;
         updateTransactions([
-          ActionType.Add,
+          ActionType.Update,
           {
             ...baseTransaction,
-            state: TransactionState.AwaitingConfirmation,
+            state: TransactionState.Pending,
+            hash,
+            // A hash alone, or a `connectUnchecked` signer's response, gives no nonce.
+            nonce: (typeof response === 'string' ? undefined : response.nonce) ?? currentNonce,
           },
         ]);
+        return typeof response === 'string'
+          ? { status: 'submitted', id, hash }
+          : { status: 'submitted', id, hash, response };
+      } catch (error) {
+        console.log(error);
+        if (isRecorded) updateTransactions([ActionType.Remove, id]);
+        noteWalletError(provider, error);
+        const kind = classifyWalletError(error);
+        return kind === 'rejected' ? { status: 'rejected' } : { status: kind, message: describeWalletError(error) };
+      }
+    },
+    [provider, account]
+  );
 
-        try {
+  const addTransaction = useCallback<AddTransaction>(
+    async (key, description, trxFn, estimatedGas, trxEstimateGasFn, fnArgs, value = 0n, callback) => {
+      const result = await submitTransaction({
+        key,
+        description,
+        onSettled: callback,
+        send: async () => {
           let gasLimit = estimatedGas;
           if (estimatedGas === 0) {
             const estimatedGasUsage = (await trxEstimateGasFn(...fnArgs, { value })).toNumber();
             gasLimit = Math.round(Number(estimatedGasUsage * 1.2));
           }
-          const txReceipt = await trxFn(...fnArgs, { value, gasLimit });
-
-          updateTransactions([
-            ActionType.Update,
-            {
-              ...baseTransaction,
-              state: TransactionState.Pending,
-              hash: txReceipt.hash,
-              // A `connectUnchecked` signer returns no nonce.
-              nonce: txReceipt.nonce ?? currentNonce,
-            },
-          ]);
-
-          return txReceipt;
-        } catch (e) {
-          console.log(e);
-          updateTransactions([ActionType.Remove, id]);
-        }
-      }
+          return trxFn(...fnArgs, { value, gasLimit });
+        },
+      });
+      return result.status === 'submitted' ? result.response : undefined;
     },
-    [provider?.network, account]
+    [submitTransaction]
   );
 
   const clearTransactions = () => {
@@ -351,7 +415,9 @@ export function useTransactionManager(web3: Web3): TransactionManager {
   return {
     transactions,
     settledTransactions,
+    walletFailure,
     addTransaction,
+    submitTransaction,
     clearTransactions,
   };
 }

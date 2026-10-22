@@ -1,9 +1,10 @@
 import { JsonRpcProvider, TransactionResponse } from '@ethersproject/providers';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { BigNumber } from 'ethers';
 
 import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
-import { useTransactionManager } from '@hooks/useTransactionManager';
+import { SendResult, useTransactionManager } from '@hooks/useTransactionManager';
 import { PendingTransaction, SettledTransaction, Transaction, TransactionState } from '@types';
 
 import { mockWeb3 } from '../mocks/mockWeb3';
@@ -237,5 +238,163 @@ describe('useTransactionManager', () => {
     expect(onSucceeded).toHaveBeenCalledWith(expect.objectContaining({ status: 'confirmed' }));
     expect(onFailed).toHaveBeenCalledWith(expect.objectContaining({ status: 'reverted' }));
     expect(result.current.transactions).toEqual([]);
+  });
+
+  describe('submitTransaction', () => {
+    const BROKEN_EXTENSION = new TypeError("Cannot read properties of undefined (reading 'sendMessage')");
+
+    it('shows the request as awaiting the wallet until the wallet returns a hash', async () => {
+      const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
+      const { result } = renderManager(web3For(ACCOUNT, provider));
+      let broadcast: (hash: string) => void = () => undefined;
+      const send = () => new Promise<string>((resolve) => (broadcast = resolve));
+
+      let submission: Promise<SendResult> = Promise.resolve({ status: 'session-changed' });
+      act(() => {
+        submission = result.current.submitTransaction({
+          key: WRAPPER,
+          description: 'Approve USDC',
+          step: 'approve',
+          send,
+        });
+      });
+      // A mobile approval can take minutes, and until the wallet returns a hash nothing is broadcast.
+      await waitFor(() =>
+        expect(result.current.transactions).toEqual([
+          expect.objectContaining({ state: TransactionState.AwaitingConfirmation, step: 'approve' }),
+        ])
+      );
+
+      await act(async () => broadcast('0xapproval'));
+
+      await expect(submission).resolves.toEqual({ status: 'submitted', id: expect.any(String), hash: '0xapproval' });
+      expect(hashes(result.current.transactions)).toEqual(['0xapproval']);
+      expect(JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]')).toEqual([
+        expect.objectContaining({ hash: '0xapproval', account: ACCOUNT, networkId: 1, key: WRAPPER, step: 'approve' }),
+      ]);
+    });
+
+    it.each<[string, unknown, SendResult]>([
+      ['an EIP-1193 rejection (4001)', { code: 4001, message: 'User rejected the request.' }, { status: 'rejected' }],
+      [
+        "ethers' ACTION_REJECTED",
+        Object.assign(new Error('user rejected transaction'), { code: 'ACTION_REJECTED' }),
+        { status: 'rejected' },
+      ],
+      [
+        "viem's UserRejectedRequestError",
+        Object.assign(new Error('User rejected the request.'), { name: 'UserRejectedRequestError' }),
+        { status: 'rejected' },
+      ],
+      [
+        'an Anchorage refusal (a bare -32603 Internal error)',
+        { code: -32603, message: 'Internal error' },
+        { status: 'provider-failure', message: 'Internal error (-32603)' },
+      ],
+      [
+        'an ethers error wrapping an internal error',
+        Object.assign(new Error('processing response error'), {
+          code: 'SERVER_ERROR',
+          error: { code: -32603, message: 'Internal error' },
+        }),
+        { status: 'provider-failure', message: 'processing response error (SERVER_ERROR)' },
+      ],
+      [
+        'an extension broken by an update',
+        BROKEN_EXTENSION,
+        { status: 'session-broken', message: "Cannot read properties of undefined (reading 'sendMessage')" },
+      ],
+    ])('reports %s, and treats only an explicit rejection as one', async (_name, error, expected) => {
+      const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
+      const { result } = renderManager(web3For(ACCOUNT, provider));
+
+      let submission: SendResult | undefined;
+      await act(async () => {
+        submission = await result.current.submitTransaction({
+          key: WRAPPER,
+          description: 'Approve USDC',
+          send: async () => Promise.reject(error),
+        });
+      });
+
+      expect(submission).toEqual(expected);
+      expect(result.current.transactions).toEqual([]);
+      expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
+    });
+
+    it('records which provider broke, so the session can be marked unusable', async () => {
+      const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
+      provider.getTransactionCount.mockRejectedValue(BROKEN_EXTENSION);
+      const { result } = renderManager(web3For(ACCOUNT, provider));
+      const send = jest.fn();
+
+      let submission: SendResult | undefined;
+      await act(async () => {
+        submission = await result.current.submitTransaction({ key: WRAPPER, description: 'Approve USDC', send });
+      });
+
+      expect(submission).toMatchObject({ status: 'session-broken' });
+      expect(send).not.toHaveBeenCalled();
+      expect(result.current.walletFailure?.provider).toBe(provider);
+    });
+
+    it.each([
+      ['another account', { account: OTHER_ACCOUNT }],
+      ['another chain', { chainId: 137 }],
+    ])('sends nothing when the session is on %s than the caller checked', async (_name, expected) => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
+      const send = jest.fn();
+
+      let submission: SendResult | undefined;
+      await act(async () => {
+        submission = await result.current.submitTransaction({
+          key: WRAPPER,
+          description: 'Approve',
+          send,
+          ...expected,
+        });
+      });
+
+      expect(submission).toEqual({ status: 'session-changed' });
+      expect(send).not.toHaveBeenCalled();
+      expect(result.current.transactions).toEqual([]);
+    });
+  });
+
+  describe('addTransaction', () => {
+    it('returns the response once sent, and nothing after a failure', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
+
+      let response: TransactionResponse | undefined;
+      let failed: TransactionResponse | undefined;
+      await act(async () => {
+        response = await result.current.addTransaction(COMET, 'Supply', sent('0xsent', 1), 1, jest.fn(), []);
+        failed = await result.current.addTransaction(
+          COMET,
+          'Supply',
+          async () => Promise.reject({ code: -32603, message: 'Internal error' }),
+          1,
+          jest.fn(),
+          []
+        );
+      });
+
+      expect(response?.hash).toBe('0xsent');
+      expect(failed).toBeUndefined();
+      expect(hashes(result.current.transactions)).toEqual(['0xsent']);
+    });
+
+    it('estimates gas when no estimate is given, and passes the value and limit to the transaction', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
+      const transactionFunction = jest.fn(sent('0xsent', 1));
+      const estimateGas = jest.fn(async () => BigNumber.from(100_000));
+
+      await act(async () => {
+        await result.current.addTransaction(COMET, 'Supply', transactionFunction, 0, estimateGas, ['0xasset', '5'], 3n);
+      });
+
+      expect(estimateGas).toHaveBeenCalledWith('0xasset', '5', { value: 3n });
+      expect(transactionFunction).toHaveBeenCalledWith('0xasset', '5', { value: 3n, gasLimit: 120_000 });
+    });
   });
 });
