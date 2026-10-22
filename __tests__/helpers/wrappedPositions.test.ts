@@ -209,8 +209,9 @@ describe('isSubmissionRefused', () => {
   const standard: LendingRoute = { kind: 'standard', writes: { isEligible: true } };
   const baseAsset = { ...mockBaseAsset(), walletBalance: 10n ** 12n };
 
-  const hydrated = (balance: bigint, market = USDC): CometStateWithMarket => ({
+  const hydrated = (balance: bigint, market = USDC, account = ACCOUNT): CometStateWithMarket => ({
     market,
+    account,
     state: [
       StateType.Hydrated,
       { baseAsset: { ...baseAsset, balance }, collateralAssets: [] },
@@ -220,38 +221,52 @@ describe('isSubmissionRefused', () => {
   const supply: Action = [ActionType.Supply, { ...baseAsset }, 1_000_000n] as Action;
 
   it('checks the live debt, not the debt when the dialog opened', () => {
-    const live = { route: wrapped, selectedMarket: USDC, comet: hydrated(-90_000_000n) };
+    const live = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(-90_000_000n) };
     expect(isSubmissionRefused(live, USDC, [repay(100_000_000n)])).toBe(true);
     expect(isSubmissionRefused(live, USDC, [repay(90_000_000n)])).toBe(false);
   });
 
   it('refuses a base supply on the wrapped route', () => {
-    const live = { route: wrapped, selectedMarket: USDC, comet: hydrated(0n) };
+    const live = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(0n) };
     expect(isSubmissionRefused(live, USDC, [supply])).toBe(true);
   });
 
   it('refuses on the wrapped route until the live balances are for the same market', () => {
-    const loading = { market: USDC, state: [StateType.Loading, undefined] as CometState };
-    expect(isSubmissionRefused({ route: wrapped, selectedMarket: USDC, comet: loading }, USDC, [repay(1n)])).toBe(true);
+    const loading = { market: USDC, account: ACCOUNT, state: [StateType.Loading, undefined] as CometState };
     expect(
-      isSubmissionRefused({ route: wrapped, selectedMarket: USDC, comet: hydrated(-10n, OTHER_ROUTED) }, USDC, [
-        repay(1n),
-      ])
+      isSubmissionRefused({ route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: loading }, USDC, [repay(1n)])
+    ).toBe(true);
+    expect(
+      isSubmissionRefused(
+        { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(-10n, OTHER_ROUTED) },
+        USDC,
+        [repay(1n)]
+      )
     ).toBe(true);
   });
 
+  it('refuses on the wrapped route when the live balances were read for another account', () => {
+    const live = {
+      route: wrapped,
+      account: ACCOUNT,
+      selectedMarket: USDC,
+      comet: hydrated(-100_000_000n, USDC, '0x0000000000000000000000000000000000000bb2'),
+    };
+    expect(isSubmissionRefused(live, USDC, [repay(100_000_000n)])).toBe(true);
+  });
+
   it('leaves the standard route on the selected market alone', () => {
-    const live = { route: standard, selectedMarket: USDC, comet: hydrated(0n) };
+    const live = { route: standard, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(0n) };
     expect(isSubmissionRefused(live, USDC, [supply])).toBe(false);
   });
 
   it('refuses a dialog kept from a routed market after another market was selected', () => {
-    const live = { route: standard, selectedMarket: UNROUTED, comet: hydrated(0n, UNROUTED) };
+    const live = { route: standard, account: ACCOUNT, selectedMarket: UNROUTED, comet: hydrated(0n, UNROUTED) };
     expect(isSubmissionRefused(live, USDC, [supply])).toBe(true);
   });
 
   it('leaves a dialog for an unrouted market alone', () => {
-    const live = { route: standard, selectedMarket: USDC, comet: hydrated(0n) };
+    const live = { route: standard, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(0n) };
     expect(isSubmissionRefused(live, UNROUTED, [supply])).toBe(false);
   });
 });

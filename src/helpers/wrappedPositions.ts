@@ -160,9 +160,16 @@ export function supplyIncentivesForRoute(isWrappedRoute: boolean, incentives: Su
 }
 
 export type MarketIdentity = { chainId: number; cometAddress: string };
-export type CometStateWithMarket = { market: MarketIdentity | undefined; state: CometState };
+/** Comet state with the market and account it was read for. */
+export type CometStateWithMarket = {
+  market: MarketIdentity | undefined;
+  account: string | undefined;
+  state: CometState;
+};
+/** The session as it is now: the route, the connected account and the selected market. */
 export type LiveSubmissionState = {
   route: LendingRoute;
+  account: string | undefined;
   selectedMarket: MarketIdentity | undefined;
   comet: CometStateWithMarket;
 };
@@ -175,8 +182,8 @@ function isSameMarket(a: MarketIdentity | undefined, b: MarketIdentity): boolean
  * Whether to refuse submitting `actions` to `submittedMarket`, judged by the session as it is
  * now. A dialog can keep a submit callback, with its market, actions and balances, from an
  * earlier render. On the wrapped route, the actions must not add to the account's direct
- * Comet supply at the live balances, and without live balances for that market the answer is
- * no. A kept dialog for a market that can route through a wrapper is refused once another
+ * Comet supply at the live balances. Without live balances for that market and account, the
+ * submission is refused. A kept dialog for a market that can route through a wrapper is refused once another
  * market is selected, because its route is no longer known.
  */
 export function isSubmissionRefused(
@@ -191,6 +198,9 @@ export function isSubmissionRefused(
   if (live.route.kind !== 'wrapped') return false;
 
   const [stateType, cometState] = live.comet.state;
-  if (stateType !== StateType.Hydrated || !isSameMarket(live.comet.market, submittedMarket)) return true;
+  const isLiveAccount = live.account !== undefined && live.comet.account?.toLowerCase() === live.account.toLowerCase();
+  if (stateType !== StateType.Hydrated || !isSameMarket(live.comet.market, submittedMarket) || !isLiveAccount) {
+    return true;
+  }
   return addsDirectBaseSupply(cometState.baseAsset, cometState.collateralAssets, actions);
 }
