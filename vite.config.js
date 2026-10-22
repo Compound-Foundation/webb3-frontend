@@ -53,7 +53,6 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      comet: resolve(__dirname, 'node_modules/comet'),
       '/fonts': resolve(__dirname, 'node_modules/compound-styles/public/fonts'),
       // Redirect the (transitive) WalletConnect provider to its self-contained UMD
       // bundle. The ESM entry has bare imports of @msgpack/msgpack and blakejs, which

@@ -4,6 +4,7 @@ import { ReactElement, useCallback, useEffect, useRef } from 'react';
 import { CircleExclamation, Wallet } from '@components/Icons';
 import { Web3 } from '@contexts/Web3Context';
 import { TRX_HISTORY_NO_FURTHER_ITEMS } from '@helpers/constants';
+import { useMarkets } from '@hooks/useMarkets';
 import { useTransactionHistory } from '@hooks/useTransactionHistory';
 import { StateType, Transaction, TransactionHistoryItem } from '@types';
 
@@ -58,6 +59,7 @@ const aggregateTransactionDataByMonth = (
 };
 
 const TransactionHistory = ({ transactions, web3 }: { transactions: Transaction[]; web3: Web3 }) => {
+  const [marketsStateType] = useMarkets();
   const { state, loadMore, refreshData } = useTransactionHistory(web3);
   const [transactionsStateType, transactionsState] = state;
   // use a ref here so we can track in our callback function
@@ -108,7 +110,7 @@ const TransactionHistory = ({ transactions, web3 }: { transactions: Transaction[
   }, []);
 
   let content: ReactElement = <></>;
-  if (transactionsStateType === StateType.Loading) {
+  if (transactionsStateType === StateType.Loading || marketsStateType === StateType.Loading) {
     content = <TransactionRowLoader key={`transaction-loader`} count={5} />;
   } else if (transactionsStateType === StateType.NoWallet) {
     content = <EmptyTransactions account={false} />;

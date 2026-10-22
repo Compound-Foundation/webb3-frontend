@@ -1,12 +1,12 @@
 import { getAddress } from 'ethers/lib/utils';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router';
 
 import type { Web3 } from '@contexts/Web3Context';
 import { convertApiResponse } from '@helpers/functions';
 import { getMarketsByNetwork } from '@helpers/markets';
 import { PRICE_PRECISION, REWARDS_API_REFRESH_INTERVAL } from '@helpers/numbers';
 import { getAccountRewardsStateEndpoint, getMarketRewardsStateEndpoint } from '@helpers/urls';
+import { useMarkets } from '@hooks/useMarkets';
 import {
   AccountRewardsState,
   MarketsByNetwork,
@@ -57,13 +57,15 @@ function areRewardsSupported(chainInformation: ChainInformation) {
 }
 
 export function useRewardsState(web3: Web3, transactions: Transaction[]): RewardsState {
-  const [searchParams] = useSearchParams();
   const [state, setState] = useState<RewardsState>([StateType.Loading]);
   const maybeAccount = web3.write.account;
   const accountRef = useRef(maybeAccount);
-  const includeTestnets = searchParams.has('testnet');
+  const [marketsStateType, marketsState] = useMarkets();
+  const marketsLoading = marketsStateType === StateType.Loading;
+  // Undefined until the market list loads; the hydrated list keeps its reference between renders
+  const markets = marketsStateType === StateType.Hydrated ? marketsState.markets : undefined;
 
-  const marketsByNetwork = useMemo(() => getMarketsByNetwork(includeTestnets), [includeTestnets]);
+  const marketsByNetwork = useMemo(() => getMarketsByNetwork(markets ?? []), [markets]);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -79,9 +81,15 @@ export function useRewardsState(web3: Web3, transactions: Transaction[]): Reward
 
     return () => clearTimeout(timeoutId);
     // re-trigger when maybeAccount changes -- so during wallet disconnect/connect we refresh the rewards
-  }, [maybeAccount]);
+    // and once the market list has loaded
+  }, [maybeAccount, marketsLoading]);
 
   const refreshData = useCallback(async () => {
+    // Rewards are grouped by the networks of the markets, so wait for the market list
+    if (marketsLoading) {
+      return;
+    }
+
     const currentAccount = accountRef.current;
     if (currentAccount === undefined && stateRef.current[0] === StateType.NoWallet) {
       // If the user has no wallet connect and we already loaded the market state then
@@ -90,7 +98,7 @@ export function useRewardsState(web3: Web3, transactions: Transaction[]): Reward
     }
 
     try {
-      const updatedState: RewardsState = await getState(marketsByNetwork, currentAccount, includeTestnets);
+      const updatedState: RewardsState = await getState(marketsByNetwork, currentAccount);
       if (currentAccount === accountRef.current) {
         setState(updatedState);
       }
@@ -105,7 +113,7 @@ export function useRewardsState(web3: Web3, transactions: Transaction[]): Reward
         );
       }
     }
-  }, [marketsByNetwork, includeTestnets]);
+  }, [marketsByNetwork, marketsLoading]);
 
   useEffect(() => {
     const intervalId = setInterval(refreshData, REWARDS_API_REFRESH_INTERVAL);
@@ -125,11 +133,7 @@ export function useRewardsState(web3: Web3, transactions: Transaction[]): Reward
   return state;
 }
 
-const getState = async (
-  marketsByNetwork: MarketsByNetwork,
-  maybeAccount?: string,
-  includeTestnets = false
-): Promise<RewardsState> => {
+const getState = async (marketsByNetwork: MarketsByNetwork, maybeAccount?: string): Promise<RewardsState> => {
   const marketsWithPriceFeeds: MarketsWithPriceFeeds = Object.entries(marketsByNetwork).filter(
     ([, { chainInformation }]) => {
       return areRewardsSupported(chainInformation);
@@ -137,7 +141,7 @@ const getState = async (
   );
 
   if (maybeAccount === undefined) {
-    const rewardsStateResponse = await fetch(getMarketRewardsStateEndpoint(includeTestnets));
+    const rewardsStateResponse = await fetch(getMarketRewardsStateEndpoint());
     const rewardsState = await rewardsStateResponse.json();
 
     const sanitizedRewardState: RewardsTokenState[] = rewardsState.map(convertApiResponse).map(sanitizeRewardState);
@@ -145,7 +149,7 @@ const getState = async (
 
     return [StateType.NoWallet, responses];
   } else {
-    const rewardStateResponse = await fetch(getAccountRewardsStateEndpoint(maybeAccount, includeTestnets));
+    const rewardStateResponse = await fetch(getAccountRewardsStateEndpoint(maybeAccount));
     const rewardState = await rewardStateResponse.json();
     const sanitizedRewardState: AccountRewardsState[] = rewardState
       .map(convertApiResponse)

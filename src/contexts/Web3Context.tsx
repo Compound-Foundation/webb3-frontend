@@ -26,7 +26,6 @@ import { CONNECTOR_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { useAnnouncedRdns, useConflictedRdns } from '@helpers/eip6963Security';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { isLedgerConnector } from '@helpers/Ledger';
-import { DEFAULT_MARKET } from '@helpers/markets';
 import {
   isAllowedConnectorId,
   isConnectorConflicted,
@@ -117,6 +116,9 @@ type Web3ProviderProps = {
 };
 
 export const Web3Provider = ({ children }: Web3ProviderProps) => {
+  // Initial read network; selecting a market switches it to the market's chain
+  const DEFAULT_READ_CHAIN_ID = 1;
+
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   // Only the setter is read: the preference is written to localStorage by
@@ -124,7 +126,7 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
   // stays on the context as part of its public surface.
   const [, setConnector] = useState<Connector | null>(null);
   const [desiredWriteNetwork, setDesiredWriteNetwork] = useState<undefined | number>();
-  const [readChainId, setReadChainId] = useState<number>(DEFAULT_MARKET.chainInformation.chainId);
+  const [readChainId, setReadChainId] = useState<number>(DEFAULT_READ_CHAIN_ID);
 
   const { address: account, chainId: writeChainId, connector: writeConnector, isConnected } = useAccount();
   const { connectAsync, connectors } = useConnect();

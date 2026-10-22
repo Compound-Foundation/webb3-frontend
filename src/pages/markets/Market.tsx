@@ -9,6 +9,7 @@ import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, isV2Market } from '@helpers/markets';
 import { formatTokenBalance, getTokenValue, PRICE_PRECISION } from '@helpers/numbers';
 import { getBlockExplorerUrlForAddress, INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
+import { useMarkets } from '@hooks/useMarkets';
 import { CTokenWithMarketState, Currency, StateType, TokenWithMarketState } from '@types';
 
 import AdditionalMarketDataPanel from './components/AdditionalMarketDataPanel';
@@ -29,20 +30,28 @@ type MarketsProps = {
 
 const Market = ({ web3 }: MarketsProps) => {
   const { selectedMarket } = useContext(getSelectedMarketContext());
+  const [marketsStateType, marketsState] = useMarkets();
 
   const marketCurrencyToShow = Currency.USD;
 
   const state = useMarketsState(web3, selectedMarket);
-  const [marketStateType, marketStateData] = state;
   const [, market] = selectedMarket;
+  const [marketStateType, marketStateData] = market?.status === 'error' ? [StateType.Loading] : state;
   const [currentChainName, currentChainId, currentBaseToken] =
     market !== undefined
       ? [market.chainInformation.name, market.chainInformation.chainId, market.baseAsset.symbol]
       : ['Connecting', -1, undefined];
   // The configured market entry keeps the display name and institutional flags,
   // which the hydrated market's on-chain base asset data doesn't carry
-  const configMarket = market !== undefined ? getMarket(market.chainInformation.chainId, market.marketAddress) : undefined;
-  const marketDisplayName = configMarket?.institutional ? configMarket.baseAsset.name : currentBaseToken;
+  const configMarket =
+    market !== undefined && marketsStateType === StateType.Hydrated
+      ? getMarket(marketsState.markets, market.chainInformation.chainId, market.marketAddress)
+      : undefined;
+  // The market list symbol stays the same once the market loads, unlike the on-chain one,
+  // so the title doesn't change
+  const marketDisplayName = configMarket?.institutional
+    ? configMarket.baseAsset.name
+    : (configMarket?.baseAsset.symbol ?? currentBaseToken);
   let assetRows: ReactNode = null;
   let marketOverviewPanel: ReactNode = null;
   let marketStatsPanel: ReactNode = null;
@@ -170,7 +179,15 @@ const Market = ({ web3 }: MarketsProps) => {
               : 1
           )
           .map((token, index) => (
-            <AssetsTableRow key={index} state={[StateType.Hydrated, token, baseAsset]} />
+            <AssetsTableRow
+              key={index}
+              state={[StateType.Hydrated, token, baseAsset]}
+              isCollateralError={
+                market.collaterals?.find(
+                  (collateral) => collateral.address.toLowerCase() === token.address.toLowerCase()
+                )?.status === 'error'
+              }
+            />
           ))}
       </CollateralAssetsPanel>
     );
