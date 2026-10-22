@@ -316,8 +316,9 @@ export type TransactionManager = {
   settledTransactions: SettledTransaction[];
   /**
    * The last wallet provider found broken while that provider was in use, if any. The manager
-   * ignores a failure that an earlier provider reports late, so that failure cannot replace this
-   * record.
+   * ignores a failure from a provider that is not in use, so that failure cannot replace this
+   * record. An example is a request through an earlier provider that fails after Web3Context
+   * rebuilt the wallet provider.
    */
   walletFailure: WalletFailure | undefined;
   /**
@@ -349,8 +350,8 @@ export function useTransactionManager(web3: Web3): TransactionManager {
   const trackedTransactions = useRef(transactions);
   trackedTransactions.current = transactions;
   const { provider, account } = web3.write;
-  // The wallet provider as of the last render. A request through an earlier provider can fail
-  // after Web3Context has rebuilt the wallet provider.
+  // The wallet provider in use: the one in the last render. A request through an earlier provider
+  // can fail after Web3Context has rebuilt the wallet provider.
   const liveProvider = useRef(provider);
   liveProvider.current = provider;
 

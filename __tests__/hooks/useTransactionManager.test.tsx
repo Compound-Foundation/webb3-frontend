@@ -533,13 +533,42 @@ describe('useTransactionManager', () => {
       expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('supply')]: 'confirmed' });
     });
 
-    it.each(['restore', 'receipt lookup', 'wallet request'] as const)(
+    it('records the rebuilt provider as broken in place of the earlier provider', async () => {
+      const earlier = walletProvider();
+      const { result, rerender } = renderManager(web3For(ACCOUNT, earlier));
+      const writeThroughBrokenExtension = () =>
+        act(async () => {
+          await result.current.submitTransaction({
+            key: COMET,
+            description: 'Repay',
+            send: async () => Promise.reject(BROKEN_EXTENSION),
+          });
+        });
+      await writeThroughBrokenExtension();
+      expect(result.current.walletFailure?.provider).toBe(earlier);
+
+      // Web3Context rebuilds the wallet provider, and a write through the rebuilt provider fails too.
+      const rebuilt = walletProvider();
+      rerender({ web3: web3For(ACCOUNT, rebuilt) });
+      await writeThroughBrokenExtension();
+
+      expect(result.current.walletFailure?.provider).toBe(rebuilt);
+    });
+
+    it.each(['restore', 'network read in the poll', 'receipt lookup', 'wallet request'] as const)(
       'keeps the rebuilt provider recorded as broken when a request through the earlier provider fails late: %s',
       async (request) => {
         const earlier = walletProvider();
         let failEarlierRequest: (error: unknown) => void = () => undefined;
         const openRequest = jest.fn(() => new Promise<never>((_resolve, reject) => (failEarlierRequest = reject)));
         if (request === 'restore') earlier.getNetwork.mockImplementationOnce(openRequest);
+        if (request === 'network read in the poll') {
+          store([storedRecord(tx('pending'))]);
+          // The restore reads the network first. The poll reads it again before its receipt lookups.
+          earlier.getNetwork
+            .mockImplementationOnce(async () => ({ chainId: 1, name: 'homestead' }))
+            .mockImplementationOnce(openRequest);
+        }
         if (request === 'receipt lookup') {
           store([storedRecord(tx('pending'))]);
           earlier.getTransactionReceipt.mockImplementationOnce(openRequest);
