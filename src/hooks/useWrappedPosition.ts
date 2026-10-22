@@ -24,8 +24,7 @@ export type WrappedPositionState =
 export const WRAPPED_POSITION_READ_FAILED =
   'Your wrapped position could not be loaded. Check your connection and try again.';
 
-/** Reads the position in one multicall, so from one block. */
-export const readWithMulticall: WrappedPositionReader = (provider, market, account) =>
+const readWithMulticall: WrappedPositionReader = (provider, market, account) =>
   readWrappedPosition(new Provider(provider, market.chainId), market, account);
 
 /**
