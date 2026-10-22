@@ -166,15 +166,37 @@ export function sanitizedAmountForAction(
 
 type Validity = 'ok' | [false, string];
 
+export type ActionRules = {
+  /**
+   * The market's base supply goes through a wrapper for this session, so no action may add to
+   * the account's direct Comet supply: neither a base supply nor a repay larger than the debt.
+   */
+  blockDirectBaseSupply?: boolean;
+};
+
 export function validateAddingAction(
   baseAssetPre: BaseAssetWithAccountState,
   collateralAssetsPre: TokenWithAccountState[],
   actions: Action[],
-  actionToAdd: Action
+  actionToAdd: Action,
+  rules: ActionRules = {}
 ): Validity {
   const { baseAsset, collateralAssets } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions);
 
   const [actionType] = actionToAdd;
+  if (rules.blockDirectBaseSupply) {
+    if (actionType === ActionType.Supply) {
+      return [false, 'Direct Supply Unavailable With This Wallet'];
+    }
+    if (actionType === ActionType.Repay) {
+      const amount = actionToAdd[2];
+      const borrowBalance = baseAsset.balance < 0n ? -baseAsset.balance : 0n;
+      if (amount !== MAX_UINT256 && amount > borrowBalance) {
+        return [false, 'Amount Exceeds Borrow Balance'];
+      }
+    }
+  }
+
   switch (actionType) {
     case ActionType.Borrow: {
       const amount = actionToAdd[2];
