@@ -119,7 +119,10 @@ export type WrappedActionController = {
   blockedReason: (type: WrappedActionType) => WrappedBlockReason | undefined;
   /** Starts a fresh review. Returns why it was refused, if it was. */
   start: (type: WrappedActionType, prepare: PrepareWrappedAction) => WrappedBlockReason | undefined;
-  /** Signs the step in review, after checking everything again. Each step needs its own call. */
+  /**
+   * Signs the step in review, after checking everything again. Each step needs its own call. A
+   * `confirm` applies only to the draft and step that were in review in the render that returned it.
+   */
   confirm: () => void;
   /** Clears the draft, or the notice left by one. Nothing already sent is cancelled. */
   discard: () => void;
@@ -599,9 +602,14 @@ export function useWrappedAction({
     }
   };
 
+  // A confirmation belongs to the draft and step in review when it was rendered. A handler kept
+  // from an earlier render does nothing once another draft or step is in review. Otherwise a
+  // delayed click on one review signs a step the user never saw.
+  const reviewed = state.phase === 'review' ? { draft: state.draft, stepIndex: state.stepIndex } : undefined;
   const confirm = () => {
     const current = live.current.state;
-    if (current.phase !== 'review') return;
+    if (reviewed === undefined || current.phase !== 'review') return;
+    if (current.draft !== reviewed.draft || current.stepIndex !== reviewed.stepIndex) return;
     const run = ++runId.current;
     dispatch({ type: 'step', index: current.stepIndex, step: { status: 'checking' } });
     void sign(run, current.draft, current.stepIndex);

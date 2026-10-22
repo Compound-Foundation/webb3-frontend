@@ -832,6 +832,43 @@ describe('useWrappedAction', () => {
       expect(result.current.state.phase).toBe('complete');
     });
 
+    it('ignores a confirmation kept from an earlier draft, after an account round trip', async () => {
+      const { manager, requests } = fakeManager();
+      const original = sessionFor(wallet);
+      const { result, rerender } = renderAction({ session: original, manager });
+      await reachReview(result);
+      // A handler that a dialog kept from the first review.
+      const confirmEarlierDraft = result.current.confirm;
+
+      rerender({ session: sessionFor(wallet, { account: OTHER_ACCOUNT }), manager });
+      rerender({ session: original, manager });
+      await reachReview(result);
+      act(() => confirmEarlierDraft());
+      await act(async () => undefined);
+
+      expect(requests).toHaveLength(0);
+      expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
+    });
+
+    it('ignores a confirmation kept from an earlier step once that step has settled', async () => {
+      const { manager, requests } = fakeManager();
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      const confirmApproval = result.current.confirm;
+
+      act(() => confirmApproval());
+      await waitFor(() => expect(requests).toHaveLength(1));
+      await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xapproval' }));
+      act(() => requests[0].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xapproval') }));
+      expect(result.current.state).toMatchObject({ phase: 'review', stepIndex: 1 });
+
+      act(() => confirmApproval());
+      await act(async () => undefined);
+
+      expect(requests).toHaveLength(1);
+      expect(stepStatuses(result)).toEqual(['confirmed', 'waiting']);
+    });
+
     it.each<[string, SendResult | 'reverted' | 'replaced', string]>([
       ['a rejection', { status: 'rejected' }, 'rejected'],
       [
