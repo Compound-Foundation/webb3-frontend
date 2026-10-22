@@ -154,6 +154,10 @@ function txReducer(currentTransactions: Transaction[], action: Action): Transact
     }
     case ActionType.Update: {
       const updated = action[1];
+      // An update for a transaction no longer tracked, such as a late lookup of one just settled,
+      // changes nothing. Otherwise it writes the record back to storage, and a later restore can
+      // track it again.
+      if (!currentTransactions.some((tx) => tx.id === updated.id)) return currentTransactions;
       updatedTransactions = currentTransactions.map((tx) => (tx.id === updated.id ? updated : tx));
       storedChange = (stored) => [...stored.filter((tx) => tx.id !== updated.id), updated];
       break;
@@ -379,15 +383,19 @@ export function useTransactionManager(web3: Web3): TransactionManager {
           // cannot be looked up. A wrapper step stays, though: its wallet request can still be open,
           // so the next review of its action waits until the user dismisses it.
           const isRestorable = (tx: Transaction) => tx.state === TransactionState.Pending || isWrapperStep(tx);
+          // A transaction this session settled is dropped, even when storage holds it again, as after
+          // another tab writes it back. `settle` ignores an id it has settled, so a copy tracked
+          // again stays pending until a reload.
+          const isSettled = (tx: Transaction) => settledIds.current.has(tx.id);
           updateStoredTransactions((stored) =>
-            stored.filter((tx) => tx.account !== undefined && (!isOwn(tx) || isRestorable(tx)))
+            stored.filter((tx) => tx.account !== undefined && !isSettled(tx) && (!isOwn(tx) || isRestorable(tx)))
           );
-          // A transaction the last render tracked is skipped, because its stored record can be stale.
-          // Otherwise a transaction settled since that render is tracked again and stays pending until
-          // a reload, and a wallet request still open in this session is marked interrupted.
+          // A transaction the last render tracked is skipped as well, because its stored record can be
+          // stale until the next render. Otherwise one settled since that render is tracked again, and
+          // a wallet request dismissed or forgotten since then comes back as interrupted.
           const isTracked = (tx: Transaction) => trackedTransactions.current.some((tracked) => tracked.id === tx.id);
           storedTransactions
-            .filter((tx) => isOwn(tx) && isRestorable(tx) && !isTracked(tx))
+            .filter((tx) => isOwn(tx) && isRestorable(tx) && !isTracked(tx) && !isSettled(tx))
             .forEach((transaction) => {
               updateTransactions([
                 ActionType.Add,
