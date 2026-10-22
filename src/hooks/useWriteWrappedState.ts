@@ -166,12 +166,20 @@ function describeRevertData(data: string): string {
   }
 }
 
-/** Why a simulation failed: the revert it carries, or the provider's message. */
+/**
+ * Why a call through the provider failed. Ethers reports every `eth_call` that fails without
+ * revert data as a revert without a reason string, a timeout or a rate limit included, and keeps
+ * the provider's own error in `error`. That error says what happened, so it is described instead.
+ */
+function describeCallFailure(error: unknown): string {
+  const inner = typeof error === 'object' && error !== null ? (error as { error?: unknown }).error : undefined;
+  return describeWalletError(inner ?? error);
+}
+
+/** Why a simulation failed: the revert it carries, or why the call failed. */
 function describeSimulationFailure(error: unknown): string {
   const data = revertData(error);
-  if (data !== undefined) return describeRevertData(data);
-  const { reason } = (typeof error === 'object' && error !== null ? error : {}) as { reason?: unknown };
-  return typeof reason === 'string' && reason !== '' ? reason : describeWalletError(error);
+  return data === undefined ? describeCallFailure(error) : describeRevertData(data);
 }
 
 /**
@@ -263,7 +271,15 @@ export async function prepareWrappedSupply({
     value >= UNLIMITED_ALLOWANCE
       ? `an unlimited amount of ${symbol}`
       : `${formatExactUnits(value, market.baseDecimals)} ${symbol}`;
-  const funds = await reads.readFunds();
+  let funds: SupplyFunds;
+  try {
+    funds = await reads.readFunds();
+  } catch (error) {
+    if (error instanceof WrappedSupplyError) throw error;
+    throw new WrappedSupplyError(
+      `Your wallet balance and allowance could not be read (${describeCallFailure(error)}). Try again in a moment.`
+    );
+  }
   if (amount > funds.walletBalance) {
     throw new WrappedSupplyError(`The amount is more than the ${exact(funds.walletBalance)} in your wallet.`);
   }
@@ -275,7 +291,7 @@ export async function prepareWrappedSupply({
     } catch (error) {
       return {
         ok: false,
-        message: `Your wallet balance and allowance could not be read again (${describeWalletError(error)}).`,
+        message: `Your wallet balance and allowance could not be read again (${describeCallFailure(error)}).`,
       };
     }
     if (live.walletBalance < amount) {

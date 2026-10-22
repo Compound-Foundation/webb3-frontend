@@ -741,6 +741,94 @@ describe('useWriteWrappedState', () => {
       }
     );
 
+    it.each<[string, Error | undefined, string | undefined, RegExp]>([
+      [
+        "a call that failed without revert data, by the provider's own error",
+        Object.assign(
+          new Error('missing revert data in call exception; Transaction reverted without a reason string'),
+          { code: 'CALL_EXCEPTION', data: '0x', error: { code: 429, message: 'Too Many Requests' } }
+        ),
+        undefined,
+        /Too Many Requests \(429\)/,
+      ],
+      [
+        'a panic, with its code',
+        undefined,
+        `0x4e487b71${utils.defaultAbiCoder.encode(['uint256'], [17]).slice(2)}`,
+        /Panic\(17\)/,
+      ],
+      ['an error the wrapper does not declare, by its selector', undefined, '0xdeadbeef', /revert data 0xdeadbeef/],
+    ])('describes %s', async (_name, thrown, returned, message) => {
+      const chain = chainFor(USDC_MARKET, { allowance: AMOUNT });
+      const { result, wallet } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+
+      chain.simulationRevert = thrown;
+      chain.simulationResult = returned;
+      await confirmStep(result);
+
+      const [step] = stepsOf(result.current.action.state);
+      expect(step).toMatchObject({
+        status: 'blocked',
+        reason: 'step-check-failed',
+        message: expect.stringMatching(message),
+      });
+      expect(step).not.toMatchObject({ message: expect.stringMatching(/without a reason string/) });
+      expect(walletRequests(wallet)).toEqual([]);
+    });
+
+    it("describes a review whose first read failed by the provider's own error", async () => {
+      const chain = chainFor(USDC_MARKET);
+      chain.failsFundReads = true;
+      const { result, wallet } = renderSupply(chain);
+
+      await startSupply(result, AMOUNT);
+
+      expect(result.current.action.state).toMatchObject({
+        phase: 'read-failed',
+        message: expect.stringMatching(/could not be read \(rate limited\)/),
+      });
+      expect(walletRequests(wallet)).toEqual([]);
+    });
+
+    it("refuses a review while the market's network cannot be read", async () => {
+      const chain = chainFor(USDC_MARKET);
+      const events: Event[] = [];
+      const wallet = walletFor(chain, events);
+      const manager = {
+        transactions: [],
+        settledTransactions: [],
+        walletFailure: undefined,
+        restoredSession: { provider: wallet, account: ACCOUNT, chainId: 1 },
+        dismissTransaction: jest.fn(),
+        submitTransaction: jest.fn(),
+      };
+      const { result } = renderHook(() => {
+        const session = sessionFor(wallet);
+        const action = useWrappedAction({
+          session,
+          manager,
+          readProvider: undefined,
+          checkRestriction: async () => undefined,
+        });
+        const write = useWriteWrappedState({
+          action,
+          route: session.route,
+          readProvider: undefined,
+          baseSymbol: 'USDC',
+        });
+        return { action, write };
+      });
+
+      await startSupply(result, AMOUNT);
+
+      expect(result.current.action.state).toMatchObject({
+        phase: 'read-failed',
+        message: expect.stringMatching(/cannot be read right now/),
+      });
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
     it.each<[string, Partial<Chain>, (chain: Chain) => void, number, string[]]>([
       ['the allowance became enough before the approval', {}, (chain) => (chain.allowance = AMOUNT), 0, []],
       ['another allowance was set before the approval', { allowance: 1n }, (chain) => (chain.allowance = 2n), 0, []],
