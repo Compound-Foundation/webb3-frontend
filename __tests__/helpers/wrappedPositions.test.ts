@@ -1,7 +1,10 @@
 import { BigNumber } from 'ethers';
 
 import { WRAPPED_MARKET_REGISTRY, WrappedMarket } from '@constants/wrappedMarkets';
+import { LendingRoute } from '@helpers/lendingRoute';
 import {
+  CometStateWithMarket,
+  isSubmissionRefused,
   getFullExitCash,
   getGrossAssets,
   getRedeemBuffer,
@@ -10,6 +13,9 @@ import {
   supplyIncentivesForRoute,
   WrappedPositionReadError,
 } from '@helpers/wrappedPositions';
+import { Action, ActionType, CometState, StateType } from '@types';
+
+import { mockBaseAsset } from '../mocks/mockBaseAsset';
 
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
@@ -182,5 +188,70 @@ describe('supplyIncentivesForRoute', () => {
 
   it('keeps the market incentives on the standard route', () => {
     expect(supplyIncentivesForRoute(false, incentives)).toEqual(incentives);
+  });
+});
+
+describe('isSubmissionRefused', () => {
+  const USDC = { chainId: 1, cometAddress: USDC_COMET };
+  const OTHER_ROUTED = { chainId: 1, cometAddress: '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840' };
+  const UNROUTED = { chainId: 1, cometAddress: '0xA17581A9E3356d9A858b789D68B4d866e593aE94' };
+  const wrapped: LendingRoute = {
+    kind: 'wrapped',
+    chainId: 1,
+    cometAddress: USDC_COMET,
+    lookup: { status: 'valid', market: usdcMarket() },
+    market: usdcMarket(),
+    validationKey: 'key',
+    reads: { isEligible: true },
+    deposit: { isEligible: false, reason: 'deposits-disabled' },
+    exit: { isEligible: false, reason: 'exits-disabled' },
+  };
+  const standard: LendingRoute = { kind: 'standard', writes: { isEligible: true } };
+  const baseAsset = { ...mockBaseAsset(), walletBalance: 10n ** 12n };
+
+  const hydrated = (balance: bigint, market = USDC): CometStateWithMarket => ({
+    market,
+    state: [
+      StateType.Hydrated,
+      { baseAsset: { ...baseAsset, balance }, collateralAssets: [] },
+    ] as unknown as CometState,
+  });
+  const repay = (amount: bigint): Action => [ActionType.Repay, { ...baseAsset }, amount] as Action;
+  const supply: Action = [ActionType.Supply, { ...baseAsset }, 1_000_000n] as Action;
+
+  it('checks the live debt, not the debt when the dialog opened', () => {
+    const live = { route: wrapped, selectedMarket: USDC, comet: hydrated(-90_000_000n) };
+    expect(isSubmissionRefused(live, USDC, [repay(100_000_000n)])).toBe(true);
+    expect(isSubmissionRefused(live, USDC, [repay(90_000_000n)])).toBe(false);
+  });
+
+  it('refuses a base supply on the wrapped route', () => {
+    const live = { route: wrapped, selectedMarket: USDC, comet: hydrated(0n) };
+    expect(isSubmissionRefused(live, USDC, [supply])).toBe(true);
+  });
+
+  it('refuses on the wrapped route until the live balances are for the same market', () => {
+    const loading = { market: USDC, state: [StateType.Loading, undefined] as CometState };
+    expect(isSubmissionRefused({ route: wrapped, selectedMarket: USDC, comet: loading }, USDC, [repay(1n)])).toBe(true);
+    expect(
+      isSubmissionRefused({ route: wrapped, selectedMarket: USDC, comet: hydrated(-10n, OTHER_ROUTED) }, USDC, [
+        repay(1n),
+      ])
+    ).toBe(true);
+  });
+
+  it('leaves the standard route on the selected market alone', () => {
+    const live = { route: standard, selectedMarket: USDC, comet: hydrated(0n) };
+    expect(isSubmissionRefused(live, USDC, [supply])).toBe(false);
+  });
+
+  it('refuses a dialog kept from a routed market after another market was selected', () => {
+    const live = { route: standard, selectedMarket: UNROUTED, comet: hydrated(0n, UNROUTED) };
+    expect(isSubmissionRefused(live, USDC, [supply])).toBe(true);
+  });
+
+  it('leaves a dialog for an unrouted market alone', () => {
+    const live = { route: standard, selectedMarket: USDC, comet: hydrated(0n) };
+    expect(isSubmissionRefused(live, UNROUTED, [supply])).toBe(false);
   });
 });

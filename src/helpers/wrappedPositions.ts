@@ -1,10 +1,13 @@
 import { BigNumber } from 'ethers';
 import { Contract, ContractCall } from 'ethers-multicall';
 
-import { WrappedMarket } from '@constants/wrappedMarkets';
+import { WRAPPED_MARKET_REGISTRY, WrappedMarket, WrappedMarketRegistry } from '@constants/wrappedMarkets';
 import CometAbi from '@helpers/abis/Comet';
 import ERC20Abi from '@helpers/abis/ERC20';
 import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
+import { addsDirectBaseSupply } from '@helpers/actions';
+import { LendingRoute } from '@helpers/lendingRoute';
+import { Action, CometState, StateType } from '@types';
 
 /** The wrapper's divisor for Comet's supply index in its redeem buffer. */
 const BASE_INDEX_SCALE = 10n ** 15n;
@@ -154,4 +157,40 @@ export type SupplyIncentives = { earnRewardsAPR: bigint | undefined; isInstituti
  */
 export function supplyIncentivesForRoute(isWrappedRoute: boolean, incentives: SupplyIncentives): SupplyIncentives {
   return isWrappedRoute ? { earnRewardsAPR: 0n, isInstitutional: false } : incentives;
+}
+
+export type MarketIdentity = { chainId: number; cometAddress: string };
+export type CometStateWithMarket = { market: MarketIdentity | undefined; state: CometState };
+export type LiveSubmissionState = {
+  route: LendingRoute;
+  selectedMarket: MarketIdentity | undefined;
+  comet: CometStateWithMarket;
+};
+
+function isSameMarket(a: MarketIdentity | undefined, b: MarketIdentity): boolean {
+  return a !== undefined && a.chainId === b.chainId && a.cometAddress.toLowerCase() === b.cometAddress.toLowerCase();
+}
+
+/**
+ * Whether to refuse submitting `actions` to `submittedMarket`, judged by the session as it is
+ * now. A dialog can keep a submit callback, with its market, actions and balances, from an
+ * earlier render. On the wrapped route, the actions must not add to the account's direct
+ * Comet supply at the live balances, and without live balances for that market the answer is
+ * no. A kept dialog for a market that can route through a wrapper is refused once another
+ * market is selected, because its route is no longer known.
+ */
+export function isSubmissionRefused(
+  live: LiveSubmissionState,
+  submittedMarket: MarketIdentity,
+  actions: Action[],
+  registry: WrappedMarketRegistry = WRAPPED_MARKET_REGISTRY
+): boolean {
+  if (!isSameMarket(live.selectedMarket, submittedMarket)) {
+    return registry.lookup(submittedMarket.chainId, submittedMarket.cometAddress).status !== 'unconfigured';
+  }
+  if (live.route.kind !== 'wrapped') return false;
+
+  const [stateType, cometState] = live.comet.state;
+  if (stateType !== StateType.Hydrated || !isSameMarket(live.comet.market, submittedMarket)) return true;
+  return addsDirectBaseSupply(cometState.baseAsset, cometState.collateralAssets, actions);
 }
