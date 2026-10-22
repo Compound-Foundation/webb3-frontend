@@ -7,7 +7,7 @@ import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { filterMap } from '@helpers/functions';
 import { TRX_REFRESH_INTERVAL } from '@helpers/numbers';
-import { classifyWalletError, describeWalletError, SendWithdrawnError } from '@helpers/walletErrors';
+import { classifyWalletError, describeWalletError, NotSentError, SendWithdrawnError } from '@helpers/walletErrors';
 import { isWrapperAddress } from '@helpers/wrappedActions';
 import {
   AwaitingConfirmationTransaction,
@@ -26,8 +26,8 @@ polling periodically to see if the transaction has resolved.
 Transactions are written to localStorage, so pending transactions will be
 reloaded on page refresh. A reload restores only the connected account's
 transactions on the connected chain, and looks each one up before resuming it:
-a settled transaction is reported in `settledTransactions` with its outcome,
-never treated as a success it may not have been. A restored transaction has no
+a settled transaction is reported in `settledTransactions` with its outcome, and
+only a receipt that shows success counts as one. A restored transaction has no
 callback, so nothing that was to follow it is sent.
 
 For example:
@@ -127,7 +127,7 @@ function updateStoredTransactions(change: (stored: Transaction[]) => Transaction
 }
 
 /**
- * Whether the record is a step of a wrapper action. While such a step may still be live, the next
+ * Whether the record is a step of a wrapper action. While such a step can still be live, the next
  * review of its action waits, so neither a reload nor clearing the list drops it. Only records
  * keyed to a configured wrapper qualify, so a record written to storage by anyone else cannot
  * hold any other contract's buttons.
@@ -195,7 +195,7 @@ type Resolution =
  * The nonce read before sending is only a lower bound: a wallet that queues the transaction behind
  * another sends it with a higher one. The node's record of the transaction gives its own nonce. A
  * wrapper step is judged replaced only by its own nonce, since reporting it replaced lets a fresh
- * review of the action start, and a lower bound could report a transaction that is still pending.
+ * review of the action start, and a lower bound can report a transaction that is still pending.
  */
 async function resolveTransaction(provider: TransactionReader, transaction: PendingTransaction): Promise<Resolution> {
   const receipt = await provider.getTransactionReceipt(transaction.hash);
@@ -247,15 +247,21 @@ export type AddTransaction = (
  * - `provider-failure`: the wallet reported another error. Whether anything reached the chain is
  *   unknown, so this is never shown as a rejection and never retried automatically.
  * - `session-broken`: the provider itself is broken, as after an extension update.
- * - `session-changed`: the session is gone, or is not the account or chain the caller checked.
- *   Nothing was sent.
+ * - `session-changed`: the session is gone, or is not the account or chain the caller checked, or
+ *   the caller withdrew the request. Nothing was sent.
+ * - `not-sent`: the request failed before the wallet was asked to sign, for example while
+ *   reading the nonce or estimating gas. Nothing was sent.
+ *
+ * After `provider-failure` or `session-broken`, a wrapper step's record stays, marked interrupted,
+ * since the wallet can still send it. Other records are removed.
  */
 export type SendResult =
   | { status: 'submitted'; id: string; hash: string; response?: TransactionResponse }
   | { status: 'rejected' }
   | { status: 'provider-failure'; message: string }
   | { status: 'session-broken'; message: string }
-  | { status: 'session-changed' };
+  | { status: 'session-changed' }
+  | { status: 'not-sent'; message: string };
 
 export type TransactionRequest = {
   /** What the UI groups the transaction under, such as the contract it calls. */
@@ -300,6 +306,11 @@ export function useTransactionManager(web3: Web3): TransactionManager {
   const [settledTransactions, setSettledTransactions] = useState<SettledTransaction[]>([]);
   const [walletFailure, setWalletFailure] = useState<WalletFailure | undefined>(undefined);
   const settledIds = useRef(new Set<string>());
+  // Callbacks by transaction id. A copy of a transaction read back from storage has none, so the
+  // callback runs once whichever copy settles first.
+  const callbacks = useRef(new Map<string, (outcome: TransactionOutcome) => void>());
+  const trackedTransactions = useRef(transactions);
+  trackedTransactions.current = transactions;
   const { provider, account } = web3.write;
 
   const noteWalletError = useCallback((failedProvider: object, error: unknown) => {
@@ -312,8 +323,9 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     if (settledIds.current.has(transaction.id)) return;
     settledIds.current.add(transaction.id);
     updateTransactions([ActionType.Remove, transaction.id]);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { callback, ...record } = transaction;
+    const { callback: recordCallback, ...record } = transaction;
+    const callback = callbacks.current.get(transaction.id) ?? recordCallback;
+    callbacks.current.delete(transaction.id);
     setSettledTransactions((settled) => [...settled, { ...record, outcome }].slice(-MAX_SETTLED_TRANSACTIONS));
     callback?.(outcome);
   }, []);
@@ -333,7 +345,7 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         const isInterrupted = (tx: Transaction): tx is AwaitingConfirmationTransaction =>
           isOwn(tx) && tx.state === TransactionState.AwaitingConfirmation && isWrapperStep(tx);
         // A record with no sender cannot be tied to an account, and a wallet request with no hash
-        // cannot be looked up. A wrapper step stays, though: its wallet request may still be open,
+        // cannot be looked up. A wrapper step stays, though: its wallet request can still be open,
         // so the next review of its action waits until the user dismisses it.
         updateStoredTransactions((stored) =>
           stored.filter(
@@ -344,8 +356,10 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         storedTransactions.filter(isInterrupted).forEach((transaction) => {
           updateTransactions([ActionType.Add, { ...transaction, isInterrupted: true }]);
         });
+        // A transaction this session already tracks is followed by the poll, with its callback.
+        const isTracked = (tx: Transaction) => trackedTransactions.current.some((tracked) => tracked.id === tx.id);
         const ownTransactions = filterMap<Transaction, PendingTransaction>(storedTransactions, (tx) =>
-          isOwn(tx) && tx.state === TransactionState.Pending ? tx : undefined
+          isOwn(tx) && tx.state === TransactionState.Pending && !isTracked(tx) ? tx : undefined
         );
         ownTransactions.forEach((transaction) => {
           resolveTransaction(provider, transaction).then(
@@ -381,10 +395,25 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let isCurrent = true;
 
+    const scheduleNextPoll = () => {
+      timeoutId = setTimeout(pollForTransactionReceipt, TRX_REFRESH_INTERVAL);
+    };
+
     function pollForTransactionReceipt() {
-      requestAnimationFrame(() => {
-        if (!isCurrent || provider === undefined || provider.network === undefined) return;
-        const chainId = provider.network.chainId;
+      requestAnimationFrame(async () => {
+        if (!isCurrent || provider === undefined) return;
+        if (!transactions.some((tx) => tx.state === TransactionState.Pending)) return;
+        // A wallet provider built moments ago has not detected its network yet, so ask for it
+        // rather than read `provider.network`, and try again later if that fails.
+        let chainId: number;
+        try {
+          ({ chainId } = await provider.getNetwork());
+        } catch (error) {
+          noteWalletError(provider, error);
+          if (isCurrent) scheduleNextPoll();
+          return;
+        }
+        if (!isCurrent) return;
         const currentNetworkPendingTransactions = filterMap<Transaction, PendingTransaction>(transactions, (tx) =>
           tx.state === TransactionState.Pending && tx.networkId === chainId ? tx : undefined
         );
@@ -409,7 +438,7 @@ export function useTransactionManager(web3: Web3): TransactionManager {
             }
           );
         });
-        timeoutId = setTimeout(pollForTransactionReceipt, TRX_REFRESH_INTERVAL);
+        scheduleNextPoll();
       });
     }
 
@@ -429,12 +458,17 @@ export function useTransactionManager(web3: Web3): TransactionManager {
       }
 
       const id = uuidv4();
-      let isRecorded = false;
+      let record: AwaitingConfirmationTransaction | undefined;
+      let isSendCalled = false;
+      const forget = () => {
+        if (record !== undefined) updateTransactions([ActionType.Remove, id]);
+        callbacks.current.delete(id);
+      };
       try {
         // Throws if the wallet changed network since the provider was built.
         const network = await provider.getNetwork();
         if (request.chainId !== undefined && network.chainId !== request.chainId) return { status: 'session-changed' };
-        const currentNonce = await provider.getTransactionCount(account);
+        const confirmedNonceBefore = await provider.getTransactionCount(account);
 
         const baseTransaction: BaseTransaction = {
           id,
@@ -442,14 +476,16 @@ export function useTransactionManager(web3: Web3): TransactionManager {
           networkId: network.chainId,
           networkName: network.name,
           description: request.description,
-          nonce: currentNonce,
+          nonce: confirmedNonceBefore,
           account: account.toLowerCase(),
           step: request.step,
           callback: request.onSettled,
         };
-        updateTransactions([ActionType.Add, { ...baseTransaction, state: TransactionState.AwaitingConfirmation }]);
-        isRecorded = true;
+        record = { ...baseTransaction, state: TransactionState.AwaitingConfirmation };
+        updateTransactions([ActionType.Add, record]);
+        if (request.onSettled !== undefined) callbacks.current.set(id, request.onSettled);
 
+        isSendCalled = true;
         const response = await request.send();
         const hash = typeof response === 'string' ? response : response.hash;
         // A hash alone, or a `connectUnchecked` signer's response, gives no nonce.
@@ -462,7 +498,7 @@ export function useTransactionManager(web3: Web3): TransactionManager {
             state: TransactionState.Pending,
             hash,
             ...(ownNonce === undefined
-              ? { nonce: currentNonce, nonceSource: 'lower-bound' as const }
+              ? { nonce: confirmedNonceBefore, nonceSource: 'lower-bound' as const }
               : { nonce: ownNonce, nonceSource: 'transaction' as const }),
           },
         ]);
@@ -470,12 +506,32 @@ export function useTransactionManager(web3: Web3): TransactionManager {
           ? { status: 'submitted', id, hash }
           : { status: 'submitted', id, hash, response };
       } catch (error) {
-        if (isRecorded) updateTransactions([ActionType.Remove, id]);
-        if (error instanceof SendWithdrawnError) return { status: 'session-changed' };
+        if (error instanceof SendWithdrawnError) {
+          forget();
+          return { status: 'session-changed' };
+        }
         console.log(error);
         noteWalletError(provider, error);
+        if (!isSendCalled || error instanceof NotSentError) {
+          forget();
+          return {
+            status: 'not-sent',
+            message: describeWalletError(error instanceof NotSentError ? error.cause : error),
+          };
+        }
         const kind = classifyWalletError(error);
-        return kind === 'rejected' ? { status: 'rejected' } : { status: kind, message: describeWalletError(error) };
+        if (kind === 'rejected') {
+          forget();
+          return { status: 'rejected' };
+        }
+        // The wallet had the request and can still send it. A wrapper step stays, marked
+        // interrupted, so the next review of its action waits until the user dismisses it.
+        if (record !== undefined && isWrapperStep(record)) {
+          updateTransactions([ActionType.Update, { ...record, isInterrupted: true }]);
+        } else {
+          forget();
+        }
+        return { status: kind, message: describeWalletError(error) };
       }
     },
     [provider, account]
@@ -507,6 +563,7 @@ export function useTransactionManager(web3: Web3): TransactionManager {
 
   const dismissTransaction = useCallback((id: string) => {
     updateTransactions([ActionType.Remove, id]);
+    callbacks.current.delete(id);
   }, []);
 
   return {

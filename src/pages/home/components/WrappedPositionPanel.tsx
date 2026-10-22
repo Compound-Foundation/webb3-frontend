@@ -201,7 +201,7 @@ const WrappedPositionPanel = ({
       {canDismissRecovered && (
         <div className="wrapped-position-panel__notice">
           <p className="L3 meta text-color--2">
-            An earlier wrapped transaction from this account has not settled, or its wallet request may still be open.
+            An earlier wrapped transaction from this account has not settled, or its wallet request can still be open.
             New wrapped deposits and withdrawals wait for it. Stop waiting only after checking your wallet and the block
             explorer: the earlier transaction can still go through.
           </p>

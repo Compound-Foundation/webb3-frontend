@@ -1,8 +1,8 @@
 /**
  * How a wallet request failed.
- * - `rejected`: the user declined it. Only an explicit rejection counts: EIP-1193 code 4001,
- *   viem's `UserRejectedRequestError`, or ethers' `ACTION_REJECTED`, which ethers raises when the
- *   wallet says the user denied the request.
+ * - `rejected`: the user declined it. Only these count: EIP-1193 code 4001, viem's
+ *   `UserRejectedRequestError`, and ethers' `ACTION_REJECTED`. Ethers raises `ACTION_REJECTED` from
+ *   the wallet's message ("user denied"), not from the code.
  * - `session-broken`: the provider itself is broken. An extension that updates under an open tab
  *   leaves the page showing the wallet as connected while every call throws, for example
  *   `Cannot read properties of undefined (reading 'sendMessage')`. Only these messages count: any
@@ -67,6 +67,18 @@ export class SendWithdrawnError extends Error {
   }
 }
 
+/**
+ * Thrown by a request's `send` when it failed before the wallet was asked to sign, for example
+ * while estimating gas. Nothing was sent. `cause` is the original error.
+ */
+export class NotSentError extends Error {
+  constructor(cause: unknown) {
+    super(describeWalletError(cause));
+    this.name = 'NotSentError';
+    this.cause = cause;
+  }
+}
+
 export type SessionProbeResult =
   | { status: 'usable' }
   | {
@@ -87,7 +99,7 @@ export type ProbedProvider = { send: (method: string, params: unknown[]) => Prom
  * Reads through the wallet provider to check that it can still serve `chainId`. A successful
  * network switch is not proof of a usable wallet: a wallet can acknowledge a switch to a network it
  * cannot serve and then fail every read. A read that fails is the only signal, so this probe makes
- * one: `eth_blockNumber` needs the wallet's node, while `eth_chainId` may be answered locally.
+ * one: `eth_blockNumber` needs the wallet's node, while the wallet can answer `eth_chainId` locally.
  */
 export async function probeWalletSession(provider: ProbedProvider, chainId: number): Promise<SessionProbeResult> {
   try {

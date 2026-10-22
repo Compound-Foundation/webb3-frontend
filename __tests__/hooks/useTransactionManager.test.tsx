@@ -4,7 +4,8 @@ import { BigNumber } from 'ethers';
 
 import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
-import { SendWithdrawnError } from '@helpers/walletErrors';
+import { TRX_REFRESH_INTERVAL } from '@helpers/numbers';
+import { NotSentError, SendWithdrawnError } from '@helpers/walletErrors';
 import { SendResult, useTransactionManager } from '@hooks/useTransactionManager';
 import { PendingTransaction, SettledTransaction, Transaction, TransactionState } from '@types';
 
@@ -34,13 +35,20 @@ type Chain = {
   confirmedNonces?: Record<string, number>;
 };
 
-/** A stand-in for the wallet provider, answering from `chain`. */
-function walletProvider(chain: Chain = {}) {
+/**
+ * A stand-in for the wallet provider, answering from `chain`. Like ethers' Web3Provider, it can
+ * leave `network` undefined until `getNetwork` has asked the wallet, `networkDelayMs` later.
+ */
+function walletProvider(chain: Chain = {}, { networkDelayMs }: { networkDelayMs?: number } = {}) {
   const chainId = chain.chainId ?? 1;
-  const network = { chainId, name: chainId === 1 ? 'homestead' : 'matic' };
-  return {
-    network,
-    getNetwork: jest.fn(async () => network),
+  const detected = { chainId, name: chainId === 1 ? 'homestead' : 'matic' };
+  const provider = {
+    network: networkDelayMs === undefined ? detected : (undefined as typeof detected | undefined),
+    getNetwork: jest.fn(async () => {
+      if (networkDelayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, networkDelayMs));
+      provider.network = detected;
+      return detected;
+    }),
     getTransactionReceipt: jest.fn(async (hash: string) =>
       chain.receipts?.[hash] === undefined ? null : { transactionHash: hash, status: chain.receipts[hash] }
     ),
@@ -51,6 +59,7 @@ function walletProvider(chain: Chain = {}) {
     getSigner: jest.fn(),
     send: jest.fn(),
   };
+  return provider;
 }
 type WalletProvider = ReturnType<typeof walletProvider>;
 
@@ -373,6 +382,54 @@ describe('useTransactionManager', () => {
     });
   });
 
+  describe('after the wallet provider is rebuilt', () => {
+    it('keeps looking up a pending transaction while the new provider detects its network', async () => {
+      jest.useFakeTimers();
+      try {
+        const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
+        const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
+        const onSettled = jest.fn();
+        await act(async () => {
+          await result.current.addTransaction(COMET, 'Supply', sent(tx('supply'), 7), 1, jest.fn(), [], 0n, onSettled);
+        });
+
+        rerender({ web3: web3For(ACCOUNT, walletProvider(chain, { networkDelayMs: 40 })) });
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(1_000);
+        });
+        expect(onSettled).not.toHaveBeenCalled();
+
+        // The transaction is mined after the rebuild, and the next poll finds it.
+        chain.receipts = { [tx('supply')]: 1 };
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(TRX_REFRESH_INTERVAL + 1_000);
+        });
+        expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ status: 'confirmed' }));
+        expect(result.current.transactions).toEqual([]);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("runs the transaction's callback once when the restore settles it first", async () => {
+      const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
+      const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
+      const onSettled = jest.fn();
+      await act(async () => {
+        await result.current.addTransaction(COMET, 'Supply', sent(tx('supply'), 7), 1, jest.fn(), [], 0n, onSettled);
+      });
+
+      // The transaction is mined, then the provider is rebuilt before the next poll.
+      chain.receipts = { [tx('supply')]: 1 };
+      rerender({ web3: web3For(ACCOUNT, walletProvider(chain, { networkDelayMs: 0 })) });
+
+      await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
+      await settleLookups();
+      expect(onSettled).toHaveBeenCalledTimes(1);
+      expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('supply')]: 'confirmed' });
+    });
+  });
+
   it('reports whether a transaction succeeded to its callback', async () => {
     const provider = walletProvider({ receipts: { [tx('succeeded')]: 1, [tx('failed')]: 0 } });
     const { result } = renderManager(web3For(ACCOUNT, provider));
@@ -528,6 +585,56 @@ describe('useTransactionManager', () => {
       expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
     });
 
+    it('keeps a wrapper step, marked interrupted, when the wallet answers with an unknown outcome', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+
+      let submission: SendResult | undefined;
+      await act(async () => {
+        submission = await result.current.submitTransaction({
+          key: WRAPPER,
+          description: 'Supply USDC',
+          step: 'supply',
+          send: async () => Promise.reject({ code: -32603, message: 'Internal error' }),
+        });
+      });
+
+      expect(submission).toEqual({ status: 'provider-failure', message: 'Internal error (-32603)' });
+      // Anchorage may still send it after approval on mobile, so the next review waits for it.
+      expect(result.current.transactions).toEqual([
+        expect.objectContaining({ state: TransactionState.AwaitingConfirmation, step: 'supply', isInterrupted: true }),
+      ]);
+      expect(JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]')).toHaveLength(1);
+    });
+
+    it('drops a wrapper step the user rejected, or one that failed before the wallet was asked', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+
+      const submissions: SendResult[] = [];
+      await act(async () => {
+        submissions.push(
+          await result.current.submitTransaction({
+            key: WRAPPER,
+            description: 'Supply USDC',
+            step: 'supply',
+            send: async () => Promise.reject({ code: 4001, message: 'User rejected the request.' }),
+          }),
+          await result.current.submitTransaction({
+            key: WRAPPER,
+            description: 'Supply USDC',
+            step: 'supply',
+            send: async () => Promise.reject(new NotSentError({ code: -32000, message: 'execution reverted' })),
+          })
+        );
+      });
+
+      expect(submissions).toEqual([
+        { status: 'rejected' },
+        { status: 'not-sent', message: 'execution reverted (-32000)' },
+      ]);
+      expect(result.current.transactions).toEqual([]);
+      expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
+    });
+
     it('sends nothing when the caller withdraws the request at the last moment', async () => {
       const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
       const { result } = renderManager(web3For(ACCOUNT, provider));
@@ -557,7 +664,11 @@ describe('useTransactionManager', () => {
         submission = await result.current.submitTransaction({ key: WRAPPER, description: 'Approve USDC', send });
       });
 
-      expect(submission).toMatchObject({ status: 'session-broken' });
+      // The nonce read failed, so the wallet was never asked and nothing was sent.
+      expect(submission).toEqual({
+        status: 'not-sent',
+        message: "Cannot read properties of undefined (reading 'sendMessage')",
+      });
       expect(send).not.toHaveBeenCalled();
       expect(result.current.walletFailure?.provider).toBe(provider);
     });

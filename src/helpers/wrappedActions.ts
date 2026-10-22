@@ -14,7 +14,7 @@ export const WRAPPED_ACTION = 'wrapped-action';
 export type WrappedActionType = 'supply' | 'withdraw';
 
 /**
- * The calls a wrapper action may make, each on one of its own contracts:
+ * The calls a wrapper action can make, each on one of its own contracts:
  * - `approve`: the base token's `approve(wrapper, amount)`, including a reset to zero.
  * - `supply-and-wrap`: the wrapper's `supplyAndWrap(amount)`.
  * - `unwrap-and-withdraw`: the wrapper's `unwrapAndWithdraw(shares)`.
@@ -54,7 +54,7 @@ export type WrappedActionIdentity = {
   screeningStatus: ScreeningStatus;
   /** The release control for `type`: the mapping's `isDepositEnabled` or `isExitEnabled`. */
   isReleased: boolean;
-  /** The wallet provider a signature would go through, compared by identity. */
+  /** The wallet provider that signs, compared by identity. */
   provider: object;
 };
 
@@ -237,7 +237,7 @@ export function submitExecution<T>(
   }
 }
 
-/** Whether `entries` would all go down the direct path. Any wrapper action refuses the whole request. */
+/** Whether every entry goes down the direct path. Any wrapper action refuses the whole request. */
 export function isDirectExecution(entries: readonly unknown[]): boolean {
   try {
     return planExecution(entries).kind === 'direct';
@@ -285,7 +285,7 @@ const ALLOWED_STEPS: Record<WrappedActionType, readonly WrappedStepKind[]> = {
  * Checks that a step makes only the call its kind allows, on the draft's own contracts: the base
  * token's `approve` to the wrapper, or the wrapper's own supply or exit method, canonically
  * encoded. The contracts come from the draft's identity, which comes from the route, so a step can
- * never reach Comet, the Bulker or any other contract. The amount is the draft's own: base units
+ * never call Comet, the Bulker or any other contract directly. The amount is the draft's own: base units
  * for a supply and shares for a withdrawal. An approval is for exactly that amount, or zero to
  * reset an allowance first, and never more.
  */
@@ -349,14 +349,16 @@ export type WrappedBlockReason =
   | WrappedStepProblem
   | MarketRestriction
   /** The step's own check, such as a simulation, refused. */
-  | 'step-check-failed';
+  | 'step-check-failed'
+  /** The request failed before the wallet was asked to sign, so nothing was sent. */
+  | 'not-sent';
 
 /**
  * The checks made against the live session immediately before every signature. The identity the
  * draft was reviewed under must still hold, so a change of account, connector, chain, market,
  * wrapper, route, screening, release control or wallet provider stops it. The route must still
  * allow the action, which covers the signer, the chain, screening, connector conflicts, wrapper
- * validation and the release control. The step must call only what it may.
+ * validation and the release control. The step must make only the call its kind allows.
  */
 export function checkBeforeSignature(
   draft: WrappedActionDraft,
@@ -378,8 +380,8 @@ export function checkBeforeSignature(
 const cometInterface = new Interface(CometAbi);
 
 /**
- * Reads the Comet pause that would make the wrapper call revert: `supplyAndWrap` supplies to
- * Comet and `unwrapAndWithdraw` withdraws from it. A read that fails, or returns something other
+ * Reads the Comet pause that makes the wrapper call revert. `supplyAndWrap` supplies to Comet,
+ * and `unwrapAndWithdraw` withdraws from it. A read that fails, or returns something other
  * than a boolean, is a restriction too.
  */
 export async function readMarketRestriction(
