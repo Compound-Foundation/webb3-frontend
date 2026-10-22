@@ -668,6 +668,50 @@ describe('WrappedSupply', () => {
       expect(within(dialog).getByRole('button', { name: 'Close' })).toBeEnabled();
     });
 
+    it('shows the review being read, and cancels it', () => {
+      const { onClose } = renderModal({ phase: 'reading', identity: draftFor([SUPPLY_STEP]).identity });
+
+      expect(screen.getByRole('dialog')).toHaveTextContent(/checking your balance/i);
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it.each<[string, WrappedStepState, RegExp]>([
+      ['checking', { status: 'checking' }, /checking your balance, allowance and wallet/i],
+      ['awaiting the wallet', { status: 'awaiting-signature' }, /waiting for your wallet/i],
+    ])('says what a step being signed is %s, with nothing to confirm', (_name, step, text) => {
+      renderModal({ ...inReview(), phase: 'signing', steps: [step, { status: 'waiting' }] });
+
+      expect(screen.getByRole('dialog')).toHaveTextContent(text);
+      expect(screen.queryByRole('button', { name: /approve 1,000/i })).not.toBeInTheDocument();
+    });
+
+    it.each<[WrappedStepState, RegExp]>([
+      [{ status: 'blocked', reason: 'identity-changed' }, /your wallet, network or market changed/],
+      [{ status: 'blocked', reason: 'session-unusable' }, /your wallet stopped responding/],
+      [
+        { status: 'blocked', reason: 'transaction-pending' },
+        /another wrapped transaction from this account is still pending/,
+      ],
+      [{ status: 'blocked', reason: 'supply-paused' }, /supplying to this market is paused/],
+      [{ status: 'blocked', reason: 'restriction-unknown' }, /pause state could not be read/],
+      [{ status: 'blocked', reason: 'deposits-disabled' }, /wrapped deposits are closed/],
+      [{ status: 'blocked', reason: 'screening' }, /has not passed screening/],
+      [{ status: 'blocked', reason: 'no-signer' }, /not connected and ready/],
+      [
+        { status: 'blocked', reason: 'not-sent', message: 'out of gas' },
+        /failed before your wallet was asked \(out of gas\)/,
+      ],
+      [{ status: 'blocked', reason: 'wrong-spender' }, /did not pass this page's checks \(wrong-spender\)/],
+    ])('says why a step was stopped before the wallet was asked: %p', (step, text) => {
+      renderModal({ ...inReview(), phase: 'stopped', steps: [step, { status: 'waiting' }] });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/nothing was sent/i);
+      expect(dialog).toHaveTextContent(text);
+      expect(dialog).toHaveTextContent('Not sent.');
+    });
+
     it('lists what was already sent when an identity change closed the supply', () => {
       renderModal({
         phase: 'discarded',
@@ -712,6 +756,21 @@ describe('WrappedSupply', () => {
       expect(dialog).toHaveTextContent(/supply confirmed/i);
       expect(dialog).toHaveTextContent('Supplied 1,000.000000 USDC');
       expect(dialog).not.toHaveTextContent(/USDT/);
+    });
+
+    it('says when a broken wallet closed the supply', () => {
+      renderModal({
+        phase: 'discarded',
+        reason: 'session-unusable',
+        type: 'supply',
+        chainId: 1,
+        submittedHashes: [],
+        isWalletRequestOpen: true,
+      });
+
+      expect(screen.getByRole('dialog')).toHaveTextContent(
+        /your wallet stopped responding, so this supply was closed/i
+      );
     });
 
     it.each<[string, WrappedActionState]>([
