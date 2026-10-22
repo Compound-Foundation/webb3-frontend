@@ -16,9 +16,10 @@ import { initializeContext, getSelectedMarketContext } from '@contexts/SelectedM
 import { useWeb3Context } from '@contexts/Web3Context';
 import { WrappedLendingContext } from '@contexts/WrappedLendingContext';
 import { useEthersProvider } from '@helpers/ethersAdapter';
-import { estimateGasForActions, getKeyForActions, initialEstimatedGasMap } from '@helpers/gasEstimator';
-import { useActionQueue } from '@hooks/useActionQueue';
+import { estimateGasForActions, getKeyForActions } from '@helpers/gasEstimator';
+import { QueueSession, useActionQueue } from '@hooks/useActionQueue';
 import { useCometState } from '@hooks/useCometState';
+import { useGasEstimates } from '@hooks/useGasEstimates';
 import { useLendingRoute } from '@hooks/useLendingRoute';
 import { useRewardsState } from '@hooks/useRewardsState';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
@@ -151,9 +152,22 @@ function App({ Component, pageProps }: any) {
     }
   };
 
+  // The queue and its gas estimates belong to the wallet session they were made in.
+  const walletSession: QueueSession = {
+    account: web3.write.account,
+    connector: web3.write.connector?.uid,
+    status: web3.write.status,
+  };
+  // The estimates also belong to the wallet's network, which the queue survives.
+  const { estimatedGasMap, addEstimate } = useGasEstimates({
+    session: walletSession,
+    walletChainId: web3.write.chainId,
+    market: selectedMarketState.selectedMarket[1],
+  });
+
   // Wallet connect for mobile requires that we pre-estimate gas for
   // transactions before they are submitted for better UX.
-  const preEstimateGas = async (actions: Action[]) => {
+  const preEstimateGas = (actions: Action[]) => {
     if (
       actions.length > 0 &&
       selectedMarketState.selectedMarket[0] == StateType.Hydrated &&
@@ -161,29 +175,30 @@ function App({ Component, pageProps }: any) {
     ) {
       const actionsKey = getKeyForActions(actions);
       if (!estimatedGasMap.has(actionsKey) || estimatedGasMap.get(actionsKey) === 0) {
-        const estimatedGas = await estimateGasForActions(
-          web3,
-          selectedMarketState.selectedMarket[1] as MarketDataLoaded,
-          cometState[1].baseAsset,
-          cometState[1].collateralAssets,
-          actions
+        addEstimate(
+          actionsKey,
+          estimateGasForActions(
+            web3,
+            selectedMarketState.selectedMarket[1] as MarketDataLoaded,
+            cometState[1].baseAsset,
+            cometState[1].collateralAssets,
+            actions
+          )
         );
-
-        const newGasMap = new Map(estimatedGasMap.set(actionsKey, estimatedGas));
-        setEstimatedGasMap(newGasMap);
       }
     }
   };
 
-  const [estimatedGasMap, setEstimatedGasMap] = useState(initialEstimatedGasMap(undefined));
   const actionQueue = useActionQueue(
     selectedMarketState.selectedMarket,
     (actions: Action[]) => {
       preEstimateGas(actions);
     },
-    { account: web3.write.account, connector: web3.write.connector?.uid, status: web3.write.status }
+    walletSession
   );
 
+  // A change of the wallet's network keeps the queue but drops its estimates, so the queue is
+  // estimated again on the new network.
   useEffect(() => {
     // If a user hasn't enabled bulker then they first have to enable bulker
     // while they have actions in the queue so this catches that flow.
@@ -199,15 +214,7 @@ function App({ Component, pageProps }: any) {
       );
       preEstimateGas(actionsInQueue);
     }
-  }, [transactions, selectedMarketState.selectedMarket[0], cometState[0], rewardsState[0]]);
-
-  useEffect(() => {
-    let maybeChainInfo = undefined;
-    if (selectedMarketState.selectedMarket[0] == StateType.Hydrated) {
-      maybeChainInfo = selectedMarketState.selectedMarket[1].chainInformation;
-    }
-    setEstimatedGasMap(initialEstimatedGasMap(maybeChainInfo));
-  }, [selectedMarketState.selectedMarket]);
+  }, [transactions, selectedMarketState.selectedMarket[0], cometState[0], rewardsState[0], web3.write.chainId]);
 
   ActionQueueContextHelpers.initializeContext(actionQueue);
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
