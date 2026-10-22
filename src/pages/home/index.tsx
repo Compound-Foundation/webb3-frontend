@@ -164,6 +164,12 @@ const Home = ({
   // On the wrapped route, a wallet session found unusable stops direct writes as well.
   const liveWalletUnusable = useRef(false);
   liveWalletUnusable.current = wrappedLending.action.session.status === 'unusable';
+  // App writes each new gas estimate into a new map, for example once the Bulker approval settles,
+  // so a kept callback reads the map through this ref. App keeps the estimates for the same
+  // account, connector, connection status, wallet network and market as a visit, so the map of the
+  // callback's own visit is the live one.
+  const liveEstimatedGasMap = useRef(estimatedGasMap);
+  liveEstimatedGasMap.current = estimatedGasMap;
 
   // The manager reads the network and nonce, and can estimate gas, before it asks the wallet. If
   // the write's visit ends or the session is found unusable in that time, the write is withdrawn.
@@ -299,7 +305,7 @@ const Home = ({
         return;
       }
       const description = `${actions.length} Action${actions.length > 1 ? 's' : ''}`;
-      const estimatedGasLimit = estimatedGasMap.get(getKeyForActions(actions)) || 0;
+      const estimatedGasLimit = liveEstimatedGasMap.current.get(getKeyForActions(actions)) || 0;
       writeState.invokeBulker(market, actions, baseAsset, collateralAssets, description, estimatedGasLimit, () => {
         setPendingAction(undefined);
         clearActions();
@@ -324,7 +330,7 @@ const Home = ({
         setActionModalState(undefined);
       };
 
-      const estimatedGasLimit = estimatedGasMap.get(getKeyForActions([singleAction])) || 0;
+      const estimatedGasLimit = liveEstimatedGasMap.current.get(getKeyForActions([singleAction])) || 0;
 
       switch (actionType) {
         case ActionType.Repay:
@@ -519,7 +525,7 @@ const Home = ({
                   spender = market.bulkerAddress;
                 }
                 if (liveWalletUnusable.current) return;
-                const approveGasLimit = estimatedGasMap.get(PreEstimatedAction.Approve) || 0;
+                const approveGasLimit = liveEstimatedGasMap.current.get(PreEstimatedAction.Approve) || 0;
                 writeState.approve(spender, assetAddress, `Enable ${asset.symbol}`, approveGasLimit);
                 confirmAction();
               }

@@ -6,6 +6,7 @@ import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { getKeyForActions } from '@helpers/gasEstimator';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { SendWithdrawnError } from '@helpers/walletErrors';
@@ -165,6 +166,7 @@ type Setup = {
   isBulkerAllowed?: boolean;
   addTransaction?: AddTransaction;
   switchWriteNetwork?: (chainId: number) => Promise<boolean>;
+  estimatedGasMap?: Map<string, number>;
 };
 
 SelectedMarketContextHelpers.initializeContext({
@@ -182,6 +184,7 @@ function homeElement({
   isBulkerAllowed = false,
   addTransaction = jest.fn(),
   switchWriteNetwork = jest.fn(),
+  estimatedGasMap = new Map(),
 }: Setup) {
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
@@ -201,7 +204,7 @@ function homeElement({
             cometState={cometState(isBulkerAllowed)}
             addTransaction={addTransaction}
             switchWriteNetwork={switchWriteNetwork}
-            estimatedGasMap={new Map()}
+            estimatedGasMap={estimatedGasMap}
             theme={Theme.Dark}
           />
         </ActionQueueContext.Provider>
@@ -286,6 +289,23 @@ describe('Home review dialogs', () => {
 
     expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
     expect(openDialog()).toEqual([ModalType.BulkerApprove, expect.anything()]);
+  });
+
+  it('submits from a kept dialog with the gas estimate made after the dialog opened', () => {
+    const queuedActions = [BORROW, SUPPLY_COMP];
+    const actionsKey = getKeyForActions(queuedActions);
+    const queue = actionQueue(queuedActions);
+    // The Bulker needs the account's approval first, so the queue's estimate is 0 when the dialog opens.
+    const { rerender } = render(homeElement({ queue, estimatedGasMap: new Map([[actionsKey, 0]]) }));
+    act(() => positionCard().onSubmitClicked());
+    const { onCompleteClicked } = openDialog()[1];
+
+    // The approval settles, and App estimates the queue again, into a new map.
+    rerender(homeElement({ queue, isBulkerAllowed: true, estimatedGasMap: new Map([[actionsKey, 451_234]]) }));
+    act(() => onCompleteClicked());
+
+    expect(mockWriteState.invokeBulker).toHaveBeenCalledTimes(1);
+    expect(mockWriteState.invokeBulker.mock.calls[0][5]).toBe(451_234);
   });
 
   it("does not let a settled transaction's callback close another account's dialog", () => {
