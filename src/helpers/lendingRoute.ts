@@ -18,17 +18,19 @@ export type WriteBlockReason =
   | 'connector-conflict'
   | 'screening'
   | 'no-account'
-  | 'no-signer'
   | 'wrong-chain'
+  | 'no-signer'
   | 'validation-pending'
   | 'validation-failed'
+  | 'not-canonical'
   | 'asset-mismatch'
   | 'metadata-mismatch'
   | 'deposits-disabled'
   | 'exits-disabled';
 
-/** Whether an action may be offered, and if not, the first reason it may not. */
-export type Eligibility = { eligible: true } | { eligible: false; reason: WriteBlockReason; requiredChainId?: number };
+/** Whether an action can be offered. When it cannot, the first reason that blocks it. */
+export type Eligibility =
+  { isEligible: true } | { isEligible: false; reason: WriteBlockReason; requiredChainId?: number };
 
 /** The parts of the selected wagmi connector that routing reads. */
 export type SessionConnector = { id: string; uid?: string; rdns?: string | readonly string[] };
@@ -38,17 +40,18 @@ export type LendingSession = {
   connector: SessionConnector | undefined;
   /** wagmi's connection status. `isActive` is already true while wagmi reconnects, so it is not enough. */
   status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected';
-  /** `web3.write.account`, which the screening gate leaves undefined unless the address is allowed. */
+  /** `web3.write.account`. Web3Context clears it when screening has not allowed the address. */
   account: string | undefined;
   chainId: number | undefined;
   /** The page shows an `?account=` address the user has no signer for. */
   isWatchOnly: boolean;
-  /** A wallet provider and connector client exist for this account and chain. */
-  signerReady: boolean;
+  /** The wallet provider was built from the current connector client, for this account and chain. */
+  isSignerReady: boolean;
   screeningStatus: ScreeningStatus;
 };
 
-export type ValidationStatus = 'pending' | 'matched' | 'asset-mismatch' | 'metadata-mismatch' | 'failed';
+export type ValidationStatus =
+  'pending' | 'matched' | 'not-canonical' | 'asset-mismatch' | 'metadata-mismatch' | 'failed';
 
 /** The result of reading a wrapper's configuration on chain, for the route `key` names. */
 export type WrapperValidation = { key: string; status: ValidationStatus };
@@ -56,7 +59,7 @@ export type WrapperValidation = { key: string; status: ValidationStatus };
 export type LendingRoute =
   | {
       kind: 'standard';
-      /** The session gates, for information only: direct Comet actions keep their existing checks. */
+      /** The session gates, for information only. Direct Comet actions keep their existing checks. */
       writes: Eligibility;
     }
   | {
@@ -82,16 +85,16 @@ export type LendingRouteInput = {
   registry?: WrappedMarketRegistry;
 };
 
-const ELIGIBLE: Eligibility = Object.freeze({ eligible: true });
+const ELIGIBLE: Eligibility = Object.freeze({ isEligible: true });
 
-function block(reason: WriteBlockReason, requiredChainId?: number): Eligibility {
-  return requiredChainId === undefined ? { eligible: false, reason } : { eligible: false, reason, requiredChainId };
+function ineligible(reason: WriteBlockReason, requiredChainId?: number): Eligibility {
+  return requiredChainId === undefined ? { isEligible: false, reason } : { isEligible: false, reason, requiredChainId };
 }
 
 /**
  * Identifies one route for one session. A validation result applies only to the key it was
- * read for, so any change of market, wrapper, connector, account, chain or connection status
- * discards it in the same render.
+ * read for. The key covers every field of the mapping and the session's connector, account,
+ * chain and connection status.
  */
 export function wrappedRouteKey(market: WrappedMarket, session: LendingSession): string {
   return [
@@ -99,6 +102,8 @@ export function wrappedRouteKey(market: WrappedMarket, session: LendingSession):
     market.cometAddress.toLowerCase(),
     market.wrapperAddress.toLowerCase(),
     market.baseTokenAddress.toLowerCase(),
+    market.baseDecimals,
+    market.shareDecimals,
     session.connector?.id ?? '',
     session.connector?.uid ?? '',
     session.account?.toLowerCase() ?? '',
@@ -113,48 +118,49 @@ function sessionGate(
   conflictedRdns: ReadonlySet<string>,
   requiredChainId: number | undefined,
 ): Eligibility {
-  if (session.isWatchOnly) return block('watch-only');
-  if (session.status === 'disconnected') return block('disconnected');
-  if (session.status !== 'connected') return block('reconnecting');
-  // Checked here as well as in Web3Context, which disconnects a conflicted session only in an
-  // effect after this render.
-  if (session.connector === undefined || isConnectorConflicted(session.connector, conflictedRdns)) {
-    return block(session.connector === undefined ? 'disconnected' : 'connector-conflict');
+  if (session.isWatchOnly) return ineligible('watch-only');
+  if (session.status === 'disconnected') return ineligible('disconnected');
+  if (session.status !== 'connected') return ineligible('reconnecting');
+  if (session.connector === undefined) return ineligible('disconnected');
+  // Web3Context also disconnects a conflicted session, but only in an effect after this render.
+  if (isConnectorConflicted(session.connector, conflictedRdns)) return ineligible('connector-conflict');
+  if (session.screeningStatus !== 'allowed') return ineligible('screening');
+  if (session.account === undefined || session.account === '') return ineligible('no-account');
+  // Before the signer check: on a chain the app does not configure, the connector client has
+  // no chain, and the user has to be asked to switch rather than told there is no signer.
+  if (requiredChainId !== undefined && session.chainId !== requiredChainId) {
+    return ineligible('wrong-chain', requiredChainId);
   }
-  if (session.screeningStatus !== 'allowed') return block('screening');
-  if (session.account === undefined || session.account === '') return block('no-account');
-  if (!session.signerReady) return block('no-signer');
-  if (requiredChainId !== undefined && session.chainId !== requiredChainId)
-    return block('wrong-chain', requiredChainId);
+  if (!session.isSignerReady) return ineligible('no-signer');
   return ELIGIBLE;
 }
 
 function validationGate(validation: WrapperValidation | undefined, key: string): Eligibility {
-  if (validation === undefined || validation.key !== key) return block('validation-pending');
+  if (validation === undefined || validation.key !== key) return ineligible('validation-pending');
   switch (validation.status) {
     case 'matched':
       return ELIGIBLE;
+    case 'not-canonical':
     case 'asset-mismatch':
-      return block('asset-mismatch');
     case 'metadata-mismatch':
-      return block('metadata-mismatch');
+      return ineligible(validation.status);
     case 'failed':
-      return block('validation-failed');
+      return ineligible('validation-failed');
     default:
-      return block('validation-pending');
+      return ineligible('validation-pending');
   }
 }
 
-function first(...gates: Eligibility[]): Eligibility {
-  return gates.find((gate) => !gate.eligible) ?? ELIGIBLE;
+function firstIneligible(...gates: Eligibility[]): Eligibility {
+  return gates.find((gate) => !gate.isEligible) ?? ELIGIBLE;
 }
 
 /**
- * Decide, once, how the selected market is lent through for this session. The route is
+ * Decides, once, how the selected market is lent through for this session. The route is
  * wrapped only when the selected connector's id is Anchorage's and the registry knows the
  * market. Balances, wallet names, installed extensions and the stored connector preference
  * are not inputs, so none of them can select it. A wrapped route never turns standard
- * because something is wrong: it stays wrapped and reports why its actions are disabled.
+ * because something is wrong. It stays wrapped and reports why its actions are disabled.
  */
 export function resolveLendingRoute({
   market,
@@ -171,7 +177,7 @@ export function resolveLendingRoute({
   }
 
   if (lookup.status === 'invalid') {
-    const mapping = block(lookup.problem === 'missing' ? 'missing-mapping' : 'invalid-mapping');
+    const mapping = ineligible(lookup.problem === 'missing' ? 'missing-mapping' : 'invalid-mapping');
     return {
       kind: 'wrapped',
       chainId: market.chainId,
@@ -188,7 +194,7 @@ export function resolveLendingRoute({
   const wrapped = lookup.market;
   const validationKey = wrappedRouteKey(wrapped, session);
   const validated = validationGate(validation, validationKey);
-  const writes = first(sessionGate(session, conflictedRdns, wrapped.chainId), validated);
+  const writes = firstIneligible(sessionGate(session, conflictedRdns, wrapped.chainId), validated);
 
   return {
     kind: 'wrapped',
@@ -198,7 +204,7 @@ export function resolveLendingRoute({
     market: wrapped,
     validationKey,
     reads: validated,
-    deposit: first(writes, wrapped.depositsEnabled ? ELIGIBLE : block('deposits-disabled')),
-    exit: first(writes, wrapped.exitsEnabled ? ELIGIBLE : block('exits-disabled')),
+    deposit: firstIneligible(writes, wrapped.isDepositEnabled ? ELIGIBLE : ineligible('deposits-disabled')),
+    exit: firstIneligible(writes, wrapped.isExitEnabled ? ELIGIBLE : ineligible('exits-disabled')),
   };
 }

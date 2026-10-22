@@ -1,6 +1,8 @@
 # Anchorage wrapper registry: deployment evidence and release checks
 
-`src/constants/wrappedMarkets.ts` maps three Ethereum Comet markets to their ERC-4626 wrappers. This document records where each address comes from, what was read on chain to confirm it, and what must still happen before wrapped deposits or exits are switched on. Both release controls (`depositsEnabled` and `exitsEnabled`) are `false` for every entry until the checks under [Unresolved release checks](#unresolved-release-checks) are closed.
+`src/constants/wrappedMarkets.ts` maps three Ethereum Comet markets to their ERC-4626 wrappers. This document records where each address comes from and what was read on chain to confirm it. It also lists the checks that must pass before wrapped deposits or exits are switched on. Both release controls, `isDepositEnabled` and `isExitEnabled`, are `false` for every entry until the checks under [Unresolved release checks](#unresolved-release-checks) are closed.
+
+The app also checks each mapping at run time, before it enables a wrapped action. Through the configured chain's public RPC, it reads the factory's `getWrapper(comet)`, the wrapper's `asset()` and `decimals()`, the Comet's `baseToken()` and the base token's `decimals()`, and compares them with the mapping. The factory address and the list of routed markets are kept in code, apart from the replaceable configuration source.
 
 ## Sources
 
@@ -57,7 +59,7 @@ Both transactions succeeded and were sent by `0x5c6266738D0Ef7C45FacA2699AE23eef
 ## Source and audit coverage
 
 - **Verified source.** Blockscout marks all three wrappers as verified with a partial match: the compiled bytecode matches, and the metadata hash does not. Compiler `0.8.28+commit.7893614a`, optimizer on with 200 runs, EVM version `cancun`. The verified `src/WrappedCometERC4626.sol` of each wrapper is byte-identical to the file at `1152de2`. The decoded constructor arguments of each wrapper are its Comet, the name and symbol above, and canonical Permit2.
-- **Audit.** Certora reviewed commit `d5324b8` (21 to 24 September 2026) and confirmed its fixes in `e53267d` and `f0dcf4a`. The deployed wrappers' verified source equals `src/WrappedCometERC4626.sol` at `1152de2`, which is 25 commits after `f0dcf4a`, and that file changed in between: `previewDeposit`, `previewMint` and `previewRedeem` now revert where the action they preview would revert (commits `97265b9` and `7f60b8a`), and two documentation commits follow (`6e2dc85`, `d965d96`). The preview changes are executable code that the audit did not cover.
+- **Audit.** Certora reviewed commit `d5324b8` (21 to 24 September 2026) and confirmed its fixes in `e53267d` and `f0dcf4a`. The deployed wrappers' verified source equals `src/WrappedCometERC4626.sol` at `1152de2`, which is 25 commits after `f0dcf4a`. Two of the commits in between change executable code: in `97265b9` and `7f60b8a`, `previewDeposit`, `previewMint` and `previewRedeem` revert in the cases where the action they preview reverts. Two later commits change comments only (`6e2dc85`, `d965d96`). The audit did not cover the preview changes.
 
 ## Unresolved release checks
 
@@ -68,6 +70,6 @@ New wrapped deposits and wrapped exits stay disabled until each check below is c
 3. **Factory owner.** Record the owner Safe's signers and threshold, and who controls them. The owner cannot change a deployed wrapper, but it chooses which wrapper `getWrapper` returns for a new market.
 4. **Live reads at release.** Repeat the reads above at a fresh block on release day, including the Comets' `isSupplyPaused()`, `isWithdrawPaused()` and `isTransferPaused()`.
 5. **Transaction paths.** Mainnet-fork coverage of supply, partial and full exits and the USDT allowance reset (COM-289) and Porto signing acceptance (COM-290).
-6. **Rollout decision.** The release (COM-292) decides when `depositsEnabled` and `exitsEnabled` change, separately, and how exits stay available if deposits are switched off again.
+6. **Rollout decision.** The release (COM-292) decides when `isDepositEnabled` and `isExitEnabled` change, separately, and how exits stay available if deposits are switched off again.
 
 No contract was deployed, funded or called with a transaction for this record.

@@ -28,10 +28,9 @@ const CONFIGURED = [
 const USDC_COMET = CONFIGURED[0][1];
 
 /** The hardcoded registry with both release controls switched on, to observe the other gates. */
-function registryWith(depositsEnabled: boolean, exitsEnabled: boolean): WrappedMarketRegistry {
+function registryWith(isDepositEnabled: boolean, isExitEnabled: boolean): WrappedMarketRegistry {
   return buildWrappedMarketRegistry({
-    ...HARDCODED_WRAPPED_LENDING_SOURCE,
-    markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({ ...market, depositsEnabled, exitsEnabled })),
+    markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({ ...market, isDepositEnabled, isExitEnabled })),
   });
 }
 const OPEN_REGISTRY = registryWith(true, true);
@@ -43,7 +42,7 @@ function anchorage(overrides: Partial<LendingSession> = {}): LendingSession {
     account: ACCOUNT,
     chainId: 1,
     isWatchOnly: false,
-    signerReady: true,
+    isSignerReady: true,
     screeningStatus: 'allowed',
     ...overrides,
   };
@@ -82,11 +81,11 @@ function resolve(cometAddress: string, session: LendingSession, options: Resolve
 
 function blocked(reason: string, requiredChainId?: number): Eligibility {
   return requiredChainId === undefined
-    ? { eligible: false, reason: reason as never }
-    : { eligible: false, reason: reason as never, requiredChainId };
+    ? { isEligible: false, reason: reason as never }
+    : { isEligible: false, reason: reason as never, requiredChainId };
 }
 
-const ELIGIBLE: Eligibility = { eligible: true };
+const ELIGIBLE: Eligibility = { isEligible: true };
 
 function expectWrapped(route: LendingRoute) {
   if (route.kind !== 'wrapped') throw new Error(`expected a wrapped route, got ${route.kind}`);
@@ -234,10 +233,13 @@ describe('lendingRoute', () => {
         [{ status: 'connecting' }, blocked('reconnecting')],
         [{ isWatchOnly: true }, blocked('watch-only')],
         [{ account: undefined }, blocked('no-account')],
-        [{ signerReady: false }, blocked('no-signer')],
-        // A mismatched signer chain asks for Ethereum; it never falls back to direct Comet.
+        [{ isSignerReady: false }, blocked('no-signer')],
+        // A mismatched signer chain asks for Ethereum. It never falls back to direct Comet.
         [{ chainId: 8453 }, blocked('wrong-chain', 1)],
         [{ chainId: undefined }, blocked('wrong-chain', 1)],
+        // On a chain the app does not configure the signer is not ready either, and the user is
+        // still asked to switch.
+        [{ chainId: 56, isSignerReady: false }, blocked('wrong-chain', 1)],
       ];
       for (const [overrides, expected] of cases) {
         const route = expectWrapped(resolve(cometAddress, anchorage(overrides)));
@@ -253,10 +255,12 @@ describe('lendingRoute', () => {
       expect(
         resolve(USDC_COMET, anchorage({ connector: undefined, status: 'disconnected', account: undefined })),
       ).toEqual({ kind: 'standard', writes: blocked('disconnected') });
-      expect(resolve(USDC_COMET, anchorage({ connector: undefined, isWatchOnly: true, signerReady: false }))).toEqual({
-        kind: 'standard',
-        writes: blocked('watch-only'),
-      });
+      expect(resolve(USDC_COMET, anchorage({ connector: undefined, isWatchOnly: true, isSignerReady: false }))).toEqual(
+        {
+          kind: 'standard',
+          writes: blocked('watch-only'),
+        },
+      );
       const metamask = { connector: { id: 'io.metamask' } };
       expect(resolve(USDC_COMET, anchorage({ ...metamask, chainId: 10 }))).toEqual({
         kind: 'standard',
@@ -341,6 +345,7 @@ describe('lendingRoute', () => {
   describe('wrapper validation', () => {
     it.each([
       ['failed', 'validation-failed'],
+      ['not-canonical', 'not-canonical'],
       ['asset-mismatch', 'asset-mismatch'],
       ['metadata-mismatch', 'metadata-mismatch'],
       ['pending', 'validation-pending'],
@@ -376,16 +381,16 @@ describe('lendingRoute', () => {
         { status: 'reconnecting' },
       ];
       for (const variant of variants) expect(wrappedRouteKey(market, anchorage(variant))).not.toBe(key);
+      // Every field of the mapping is part of the key.
+      expect(wrappedRouteKey({ ...market, baseDecimals: 18 }, anchorage())).not.toBe(key);
+      expect(wrappedRouteKey({ ...market, shareDecimals: 6 }, anchorage())).not.toBe(key);
       expect(wrappedRouteKey(wrappedMarket(OPEN_REGISTRY, CONFIGURED[1][1]), anchorage())).not.toBe(key);
       // Address case is not identity.
       expect(wrappedRouteKey(market, anchorage({ account: ACCOUNT.toUpperCase().replace('0X', '0x') }))).toBe(key);
     });
 
     it('reports a missing or invalid mapping on a routed market as a disabled wrapped route', () => {
-      const routedOnly = buildWrappedMarketRegistry({
-        routedMarkets: HARDCODED_WRAPPED_LENDING_SOURCE.routedMarkets,
-        markets: [],
-      });
+      const routedOnly = buildWrappedMarketRegistry({ markets: [] });
       const missing = expectWrapped(resolve(USDC_COMET, anchorage(), { registry: routedOnly }));
       expect(missing.market).toBeUndefined();
       expect(missing.deposit).toEqual(blocked('missing-mapping'));
@@ -394,19 +399,34 @@ describe('lendingRoute', () => {
 
       // A mapping with no routed entry still routes wrapped, so dropping either half never
       // sends Anchorage straight to Comet.
-      const mappingOnly = buildWrappedMarketRegistry({
-        routedMarkets: [],
-        markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({ ...market, depositsEnabled: true })),
-      });
+      const mappingOnly = buildWrappedMarketRegistry(
+        { markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({ ...market, isDepositEnabled: true })) },
+        [],
+      );
       expect(expectWrapped(resolve(USDC_COMET, anchorage(), { registry: mappingOnly })).deposit).toEqual(ELIGIBLE);
 
-      const broken = buildWrappedMarketRegistry({
-        routedMarkets: [],
-        markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({ ...market, shareDecimals: 6 })),
-      });
+      const broken = buildWrappedMarketRegistry(
+        { markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({ ...market, shareDecimals: 6 })) },
+        [],
+      );
       const invalid = expectWrapped(resolve(USDC_COMET, anchorage(), { registry: broken }));
       expect(invalid.deposit).toEqual(blocked('invalid-mapping'));
       expect(invalid.exit).toEqual(blocked('invalid-mapping'));
+
+      // A source with an entry that names no market disables every routed market, even when
+      // both its halves are lost or garbled.
+      const unreadable = buildWrappedMarketRegistry({
+        markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({
+          ...market,
+          chainId: String(market.chainId) as unknown as number,
+          isDepositEnabled: true,
+        })),
+      });
+      for (const [, cometAddress] of CONFIGURED) {
+        const route = expectWrapped(resolve(cometAddress, anchorage(), { registry: unreadable }));
+        expect(route.deposit).toEqual(blocked('invalid-mapping'));
+        expect(route.exit).toEqual(blocked('invalid-mapping'));
+      }
     });
   });
 });
