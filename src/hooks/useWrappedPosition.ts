@@ -53,8 +53,10 @@ export function useWrappedPosition({
 }): { state: WrappedPositionState; retry: () => void } {
   const [stored, setStored] = useState<StoredState | undefined>(undefined);
   const [attempt, setAttempt] = useState(0);
-  const [tick, setTick] = useState(0);
   const requestId = useRef(0);
+  // Whether a read for the current key is running, and whether another was asked for meanwhile.
+  const isReading = useRef(false);
+  const isRefreshQueued = useRef(false);
 
   const market = route.kind === 'wrapped' ? route.market : undefined;
   const readKey =
@@ -67,35 +69,59 @@ export function useWrappedPosition({
       ? route.validationKey
       : undefined;
 
-  // The effect reads the inputs of the render that produced `readKey`. The key covers the
-  // market and the account, so they cannot differ from the ones it was made from.
-  const inputs = useRef({ market, account, provider, read });
-  inputs.current = { market, account, provider, read };
-
-  useEffect(() => {
-    if (readKey === undefined) return;
+  // Starts a read with the latest render's inputs. The key covers the market and the account,
+  // so they cannot differ from the ones the key was made from.
+  const startRead = useRef<() => void>(() => undefined);
+  startRead.current = () => {
+    if (readKey === undefined || market === undefined || account === undefined || provider === undefined) return;
     const id = ++requestId.current;
-    const { market, account, provider, read } = inputs.current;
-    if (market === undefined || account === undefined || provider === undefined) return;
+    const key = readKey;
+    isReading.current = true;
+    isRefreshQueued.current = false;
 
+    const finish = (state: WrappedPositionState) => {
+      if (id !== requestId.current) return;
+      isReading.current = false;
+      setStored({ key, state });
+      if (isRefreshQueued.current) startRead.current();
+    };
     read(provider, market, account).then(
-      (position) => {
-        if (id === requestId.current) setStored({ key: readKey, state: { status: 'loaded', position } });
-      },
+      (position) => finish({ status: 'loaded', position }),
       (error) => {
-        if (id !== requestId.current) return;
-        console.error('Wrapped position read failed:', error);
-        setStored({ key: readKey, state: { status: 'error', message: WRAPPED_POSITION_READ_FAILED } });
+        if (id === requestId.current) console.error('Wrapped position read failed:', error);
+        finish({ status: 'error', message: WRAPPED_POSITION_READ_FAILED });
       }
     );
+  };
+
+  // A new key, provider or retry makes any read in flight obsolete, so it starts over.
+  useEffect(() => {
+    isReading.current = false;
+    startRead.current();
     return () => {
       requestId.current++;
+      isReading.current = false;
     };
-  }, [readKey, provider, refreshToken, attempt, tick]);
+  }, [readKey, provider, attempt]);
+
+  // A refresh never cancels a read in flight; a slow read would otherwise never finish. A
+  // refresh asked for by a transaction runs once the current read finishes; a timed one is
+  // skipped while a read is running.
+  const refresh = useRef((queueIfReading: boolean) => {
+    if (!isReading.current) startRead.current();
+    else if (queueIfReading) isRefreshQueued.current = true;
+  });
+
+  const lastRefreshToken = useRef(refreshToken);
+  useEffect(() => {
+    if (Object.is(lastRefreshToken.current, refreshToken)) return;
+    lastRefreshToken.current = refreshToken;
+    refresh.current(true);
+  }, [refreshToken]);
 
   useEffect(() => {
     if (readKey === undefined) return;
-    const intervalId = setInterval(() => setTick((value) => value + 1), REFRESH_INTERVAL);
+    const intervalId = setInterval(() => refresh.current(false), REFRESH_INTERVAL);
     return () => clearInterval(intervalId);
   }, [readKey]);
 
