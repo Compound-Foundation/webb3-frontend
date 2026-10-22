@@ -1,3 +1,5 @@
+import type { TransactionReceipt } from '@ethersproject/providers';
+
 type Decimal = {
   value: string;
 };
@@ -561,8 +563,13 @@ export type BaseTransaction = {
   networkId: number;
   networkName: string;
   description: string;
+  /** The sender's confirmed nonce just before sending, or the transaction's own nonce once known. */
   nonce: number;
-  callback?: () => void;
+  /** The sender, in lower case. Records stored before this field existed have none. */
+  account?: string;
+  /** For one transaction of a multi-step action, such as a wrapper supply, the step it is. */
+  step?: string;
+  callback?: (outcome: TransactionOutcome) => void;
 };
 export type AwaitingConfirmationTransaction = BaseTransaction & {
   state: TransactionState.AwaitingConfirmation;
@@ -572,6 +579,15 @@ export type PendingTransaction = BaseTransaction & {
   hash: string;
 };
 export type Transaction = AwaitingConfirmationTransaction | PendingTransaction;
+
+/** What became of a broadcast transaction. A receipt without a success flag is not a success. */
+export type TransactionOutcome =
+  | { status: 'confirmed'; receipt: TransactionReceipt }
+  | { status: 'reverted'; receipt: TransactionReceipt }
+  | { status: 'replaced' };
+
+/** A broadcast transaction and what became of it. */
+export type SettledTransaction = Omit<PendingTransaction, 'callback'> & { outcome: TransactionOutcome };
 
 export type MarketsByNetwork = {
   [key: number]: { chainInformation: ChainInformation; markets: MarketData[] };
