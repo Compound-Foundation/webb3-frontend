@@ -262,6 +262,23 @@ describe('Home on the wrapped route', () => {
     expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
   });
 
+  it('starts no wrapped supply review from a callback kept from an earlier visit', () => {
+    const supply = jest.fn(() => undefined);
+    const state = cometState(EMPTY_ACCOUNT);
+    const usdc = { ...wrappedLending(), write: { supply } };
+    const { rerender } = render(homeElement({ lending: usdc, state, queue: actionQueue([]) }));
+    const keptReview = mockLastProps.WrappedPositionPanel.supply.onReview;
+
+    // The user switches to the USDT market: the panel's review callback from before belongs to USDC.
+    const usdt = { ...wrappedLending(USDT_COMET), write: { supply } };
+    rerender(homeElement({ lending: usdt, market: USDT_MARKET, state, queue: actionQueue([]) }));
+
+    expect(keptReview(1_000_000n)).toBe('identity-changed');
+    expect(supply).not.toHaveBeenCalled();
+    mockLastProps.WrappedPositionPanel.supply.onReview(1_000_000n);
+    expect(supply).toHaveBeenCalledWith(1_000_000n);
+  });
+
   it('shows the panel loading while the Comet state still belongs to the previous market', () => {
     const state = cometState(EMPTY_ACCOUNT);
     const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
