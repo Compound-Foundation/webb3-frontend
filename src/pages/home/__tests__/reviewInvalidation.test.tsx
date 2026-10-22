@@ -57,7 +57,7 @@ const mockWriteState = {
   claimReward: jest.fn(),
   drip: jest.fn(),
 };
-// The add-transaction function Home gives its writes, as the real writes would call it.
+// The add-transaction function Home gives its writes. The tests call it as the real writes do.
 const mockWriteDependencies: { addTransaction?: AddTransaction } = {};
 jest.mock('@hooks/useWriteCometState', () => ({
   useWriteCometState: (_web3: unknown, addTransaction: AddTransaction) => {
@@ -357,6 +357,38 @@ describe('Home submission guards', () => {
       expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
     }
   );
+
+  it.each<[string, Partial<Setup>]>([
+    ['account', { web3: web3For({ account: OTHER_ACCOUNT }) }],
+    ['connection status (a reconnect)', { web3: web3For({ status: 'reconnecting' }) }],
+    ['wallet network', { web3: web3For({ chainId: 137 }) }],
+    ['market', { market: USDT_MARKET }],
+  ])('ignores faucet clicks kept from before a change of %s', (_change, changed) => {
+    const queue = actionQueue([]);
+    const { rerender } = render(homeElement({ queue }));
+    // The base asset's faucet button is on the position card, and each collateral row has its own.
+    const dripBaseAssetKept = positionCard().onDripClicked;
+    const dripCollateralKept = mockLastProps.AssetRow.state[1].onDripClicked;
+
+    rerender(homeElement({ queue, ...changed }));
+    act(() => {
+      dripBaseAssetKept();
+      dripCollateralKept();
+    });
+
+    expect(mockWriteState.drip).not.toHaveBeenCalled();
+  });
+
+  it('asks the faucet while its visit is current', () => {
+    render(homeElement({ queue: actionQueue([]) }));
+
+    act(() => {
+      positionCard().onDripClicked();
+      mockLastProps.AssetRow.state[1].onDripClicked();
+    });
+
+    expect(mockWriteState.drip).toHaveBeenCalledTimes(2);
+  });
 
   it('ignores a submit kept from before a change of wallet network, and asks for no switch', () => {
     const switchWriteNetwork = jest.fn();
