@@ -209,7 +209,7 @@ export type SubmitTransaction = (request: TransactionRequest) => Promise<SendRes
 /** A wallet provider that threw as a broken provider does, as after an extension update. */
 export type WalletFailure = { provider: object; message: string };
 
-type TransactionManager = {
+export type TransactionManager = {
   /** Transactions awaiting a wallet's confirmation or a receipt. */
   transactions: Transaction[];
   /** Transactions this session saw settle, including restored ones, with what became of them. */
