@@ -198,6 +198,11 @@ type Resolution =
  * another sends it with a higher one. The node's record of the transaction gives its own nonce. A
  * wrapper step is judged replaced only by its own nonce, since reporting it replaced lets a fresh
  * review of the action start, and a lower bound can report a transaction that is still pending.
+ *
+ * The record's nonce is the transaction's own, or that lower bound, so the transaction's own nonce
+ * is never below it. A smaller reported nonce is not the transaction's and is ignored. A Safe, for
+ * example, reports nonce 0 until its owners execute the transaction. Otherwise every queued Safe
+ * transaction is reported replaced on its first lookup.
  */
 async function resolveTransaction(provider: TransactionReader, transaction: PendingTransaction): Promise<Resolution> {
   const receipt = await provider.getTransactionReceipt(transaction.hash);
@@ -205,7 +210,10 @@ async function resolveTransaction(provider: TransactionReader, transaction: Pend
   if (transaction.account === undefined) return { status: 'pending' };
 
   const sentTransaction = await provider.getTransaction(transaction.hash);
-  const reportedNonce = typeof sentTransaction?.nonce === 'number' ? sentTransaction.nonce : undefined;
+  const reportedNonce =
+    typeof sentTransaction?.nonce === 'number' && sentTransaction.nonce >= transaction.nonce
+      ? sentTransaction.nonce
+      : undefined;
   const ownNonce = reportedNonce ?? (transaction.nonceSource === 'transaction' ? transaction.nonce : undefined);
   const nonce = ownNonce ?? (isWrapperStep(transaction) ? undefined : transaction.nonce);
   const pending: Resolution = { status: 'pending', ownNonce: reportedNonce };
