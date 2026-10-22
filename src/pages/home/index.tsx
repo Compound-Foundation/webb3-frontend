@@ -8,7 +8,6 @@ import type { Web3 } from '@contexts/Web3Context';
 import { useWrappedLending } from '@contexts/WrappedLendingContext';
 import {
   ActionRules,
-  addsDirectBaseSupply,
   isSameToken,
   calculateUpdatedBalances,
   getActionFromPendingAction,
@@ -20,7 +19,13 @@ import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
-import { supplyIncentivesForRoute } from '@helpers/wrappedPositions';
+import {
+  CometStateWithMarket,
+  isSubmissionRefused,
+  LiveSubmissionState,
+  MarketIdentity,
+  supplyIncentivesForRoute,
+} from '@helpers/wrappedPositions';
 import { Theme } from '@hooks/useThemeManager';
 import { AddTransaction } from '@hooks/useTransactionManager';
 import { useWriteCometState, WriteCometState } from '@hooks/useWriteCometState';
@@ -95,10 +100,28 @@ const Home = ({
   const wrappedLending = useWrappedLending();
   const isWrappedRoute = wrappedLending.route.kind === 'wrapped';
   const actionRules: ActionRules = { blockDirectBaseSupply: isWrappedRoute };
-  // Submissions can start from a callback a dialog kept from an earlier render, so they check
-  // the route as it is now, not as it was when the callback was made.
-  const liveRoute = useRef(wrappedLending.route);
-  liveRoute.current = wrappedLending.route;
+  const selectedMarketIdentity: MarketIdentity | undefined =
+    selectedMarket[1] === undefined
+      ? undefined
+      : { chainId: selectedMarket[1].chainInformation.chainId, cometAddress: selectedMarket[1].marketAddress };
+  // Comet state names no market, and it trails a market change by a render. Each new state is
+  // recorded with the market selected when it arrived, so a stale one keeps its old market.
+  const cometStateMarket = useRef<CometStateWithMarket>({ market: selectedMarketIdentity, state });
+  if (cometStateMarket.current.state !== state) {
+    cometStateMarket.current = { market: selectedMarketIdentity, state };
+  }
+  // Submissions can start from a callback a dialog kept from an earlier render, so they are
+  // judged by the session as it is now, not as it was when the callback was made.
+  const liveSession = useRef<LiveSubmissionState>({
+    route: wrappedLending.route,
+    selectedMarket: selectedMarketIdentity,
+    comet: cometStateMarket.current,
+  });
+  liveSession.current = {
+    route: wrappedLending.route,
+    selectedMarket: selectedMarketIdentity,
+    comet: cometStateMarket.current,
+  };
 
   let assetRows: ReactNode[];
   let otherAssetRows: ReactNode[] = [];
@@ -168,9 +191,12 @@ const Home = ({
       earnRewardsAPR: supplyRewardsAPR,
       isInstitutional,
     });
-    // True when the route is wrapped now and the actions would add to the direct Comet supply.
     const isBlockedOnLiveRoute = (actionsToSubmit: Action[]) =>
-      liveRoute.current.kind === 'wrapped' && addsDirectBaseSupply(baseAsset, collateralAssets, actionsToSubmit);
+      isSubmissionRefused(
+        liveSession.current,
+        { chainId: market.chainInformation.chainId, cometAddress: market.marketAddress },
+        actionsToSubmit
+      );
 
     const actions = getActions(baseAsset, collateralAssets, rewards);
     const actionsForCompare = compare ? [] : actions;
@@ -575,12 +601,13 @@ const Home = ({
   const { route: wrappedRoute } = wrappedLending;
   if (wrappedRoute.kind === 'wrapped' && cometState !== StateType.Loading) {
     const { baseAsset, earnAPR } = state[1];
-    // Comet state trails a market change by a render; its price applies only to its own market.
+    // The rate and price belong to the market whose Comet state this is, which can still be
+    // the previous market for a render after a switch.
+    const cometMarket = cometStateMarket.current.market;
     const isCometStateForRoute =
-      selectedMarket[1] !== undefined &&
-      selectedMarket[1].marketAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase() &&
-      (wrappedRoute.market === undefined ||
-        baseAsset.address.toLowerCase() === wrappedRoute.market.baseTokenAddress.toLowerCase());
+      cometMarket !== undefined &&
+      cometMarket.chainId === wrappedRoute.chainId &&
+      cometMarket.cometAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase();
     wrappedPanel = (
       <WrappedPositionPanel
         route={wrappedRoute}
