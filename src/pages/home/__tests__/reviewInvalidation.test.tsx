@@ -1,3 +1,4 @@
+import { TransactionResponse } from '@ethersproject/providers';
 import { act, render } from '@testing-library/react';
 
 import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
@@ -6,7 +7,10 @@ import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
 import { getMarket } from '@helpers/markets';
+import { MAX_UINT256 } from '@helpers/numbers';
+import { SendWithdrawnError } from '@helpers/walletErrors';
 import { Theme } from '@hooks/useThemeManager';
+import type { AddTransaction } from '@hooks/useTransactionManager';
 import { IDLE_WRAPPED_ACTION, WalletSessionHealth } from '@hooks/useWrappedAction';
 import {
   Action,
@@ -52,7 +56,14 @@ const mockWriteState = {
   claimReward: jest.fn(),
   drip: jest.fn(),
 };
-jest.mock('@hooks/useWriteCometState', () => ({ useWriteCometState: () => mockWriteState }));
+// The add-transaction function Home gives its writes, as the real writes would call it.
+const mockWriteDependencies: { addTransaction?: AddTransaction } = {};
+jest.mock('@hooks/useWriteCometState', () => ({
+  useWriteCometState: (_web3: unknown, addTransaction: AddTransaction) => {
+    mockWriteDependencies.addTransaction = addTransaction;
+    return mockWriteState;
+  },
+}));
 
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
@@ -141,6 +152,8 @@ type Setup = {
   queue: ActionQueue;
   lending?: WrappedLending;
   isBulkerAllowed?: boolean;
+  addTransaction?: AddTransaction;
+  switchWriteNetwork?: (chainId: number) => Promise<boolean>;
 };
 
 SelectedMarketContextHelpers.initializeContext({
@@ -156,6 +169,8 @@ function homeElement({
   queue,
   lending = STANDARD,
   isBulkerAllowed = false,
+  addTransaction = jest.fn(),
+  switchWriteNetwork = jest.fn(),
 }: Setup) {
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
@@ -173,8 +188,8 @@ function homeElement({
             web3={web3}
             selectedMarketData={selectedMarketData}
             cometState={cometState(isBulkerAllowed)}
-            addTransaction={jest.fn()}
-            switchWriteNetwork={jest.fn()}
+            addTransaction={addTransaction}
+            switchWriteNetwork={switchWriteNetwork}
             estimatedGasMap={new Map()}
             theme={Theme.Dark}
           />
@@ -284,6 +299,139 @@ describe('Home submission guards', () => {
 
   beforeEach(() => {
     Object.values(mockWriteState).forEach((fn) => fn.mockReset());
+  });
+
+  it.each<[string, Partial<Setup>]>([
+    ['account', { web3: web3For({ account: OTHER_ACCOUNT }) }],
+    ['connector', { web3: web3For({ connector: 'uid-2' }) }],
+    ['wallet network', { web3: web3For({ chainId: 137 }) }],
+    ['market', { market: USDT_MARKET }],
+  ])(
+    'ignores an amount confirmation kept from before a change of %s, and asks the wallet nothing',
+    (_change, changed) => {
+      const switchWriteNetwork = jest.fn();
+      const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
+      const queue = actionQueue([], pendingSupply);
+      const { rerender } = render(homeElement({ queue, switchWriteNetwork }));
+      // The amount form keeps its confirm handler from the render that opened it.
+      const confirmKeptAmount = positionCard().onPendingActionConfirm;
+
+      rerender(homeElement({ queue: actionQueue([]), switchWriteNetwork, ...changed }));
+      act(() => confirmKeptAmount(10n ** 18n));
+
+      expect(mockWriteState.approve).not.toHaveBeenCalled();
+      expect(switchWriteNetwork).not.toHaveBeenCalled();
+      expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
+    }
+  );
+
+  it('ignores a submit kept from before a change of wallet network, and asks for no switch', () => {
+    const switchWriteNetwork = jest.fn();
+    const queue = actionQueue([BORROW]);
+    // The wallet is on Polygon, so a submit asks for a switch to the market's chain first.
+    const { rerender } = render(homeElement({ queue, switchWriteNetwork, web3: web3For({ chainId: 137 }) }));
+    const submitKeptQueue = positionCard().onSubmitClicked;
+
+    rerender(homeElement({ queue, switchWriteNetwork }));
+    act(() => submitKeptQueue());
+
+    expect(switchWriteNetwork).not.toHaveBeenCalled();
+    Object.values(mockWriteState).forEach((fn) => expect(fn).not.toHaveBeenCalled());
+  });
+
+  describe('while the transaction manager prepares a write', () => {
+    /** Simulates the manager: it reads the network and nonce, then asks the wallet, unless the write is withdrawn. */
+    function preparingManager() {
+      let finishPreparing: () => void = () => undefined;
+      const outcomes: string[] = [];
+      const addTransaction = jest.fn<ReturnType<AddTransaction>, Parameters<AddTransaction>>(
+        async (_key, _description, trxFn, estimatedGas, _estimateGas, fnArgs, value) => {
+          await new Promise<void>((resolve) => (finishPreparing = resolve));
+          try {
+            const response = await trxFn(...fnArgs, { value, gasLimit: estimatedGas });
+            outcomes.push('sent');
+            return response;
+          } catch (error) {
+            outcomes.push(error instanceof SendWithdrawnError ? 'withdrawn' : 'failed');
+            return undefined;
+          }
+        }
+      );
+      return { addTransaction, outcomes, finishPreparing: () => finishPreparing() };
+    }
+
+    const walletApprove = jest.fn(async () => ({ hash: '0xapproval' } as unknown as TransactionResponse));
+
+    beforeEach(() => {
+      walletApprove.mockClear();
+      // As useWriteCometState's approve does: one call to the add-transaction function Home gave it.
+      mockWriteState.approve.mockImplementation(
+        (spender: string, asset: string, description: string, estimatedGas: number, callback?: () => void) =>
+          mockWriteDependencies.addTransaction?.(
+            asset,
+            description,
+            walletApprove,
+            estimatedGas,
+            jest.fn(),
+            [spender, MAX_UINT256.toString()],
+            0n,
+            callback
+          )
+      );
+    });
+
+    it.each<[string, Partial<Setup>]>([
+      ['account', { web3: web3For({ account: OTHER_ACCOUNT }) }],
+      ['wallet network', { web3: web3For({ chainId: 137 }) }],
+      ['market', { market: USDT_MARKET }],
+    ])(
+      'withdraws an approval whose visit ends with a change of %s before the wallet is asked',
+      async (_change, changed) => {
+        const manager = preparingManager();
+        const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
+        const { rerender } = render(
+          homeElement({ queue: actionQueue([], pendingSupply), addTransaction: manager.addTransaction })
+        );
+        act(() => positionCard().onPendingActionConfirm(10n ** 18n));
+        expect(manager.addTransaction).toHaveBeenCalledTimes(1);
+
+        rerender(homeElement({ queue: actionQueue([]), addTransaction: manager.addTransaction, ...changed }));
+        await act(async () => manager.finishPreparing());
+
+        expect(walletApprove).not.toHaveBeenCalled();
+        expect(manager.outcomes).toEqual(['withdrawn']);
+      }
+    );
+
+    it('asks the wallet for an approval whose visit is still current', async () => {
+      const manager = preparingManager();
+      const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
+      const queue = actionQueue([], pendingSupply);
+      const { rerender } = render(homeElement({ queue, addTransaction: manager.addTransaction }));
+      act(() => positionCard().onPendingActionConfirm(10n ** 18n));
+
+      rerender(homeElement({ queue, addTransaction: manager.addTransaction }));
+      await act(async () => manager.finishPreparing());
+
+      expect(walletApprove).toHaveBeenCalledWith(USDC_COMET, MAX_UINT256.toString(), { value: 0n, gasLimit: 0 });
+      expect(manager.outcomes).toEqual(['sent']);
+    });
+
+    it('withdraws an approval once the wallet session is found unusable while it is prepared', async () => {
+      const manager = preparingManager();
+      const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
+      const queue = actionQueue([], pendingSupply);
+      const usable = wrappedLending({ status: 'usable' });
+      const { rerender } = render(homeElement({ queue, lending: usable, addTransaction: manager.addTransaction }));
+      act(() => positionCard().onPendingActionConfirm(10n ** 18n));
+
+      const unusable = wrappedLending({ status: 'unusable', reason: 'provider-broken', instruction: 'Reload.' });
+      rerender(homeElement({ queue, lending: unusable, addTransaction: manager.addTransaction }));
+      await act(async () => manager.finishPreparing());
+
+      expect(walletApprove).not.toHaveBeenCalled();
+      expect(manager.outcomes).toEqual(['withdrawn']);
+    });
   });
 
   it('refuses a queue holding a wrapper action whole, submitting none of it', () => {
