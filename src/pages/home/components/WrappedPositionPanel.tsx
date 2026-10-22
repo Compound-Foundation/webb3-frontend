@@ -3,6 +3,7 @@ import { ReactNode } from 'react';
 import { Eligibility, LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { formatRateFactor, formatValue, formatValueInDollars } from '@helpers/numbers';
 import { getWithdrawableCash, getWrappedPositionValueInDollars, WithdrawableCash } from '@helpers/wrappedPositions';
+import { WalletSessionHealth } from '@hooks/useWrappedAction';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
 
 export type WrappedRoute = Extract<LendingRoute, { kind: 'wrapped' }>;
@@ -14,6 +15,8 @@ type WrappedPositionPanelProps = {
   baseAsset: { symbol: string; baseAssetPriceInDollars: bigint; balanceOfComet: bigint };
   /** The market's base supply rate. No reward rate is verified for wrapped positions, so none is passed. */
   earnAPR: bigint;
+  /** The wallet session's check. An unusable session stops every write until reload or reconnect. */
+  session?: WalletSessionHealth;
   onRetry: () => void;
 };
 
@@ -77,7 +80,14 @@ function withdrawableNote({ limit }: WithdrawableCash): string {
  * The connected account's position in the selected market's wrapper. It is kept apart from
  * the direct Comet position: wrapper shares are not collateral and add no borrowing capacity.
  */
-const WrappedPositionPanel = ({ route, position, baseAsset, earnAPR, onRetry }: WrappedPositionPanelProps) => {
+const WrappedPositionPanel = ({
+  route,
+  position,
+  baseAsset,
+  earnAPR,
+  session = { status: 'not-applicable' },
+  onRetry,
+}: WrappedPositionPanelProps) => {
   const { symbol } = baseAsset;
   let content: ReactNode;
 
@@ -175,6 +185,14 @@ const WrappedPositionPanel = ({ route, position, baseAsset, earnAPR, onRetry }: 
           collateral and does not add to your borrowing capacity.
         </p>
       </div>
+      {session.status === 'unusable' && (
+        <div className="wrapped-position-panel__notice" role="alert">
+          <p className="L3 meta text-color--2">{session.instruction}</p>
+          <button className="button button--small" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+        </div>
+      )}
       {content}
       <div className="wrapped-position-panel__actions">
         <div className="wrapped-position-panel__action">

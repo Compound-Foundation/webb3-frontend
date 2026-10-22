@@ -20,6 +20,7 @@ import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
+import { isDirectExecution } from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
   isSameWalletSession,
@@ -97,7 +98,6 @@ const Home = ({
     getActionQueueContext()
   );
 
-  const [actionModalState, setActionModalState] = useState<ActionModalState>(undefined);
   const [compare, setCompare] = useState(false);
   const [cometState] = state;
 
@@ -138,6 +138,32 @@ const Home = ({
     selectedMarket: selectedMarketIdentity,
     comet: cometStateMarket.current,
   };
+  // A review dialog belongs to the account, connector, network and market it was opened for, and
+  // closes in the same render when any of them changes. A callback kept from an earlier one can
+  // open or close only a dialog of its own, which is never shown.
+  const dialogIdentity = [
+    web3.write.account?.toLowerCase() ?? '',
+    web3.write.connector?.uid ?? '',
+    web3.write.chainId ?? '',
+    selectedMarketIdentity === undefined
+      ? ''
+      : `${selectedMarketIdentity.chainId}:${selectedMarketIdentity.cometAddress.toLowerCase()}`,
+  ].join('|');
+  const [openDialog, setOpenDialog] = useState<{ identity: string; state: ActionModalState }>();
+  const actionModalState = openDialog?.identity === dialogIdentity ? openDialog.state : undefined;
+  const setActionModalState = (dialog: ActionModalState) =>
+    setOpenDialog((current) => {
+      if (dialog !== undefined) return { identity: dialogIdentity, state: dialog };
+      return current?.identity === dialogIdentity ? undefined : current;
+    });
+  useEffect(() => {
+    if (openDialog !== undefined && openDialog.identity !== dialogIdentity) setOpenDialog(undefined);
+  }, [openDialog, dialogIdentity]);
+  const liveDialogIdentity = useRef(dialogIdentity);
+  liveDialogIdentity.current = dialogIdentity;
+  // On the wrapped route, a wallet session found unusable stops direct writes as well.
+  const liveWalletUnusable = useRef(false);
+  liveWalletUnusable.current = wrappedLending.action.session.status === 'unusable';
 
   let assetRows: ReactNode[];
   let otherAssetRows: ReactNode[] = [];
@@ -207,7 +233,12 @@ const Home = ({
       earnRewardsAPR: supplyRewardsAPR,
       isInstitutional,
     });
+    // Dialogs keep the callbacks below, so they check the session when they run.
+    const isFromEarlierDialog = () => liveDialogIdentity.current !== dialogIdentity;
     const isBlockedOnLiveRoute = (actionsToSubmit: Action[]) =>
+      liveWalletUnusable.current ||
+      // A queue holding a wrapper action is refused whole, never submitted without it.
+      !isDirectExecution(actionsToSubmit) ||
       isSubmissionRefused(
         liveSession.current,
         { chainId: market.chainInformation.chainId, cometAddress: market.marketAddress },
@@ -223,6 +254,7 @@ const Home = ({
 
     const onRequestClose = () => setActionModalState(undefined);
     const submitBulkerAction = () => {
+      if (isFromEarlierDialog()) return;
       if (isBlockedOnLiveRoute(actions)) {
         setActionModalState(undefined);
         return;
@@ -240,6 +272,7 @@ const Home = ({
     };
 
     const submitSingleAction = (singleAction: Action) => {
+      if (isFromEarlierDialog()) return;
       if (isBlockedOnLiveRoute([singleAction])) {
         setActionModalState(undefined);
         return;
@@ -442,6 +475,7 @@ const Home = ({
                 if (isStETH(asset.symbol) && isUnwrappedCollateralAsset(market.chainInformation, assetAddress)) {
                   spender = market.bulkerAddress;
                 }
+                if (liveWalletUnusable.current) return;
                 const approveGasLimit = estimatedGasMap.get(PreEstimatedAction.Approve) || 0;
                 writeState.approve(spender, assetAddress, `Enable ${asset.symbol}`, approveGasLimit);
                 confirmAction();
@@ -648,6 +682,7 @@ const Home = ({
           }
         }
         earnAPR={cometForRoute?.earnAPR ?? 0n}
+        session={wrappedLending.action.session}
         onRetry={wrappedLending.retry}
       />
     );

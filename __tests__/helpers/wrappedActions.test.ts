@@ -11,6 +11,7 @@ import {
   checkBeforeSignature,
   checkWrappedDraft,
   checkWrappedStep,
+  isDirectExecution,
   isSameWrappedIdentity,
   planExecution,
   readMarketRestriction,
@@ -161,6 +162,13 @@ describe('wrappedActions', () => {
       expect(submitExecution([supply], { direct, wrapped })).toBe('wrapped');
       expect(wrapped).toHaveBeenCalledWith(supply);
       expect(planExecution([])).toEqual({ kind: 'none' });
+    });
+
+    it('tells whether a request would go down the direct path whole', () => {
+      expect(isDirectExecution([BORROW, REPAY])).toBe(true);
+      expect(isDirectExecution([BORROW, draft('supply', [supplyAndWrap()])])).toBe(false);
+      expect(isDirectExecution([draft('supply', [supplyAndWrap()])])).toBe(false);
+      expect(isDirectExecution([])).toBe(false);
     });
 
     it('throws a typed error', () => {

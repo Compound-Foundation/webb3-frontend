@@ -160,4 +160,29 @@ describe('WrappedPositionPanel', () => {
     expect(screen.getByText(/loading your wrapped position/i)).toBeInTheDocument();
     expect(screen.queryByTestId('wrapped-position-value')).not.toBeInTheDocument();
   });
+
+  it('tells the user to reload and reconnect when the wallet session is unusable', () => {
+    const instruction = 'Your wallet extension stopped responding. Reload the page and reconnect your wallet.';
+    render(
+      <WrappedPositionPanel
+        route={wrappedRoute({ deposit: { isEligible: true }, exit: { isEligible: true } })}
+        position={{ status: 'loaded', position: POSITION }}
+        baseAsset={BASE_ASSET}
+        earnAPR={0n}
+        session={{ status: 'unusable', reason: 'provider-broken', instruction }}
+        onRetry={jest.fn()}
+      />
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(instruction);
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /supply usdc through the wrapper/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /withdraw usdc from the wrapper/i })).toBeDisabled();
+  });
+
+  it('shows no session notice while the wallet session is usable', () => {
+    renderPanel({ status: 'loaded', position: POSITION });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });

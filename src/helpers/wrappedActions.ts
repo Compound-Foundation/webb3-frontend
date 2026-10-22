@@ -231,6 +231,16 @@ export function submitExecution<T>(
   }
 }
 
+/** Whether `entries` would all go down the direct path. Any wrapper action refuses the whole request. */
+export function isDirectExecution(entries: readonly unknown[]): boolean {
+  try {
+    return planExecution(entries).kind === 'direct';
+  } catch (error) {
+    if (error instanceof WrappedExecutionError) return false;
+    throw error;
+  }
+}
+
 /** The standard queue's and the Bulker's boundary: every entry must be a direct action. */
 export function assertDirectActions(entries: readonly unknown[]): asserts entries is Action[] {
   if (planExecution(entries).kind === 'wrapped') {
