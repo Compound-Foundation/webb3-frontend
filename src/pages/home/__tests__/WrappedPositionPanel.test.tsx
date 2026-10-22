@@ -184,5 +184,25 @@ describe('WrappedPositionPanel', () => {
     renderPanel({ status: 'loaded', position: POSITION });
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop waiting' })).not.toBeInTheDocument();
+  });
+
+  it('lets the user stop waiting for an earlier wrapped transaction', () => {
+    const onDismissRecovered = jest.fn();
+    render(
+      <WrappedPositionPanel
+        route={wrappedRoute()}
+        position={{ status: 'loaded', position: POSITION }}
+        baseAsset={BASE_ASSET}
+        earnAPR={0n}
+        canDismissRecovered
+        onDismissRecovered={onDismissRecovered}
+        onRetry={jest.fn()}
+      />
+    );
+
+    expect(screen.getByText(/has not settled, or its wallet request may still be open/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop waiting' }));
+    expect(onDismissRecovered).toHaveBeenCalledTimes(1);
   });
 });

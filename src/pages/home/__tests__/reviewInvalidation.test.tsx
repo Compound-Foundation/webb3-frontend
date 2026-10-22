@@ -302,6 +302,21 @@ describe('Home submission guards', () => {
     expect(mockLastProps.WrappedPositionPanel.session).toBe(unusable);
   });
 
+  it('passes the dismissal of earlier wrapped transactions to the panel', () => {
+    const dismissRecovered = jest.fn();
+    const lending = wrappedLending({ status: 'usable' });
+    render(
+      homeElement({
+        queue: actionQueue([]),
+        lending: { ...lending, action: { ...lending.action, canDismissRecovered: true, dismissRecovered } },
+      })
+    );
+
+    expect(mockLastProps.WrappedPositionPanel.canDismissRecovered).toBe(true);
+    mockLastProps.WrappedPositionPanel.onDismissRecovered();
+    expect(dismissRecovered).toHaveBeenCalledTimes(1);
+  });
+
   it('allows direct writes on the wrapped route while the wallet session is usable', () => {
     const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
     render(homeElement({ queue: actionQueue([BORROW], pendingSupply), lending: wrappedLending({ status: 'usable' }) }));

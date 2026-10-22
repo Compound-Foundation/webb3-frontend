@@ -157,6 +157,11 @@ const WRAPPER_ADDRESSES: ReadonlySet<string> = new Set(
   HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => String(market.wrapperAddress).toLowerCase())
 );
 
+/** Whether `address` is a wrapper the configuration names. */
+export function isWrapperAddress(address: unknown): boolean {
+  return typeof address === 'string' && WRAPPER_ADDRESSES.has(address.toLowerCase());
+}
+
 export function isWrappedActionDraft(entry: unknown): entry is WrappedActionDraft {
   return typeof entry === 'object' && entry !== null && (entry as { kind?: unknown }).kind === WRAPPED_ACTION;
 }
@@ -166,8 +171,9 @@ export function isWrappedActionEntry(entry: unknown): boolean {
   if (isWrappedActionDraft(entry)) return true;
   if (!Array.isArray(entry)) return false;
   const asset: unknown = entry[1];
-  const address = typeof asset === 'object' && asset !== null ? (asset as { address?: unknown }).address : undefined;
-  return typeof address === 'string' && WRAPPER_ADDRESSES.has(address.toLowerCase());
+  return isWrapperAddress(
+    typeof asset === 'object' && asset !== null ? (asset as { address?: unknown }).address : undefined
+  );
 }
 
 function isDirectAction(entry: unknown): entry is Action {
