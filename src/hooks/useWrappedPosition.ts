@@ -6,6 +6,7 @@ import { WrappedMarket } from '@constants/wrappedMarkets';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { REFRESH_INTERVAL } from '@helpers/numbers';
 import { readWrappedPosition, WrappedPosition } from '@helpers/wrappedPositions';
+import { SettledTransaction, Transaction } from '@types';
 
 export type WrappedPositionReader = (
   provider: JsonRpcProvider,
@@ -23,8 +24,22 @@ export type WrappedPositionState =
 export const WRAPPED_POSITION_READ_FAILED =
   'Your wrapped position could not be loaded. Check your connection and try again.';
 
-const readWithMulticall: WrappedPositionReader = (provider, market, account) =>
+/** Reads the position in one multicall, so from one block. */
+export const readWithMulticall: WrappedPositionReader = (provider, market, account) =>
   readWrappedPosition(new Provider(provider, market.chainId), market, account);
+
+/**
+ * A `refreshToken` that changes whenever a transaction is added or settles. A settled transaction,
+ * such as a confirmed approval or supply, changes the shares, wallet balance or allowance. The
+ * settled list is capped, so the token names its newest transaction as well as its length.
+ */
+export function positionRefreshToken(
+  transactions: readonly Transaction[],
+  settledTransactions: readonly SettledTransaction[]
+): string {
+  const newest = settledTransactions[settledTransactions.length - 1];
+  return `${transactions.length}|${settledTransactions.length}|${newest?.id ?? ''}`;
+}
 
 type StoredState = { key: string; state: WrappedPositionState };
 
