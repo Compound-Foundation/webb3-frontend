@@ -14,7 +14,13 @@ import { NotSentError, SendWithdrawnError, SessionProbeResult } from '@helpers/w
 import { MarketRestriction, WrappedActionIdentity, WrappedSession, WrappedStep } from '@helpers/wrappedActions';
 import type { SendResult, TransactionManager, TransactionRequest } from '@hooks/useTransactionManager';
 import { useWrappedAction, WrappedActionController } from '@hooks/useWrappedAction';
-import { PendingTransaction, SettledTransaction, Transaction, TransactionState } from '@types';
+import {
+  AwaitingConfirmationTransaction,
+  PendingTransaction,
+  SettledTransaction,
+  Transaction,
+  TransactionState,
+} from '@types';
 
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
@@ -1012,6 +1018,23 @@ describe('useWrappedAction', () => {
       };
     }
 
+    /** A wallet request with no hash that nothing can follow, as after a reload or an ambiguous error. */
+    function interruptedRequest(overrides: Partial<AwaitingConfirmationTransaction> = {}): Transaction {
+      return {
+        id: 'interrupted',
+        key: USDC_WRAPPER,
+        networkId: 1,
+        networkName: 'homestead',
+        description: 'Supply USDC through the wrapper',
+        nonce: 7,
+        account: ACCOUNT,
+        step: 'supply',
+        state: TransactionState.AwaitingConfirmation,
+        isInterrupted: true,
+        ...overrides,
+      };
+    }
+
     it('requires an earlier wrapper transaction to settle before a fresh review, and resumes nothing', async () => {
       const { manager } = fakeManager();
       const pending = wrapperTransaction();
@@ -1081,14 +1104,16 @@ describe('useWrappedAction', () => {
       expect(manager.dismissTransaction).not.toHaveBeenCalled();
     });
 
-    it('does not dismiss anything while a draft is in progress', async () => {
+    it('does not dismiss an interrupted request while a draft is in progress', async () => {
       const { manager, requests } = fakeManager();
       const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
-      // The manager now holds the step's own record, awaiting the wallet.
-      const inFlight = wrapperTransaction({ id: 'in-flight' });
-      rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [inFlight] } });
+      // The wallet answered the step with an ambiguous error. The manager has marked the step's own
+      // record interrupted, and the draft has not yet heard the result.
+      const interrupted = interruptedRequest({ id: 'in-flight', step: 'approve' });
+      rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [interrupted] } });
+      expect(result.current.state.phase).toBe('signing');
 
       expect(result.current.canDismissRecovered).toBe(false);
       act(() => result.current.dismissRecovered());
