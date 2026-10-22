@@ -506,7 +506,8 @@ export type Action =
 export type ActionQueue = {
   addOrUpdateAction: (action: Action) => void;
   clearActions: () => void;
-  queueActions: (market: string, actions: Action[]) => void;
+  /** Defers `actions` until the market on `chainId` with Comet `marketAddress` is selected. */
+  queueActions: (chainId: number, marketAddress: string, actions: Action[]) => void;
   getActions: (
     baseAsset: BaseAssetWithAccountState,
     collateralAssets: TokenWithAccountState[],
