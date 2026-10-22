@@ -25,7 +25,7 @@ import {
   WrappedStep,
   wrappedActionIdentity,
 } from '@helpers/wrappedActions';
-import { SettledTransaction, Transaction, TransactionOutcome } from '@types';
+import { SettledTransaction, Transaction, TransactionOutcome, TransactionState } from '@types';
 
 import type { TransactionManager } from './useTransactionManager';
 
@@ -113,7 +113,7 @@ export type WrappedActionController = {
   session: WalletSessionHealth;
   /** This account's wrapper transactions on this chain: still pending, and settled this session. */
   recovered: { pending: readonly Transaction[]; settled: readonly SettledTransaction[] };
-  /** Whether earlier wrapper transactions are holding back a fresh review, with no draft in progress. */
+  /** Whether an interrupted wallet request holds back a fresh review, with no draft in progress. */
   canDismissRecovered: boolean;
   /** Why `start(type)` refuses now, or undefined if it starts. */
   blockedReason: (type: WrappedActionType) => WrappedBlockReason | undefined;
@@ -124,9 +124,10 @@ export type WrappedActionController = {
   /** Clears the draft, or the notice left by one. Nothing already sent is cancelled. */
   discard: () => void;
   /**
-   * Stops tracking this account's earlier wrapper transactions on this chain, including wallet
-   * requests open at a reload, so that a fresh review can start. Only for the user to call after
-   * checking their wallet and the explorer: a dismissed request or transaction can still go through.
+   * Stops waiting for this account's interrupted wallet requests on this chain: requests open at a
+   * reload, or answered with an ambiguous error, whose result nothing can follow. Only for the user
+   * to call after checking their wallet, because a dismissed request can still go through. A
+   * broadcast transaction is not dismissed: it holds back a fresh review until it settles.
    */
   dismissRecovered: () => void;
 };
@@ -172,6 +173,11 @@ function hasProgress(state: WrappedActionState): state is Extract<WrappedActionS
 function identityOf(state: WrappedActionState): WrappedActionIdentity | undefined {
   if (hasProgress(state)) return state.draft.identity;
   return state.phase === 'reading' || state.phase === 'read-failed' ? state.identity : undefined;
+}
+
+/** A wallet request whose result nothing can follow: it has no hash to look up. */
+function isInterrupted(transaction: Transaction): boolean {
+  return transaction.state === TransactionState.AwaitingConfirmation && transaction.isInterrupted === true;
 }
 
 function isInProgress(state: WrappedActionState): boolean {
@@ -602,14 +608,16 @@ export function useWrappedAction({
   const dismissRecovered = () => {
     const current = live.current;
     if (isInProgress(current.state)) return;
-    current.recovered.pending.forEach((transaction) => current.manager.dismissTransaction(transaction.id));
+    current.recovered.pending.filter(isInterrupted).forEach((transaction) => {
+      current.manager.dismissTransaction(transaction.id);
+    });
   };
 
   return {
     state,
     session: health,
     recovered,
-    canDismissRecovered: recovered.pending.length > 0 && !isInProgress(state),
+    canDismissRecovered: recovered.pending.some(isInterrupted) && !isInProgress(state),
     blockedReason,
     start,
     confirm,
