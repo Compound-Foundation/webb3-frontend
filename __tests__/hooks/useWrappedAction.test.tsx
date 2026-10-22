@@ -1414,4 +1414,70 @@ describe('useWrappedAction with the transaction manager', () => {
     expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(2);
     expect(stepStatuses(result)).toEqual(['confirmed', 'confirmed']);
   });
+
+  it('keeps a broken session unusable when a request through the earlier wallet provider fails late', async () => {
+    /** A wallet whose reads succeed, with no transactions to report. */
+    const quietWallet = () =>
+      Object.assign(walletProvider(), {
+        getNetwork: jest.fn(async () => ({ chainId: 1, name: 'homestead' })),
+        getTransactionReceipt: jest.fn(async () => null),
+        getTransaction: jest.fn(async () => null),
+        getTransactionCount: jest.fn(async () => 5),
+      });
+    const earlier = quietWallet();
+    const rebuilt = quietWallet();
+    const { result, rerender } = renderHook(
+      ({ wallet }: { wallet: Wallet }) => {
+        const web3 = {
+          ...mockWeb3,
+          write: { ...mockWeb3.write, account: ACCOUNT, chainId: 1, provider: wallet as unknown as JsonRpcProvider },
+        };
+        const manager = useTransactionManager(web3);
+        const action = useWrappedAction({
+          session: sessionFor(wallet),
+          manager,
+          readProvider: undefined,
+          checkRestriction: async () => undefined,
+        });
+        return { manager, action };
+      },
+      { initialProps: { wallet: earlier } }
+    );
+    await waitFor(() => expect(result.current.action.session.status).toBe('usable'));
+
+    // A direct write through the earlier provider waits in the wallet.
+    let failEarlierRequest: (error: unknown) => void = () => undefined;
+    let earlierSubmission: Promise<SendResult> = Promise.resolve({ status: 'session-changed' });
+    act(() => {
+      earlierSubmission = result.current.manager.submitTransaction({
+        key: USDC_COMET,
+        description: 'Repay',
+        send: () => new Promise((_resolve, reject) => (failEarlierRequest = reject)),
+      });
+    });
+    await waitFor(() => expect(result.current.manager.transactions).toHaveLength(1));
+
+    // Web3Context rebuilds the wallet provider. The rebuilt provider passes its session check. Then a
+    // write through the rebuilt provider finds the extension broken.
+    rerender({ wallet: rebuilt });
+    await waitFor(() => expect(result.current.action.session.status).toBe('usable'));
+    await act(async () => {
+      await result.current.manager.submitTransaction({
+        key: USDC_COMET,
+        description: 'Repay',
+        send: async () => Promise.reject(BROKEN_EXTENSION),
+      });
+    });
+    expect(result.current.action.session).toMatchObject({ status: 'unusable', reason: 'provider-broken' });
+
+    // The earlier provider's open request then fails the same way.
+    await act(async () => {
+      failEarlierRequest(BROKEN_EXTENSION);
+      await earlierSubmission;
+    });
+
+    expect(result.current.action.session).toMatchObject({ status: 'unusable', reason: 'provider-broken' });
+    expect(result.current.action.blockedReason('supply')).toBe('session-unusable');
+    expect(result.current.manager.walletFailure?.provider).toBe(rebuilt);
+  });
 });

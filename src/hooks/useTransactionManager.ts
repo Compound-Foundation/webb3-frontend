@@ -314,7 +314,11 @@ export type TransactionManager = {
   transactions: Transaction[];
   /** Transactions this session saw settle, including restored ones, with what became of them. */
   settledTransactions: SettledTransaction[];
-  /** The last wallet provider found broken, if any. */
+  /**
+   * The last wallet provider found broken while that provider was in use, if any. The manager
+   * ignores a failure that an earlier provider reports late, so that failure cannot replace this
+   * record.
+   */
   walletFailure: WalletFailure | undefined;
   /**
    * The last wallet session whose stored transactions were restored into `transactions`. Until it
@@ -345,8 +349,16 @@ export function useTransactionManager(web3: Web3): TransactionManager {
   const trackedTransactions = useRef(transactions);
   trackedTransactions.current = transactions;
   const { provider, account } = web3.write;
+  // The wallet provider as of the last render. A request through an earlier provider can fail
+  // after Web3Context has rebuilt the wallet provider.
+  const liveProvider = useRef(provider);
+  liveProvider.current = provider;
 
+  // Records a provider as broken only while that provider is in use. Otherwise a failure that an
+  // earlier provider reports late replaces the record of the provider in use. `useWrappedAction`
+  // can then show the broken session as usable, with no new check.
   const noteWalletError = useCallback((failedProvider: object, error: unknown) => {
+    if (failedProvider !== liveProvider.current) return;
     if (classifyWalletError(error) === 'session-broken') {
       setWalletFailure({ provider: failedProvider, message: describeWalletError(error) });
     }
