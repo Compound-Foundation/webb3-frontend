@@ -10,7 +10,7 @@ export type WrappedLending = {
   retry: () => void;
 };
 
-/** Outside a provider, lending is standard and there is no wrapped position. */
+/** The value outside a provider: the standard route, with no wrapped position. */
 export const STANDARD_LENDING: WrappedLending = Object.freeze({
   route: { kind: 'standard', writes: { isEligible: false, reason: 'disconnected' } },
   position: { status: 'not-applicable' },

@@ -2,7 +2,7 @@ import { ReactNode } from 'react';
 
 import { Eligibility, LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { formatRateFactor, formatValue, formatValueInDollars } from '@helpers/numbers';
-import { getWrappedPositionValueInDollars } from '@helpers/wrappedPositions';
+import { getWithdrawableCash, getWrappedPositionValueInDollars, WithdrawableCash } from '@helpers/wrappedPositions';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
 
 export type WrappedRoute = Extract<LendingRoute, { kind: 'wrapped' }>;
@@ -10,8 +10,9 @@ export type WrappedRoute = Extract<LendingRoute, { kind: 'wrapped' }>;
 type WrappedPositionPanelProps = {
   route: WrappedRoute;
   position: WrappedPositionState;
-  baseAsset: { symbol: string; baseAssetPriceInDollars: bigint };
-  /** The market's base supply rate. Reward rates are never passed: none is verified for wrapped positions. */
+  /** The market's base asset, from the Comet state of the same market. */
+  baseAsset: { symbol: string; baseAssetPriceInDollars: bigint; balanceOfComet: bigint };
+  /** The market's base supply rate. No reward rate is verified for wrapped positions, so none is passed. */
   earnAPR: bigint;
   onRetry: () => void;
 };
@@ -51,13 +52,24 @@ function writeBlockMessage(eligibility: Eligibility, action: 'deposits' | 'withd
     case 'exits-disabled':
       return `Wrapped ${action} are not open yet.`;
     case 'wrong-chain':
-      return `Switch your wallet to Ethereum to use wrapped ${action}.`;
+      return `Switch your wallet to this market's network to use wrapped ${action}.`;
     case 'reconnecting':
     case 'no-signer':
     case 'validation-pending':
       return 'Waiting for your wallet and the wrapper check.';
     default:
       return `Wrapped ${action} are unavailable for this session.`;
+  }
+}
+
+function withdrawableNote({ limit }: WithdrawableCash): string {
+  switch (limit) {
+    case 'paused':
+      return 'Withdrawals from this market are paused.';
+    case 'liquidity':
+      return 'Limited by the cash the market holds. The rest of the position stays in the wrapper.';
+    default:
+      return "The value less the wrapper's rounding buffer, if the market's cash and state are unchanged.";
   }
 }
 
@@ -100,13 +112,12 @@ const WrappedPositionPanel = ({ route, position, baseAsset, earnAPR, onRetry }: 
       break;
     }
     case 'loaded': {
-      const { shares, grossAssets, baseDecimals, baseWalletBalance, wrapperAllowance, fullExitCash } =
+      const { shares, grossAssets, baseDecimals, baseWalletBalance, wrapperAllowance, fullExitCash, isWithdrawPaused } =
         position.position;
-      const valueInDollars = getWrappedPositionValueInDollars(grossAssets, baseAsset.baseAssetPriceInDollars);
-      const payout =
-        shares > 0n && fullExitCash === 0n
-          ? 'Too small to withdraw'
-          : `${formatValue(baseDecimals, fullExitCash)} ${symbol}`;
+      const valueInDollars = getWrappedPositionValueInDollars(grossAssets, baseAsset.baseAssetPriceInDollars, symbol);
+      const withdrawable = getWithdrawableCash(fullExitCash, isWithdrawPaused, baseAsset.balanceOfComet);
+      const isDust = shares > 0n && fullExitCash === 0n && !isWithdrawPaused;
+      const payout = isDust ? 'Too small to withdraw' : `${formatValue(baseDecimals, withdrawable.amount)} ${symbol}`;
       const allowance =
         wrapperAllowance >= UNLIMITED_ALLOWANCE
           ? 'Unlimited'
@@ -124,14 +135,11 @@ const WrappedPositionPanel = ({ route, position, baseAsset, earnAPR, onRetry }: 
             </p>
           </div>
           <div className="wrapped-position-panel__figure">
-            <label className="L3 label text-color--2">Estimated full-exit payout</label>
+            <label className="L3 label text-color--2">Withdrawable now (estimated)</label>
             <p className="body body--emphasized" data-testid="wrapped-full-exit-payout">
               {payout}
             </p>
-            <p className="L4 meta text-color--2">
-              The value less the wrapper&apos;s rounding buffer. A withdrawal depends on market liquidity and on
-              withdrawals not being paused.
-            </p>
+            <p className="L4 meta text-color--2">{withdrawableNote(withdrawable)}</p>
           </div>
           <div className="wrapped-position-panel__figure">
             <label className="L3 label text-color--2">Supply APR</label>

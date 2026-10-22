@@ -22,8 +22,6 @@ export type WrappedPositionState =
 
 export const WRAPPED_POSITION_READ_FAILED =
   'Your wrapped position could not be loaded. Check your connection and try again.';
-const NO_ACCOUNT = 'No account is connected, so there is no wrapped position to load.';
-const NO_PROVIDER = 'There is no connection to the network this market is on, so your wrapped position cannot load.';
 
 const readWithMulticall: WrappedPositionReader = (provider, market, account) =>
   readWrappedPosition(new Provider(provider, market.chainId), market, account);
@@ -32,9 +30,9 @@ type StoredState = { key: string; state: WrappedPositionState };
 
 /**
  * Reads the connected account's position in the selected market's wrapper, on the wrapped
- * route only. A read belongs to the route key it started under, which covers the market, the
- * wrapper, the connector, the account, the chain and the connection status. A result that
- * arrives after the key changed is dropped, and a new key shows as loading until its own read
+ * route only. Each read belongs to the route key it started under. The key covers the market,
+ * the wrapper, the connector, the account, the chain and the connection status. A result that
+ * arrives after the key changed is dropped. A new key shows as loading until its own read
  * finishes, so one wallet's position never appears under another.
  */
 export function useWrappedPosition({
@@ -47,7 +45,7 @@ export function useWrappedPosition({
   route: LendingRoute;
   account: string | undefined;
   provider: JsonRpcProvider | undefined;
-  /** Any value that changes when the position should be read again, such as after a transaction. */
+  /** Any value that changes whenever the position needs reading again, such as after a transaction. */
   refreshToken?: unknown;
   read?: WrappedPositionReader;
 }): { state: WrappedPositionState; retry: () => void } {
@@ -104,9 +102,9 @@ export function useWrappedPosition({
     };
   }, [readKey, provider, attempt]);
 
-  // A refresh never cancels a read in flight; a slow read would otherwise never finish. A
-  // refresh asked for by a transaction runs once the current read finishes; a timed one is
-  // skipped while a read is running.
+  // A refresh never cancels a read in flight, so a read slower than the refresh interval still
+  // finishes. A refresh asked for by a transaction runs once the current read finishes. A timed
+  // refresh is skipped while a read is running.
   const refresh = useRef((queueIfReading: boolean) => {
     if (!isReading.current) startRead.current();
     else if (queueIfReading) isRefreshQueued.current = true;
@@ -138,10 +136,10 @@ export function useWrappedPosition({
       route.reads.reason === 'validation-pending'
         ? { status: 'loading' }
         : { status: 'unavailable', reason: route.reads.reason };
-  } else if (account === undefined) {
-    state = { status: 'error', message: NO_ACCOUNT };
-  } else if (provider === undefined) {
-    state = { status: 'error', message: NO_PROVIDER };
+  } else if (account === undefined || provider === undefined) {
+    // Web3Context withholds the account until address screening allows it, and the provider
+    // comes from the app's chain configuration. Neither is a read failure.
+    state = { status: 'loading' };
   } else if (stored !== undefined && stored.key === readKey) {
     state = stored.state;
   } else {

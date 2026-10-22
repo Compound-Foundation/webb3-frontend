@@ -9,7 +9,7 @@ import { WrappedPositionState } from '@hooks/useWrappedPosition';
 import WrappedPositionPanel, { WrappedRoute } from '../components/WrappedPositionPanel';
 
 const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
-const BASE_ASSET = { symbol: 'USDC', baseAssetPriceInDollars: 100_000_000n };
+const BASE_ASSET = { symbol: 'USDC', baseAssetPriceInDollars: 100_000_000n, balanceOfComet: 10n ** 12n };
 
 function wrappedRoute(overrides: Partial<Extract<LendingRoute, { kind: 'wrapped' }>> = {}): WrappedRoute {
   const lookup = WRAPPED_MARKET_REGISTRY.lookup(1, USDC_COMET);
@@ -38,15 +38,21 @@ const POSITION: WrappedPosition = {
   wrapperAllowance: 5_000_000n,
   redeemBuffer: 3n,
   fullExitCash: 250_124_997n,
+  isWithdrawPaused: false,
   snapshot: { totalSupply: 0n, totalAssets: 0n, baseSupplyIndex: 0n },
 };
 
-function renderPanel(position: WrappedPositionState, route = wrappedRoute(), onRetry = jest.fn()) {
+function renderPanel(
+  position: WrappedPositionState,
+  route = wrappedRoute(),
+  onRetry = jest.fn(),
+  baseAsset = BASE_ASSET
+) {
   render(
     <WrappedPositionPanel
       route={route}
       position={position}
-      baseAsset={BASE_ASSET}
+      baseAsset={baseAsset}
       earnAPR={45_000_000_000_000_000n}
       onRetry={onRetry}
     />
@@ -55,13 +61,30 @@ function renderPanel(position: WrappedPositionState, route = wrappedRoute(), onR
 }
 
 describe('WrappedPositionPanel', () => {
-  it('shows the position value and the full-exit payout as separate figures', () => {
+  it('shows the position value and the cash withdrawable now as separate figures', () => {
     renderPanel({ status: 'loaded', position: POSITION });
 
     expect(screen.getByTestId('wrapped-position-value')).toHaveTextContent('250.1250 USDC');
     expect(screen.getByTestId('wrapped-position-value-usd')).toHaveTextContent('$250.13');
+    expect(screen.getByText('Withdrawable now (estimated)')).toBeInTheDocument();
     expect(screen.getByTestId('wrapped-full-exit-payout')).toHaveTextContent('250.1250 USDC');
-    expect(screen.getByText(/depends on market liquidity/i)).toBeInTheDocument();
+  });
+
+  it('caps the withdrawable cash at what the market holds', () => {
+    renderPanel({ status: 'loaded', position: POSITION }, wrappedRoute(), jest.fn(), {
+      ...BASE_ASSET,
+      balanceOfComet: 50_000_000n,
+    });
+
+    expect(screen.getByTestId('wrapped-full-exit-payout')).toHaveTextContent('50.0000 USDC');
+    expect(screen.getByText(/limited by the cash the market holds/i)).toBeInTheDocument();
+  });
+
+  it('shows nothing withdrawable while Comet withdrawals are paused', () => {
+    renderPanel({ status: 'loaded', position: { ...POSITION, isWithdrawPaused: true } });
+
+    expect(screen.getByTestId('wrapped-full-exit-payout')).toHaveTextContent('0.0000 USDC');
+    expect(screen.getByText(/withdrawals from this market are paused/i)).toBeInTheDocument();
   });
 
   it('says a position worth no more than the buffer cannot be withdrawn', () => {

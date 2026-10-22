@@ -7,15 +7,15 @@ import ERC20Abi from '@helpers/abis/ERC20';
 import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
 import { addsDirectBaseSupply } from '@helpers/actions';
 import { LendingRoute } from '@helpers/lendingRoute';
-import { Action, CometState, StateType } from '@types';
+import { getTokenValue } from '@helpers/numbers';
+import { Action, CometState, Currency, StateType } from '@types';
 
 /** The wrapper's divisor for Comet's supply index in its redeem buffer. */
 const BASE_INDEX_SCALE = 10n ** 15n;
 /** The wrapper's allowance for what one Comet transfer can lose to rounding, in base units. */
 const COMET_TRANSFER_LOSS = 2n;
-const PRICE_DECIMALS = 8n;
 
-/** A read that could not produce a trustworthy position. The UI shows it; it never means zero. */
+/** A read that produced no trustworthy position. The UI shows the error, and never shows zero for it. */
 export class WrappedPositionReadError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message);
@@ -35,7 +35,7 @@ export type WrappedPositionSnapshot = {
 };
 
 /**
- * One account's position in one wrapper. Shares use `shareDecimals` (18); every other amount
+ * One account's position in one wrapper. Shares use `shareDecimals` (18). Every other amount
  * is in base-token units (`baseDecimals`, 6 for the three Ethereum wrappers).
  */
 export type WrappedPosition = {
@@ -44,7 +44,7 @@ export type WrappedPosition = {
   /** What the shares are worth, as the wrapper's `convertToAssets` rounds it: down. */
   grossAssets: bigint;
   baseDecimals: number;
-  /** The base token the account holds in its wallet and could supply. */
+  /** The base token in the account's wallet, which is what it has available to supply. */
   baseWalletBalance: bigint;
   /** The base-token allowance the account has given the wrapper. */
   wrapperAllowance: bigint;
@@ -52,6 +52,8 @@ export type WrappedPosition = {
   redeemBuffer: bigint;
   /** The cash a full exit pays at this snapshot: the gross value less the buffer, or zero. */
   fullExitCash: bigint;
+  /** Whether Comet withdrawals, which every wrapper exit makes, are paused. */
+  isWithdrawPaused: boolean;
   snapshot: WrappedPositionSnapshot;
 };
 
@@ -81,11 +83,15 @@ export function getFullExitCash(grossAssets: bigint, redeemBuffer: bigint) {
 }
 
 /**
- * The dollar value of a base-unit amount, priced with the market's existing 8-decimal base
- * price. The result keeps the base token's decimals.
+ * The dollar value of a base-unit amount, in the base token's decimals. It uses the app's own
+ * conversion with the market's 8-decimal base price, which values USDC at one dollar.
  */
-export function getWrappedPositionValueInDollars(grossAssets: bigint, baseAssetPriceInDollars: bigint) {
-  return (grossAssets * baseAssetPriceInDollars) / 10n ** PRICE_DECIMALS;
+export function getWrappedPositionValueInDollars(
+  grossAssets: bigint,
+  baseAssetPriceInDollars: bigint,
+  baseSymbol: string
+) {
+  return getTokenValue(grossAssets, Currency.USD, baseAssetPriceInDollars, baseSymbol);
 }
 
 function toBigInt(value: unknown, name: string): bigint {
@@ -115,6 +121,7 @@ export async function readWrappedPosition(
       wrapper.asset(),
       comet.balanceOf(market.wrapperAddress),
       comet.totalsBasic(),
+      comet.isWithdrawPaused(),
       baseToken.balanceOf(account),
       baseToken.allowance(account, market.wrapperAddress),
     ]);
@@ -122,10 +129,21 @@ export async function readWrappedPosition(
     throw new WrappedPositionReadError('The wrapper position could not be read.', { cause: error });
   }
 
-  const [sharesResult, totalSupplyResult, asset, totalAssetsResult, totalsBasic, walletResult, allowanceResult] =
-    results;
+  const [
+    sharesResult,
+    totalSupplyResult,
+    asset,
+    totalAssetsResult,
+    totalsBasic,
+    isWithdrawPaused,
+    walletResult,
+    allowanceResult,
+  ] = results;
   if (typeof asset !== 'string' || asset.toLowerCase() !== market.cometAddress.toLowerCase()) {
     throw new WrappedPositionReadError('The wrapper does not hold the configured market.');
+  }
+  if (typeof isWithdrawPaused !== 'boolean') {
+    throw new WrappedPositionReadError('The wrapper read returned no withdrawal pause state.');
   }
 
   const shares = toBigInt(sharesResult, 'shares');
@@ -144,6 +162,7 @@ export async function readWrappedPosition(
     wrapperAllowance: toBigInt(allowanceResult, 'wrapperAllowance'),
     redeemBuffer,
     fullExitCash: getFullExitCash(grossAssets, redeemBuffer),
+    isWithdrawPaused,
     snapshot: { totalSupply, totalAssets, baseSupplyIndex },
   };
 }
@@ -152,11 +171,16 @@ export type SupplyIncentives = { earnRewardsAPR: bigint | undefined; isInstituti
 
 /**
  * The supply incentives the dashboard shows for a route. No COMP, Merkl or institutional boost
- * rate is verified for wrapped positions, so the wrapped route shows none and keeps only the
- * market's base lending rate. Borrow-side figures are not affected.
+ * rate is verified for wrapped positions. On the wrapped route the dashboard's supply figures
+ * describe a wrapped supply, so they show the base lending rate only. An account with a direct
+ * Comet supply keeps the incentives that supply earns. Borrow-side figures are unchanged.
  */
-export function supplyIncentivesForRoute(isWrappedRoute: boolean, incentives: SupplyIncentives): SupplyIncentives {
-  return isWrappedRoute ? { earnRewardsAPR: 0n, isInstitutional: false } : incentives;
+export function supplyIncentivesForRoute(
+  isWrappedRoute: boolean,
+  directBaseBalance: bigint,
+  incentives: SupplyIncentives
+): SupplyIncentives {
+  return isWrappedRoute && directBaseBalance <= 0n ? { earnRewardsAPR: 0n, isInstitutional: false } : incentives;
 }
 
 export type MarketIdentity = { chainId: number; cometAddress: string };
@@ -183,8 +207,8 @@ function isSameMarket(a: MarketIdentity | undefined, b: MarketIdentity): boolean
  * now. A dialog can keep a submit callback, with its market, actions and balances, from an
  * earlier render. On the wrapped route, the actions must not add to the account's direct
  * Comet supply at the live balances. Without live balances for that market and account, the
- * submission is refused. A kept dialog for a market that can route through a wrapper is refused once another
- * market is selected, because its route is no longer known.
+ * submission is refused. Once another market is selected, the route of a kept dialog's market is
+ * unknown. Such a dialog is refused if its market can route through a wrapper.
  */
 export function isSubmissionRefused(
   live: LiveSubmissionState,
@@ -203,4 +227,20 @@ export function isSubmissionRefused(
     return true;
   }
   return addsDirectBaseSupply(cometState.baseAsset, cometState.collateralAssets, actions);
+}
+
+export type WithdrawableCash = { amount: bigint; limit: 'none' | 'paused' | 'liquidity' };
+
+/**
+ * The cash a full exit can pay now. The wrapper pays through Comet's `withdrawTo`, so the exit
+ * pays nothing while Comet withdrawals are paused and no more than the base token Comet holds.
+ */
+export function getWithdrawableCash(
+  fullExitCash: bigint,
+  isWithdrawPaused: boolean,
+  marketLiquidity: bigint
+): WithdrawableCash {
+  if (isWithdrawPaused) return { amount: 0n, limit: 'paused' };
+  if (fullExitCash > marketLiquidity) return { amount: marketLiquidity, limit: 'liquidity' };
+  return { amount: fullExitCash, limit: 'none' };
 }
