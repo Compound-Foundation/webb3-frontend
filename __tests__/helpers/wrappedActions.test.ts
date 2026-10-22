@@ -304,6 +304,48 @@ describe('wrappedActions', () => {
     ])('refuses a draft with %s', (_name, type, steps) => {
       expect(checkWrappedDraft(draft(type, steps))).toBe('bad-sequence');
     });
+
+    const reset = (id = 'reset') => ({ ...approve(USDC_WRAPPER, 0n), id });
+
+    it.each<[string, WrappedStep[]]>([
+      ['the supply alone', [supplyAndWrap()]],
+      ['an approval of the amount, then the supply', [approve(), supplyAndWrap()]],
+      ['a reset to zero, an approval of the amount, then the supply', [reset(), approve(), supplyAndWrap()]],
+    ])('allows a supply of %s', (_name, steps) => {
+      expect(checkWrappedDraft(draft('supply', steps))).toBeUndefined();
+    });
+
+    it.each<[string, WrappedStep[]]>([
+      ['a reset and no approval', [reset(), supplyAndWrap()]],
+      ['a reset after the approval', [approve(), reset(), supplyAndWrap()]],
+      ['two approvals of the amount', [approve(), { ...approve(), id: 'again' }, supplyAndWrap()]],
+      ['two resets', [reset('reset-1'), reset('reset-2'), approve(), supplyAndWrap()]],
+    ])('refuses a supply with %s', (_name, steps) => {
+      expect(checkWrappedDraft(draft('supply', steps))).toBe('bad-sequence');
+    });
+
+    it.each<[string, WrappedActionType, bigint, WrappedStep]>([
+      [
+        'a supply of zero',
+        'supply',
+        0n,
+        step('supply-and-wrap', USDC_WRAPPER, CALLS.encodeFunctionData('supplyAndWrap', [0n])),
+      ],
+      [
+        'a supply of the unlimited sentinel',
+        'supply',
+        2n ** 256n - 1n,
+        step('supply-and-wrap', USDC_WRAPPER, CALLS.encodeFunctionData('supplyAndWrap', [2n ** 256n - 1n])),
+      ],
+      [
+        'a withdrawal of no shares',
+        'withdraw',
+        0n,
+        step('unwrap-and-withdraw', USDC_WRAPPER, CALLS.encodeFunctionData('unwrapAndWithdraw', [0n])),
+      ],
+    ])('refuses %s, whose calls match its amount', (_name, type, amount, onlyStep) => {
+      expect(checkWrappedDraft({ ...draft(type, [onlyStep]), amount })).toBe('wrong-amount');
+    });
   });
 
   describe('checkBeforeSignature', () => {

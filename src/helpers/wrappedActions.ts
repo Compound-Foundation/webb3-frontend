@@ -4,6 +4,7 @@ import { JsonRpcProvider } from '@ethersproject/providers';
 import { HARDCODED_WRAPPED_LENDING_SOURCE } from '@constants/wrappedMarkets';
 import CometAbi from '@helpers/abis/Comet';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
+import { MAX_UINT256 } from '@helpers/numbers';
 import type { ScreeningStatus } from '@hooks/useAddressScreening';
 import { Action, ActionType } from '@types';
 
@@ -315,11 +316,19 @@ export function checkWrappedStep(draft: WrappedActionDraft, step: WrappedStep): 
   return BigInt(call.args[0].toString()) === draft.amount ? undefined : 'wrong-amount';
 }
 
+/** The amount a well-formed `approve` step approves. */
+function approvedAmount(step: WrappedStep): bigint {
+  return BigInt(BASE_TOKEN_CALLS.parseTransaction({ data: step.request.data }).args[1].toString());
+}
+
 /**
- * Checks a draft's steps as a whole. A supply is any approvals followed by one `supplyAndWrap`. A
- * withdrawal is one `unwrapAndWithdraw`. Step ids are unique, since hashes are stored under them.
+ * Checks a draft's steps as a whole. Its amount is positive and never the unlimited sentinel. A
+ * supply is one `supplyAndWrap`, after either no approval, an approval of exactly its amount, or a
+ * reset to zero and then that approval. A withdrawal is one `unwrapAndWithdraw`. Step ids are
+ * unique, since hashes are stored under them.
  */
 export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem | undefined {
+  if (draft.amount <= 0n || draft.amount >= MAX_UINT256) return 'wrong-amount';
   for (const step of draft.steps) {
     const problem = checkWrappedStep(draft, step);
     if (problem !== undefined) return problem;
@@ -329,7 +338,13 @@ export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem
   const isOrdered =
     kinds.length > 0 && kinds[kinds.length - 1] === finalKind && kinds.slice(0, -1).every((kind) => kind === 'approve');
   const isUnique = new Set(draft.steps.map((step) => step.id)).size === draft.steps.length;
-  return isOrdered && isUnique ? undefined : 'bad-sequence';
+  if (!isOrdered || !isUnique) return 'bad-sequence';
+  const approvals = draft.steps.filter((step) => step.kind === 'approve').map(approvedAmount);
+  const isApprovalSequence =
+    approvals.length === 0 ||
+    (approvals.length === 1 && approvals[0] === draft.amount) ||
+    (approvals.length === 2 && approvals[0] === 0n && approvals[1] === draft.amount);
+  return isApprovalSequence ? undefined : 'bad-sequence';
 }
 
 export type MarketRestriction = 'supply-paused' | 'withdraw-paused' | 'restriction-unknown';
