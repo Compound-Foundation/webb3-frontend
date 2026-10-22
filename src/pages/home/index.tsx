@@ -19,6 +19,7 @@ import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
+import { SendWithdrawnError } from '@helpers/walletErrors';
 import { isDirectExecution } from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
@@ -89,7 +90,6 @@ const Home = ({
   }, [selectedMarket[0], selectedMarket[1]?.baseAsset?.symbol]);
 
   const rewards = useContext(RewardsStateContext);
-  const writeState = useWriteCometState(web3, addTransaction);
   const { addOrUpdateAction, clearActions, getActions, getPendingAction, removeAction, setPendingAction } = useContext(
     getActionQueueContext()
   );
@@ -129,11 +129,11 @@ const Home = ({
     selectedMarket: selectedMarketIdentity,
     comet: cometStateMarket.current,
   };
-  // A review dialog belongs to the visit to the account, connector, network and market it was opened
-  // for, and closes in the same render when any of them changes. A callback kept from an earlier
-  // visit, even one to the same account and market, can open or close only a dialog of its own,
-  // which is never shown.
-  const dialogIdentity = [
+  // Review dialogs and writes belong to a visit: the account, connector, wallet network and market
+  // they were made for. A change of any of them starts a new visit in the same render. A callback
+  // kept from an earlier visit, even one to the same account and market, starts no write. It can
+  // open or close only a dialog of its own visit, which is never shown.
+  const visitIdentity = [
     web3.write.account?.toLowerCase() ?? '',
     web3.write.connector?.uid ?? '',
     web3.write.chainId ?? '',
@@ -141,26 +141,53 @@ const Home = ({
       ? ''
       : `${selectedMarketIdentity.chainId}:${selectedMarketIdentity.cometAddress.toLowerCase()}`,
   ].join('|');
-  const dialogVisit = useRef({ identity: dialogIdentity, count: 0 });
-  if (dialogVisit.current.identity !== dialogIdentity) {
-    dialogVisit.current = { identity: dialogIdentity, count: dialogVisit.current.count + 1 };
+  const visit = useRef({ identity: visitIdentity, count: 0 });
+  if (visit.current.identity !== visitIdentity) {
+    visit.current = { identity: visitIdentity, count: visit.current.count + 1 };
   }
-  const dialogKey = `${dialogIdentity}#${dialogVisit.current.count}`;
-  const [openDialog, setOpenDialog] = useState<{ key: string; state: ActionModalState }>();
-  const actionModalState = openDialog?.key === dialogKey ? openDialog.state : undefined;
-  const setActionModalState = (dialog: ActionModalState) =>
-    setOpenDialog((current) => {
-      if (dialog !== undefined) return { key: dialogKey, state: dialog };
-      return current?.key === dialogKey ? undefined : current;
-    });
-  useEffect(() => {
-    if (openDialog !== undefined && openDialog.key !== dialogKey) setOpenDialog(undefined);
-  }, [openDialog, dialogKey]);
-  const liveDialogKey = useRef(dialogKey);
-  liveDialogKey.current = dialogKey;
+  const visitKey = `${visitIdentity}#${visit.current.count}`;
+  const liveVisitKey = useRef(visitKey);
+  liveVisitKey.current = visitKey;
+  // Dialogs and the position card keep the callbacks of the render that made them.
+  const isFromEarlierVisit = () => liveVisitKey.current !== visitKey;
   // On the wrapped route, a wallet session found unusable stops direct writes as well.
   const liveWalletUnusable = useRef(false);
   liveWalletUnusable.current = wrappedLending.action.session.status === 'unusable';
+
+  // The manager reads the network and nonce, and can estimate gas, before it asks the wallet. If
+  // the write's visit ends or the session is found unusable in that time, the write is withdrawn.
+  // Otherwise the wallet is asked to sign for a session or market the user has left.
+  const addTransactionWhileCurrent: AddTransaction = (
+    key,
+    description,
+    trxFn,
+    estimatedGas,
+    trxEstimateGasFn,
+    fnArgs,
+    value,
+    callback
+  ) => {
+    const visitKeyBefore = liveVisitKey.current;
+    const sendWhileCurrent: typeof trxFn = (...args) =>
+      liveVisitKey.current === visitKeyBefore && !liveWalletUnusable.current
+        ? trxFn(...args)
+        : Promise.reject(new SendWithdrawnError());
+    return addTransaction(key, description, sendWhileCurrent, estimatedGas, trxEstimateGasFn, fnArgs, value, callback);
+  };
+  const writeState = useWriteCometState(web3, addTransactionWhileCurrent);
+
+  const [openDialog, setOpenDialog] = useState<{ key: string; state: ActionModalState }>();
+  const actionModalState = openDialog?.key === visitKey ? openDialog.state : undefined;
+  const setActionModalState = (dialog: ActionModalState) =>
+    setOpenDialog((current) => {
+      if (dialog !== undefined) return { key: visitKey, state: dialog };
+      return current?.key === visitKey ? undefined : current;
+    });
+  // A dialog from an earlier visit is hidden in the render above and cleared here, so it does not
+  // return with the session.
+  useEffect(() => {
+    if (openDialog !== undefined && openDialog.key !== visitKey) setOpenDialog(undefined);
+  }, [openDialog, visitKey]);
 
   let assetRows: ReactNode[];
   let otherAssetRows: ReactNode[] = [];
@@ -231,7 +258,6 @@ const Home = ({
       isInstitutional,
     });
     // Dialogs keep the callbacks below, so they check the session when they run.
-    const isFromEarlierDialog = () => liveDialogKey.current !== dialogKey;
     const isBlockedOnLiveRoute = (actionsToSubmit: Action[]) =>
       liveWalletUnusable.current ||
       // A queue holding a wrapper action is refused whole, never submitted without it.
@@ -250,11 +276,11 @@ const Home = ({
     const onRequestClose = () => setActionModalState(undefined);
     // The approval dialog keeps this, so it checks the session when the user clicks.
     const allowOperatorWhileCurrent: WriteCometState['allowOperator'] = async (...args) => {
-      if (isFromEarlierDialog() || liveWalletUnusable.current) return;
+      if (isFromEarlierVisit() || liveWalletUnusable.current) return;
       return writeState.allowOperator(...args);
     };
     const submitBulkerAction = () => {
-      if (isFromEarlierDialog()) return;
+      if (isFromEarlierVisit()) return;
       if (isBlockedOnLiveRoute(actions)) {
         setActionModalState(undefined);
         return;
@@ -272,7 +298,7 @@ const Home = ({
     };
 
     const submitSingleAction = (singleAction: Action) => {
-      if (isFromEarlierDialog()) return;
+      if (isFromEarlierVisit()) return;
       if (isBlockedOnLiveRoute([singleAction])) {
         setActionModalState(undefined);
         return;
@@ -441,6 +467,7 @@ const Home = ({
           removeAction(action);
         },
         onDripClicked: () => {
+          if (isFromEarlierVisit()) return;
           writeState.drip(market, baseAsset.address);
         },
         onSelectAction: (action: Action) => {
@@ -450,6 +477,9 @@ const Home = ({
           setPendingAction(undefined);
         },
         onPendingActionConfirm: (amount: bigint) => {
+          // The amount form keeps this callback. One from an earlier visit asks for no approval or
+          // network switch, and queues nothing.
+          if (isFromEarlierVisit()) return;
           if (pendingAction !== undefined) {
             const action = getActionFromPendingAction(pendingAction, amount);
             // The form already refuses a base supply on the wrapped route. Refusing it here as well
@@ -491,6 +521,7 @@ const Home = ({
           }
         },
         onSubmitClicked: () => {
+          if (isFromEarlierVisit()) return;
           setPendingAction(undefined);
           if (isBlockedOnLiveRoute(actions)) return;
 
@@ -571,6 +602,7 @@ const Home = ({
               transaction: blockingTransaction,
               unwrappedAssetSupplyAction: stEthWrapSupplyAction,
               onDripClicked: () => {
+                if (isFromEarlierVisit()) return;
                 writeState.drip(market, token.address);
               },
               onCancelClicked: () => {
