@@ -7,7 +7,9 @@ import { WrappedBlockReason } from '@helpers/wrappedActions';
 import { getWithdrawableCash, getWrappedPositionValueInDollars, WithdrawableCash } from '@helpers/wrappedPositions';
 import { WalletSessionHealth } from '@hooks/useWrappedAction';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
-import { parseWrappedSupplyAmount, toWrappedSupplyInput } from '@hooks/useWriteWrappedState';
+import { parseWrappedSupplyAmount } from '@hooks/useWriteWrappedState';
+
+import { stringFromBigInt } from './ActionInputView';
 
 export type WrappedRoute = Extract<LendingRoute, { kind: 'wrapped' }>;
 
@@ -139,7 +141,7 @@ const WrappedSupplyForm = ({
           onChange={(event) => change(event.target.value)}
           autoComplete="off"
         />
-        <button className="button button--small" onClick={() => change(toWrappedSupplyInput(walletBalance, decimals))}>
+        <button className="button button--small" onClick={() => change(stringFromBigInt(walletBalance, decimals))}>
           Max
         </button>
       </div>

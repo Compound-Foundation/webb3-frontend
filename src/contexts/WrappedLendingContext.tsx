@@ -6,9 +6,9 @@ import { WrappedPositionState } from '@hooks/useWrappedPosition';
 import { IDLE_WRITE_WRAPPED_STATE, WriteWrappedState } from '@hooks/useWriteWrappedState';
 
 /**
- * The selected market's lending route for this session, the wrapped position it reads, the
- * wrapper action lifecycle with its check of the wallet session, and the wrapped writes that start
- * a review in that lifecycle.
+ * What the selected market's wrapped lending needs in this session. `route` is its lending route
+ * and `position` the wrapped position read for it. `action` is the wrapper action lifecycle, with
+ * its check of the wallet session, and `write` starts a review in that lifecycle.
  */
 export type WrappedLending = {
   route: LendingRoute;

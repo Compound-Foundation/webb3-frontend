@@ -739,7 +739,7 @@ const Home = ({
         onDismissRecovered={wrappedAction.dismissRecovered}
         supply={{
           blockedReason: wrappedAction.blockedReason('supply'),
-          // The form keeps this callback. One from an earlier visit starts no review.
+          // A callback kept from an earlier visit starts no review.
           onReview: (amount) => (isFromEarlierVisit() ? 'identity-changed' : wrappedLending.write.supply(amount)),
         }}
         onRetry={wrappedLending.retry}

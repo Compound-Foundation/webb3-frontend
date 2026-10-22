@@ -101,7 +101,7 @@ type Chain = {
   /** The provider fails the balance and allowance reads. */
   failsFundReads: boolean;
   /** The next mined call reverts. */
-  revertNext: boolean;
+  shouldRevertNext: boolean;
   /** The supply simulation reverts with this error. */
   simulationRevert: Error | undefined;
   /** The supply simulation returns this instead, as ethers returns a reverted call's data. */
@@ -118,7 +118,7 @@ function chainFor(market: WrappedMarket, { balance = 10_000_000_000n, allowance 
     history: new Map(),
     providerLag: 0,
     failsFundReads: false,
-    revertNext: false,
+    shouldRevertNext: false,
     simulationRevert: undefined,
     simulationResult: undefined,
   };
@@ -130,7 +130,7 @@ function stateAt(chain: Chain, block: number) {
   return block >= chain.block ? latest : chain.history.get(block) ?? latest;
 }
 
-/** Mines a call, in a new block, as the base token and the wrapper would. Returns whether it succeeded. */
+/** Mines a call in a new block, as the base token and the wrapper do. Returns whether it succeeded. */
 function mine(chain: Chain, request: { to: string; data: string }): boolean {
   chain.history.set(chain.block, { balance: chain.balance, allowance: chain.allowance, shares: chain.shares });
   chain.block += 1;
@@ -138,8 +138,8 @@ function mine(chain: Chain, request: { to: string; data: string }): boolean {
 }
 
 function applyCall(chain: Chain, { to, data }: { to: string; data: string }): boolean {
-  if (chain.revertNext) {
-    chain.revertNext = false;
+  if (chain.shouldRevertNext) {
+    chain.shouldRevertNext = false;
     return false;
   }
   const call = CALLS.parseTransaction({ data });
@@ -629,7 +629,7 @@ describe('useWriteWrappedState', () => {
         (wallet) => wallet.sendUncheckedTransaction.mockRejectedValueOnce({ code: -32603, message: 'Internal error' }),
         'provider-failure',
       ],
-      ['reverted', (_wallet, chain) => (chain.revertNext = true), 'reverted'],
+      ['reverted', (_wallet, chain) => (chain.shouldRevertNext = true), 'reverted'],
     ])('stops the sequence when the reset is %s', async (_name, interrupt, status) => {
       const chain = chainFor(USDT_MARKET, { allowance: 1_000_000n });
       const events: Event[] = [];

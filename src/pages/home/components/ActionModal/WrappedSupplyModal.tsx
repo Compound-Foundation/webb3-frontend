@@ -186,8 +186,8 @@ function DirectDebtWarning({
 /**
  * The review and status of a wrapped supply: the exact amount, each step with what became of it
  * and a link to its transaction, and a warning when the account also borrows directly. Each step
- * is confirmed on its own. Closing the dialog stops the supply: a later step is never sent, and
- * nothing already sent is cancelled.
+ * is confirmed on its own. The supply stops when the dialog is closed: a later step is never sent,
+ * and nothing already sent is cancelled.
  */
 const WrappedSupplyModal = ({
   state,
@@ -305,8 +305,8 @@ const WrappedSupplyModal = ({
           )}
           {phase === 'signing' && (
             <p className="L4 meta text-color--2">
-              Closing this stops the supply after the current step. A request already in your wallet, or a transaction
-              already on the network, is not cancelled.
+              If you close this dialog, the supply stops after the current step. A request already in your wallet, or a
+              transaction already on the network, is not cancelled.
             </p>
           )}
         </>

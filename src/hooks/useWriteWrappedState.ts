@@ -35,12 +35,15 @@ const ZERO_FIRST_APPROVAL_TOKENS: Readonly<Record<number, ReadonlySet<string>>> 
 });
 
 /** Whether the token's allowance has to be reset to zero before it is changed to another nonzero amount. */
-export function requiresAllowanceReset(chainId: number, tokenAddress: string): boolean {
+function requiresAllowanceReset(chainId: number, tokenAddress: string): boolean {
   return ZERO_FIRST_APPROVAL_TOKENS[chainId]?.has(tokenAddress.toLowerCase()) ?? false;
 }
 
-/** An allowance at least this large is an unlimited approval, not an amount worth printing. */
-const UNLIMITED_ALLOWANCE = 2n ** 128n;
+/**
+ * An amount at least this large is shown as unlimited. An allowance this large is an unlimited
+ * approval, and no wallet balance comes near it.
+ */
+const UNLIMITED_AMOUNT = 2n ** 128n;
 
 const AMOUNT_INPUT = /^(\d*)(?:\.(\d*))?$/;
 
@@ -60,13 +63,6 @@ export function parseWrappedSupplyAmount(input: string, decimals: number): bigin
   );
 }
 
-/** `value` as an amount input accepts it: digits and a decimal point, with no trailing zeros. */
-export function toWrappedSupplyInput(value: bigint, decimals: number): string {
-  const scale = 10n ** BigInt(decimals);
-  const fraction = (value % scale).toString().padStart(decimals, '0').replace(/0+$/, '');
-  return fraction === '' ? (value / scale).toString() : `${value / scale}.${fraction}`;
-}
-
 /** `value` in units of `decimals`, with every decimal shown and the whole part grouped: 1,234.567891. */
 export function formatExactUnits(value: bigint, decimals: number): string {
   const magnitude = value < 0n ? -value : value;
@@ -77,7 +73,7 @@ export function formatExactUnits(value: bigint, decimals: number): string {
 }
 
 /** Why a wrapped supply could not be reviewed. Its message is shown to the user. */
-export class WrappedSupplyError extends Error {
+class WrappedSupplyError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'WrappedSupplyError';
@@ -107,7 +103,7 @@ export function newestReceiptBlock(settled: readonly SettledTransaction[]): numb
  * a read just after a confirmed approval can miss it, and a fresh review asks for the approval
  * again. A provider that does not reach the block in time fails the read.
  */
-export async function readSupplyFunds(
+async function readSupplyFunds(
   provider: SupplyReadProvider,
   identity: WrappedActionIdentity,
   minBlock: number | undefined,
@@ -144,7 +140,7 @@ const PANIC_SELECTOR = '0x4e487b71';
 /** The revert data an error carries. Ethers keeps it in `data`, sometimes on a nested error. */
 function revertData(error: unknown): string | undefined {
   const queue: unknown[] = [error];
-  for (let depth = 0; queue.length > 0 && depth < 8; depth++) {
+  for (let visited = 0; queue.length > 0 && visited < 8; visited++) {
     const current = queue.shift();
     if (typeof current !== 'object' || current === null) continue;
     const { data, error: inner, cause } = current as { data?: unknown; error?: unknown; cause?: unknown };
@@ -188,7 +184,7 @@ function describeSimulationFailure(error: unknown): string {
  * returns a revert's data as the call's result, so the result is decoded rather than trusted. A
  * failed simulation refuses the step. Nothing else is tried in its place.
  */
-export async function simulateSupplyAndWrap(
+async function simulateSupplyAndWrap(
   call: WrappedSupplyReads['call'],
   identity: WrappedActionIdentity,
   amount: bigint,
@@ -249,10 +245,14 @@ export type PrepareWrappedSupplyInput = {
  *   reset with `approve(wrapper, 0)`.
  *
  * The amount must be positive and within the wallet balance just read. The approval is for exactly
- * the amount, never more. Before each signature, its step reads the balance and allowance again
- * and stops if they are no longer what the review was built from: the user reviews again rather
- * than the sequence changing under them. The supply is simulated from the account just before it
- * is signed, at the block of that last read.
+ * the amount, never more. Before each signature, its step reads the balance and allowance again.
+ * The step stops, and the user reviews again, when the balance is below the amount or the
+ * allowance is not the one the plan expects:
+ * - before a reset, or an approval with no reset before it, exactly the allowance read at review
+ * - before an approval after a reset, zero
+ * - before the supply, at least the amount
+ *
+ * The supply is then simulated from the account, at the block of that read.
  */
 export async function prepareWrappedSupply({
   identity,
@@ -267,8 +267,8 @@ export async function prepareWrappedSupply({
   if (amount <= 0n) throw new WrappedSupplyError('Enter an amount greater than 0.');
   if (amount >= MAX_UINT256) throw new WrappedSupplyError('An unlimited amount cannot be supplied or approved.');
 
-  const exact = (value: bigint) =>
-    value >= UNLIMITED_ALLOWANCE
+  const formatAmount = (value: bigint) =>
+    value >= UNLIMITED_AMOUNT
       ? `an unlimited amount of ${symbol}`
       : `${formatExactUnits(value, market.baseDecimals)} ${symbol}`;
   let funds: SupplyFunds;
@@ -281,33 +281,35 @@ export async function prepareWrappedSupply({
     );
   }
   if (amount > funds.walletBalance) {
-    throw new WrappedSupplyError(`The amount is more than the ${exact(funds.walletBalance)} in your wallet.`);
+    throw new WrappedSupplyError(`The amount is more than the ${formatAmount(funds.walletBalance)} in your wallet.`);
   }
 
-  const checkBefore = (rule: AllowanceRule, simulate: boolean) => async (): Promise<WrappedStepCheck> => {
-    let live: SupplyFunds;
+  const checkBefore = (rule: AllowanceRule, shouldSimulate: boolean) => async (): Promise<WrappedStepCheck> => {
+    let fundsBeforeSigning: SupplyFunds;
     try {
-      live = await reads.readFunds();
+      fundsBeforeSigning = await reads.readFunds();
     } catch (error) {
       return {
         ok: false,
         message: `Your wallet balance and allowance could not be read again (${describeCallFailure(error)}).`,
       };
     }
-    if (live.walletBalance < amount) {
-      const held = exact(live.walletBalance);
+    if (fundsBeforeSigning.walletBalance < amount) {
+      const held = formatAmount(fundsBeforeSigning.walletBalance);
       return { ok: false, message: `Your wallet now holds ${held}, less than this supply. Review the supply again.` };
     }
-    const { allowance } = live;
+    const { allowance } = fundsBeforeSigning;
     if ('exactly' in rule ? allowance !== rule.exactly : allowance < rule.atLeast) {
       return {
         ok: false,
-        message: `The wrapper's allowance is now ${exact(
+        message: `The wrapper's allowance is now ${formatAmount(
           allowance
         )}, not what this review expected. Review the supply again.`,
       };
     }
-    return simulate ? simulateSupplyAndWrap(reads.call, identity, amount, live.blockNumber) : { ok: true };
+    return shouldSimulate
+      ? simulateSupplyAndWrap(reads.call, identity, amount, fundsBeforeSigning.blockNumber)
+      : { ok: true };
   };
 
   const approval = (id: string, approvedAmount: bigint, description: string, rule: AllowanceRule): WrappedStep => ({
@@ -322,26 +324,26 @@ export async function prepareWrappedSupply({
   });
 
   const steps: WrappedStep[] = [];
-  const { allowance } = funds;
-  if (allowance < amount) {
-    const isResetFirst = allowance > 0n && requiresAllowanceReset(identity.chainId, identity.baseTokenAddress);
+  const allowanceAtReview = funds.allowance;
+  if (allowanceAtReview < amount) {
+    const isResetFirst = allowanceAtReview > 0n && requiresAllowanceReset(identity.chainId, identity.baseTokenAddress);
     if (isResetFirst) {
       steps.push(
         approval(WRAPPED_SUPPLY_STEP_IDS.reset, 0n, `Reset the ${symbol} allowance for the wrapper to 0`, {
-          exactly: allowance,
+          exactly: allowanceAtReview,
         })
       );
     }
     steps.push(
-      approval(WRAPPED_SUPPLY_STEP_IDS.approve, amount, `Approve ${exact(amount)} for the wrapper`, {
-        exactly: isResetFirst ? 0n : allowance,
+      approval(WRAPPED_SUPPLY_STEP_IDS.approve, amount, `Approve ${formatAmount(amount)} for the wrapper`, {
+        exactly: isResetFirst ? 0n : allowanceAtReview,
       })
     );
   }
   steps.push({
     id: WRAPPED_SUPPLY_STEP_IDS.supply,
     kind: 'supply-and-wrap',
-    description: `Supply ${exact(amount)} through the wrapper`,
+    description: `Supply ${formatAmount(amount)} through the wrapper`,
     request: { to: identity.wrapperAddress, data: wrapperInterface.encodeFunctionData('supplyAndWrap', [amount]) },
     check: checkBefore({ atLeast: amount }, true),
   });
