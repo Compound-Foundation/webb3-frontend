@@ -10,7 +10,7 @@ import {
   WrappedMarketRegistry,
 } from '@constants/wrappedMarkets';
 import { LendingSession, resolveLendingRoute, ValidationStatus, wrappedRouteKey } from '@helpers/lendingRoute';
-import { SendWithdrawnError, SessionProbeResult } from '@helpers/walletErrors';
+import { NotSentError, SendWithdrawnError, SessionProbeResult } from '@helpers/walletErrors';
 import { MarketRestriction, WrappedActionIdentity, WrappedSession, WrappedStep } from '@helpers/wrappedActions';
 import type { SendResult, TransactionManager, TransactionRequest } from '@hooks/useTransactionManager';
 import { useWrappedAction, WrappedActionController } from '@hooks/useWrappedAction';
@@ -345,7 +345,7 @@ describe('useWrappedAction', () => {
         await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xapproval' }));
         act(() => requests[0].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xapproval') }));
         // The supply waits for its own confirmation.
-        expect(result.current.state).toMatchObject({ phase: 'review', current: 1 });
+        expect(result.current.state).toMatchObject({ phase: 'review', stepIndex: 1 });
 
         rerender({ session: changedSession(wallet), manager });
         act(() => result.current.confirm());
@@ -355,8 +355,42 @@ describe('useWrappedAction', () => {
         if (outcome === 'discarded') {
           expect(result.current.state).toMatchObject({ phase: 'discarded', submittedHashes: ['0xapproval'] });
         } else {
-          expect(result.current.state).toMatchObject({ phase: 'stopped', current: 1 });
+          expect(result.current.state).toMatchObject({ phase: 'stopped', stepIndex: 1 });
           expect(result.current.state).toMatchObject({
+            steps: [{ status: 'confirmed' }, { status: 'blocked', reason: outcome }],
+          });
+        }
+      }
+    );
+
+    it.each(CHECKS)(
+      'rechecks signer, chain, wrapper, screening, release controls, and restrictions before each signature, while its checks run: %s',
+      async (_name, changedSession, outcome) => {
+        const { manager, requests } = fakeManager();
+        let releaseRestriction: () => void = () => undefined;
+        const restriction = jest
+          .fn<Promise<MarketRestriction | undefined>, [WrappedActionIdentity]>()
+          .mockResolvedValueOnce(undefined)
+          .mockImplementationOnce(() => new Promise((resolve) => (releaseRestriction = () => resolve(undefined))));
+        const { result, rerender } = renderAction({ session: sessionFor(wallet), manager }, { restriction });
+        await reachReview(result);
+        await confirmAndWaitForWallet(result, requests, 1);
+        await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xapproval' }));
+        act(() => requests[0].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xapproval') }));
+
+        // The second signature's checks are running when the session changes.
+        act(() => result.current.confirm());
+        await waitFor(() => expect(restriction).toHaveBeenCalledTimes(2));
+        rerender({ session: changedSession(wallet), manager });
+        await act(async () => releaseRestriction());
+        await act(async () => undefined);
+
+        expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
+        if (outcome === 'discarded') {
+          expect(result.current.state).toMatchObject({ phase: 'discarded', submittedHashes: ['0xapproval'] });
+        } else {
+          expect(result.current.state).toMatchObject({
+            phase: 'stopped',
             steps: [{ status: 'confirmed' }, { status: 'blocked', reason: outcome }],
           });
         }
@@ -776,7 +810,7 @@ describe('useWrappedAction', () => {
       });
       await act(async () => undefined);
 
-      expect(result.current.state).toMatchObject({ phase: 'stopped', current: 0 });
+      expect(result.current.state).toMatchObject({ phase: 'stopped', stepIndex: 0 });
       expect(stepStatuses(result)).toEqual([status, 'waiting']);
       expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
     });
@@ -792,7 +826,7 @@ describe('useWrappedAction', () => {
         requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xapproval' });
       });
 
-      expect(result.current.state).toMatchObject({ phase: 'review', current: 1 });
+      expect(result.current.state).toMatchObject({ phase: 'review', stepIndex: 1 });
       expect(stepStatuses(result)).toEqual(['confirmed', 'waiting']);
     });
 
@@ -810,7 +844,7 @@ describe('useWrappedAction', () => {
 
       expect(result.current.state).toMatchObject({
         steps: [
-          { status: 'provider-failure', message: expect.stringMatching(/may still be approved in the wallet/) },
+          { status: 'provider-failure', message: expect.stringMatching(/can still be approved in the wallet/) },
           { status: 'waiting' },
         ],
       });
@@ -878,6 +912,26 @@ describe('useWrappedAction', () => {
         }
       }
     );
+
+    it('reports a step that failed before the wallet was asked as not sent', async () => {
+      const { manager, requests } = fakeManager();
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      wallet.estimateGas.mockRejectedValueOnce({ code: -32000, message: 'execution reverted' });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      await expect(requests[0].request.send()).rejects.toBeInstanceOf(NotSentError);
+      expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+      await act(async () => requests[0].resolve({ status: 'not-sent', message: 'execution reverted (-32000)' }));
+
+      expect(result.current.state).toMatchObject({
+        phase: 'stopped',
+        steps: [
+          { status: 'blocked', reason: 'not-sent', message: 'execution reverted (-32000)' },
+          { status: 'waiting' },
+        ],
+      });
+    });
 
     it('withdraws the request when the draft is cleared while gas is estimated', async () => {
       const { manager, requests } = fakeManager();

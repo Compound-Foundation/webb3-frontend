@@ -575,7 +575,7 @@ export type BaseTransaction = {
 };
 export type AwaitingConfirmationTransaction = BaseTransaction & {
   state: TransactionState.AwaitingConfirmation;
-  /** Restored after a reload: the wallet request may still be open, but its result cannot be followed. */
+  /** Restored after a reload: the wallet request can still be open, but its result cannot be followed. */
   isInterrupted?: boolean;
 };
 export type PendingTransaction = BaseTransaction & {

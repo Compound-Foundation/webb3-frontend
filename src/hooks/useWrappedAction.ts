@@ -1,8 +1,10 @@
 import { JsonRpcProvider, TransactionReceipt } from '@ethersproject/providers';
+import { BigNumber } from 'ethers';
 import { useEffect, useReducer, useRef, useState } from 'react';
 
 import {
   describeWalletError,
+  NotSentError,
   probeWalletSession,
   ProbedProvider,
   SendWithdrawnError,
@@ -76,7 +78,7 @@ type DraftProgress = {
   draft: WrappedActionDraft;
   steps: readonly WrappedStepState[];
   /** The step the user confirms next, or the one in progress or that stopped the draft. */
-  current: number;
+  stepIndex: number;
 };
 
 /**
@@ -113,7 +115,7 @@ export type WrappedActionController = {
   recovered: { pending: readonly Transaction[]; settled: readonly SettledTransaction[] };
   /** Whether earlier wrapper transactions are holding back a fresh review, with no draft in progress. */
   canDismissRecovered: boolean;
-  /** Why `start(type)` would be refused now, or undefined. */
+  /** Why `start(type)` refuses now, or undefined if it starts. */
   blockedReason: (type: WrappedActionType) => WrappedBlockReason | undefined;
   /** Starts a fresh review. Returns why it was refused, if it was. */
   start: (type: WrappedActionType, prepare: PrepareWrappedAction) => WrappedBlockReason | undefined;
@@ -200,14 +202,14 @@ function withStep(state: WrappedActionState, index: number, step: WrappedStepSta
     case 'checking':
     case 'awaiting-signature':
     case 'submitted':
-      return { ...state, phase: 'signing', steps, current: index };
+      return { ...state, phase: 'signing', steps, stepIndex: index };
     case 'confirmed':
       // The next step waits for the user, so nothing is sent without a fresh confirmation.
       return index === state.draft.steps.length - 1
-        ? { ...state, phase: 'complete', steps, current: index }
-        : { ...state, phase: 'review', steps, current: index + 1 };
+        ? { ...state, phase: 'complete', steps, stepIndex: index }
+        : { ...state, phase: 'review', steps, stepIndex: index + 1 };
     default:
-      return { ...state, phase: 'stopped', steps, current: index };
+      return { ...state, phase: 'stopped', steps, stepIndex: index };
   }
 }
 
@@ -215,19 +217,20 @@ function withStep(state: WrappedActionState, index: number, step: WrappedStepSta
 function stoppedByUnusableSession(state: WrappedActionState): WrappedActionState {
   if (state.phase === 'reading') return discardedFrom(state, 'session-unusable');
   if (!hasProgress(state) || state.phase === 'complete' || state.phase === 'stopped') return state;
-  const step = state.steps[state.current];
+  const step = state.steps[state.stepIndex];
   let stopped: WrappedStepState;
   if (step.status === 'submitted') {
     stopped = { status: 'unresolved', hash: step.hash };
   } else if (step.status === 'awaiting-signature') {
     stopped = {
       status: 'provider-failure',
-      message: 'The wallet stopped responding while it had the request. It may still be approved in the wallet.',
+      message:
+        'The wallet stopped responding while it had the request. The request can still be approved in the wallet.',
     };
   } else {
     stopped = { status: 'blocked', reason: 'session-unusable' };
   }
-  return withStep(state, state.current, stopped);
+  return withStep(state, state.stepIndex, stopped);
 }
 
 function lifecycleReducer(state: WrappedActionState, event: LifecycleEvent): WrappedActionState {
@@ -244,7 +247,7 @@ function lifecycleReducer(state: WrappedActionState, event: LifecycleEvent): Wra
             phase: 'review',
             draft: event.draft,
             steps: event.draft.steps.map(() => ({ status: 'waiting' })),
-            current: 0,
+            stepIndex: 0,
           }
         : state;
     case 'step':
@@ -282,7 +285,12 @@ async function sendStep(
 ): Promise<string> {
   const provider = identity.provider as Pick<JsonRpcProvider, 'getSigner' | 'estimateGas'>;
   const request = { to: step.request.to, data: step.request.data, chainId: identity.chainId };
-  const estimatedGas = await provider.estimateGas({ ...request, from: identity.account });
+  let estimatedGas: BigNumber;
+  try {
+    estimatedGas = await provider.estimateGas({ ...request, from: identity.account });
+  } catch (error) {
+    throw new NotSentError(error);
+  }
   beforeSending();
   return provider
     .getSigner(identity.account)
@@ -330,12 +338,18 @@ function isTarget(record: HealthRecord | undefined, target: ProbeTarget): record
  * wrapped supply and COM-288's wrapped withdrawal. It never touches the standard queue or the
  * Bulker, and its steps can only call the wrapper or approve the base token to it.
  *
- * Before every signature it checks the live session again: the identity the draft was reviewed
- * under (account, connector, chain, market, wrapper, route, screening, release control and wallet
- * provider), the route's eligibility (signer, chain, screening, conflicts, wrapper validation and
- * release control), the step's call, Comet's pause for the action, the step's own check, and a
- * read through the wallet. A change of identity at any point discards the draft and drops every
- * late result, so a later step is never sent without a fresh review and confirmation.
+ * Before every signature, the hook checks the live session again:
+ * - the identity the draft was reviewed under: account, connector, chain, market, wrapper, route,
+ *   screening, release control and wallet provider
+ * - the route's eligibility: signer, chain, screening, connector conflicts, wrapper validation and
+ *   release control
+ * - the step's call, Comet's pause for the action, and the step's own check
+ * - a read through the wallet
+ *
+ * It checks the identity and eligibility again after those reads, after the gas estimate, and
+ * immediately before the wallet is asked. A change of identity at any point discards the draft
+ * and drops every late result, so a later step is never sent without a fresh review and
+ * confirmation.
  */
 export function useWrappedAction({
   session,
@@ -560,6 +574,13 @@ export function useWrappedAction({
       case 'session-changed':
         block(withdrawnBecause ?? 'identity-changed');
         break;
+      case 'not-sent':
+        block('not-sent', result.message);
+        break;
+      default: {
+        const unhandled: never = result;
+        throw new Error(`Unhandled send result ${JSON.stringify(unhandled)}`);
+      }
     }
   };
 
@@ -567,8 +588,8 @@ export function useWrappedAction({
     const current = live.current.state;
     if (current.phase !== 'review') return;
     const run = ++runId.current;
-    dispatch({ type: 'step', index: current.current, step: { status: 'checking' } });
-    void sign(run, current.draft, current.current);
+    dispatch({ type: 'step', index: current.stepIndex, step: { status: 'checking' } });
+    void sign(run, current.draft, current.stepIndex);
   };
 
   const discard = () => {
