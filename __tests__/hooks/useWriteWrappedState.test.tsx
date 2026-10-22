@@ -769,6 +769,45 @@ describe('useWriteWrappedState', () => {
       expect(walletRequests(wallet).map(({ method }) => method)).toEqual(sent);
     });
 
+    it('stops before the USDT reset when the allowance changed after the review', async () => {
+      const chain = chainFor(USDT_MARKET, { allowance: 1_000_000n });
+      const { result, wallet } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+      expect(draftCalls(result).map(({ id }) => id)).toEqual(['reset-allowance', 'approve', 'supply']);
+
+      // The allowance is raised elsewhere, above the amount, before the reset is signed.
+      chain.allowance = 10_000_000n;
+      await confirmStep(result);
+
+      expect(result.current.action.state).toMatchObject({
+        phase: 'stopped',
+        steps: [{ status: 'blocked', reason: 'step-check-failed' }, { status: 'waiting' }, { status: 'waiting' }],
+      });
+      expect(walletRequests(wallet)).toEqual([]);
+      expect(chain.allowance).toBe(10_000_000n);
+    });
+
+    it('stops without a simulation or a request when the balance and allowance cannot be read before the supply', async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: 0n });
+      const { result, wallet, events } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+      await confirmStep(result);
+      events.length = 0;
+
+      chain.failsFundReads = true;
+      await confirmStep(result);
+
+      expect(result.current.action.state).toMatchObject({
+        phase: 'stopped',
+        steps: [
+          { status: 'confirmed' },
+          { status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/could not be read again/) },
+        ],
+      });
+      expect(events).not.toContain('simulate');
+      expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
+    });
+
     it('stops when a USDT allowance is nonzero again after its reset', async () => {
       const chain = chainFor(USDT_MARKET, { allowance: 1_000_000n });
       const { result, wallet } = renderSupply(chain);
