@@ -1,6 +1,7 @@
 import { ReactNode, useContext, useEffect, useRef, useState } from 'react';
 
 import { isUnwrappedCollateralAsset } from '@constants/chains';
+import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
@@ -16,7 +17,7 @@ import {
 import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
-import { DEFAULT_MARKET } from '@helpers/markets';
+import { DEFAULT_MARKET, getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { SendWithdrawnError } from '@helpers/walletErrors';
@@ -746,13 +747,31 @@ const Home = ({
     );
   }
 
+  // The supply dialog describes its draft's own market. A completed or stopped draft stays on
+  // screen after the user selects another market.
+  const { state: wrappedActionState } = wrappedAction;
+  const draftIdentity =
+    'draft' in wrappedActionState
+      ? wrappedActionState.draft.identity
+      : 'identity' in wrappedActionState
+      ? wrappedActionState.identity
+      : undefined;
+  const draftLookup =
+    draftIdentity === undefined
+      ? undefined
+      : WRAPPED_MARKET_REGISTRY.lookup(draftIdentity.chainId, draftIdentity.cometAddress);
+
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
       <WrappedSupplyModal
-        state={wrappedAction.state}
-        symbol={selectedMarket[1]?.baseAsset.symbol ?? ''}
-        decimals={wrappedRoute.kind === 'wrapped' ? wrappedRoute.market?.baseDecimals : undefined}
+        state={wrappedActionState}
+        symbol={
+          draftIdentity === undefined
+            ? ''
+            : getMarket(draftIdentity.chainId, draftIdentity.cometAddress)?.baseAsset.symbol ?? ''
+        }
+        decimals={draftLookup?.status === 'valid' ? draftLookup.market.baseDecimals : undefined}
         directBorrowBalance={directBorrowBalance}
         onConfirm={wrappedAction.confirm}
         onClose={wrappedAction.discard}

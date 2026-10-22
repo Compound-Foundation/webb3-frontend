@@ -204,6 +204,13 @@ function stepStatuses(result: Result): string[] {
   return 'steps' in state ? state.steps.map((step) => step.status) : [];
 }
 
+/** Identity changes after a draft has ended. */
+const CHANGES_AFTER_THE_END: [string, (wallet: Wallet) => WrappedSession][] = [
+  ['reconnect', (wallet) => sessionFor(wallet, { status: 'reconnecting' })],
+  ['account', (wallet) => sessionFor(wallet, { account: OTHER_ACCOUNT })],
+  ['market', (wallet) => sessionFor(wallet, { cometAddress: USDT_COMET })],
+];
+
 describe('useWrappedAction', () => {
   let wallet: Wallet;
 
@@ -1101,6 +1108,49 @@ describe('useWrappedAction', () => {
       const { state } = result.current;
       if (state.phase !== 'signing') throw new Error('the step must be signing');
       expect(Object.isFrozen(state.draft.steps[0].request)).toBe(true);
+    });
+
+    it.each(CHANGES_AFTER_THE_END)(
+      'keeps a completed or stopped draft, which sends nothing more, after a change of %s',
+      async (_change, changedSession) => {
+        const { manager, requests } = fakeManager(wallet);
+        const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+        act(() => {
+          result.current.start('supply', async () => ({ amount: 1_000_000n, steps: [SUPPLY] }));
+        });
+        await waitFor(() => expect(result.current.state.phase).toBe('review'));
+        await confirmAndWaitForWallet(result, requests, 1);
+        await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xsupply' }));
+        act(() => requests[0].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xsupply') }));
+        expect(result.current.state.phase).toBe('complete');
+
+        rerender({ session: changedSession(wallet), manager });
+
+        // What became of the supply stays on screen. Nothing can be sent from it.
+        expect(result.current.state).toMatchObject({ phase: 'complete', steps: [{ status: 'confirmed' }] });
+        act(() => result.current.confirm());
+        await act(async () => undefined);
+        expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
+      }
+    );
+
+    it('keeps a stopped draft and its reason after an identity change', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+      await act(async () => requests[0].resolve({ status: 'rejected' }));
+      expect(result.current.state).toMatchObject({
+        phase: 'stopped',
+        steps: [{ status: 'rejected' }, { status: 'waiting' }],
+      });
+
+      rerender({ session: sessionFor(wallet, { status: 'reconnecting' }), manager });
+
+      expect(result.current.state).toMatchObject({
+        phase: 'stopped',
+        steps: [{ status: 'rejected' }, { status: 'waiting' }],
+      });
     });
 
     it('clears a draft without cancelling what the wallet already has', async () => {

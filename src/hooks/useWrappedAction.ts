@@ -416,8 +416,10 @@ export function useWrappedAction({
   }
 
   // A draft whose identity no longer holds is discarded in this render, before the effect below
-  // records it, so no render shows it for review.
-  const activeIdentity = identityOf(lifecycle);
+  // records it, so no render shows it for review. A complete or stopped draft sends nothing more,
+  // so it stays, with what became of each step, until the user closes it or starts another.
+  const activeIdentity =
+    lifecycle.phase === 'complete' || lifecycle.phase === 'stopped' ? undefined : identityOf(lifecycle);
   const isStale =
     activeIdentity !== undefined &&
     !isSameWrappedIdentity(activeIdentity, wrappedActionIdentity(activeIdentity.type, session));

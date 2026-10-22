@@ -695,6 +695,22 @@ describe('WrappedSupply', () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
+    it("keeps a confirmed supply on screen, in its own market's terms, after a switch to another market", () => {
+      const receipt = { transactionHash: HASH, status: 1 } as TransactionReceipt;
+      const complete: WrappedActionState = {
+        ...inReview([SUPPLY_STEP]),
+        phase: 'complete',
+        steps: [{ status: 'confirmed', hash: HASH, receipt }],
+      };
+      const usdt = { ...lendingWith(controller(complete)), route: routeFor(OPEN, USDT_COMET) };
+      render(homeElement(usdt, cometState(BASE_ASSET), actionQueue(), USDT_MARKET));
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/supply confirmed/i);
+      expect(dialog).toHaveTextContent('Supplied 1,000.000000 USDC');
+      expect(dialog).not.toHaveTextContent(/USDT/);
+    });
+
     it.each<[string, WrappedActionState]>([
       ['nothing is in progress', { phase: 'idle' }],
       [
