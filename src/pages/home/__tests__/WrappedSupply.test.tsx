@@ -77,6 +77,8 @@ const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
 const USDC_WRAPPER = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73';
 const USDC_MARKET = getMarket(1, USDC_COMET) as MarketData;
+const USDT_COMET = '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840';
+const USDT_MARKET = getMarket(1, USDT_COMET) as MarketData;
 const WALLET = { name: 'wallet provider' };
 const AMOUNT = 1_000_000_000n;
 const HASH = `0x${'7'.repeat(64)}`;
@@ -106,11 +108,14 @@ const SESSION: LendingSession = {
 };
 
 /** The route the resolver gives the session, with the wrapper validated for it. */
-function routeFor(registry: WrappedMarketRegistry): Extract<LendingRoute, { kind: 'wrapped' }> {
-  const lookup = registry.lookup(1, USDC_COMET);
+function routeFor(
+  registry: WrappedMarketRegistry,
+  cometAddress = USDC_COMET
+): Extract<LendingRoute, { kind: 'wrapped' }> {
+  const lookup = registry.lookup(1, cometAddress);
   if (lookup.status !== 'valid') throw new Error('the mapping must be valid');
   const route = resolveLendingRoute({
-    market: { chainId: 1, cometAddress: USDC_COMET },
+    market: { chainId: 1, cometAddress },
     session: SESSION,
     conflictedRdns: new Set(),
     validation: { key: wrappedRouteKey(lookup.market, SESSION), status: 'matched' },
@@ -254,11 +259,16 @@ SelectedMarketContextHelpers.initializeContext({
 });
 ActionQueueContextHelpers.initializeContext(actionQueue());
 
-function homeElement(lending: WrappedLending, state: CometState, queue: ActionQueue = actionQueue()) {
+function homeElement(
+  lending: WrappedLending,
+  state: CometState,
+  queue: ActionQueue = actionQueue(),
+  market: MarketData = USDC_MARKET
+) {
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
   const selectedMarketData = {
-    selectedMarket: [StateType.Hydrated, USDC_MARKET] as const,
+    selectedMarket: [StateType.Hydrated, market] as const,
     selectMarket: jest.fn(),
     selectMarketByAddress: jest.fn(),
   };
@@ -338,15 +348,38 @@ describe('WrappedSupply', () => {
       expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
     });
 
-    it('keeps the warning while the supply is being signed', () => {
-      const state = inReview([APPROVE_STEP, SUPPLY_STEP], 1, [
-        { status: 'confirmed', hash: HASH, receipt: { transactionHash: HASH, status: 1 } as TransactionReceipt },
-        { status: 'waiting' },
-      ]);
-      render(homeElement(lendingWith(controller(state)), cometState(BORROWER)));
+    it('keeps the warning for the next step, and while the wallet is asked to sign it', () => {
+      const confirmed: WrappedStepState = {
+        status: 'confirmed',
+        hash: HASH,
+        receipt: { transactionHash: HASH, status: 1 } as TransactionReceipt,
+      };
+      const review = inReview([APPROVE_STEP, SUPPLY_STEP], 1, [confirmed, { status: 'waiting' }]);
+      const { rerender } = render(homeElement(lendingWith(controller(review)), cometState(BORROWER)));
 
       expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent(/does not repay/i);
       expect(screen.getByRole('button', { name: /supply 1,000\.000000 usdc/i })).toBeEnabled();
+
+      const signing: WrappedActionState = {
+        ...review,
+        phase: 'signing',
+        steps: [confirmed, { status: 'awaiting-signature' }],
+      };
+      rerender(homeElement(lendingWith(controller(signing)), cometState(BORROWER)));
+      expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent(/does not repay/i);
+    });
+
+    it("warns without an amount while the direct position shown is still the previous market's", () => {
+      const state = cometState(BORROWER);
+      const usdt = { ...lendingWith(controller()), route: routeFor(OPEN, USDT_COMET) };
+      const { rerender } = render(homeElement(usdt, state, actionQueue(), USDT_MARKET));
+
+      // The user switches to USDC and reviews a supply before USDC's Comet state arrives.
+      rerender(homeElement(lendingWith(controller(inReview())), state, actionQueue(), USDC_MARKET));
+
+      const warning = within(screen.getByRole('dialog')).getByRole('alert');
+      expect(warning).toHaveTextContent(/does not repay/i);
+      expect(warning).not.toHaveTextContent(/2,500/);
     });
 
     it('warns without an amount while the direct position is not loaded', () => {
