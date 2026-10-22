@@ -45,3 +45,12 @@
     }
   }
 }
+
+.wrapped-route-notice {
+  border: 1px solid var(--ui--border);
+  border-radius: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1rem 1.25rem;
+}
