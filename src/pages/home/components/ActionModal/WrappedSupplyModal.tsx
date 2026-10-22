@@ -147,7 +147,9 @@ function signingLabel(step: WrappedStepState): string {
 /**
  * Before the wallet signs, tells an account that also borrows directly from the market that this
  * supply lends through the wrapper and does not repay that borrow. Repay stays a separate, direct
- * action. While the direct position is not known, the warning is shown without its amount.
+ * action. While the direct position is not known, the warning is shown without its amount. With no
+ * borrow known, the dialog still says so plainly, since a borrow made elsewhere can be newer than
+ * the position this page read.
  */
 function DirectDebtWarning({
   directBorrowBalance,
@@ -158,7 +160,13 @@ function DirectDebtWarning({
   symbol: string;
   decimals: number | undefined;
 }) {
-  if (directBorrowBalance !== undefined && directBorrowBalance <= 0n) return null;
+  if (directBorrowBalance !== undefined && directBorrowBalance <= 0n) {
+    return (
+      <p className="L4 meta text-color--2">
+        This supply lends to the market through the wrapper. It does not repay a direct borrow: only Repay does.
+      </p>
+    );
+  }
   const debt =
     directBorrowBalance === undefined || decimals === undefined
       ? undefined

@@ -426,8 +426,9 @@ describe('WrappedSupply', () => {
     it('shows no warning to an account without a direct borrow', () => {
       render(homeElement(lendingWith(controller(inReview())), cometState({ ...BASE_ASSET, balance: 0n })));
 
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).not.toBeInTheDocument();
+      // A borrow made elsewhere can be newer than this page's read, so the dialog still says it.
+      expect(screen.getByRole('dialog')).toHaveTextContent(/does not repay a direct borrow/i);
     });
   });
 
