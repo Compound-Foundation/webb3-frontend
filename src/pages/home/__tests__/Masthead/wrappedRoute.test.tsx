@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import { Theme } from '@hooks/useThemeManager';
-import { Action, ActionType, BaseAssetWithAccountState, StateType } from '@types';
+import { Action, BaseAssetWithAccountState, StateType } from '@types';
 
 import { MockBaseAssetWithAccountState } from '../../../../../__tests__/mocks/mockTokens';
 import Masthead from '../../components/Masthead';
