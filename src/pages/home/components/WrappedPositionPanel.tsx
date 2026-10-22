@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 
 import { assetIconForAssetSymbol } from '@helpers/assets';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
@@ -73,7 +73,7 @@ function writeBlockMessage(reason: WrappedBlockReason, action: 'deposits' | 'wit
     case 'validation-pending':
       return 'Waiting for your wallet and the wrapper check.';
     case 'transaction-pending':
-      return 'Waiting for your earlier wrapped transaction to settle.';
+      return "Waiting for this account's earlier wrapped transactions to be checked and to settle.";
     case 'action-in-progress':
       return 'A wrapped transaction is already in review.';
     case 'session-unusable':
@@ -199,8 +199,12 @@ const WrappedPositionPanel = ({
   onRetry,
 }: WrappedPositionPanelProps) => {
   const { symbol } = baseAsset;
-  // The supply form belongs to the route it was opened on, so a change of session or market closes it.
-  const [supplyFormRoute, setSupplyFormRoute] = useState<string | undefined>(undefined);
+  // The supply form belongs to the route key it was opened for, so a change of session or market
+  // closes it, and it stays closed if the key returns.
+  const [supplyFormRouteKey, setSupplyFormRouteKey] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    setSupplyFormRouteKey((current) => (current === route.validationKey ? current : undefined));
+  }, [route.validationKey]);
   let content: ReactNode;
 
   switch (position.status) {
@@ -309,7 +313,7 @@ const WrappedPositionPanel = ({
       onReview: supply.onReview,
     };
   }
-  const isSupplyFormOpen = supplyFormRoute !== undefined && supplyFormRoute === route.validationKey;
+  const isSupplyFormOpen = supplyFormRouteKey !== undefined && supplyFormRouteKey === route.validationKey;
 
   return (
     <div className="panel wrapped-position-panel L2">
@@ -348,7 +352,7 @@ const WrappedPositionPanel = ({
           <button
             className="button button--supply"
             disabled={supplyForm === undefined}
-            onClick={() => setSupplyFormRoute(isSupplyFormOpen ? undefined : route.validationKey)}
+            onClick={() => setSupplyFormRouteKey(isSupplyFormOpen ? undefined : route.validationKey)}
           >
             Supply {symbol} through the wrapper
           </button>
@@ -370,11 +374,11 @@ const WrappedPositionPanel = ({
           symbol={symbol}
           decimals={supplyForm.decimals}
           walletBalance={supplyForm.walletBalance}
-          onCancel={() => setSupplyFormRoute(undefined)}
+          onCancel={() => setSupplyFormRouteKey(undefined)}
           onReview={(amount) => {
             const refusal = supplyForm.onReview(amount);
             // Once the review starts, its dialog takes over.
-            if (refusal === undefined) setSupplyFormRoute(undefined);
+            if (refusal === undefined) setSupplyFormRouteKey(undefined);
             return refusal;
           }}
         />

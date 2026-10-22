@@ -578,7 +578,10 @@ describe('WrappedSupply', () => {
 
       // A reconnect gives the route a new validation key.
       rerender(<WrappedPositionPanel route={{ ...routeFor(OPEN), validationKey: 'another-session' }} {...props} />);
+      expect(screen.queryByRole('textbox', { name: /amount of usdc to supply/i })).not.toBeInTheDocument();
 
+      // The session returns to the key the form was opened for. The form stays closed.
+      rerender(<WrappedPositionPanel route={routeFor(OPEN)} {...props} />);
       expect(screen.queryByRole('textbox', { name: /amount of usdc to supply/i })).not.toBeInTheDocument();
     });
 
