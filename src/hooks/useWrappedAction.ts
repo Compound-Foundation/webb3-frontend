@@ -335,7 +335,11 @@ function frozenDraft(
 type ProbeTarget = { provider: object; key: string; chainId: number };
 type HealthRecord = { provider: object; key: string; result: SessionProbeResult };
 
-function isTarget(record: HealthRecord | undefined, target: ProbeTarget): record is HealthRecord {
+/** Whether `record` was read through the wallet session `target`: the same provider, account and chain. */
+function isTarget<T extends { provider: object; key: string }>(
+  record: T | undefined,
+  target: ProbeTarget
+): record is T {
   return record !== undefined && record.provider === target.provider && record.key === target.key;
 }
 
@@ -412,8 +416,9 @@ export function useWrappedAction({
   };
 
   // Callbacks run after later renders, so they read everything through this ref.
-  const live = useRef({ session, health, state, recovered, manager, readProvider, probe, checkRestriction });
-  live.current = { session, health, state, recovered, manager, readProvider, probe, checkRestriction };
+  const rendered = { session, probeTarget, health, state, recovered, manager, readProvider, probe, checkRestriction };
+  const live = useRef(rendered);
+  live.current = rendered;
 
   useEffect(() => {
     if (!isStale) return;
@@ -429,6 +434,10 @@ export function useWrappedAction({
   }, [isUnusable, lifecycle.phase]);
 
   const recordProbe = (target: ProbeTarget, result: SessionProbeResult) => {
+    // A result describes the session it was read through. A result that arrives after the live
+    // session changed is dropped. Otherwise it replaces the live session's record, and the live
+    // session shows as being checked again with no check running.
+    if (!isTarget(live.current.probeTarget, target)) return;
     // An unusable session stays unusable until its provider, account or chain changes.
     setHealthRecord((current) =>
       isTarget(current, target) && current.result.status === 'unusable'
