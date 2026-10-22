@@ -16,7 +16,7 @@ import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { getBlockExplorerUrl } from '@helpers/urls';
 import { WrappedSession, wrappedActionIdentity } from '@helpers/wrappedActions';
-import { WrappedPosition } from '@helpers/wrappedPositions';
+import { BlockWait, WrappedPosition } from '@helpers/wrappedPositions';
 import {
   SendResult,
   TransactionManager,
@@ -26,7 +26,6 @@ import {
 import { useWrappedAction, WrappedActionController, WrappedActionState } from '@hooks/useWrappedAction';
 import { positionRefreshToken, useWrappedPosition } from '@hooks/useWrappedPosition';
 import {
-  BlockWait,
   newestReceiptBlock,
   parseWrappedSupplyAmount,
   prepareWrappedSupply,
@@ -95,8 +94,8 @@ type Chain = {
   shares: bigint;
   /** The newest block. Each mined transaction makes a new one. */
   block: number;
-  /** The balance and allowance at the end of each earlier block. */
-  history: Map<number, { balance: bigint; allowance: bigint }>;
+  /** The balance, allowance and shares at the end of each earlier block. */
+  history: Map<number, { balance: bigint; allowance: bigint; shares: bigint }>;
   /** How many blocks the configured chain's provider trails the wallet's node by. */
   providerLag: number;
   /** The provider fails the balance and allowance reads. */
@@ -125,16 +124,15 @@ function chainFor(market: WrappedMarket, { balance = 10_000_000_000n, allowance 
   };
 }
 
-/** The balance and allowance at the end of `block`. */
+/** The balance, allowance and shares at the end of `block`. */
 function stateAt(chain: Chain, block: number) {
-  return block >= chain.block
-    ? { balance: chain.balance, allowance: chain.allowance }
-    : chain.history.get(block) ?? { balance: chain.balance, allowance: chain.allowance };
+  const latest = { balance: chain.balance, allowance: chain.allowance, shares: chain.shares };
+  return block >= chain.block ? latest : chain.history.get(block) ?? latest;
 }
 
 /** Mines a call, in a new block, as the base token and the wrapper would. Returns whether it succeeded. */
 function mine(chain: Chain, request: { to: string; data: string }): boolean {
-  chain.history.set(chain.block, { balance: chain.balance, allowance: chain.allowance });
+  chain.history.set(chain.block, { balance: chain.balance, allowance: chain.allowance, shares: chain.shares });
   chain.block += 1;
   return applyCall(chain, request);
 }
@@ -164,19 +162,20 @@ function applyCall(chain: Chain, { to, data }: { to: string; data: string }): bo
   return false;
 }
 
-function positionOf(chain: Chain): WrappedPosition {
-  return {
-    shares: chain.shares,
+function positionOf({ shares, balance, allowance }: { shares: bigint; balance: bigint; allowance: bigint }) {
+  const position: WrappedPosition = {
+    shares,
     shareDecimals: 18,
-    grossAssets: chain.shares / 10n ** 12n,
+    grossAssets: shares / 10n ** 12n,
     baseDecimals: 6,
-    baseWalletBalance: chain.balance,
-    wrapperAllowance: chain.allowance,
+    baseWalletBalance: balance,
+    wrapperAllowance: allowance,
     redeemBuffer: 3n,
     fullExitCash: 0n,
     isWithdrawPaused: false,
     snapshot: { totalSupply: 0n, totalAssets: 0n, baseSupplyIndex: 0n },
   };
+  return position;
 }
 
 /** A reverted `eth_call` as ethers reports it, with the revert data on the error. */
@@ -386,9 +385,10 @@ function renderSupply(
 ) {
   const wallet = givenWallet ?? walletFor(chain, events);
   const readProvider = readProviderFor(chain, events);
+  // The panel's position read goes through the same provider, so it trails the same way.
   const positionRead = jest.fn(async () => {
     events.push('position-read');
-    return positionOf(chain);
+    return positionOf(stateAt(chain, chain.block - chain.providerLag));
   });
   const web3 = {
     ...mockWeb3,
@@ -410,6 +410,8 @@ function renderSupply(
         account: session.account,
         provider: readProvider as unknown as JsonRpcProvider,
         refreshToken: positionRefreshToken(manager.transactions, manager.settledTransactions),
+        minBlock: newestReceiptBlock(action.recovered.settled),
+        blockWait,
         read: positionRead,
       });
       return { manager, action, write, position };
@@ -1199,6 +1201,27 @@ describe('useWriteWrappedState', () => {
       } else {
         expect(links).toEqual([]);
       }
+    });
+
+    it("refreshes the position from a block that shows the confirmed supply, while the market's provider trails", async () => {
+      const chain = chainFor(USDC_MARKET, { balance: 10_000_000n, allowance: AMOUNT });
+      const { result } = renderSupply(chain);
+      await waitFor(() => expect(result.current.position.state).toMatchObject({ status: 'loaded' }));
+      await startSupply(result, AMOUNT);
+
+      // The market's provider trails the wallet's node by a block, so it does not show the supply yet.
+      chain.providerLag = 1;
+      await confirmStep(result);
+      expect(result.current.action.state.phase).toBe('complete');
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+      expect(result.current.position.state).toMatchObject({ position: { shares: 0n } });
+
+      chain.providerLag = 0;
+      await waitFor(() =>
+        expect(result.current.position.state).toMatchObject({
+          position: { shares: AMOUNT * 10n ** 12n, baseWalletBalance: 10_000_000n - AMOUNT, wrapperAllowance: 0n },
+        })
+      );
     });
 
     it('refreshes shares, wallet balance and allowance after the confirmed supply, and links the transaction', async () => {

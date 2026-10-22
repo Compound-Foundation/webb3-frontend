@@ -5,7 +5,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { WrappedMarket } from '@constants/wrappedMarkets';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { REFRESH_INTERVAL } from '@helpers/numbers';
-import { readWrappedPosition, WrappedPosition } from '@helpers/wrappedPositions';
+import {
+  BlockWait,
+  DEFAULT_BLOCK_WAIT,
+  readWrappedPosition,
+  waitForBlock,
+  WrappedPosition,
+} from '@helpers/wrappedPositions';
 import { SettledTransaction, Transaction } from '@types';
 
 export type WrappedPositionReader = (
@@ -54,6 +60,8 @@ export function useWrappedPosition({
   account,
   provider,
   refreshToken,
+  minBlock,
+  blockWait = DEFAULT_BLOCK_WAIT,
   read = readWithMulticall,
 }: {
   route: LendingRoute;
@@ -61,6 +69,13 @@ export function useWrappedPosition({
   provider: JsonRpcProvider | undefined;
   /** Any value that changes whenever the position needs reading again, such as after a transaction. */
   refreshToken?: unknown;
+  /**
+   * The block a read should show, such as the block of a wrapper transaction that just settled. A
+   * read waits for the provider to reach it, and reads anyway after `blockWait`: the timed refresh
+   * corrects a read that was still behind.
+   */
+  minBlock?: number;
+  blockWait?: BlockWait;
   read?: WrappedPositionReader;
 }): { state: WrappedPositionState; retry: () => void } {
   const [stored, setStored] = useState<StoredState | undefined>(undefined);
@@ -97,7 +112,11 @@ export function useWrappedPosition({
       setStored({ key, state });
       if (isRefreshQueued.current) startRead.current();
     };
-    read(provider, market, account).then(
+    const reading =
+      minBlock === undefined
+        ? read(provider, market, account)
+        : waitForBlock(provider, minBlock, blockWait).then(() => read(provider, market, account));
+    reading.then(
       (position) => finish({ status: 'loaded', position }),
       (error) => {
         if (id === requestId.current) console.error('Wrapped position read failed:', error);

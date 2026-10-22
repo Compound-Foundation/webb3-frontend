@@ -9,6 +9,7 @@ import { LendingRoute } from '@helpers/lendingRoute';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { describeWalletError } from '@helpers/walletErrors';
 import { WrappedActionIdentity, WrappedBlockReason, WrappedStep, WrappedStepCheck } from '@helpers/wrappedActions';
+import { BlockWait, DEFAULT_BLOCK_WAIT, waitForBlock } from '@helpers/wrappedPositions';
 import { SettledTransaction } from '@types';
 
 import type { WrappedActionController } from './useWrappedAction';
@@ -86,12 +87,6 @@ export class WrappedSupplyError extends Error {
 /** The account's base-token balance and its allowance to the wrapper, read at one block. */
 export type SupplyFunds = { blockNumber: number; walletBalance: bigint; allowance: bigint };
 
-/** How a read waits for the configured chain's provider to reach a block: how often it asks, and for how long. */
-export type BlockWait = { attempts: number; intervalMs: number };
-
-/** About half a minute: a few Ethereum blocks. */
-export const DEFAULT_BLOCK_WAIT: BlockWait = Object.freeze({ attempts: 20, intervalMs: 1_500 });
-
 /** The calls a wrapped supply makes to the configured chain's public provider. */
 export type SupplyReadProvider = Pick<JsonRpcProvider, 'call' | 'getBlockNumber'>;
 
@@ -108,10 +103,9 @@ export function newestReceiptBlock(settled: readonly SettledTransaction[]): numb
 
 /**
  * Reads the account's base-token balance and its allowance to the wrapper, both at one block that
- * is at least `minBlock`. The transaction manager learns of a receipt from the wallet's node, and
- * the configured chain's provider can trail it, so the read waits until that provider reaches the
- * block. Otherwise a read just after a confirmed approval misses it, and a fresh review asks for
- * the approval again. A provider that does not catch up in time fails the read.
+ * is at least `minBlock`, the block of the account's newest settled wrapper transaction. Otherwise
+ * a read just after a confirmed approval can miss it, and a fresh review asks for the approval
+ * again. A provider that does not reach the block in time fails the read.
  */
 export async function readSupplyFunds(
   provider: SupplyReadProvider,
@@ -119,15 +113,11 @@ export async function readSupplyFunds(
   minBlock: number | undefined,
   wait: BlockWait = DEFAULT_BLOCK_WAIT
 ): Promise<SupplyFunds> {
-  let blockNumber = await provider.getBlockNumber();
-  for (let attempt = 1; minBlock !== undefined && blockNumber < minBlock; attempt++) {
-    if (attempt > wait.attempts) {
-      throw new WrappedSupplyError(
-        "This market's network has not shown your last wrapped transaction yet. Try again in a moment."
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, wait.intervalMs));
-    blockNumber = await provider.getBlockNumber();
+  const blockNumber = await waitForBlock(provider, minBlock, wait);
+  if (blockNumber === undefined) {
+    throw new WrappedSupplyError(
+      "This market's network has not shown your last wrapped transaction yet. Try again in a moment."
+    );
   }
   const read = (method: 'balanceOf' | 'allowance', args: string[]) =>
     provider
