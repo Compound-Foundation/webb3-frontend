@@ -102,6 +102,8 @@ type Chain = {
   failsFundReads: boolean;
   /** How many more balance reads fail as a node a block behind fails them. */
   laggingNodeReads: number;
+  /** How many more supply simulations fail the same way. */
+  laggingNodeSimulations: number;
   /** The next mined call reverts. */
   shouldRevertNext: boolean;
   /** The supply simulation reverts with this error. */
@@ -121,6 +123,7 @@ function chainFor(market: WrappedMarket, { balance = 10_000_000_000n, allowance 
     providerLag: 0,
     failsFundReads: false,
     laggingNodeReads: 0,
+    laggingNodeSimulations: 0,
     shouldRevertNext: false,
     simulationRevert: undefined,
     simulationResult: undefined,
@@ -232,6 +235,14 @@ function readProviderFor(chain: Chain, events: Event[]) {
         }
         if (call.name === 'supplyAndWrap' && isSame(to, market.wrapperAddress) && isSame(from, ACCOUNT)) {
           events.push('simulate');
+          if (chain.laggingNodeSimulations > 0) {
+            chain.laggingNodeSimulations -= 1;
+            throw Object.assign(new Error('missing revert data in call exception'), {
+              code: 'CALL_EXCEPTION',
+              data: '0x',
+              error: { code: -32000, message: 'header not found' },
+            });
+          }
           if (chain.simulationRevert !== undefined) throw chain.simulationRevert;
           if (chain.simulationResult !== undefined) return chain.simulationResult;
           const amount = BigInt(call.args[0].toString());
@@ -961,7 +972,7 @@ describe('useWriteWrappedState', () => {
           market: USDC_MARKET,
           amount: AMOUNT,
           symbol: 'USDC',
-          reads: { readFunds, call: jest.fn() },
+          reads: { readFunds, call: jest.fn(), retryIntervalMs: 1 },
         })
       ).rejects.toThrow(/wrapper for this market changed/);
       expect(readFunds).not.toHaveBeenCalled();
@@ -978,6 +989,72 @@ describe('useWriteWrappedState', () => {
 
       expect(stepStatuses(result)).toEqual(['confirmed', 'waiting']);
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
+    });
+
+    it('simulates again when a node of a load-balanced provider is still a block behind', async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: AMOUNT });
+      const { result, wallet } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+
+      chain.laggingNodeSimulations = 1;
+      await confirmStep(result);
+
+      expect(result.current.action.state.phase).toBe('complete');
+      expect(walletRequests(wallet)).toEqual([supplyAndWrap(USDC_MARKET, AMOUNT)]);
+    });
+
+    it('does not simulate a revert again', async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: AMOUNT });
+      const { result, events } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+      events.length = 0;
+
+      chain.simulationRevert = revertWith(CALLS.getSighash('ZeroSharesMinted'));
+      await confirmStep(result);
+
+      expect(events.filter((event) => event === 'simulate')).toHaveLength(1);
+      expect(stepStatuses(result)).toEqual(['blocked']);
+    });
+
+    it('says a step stopped because the provider did not catch up, in a sentence of its own', async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: 0n });
+      const { result } = renderSupply(chain, { blockWait: { attempts: 3, intervalMs: 5 } });
+      await startSupply(result, AMOUNT);
+      await confirmStep(result);
+
+      chain.providerLag = 1;
+      await confirmStep(result);
+
+      expect(stepsOf(result.current.action.state)[1]).toMatchObject({
+        status: 'blocked',
+        message:
+          "This market's network has not shown your last wrapped transaction yet. Review the supply again in a moment.",
+      });
+    });
+
+    it('describes an HTTP failure by its status, without the request it sent', async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: AMOUNT });
+      const { result } = renderSupply(chain);
+      await startSupply(result, AMOUNT);
+
+      const request = `requestBody="{\\"method\\":\\"eth_call\\",\\"params\\":[{\\"from\\":\\"${ACCOUNT}\\"}]}", url="https://rpc.example/ethereum-mainnet"`;
+      chain.simulationRevert = Object.assign(new Error('missing revert data in call exception'), {
+        code: 'CALL_EXCEPTION',
+        data: '0x',
+        error: Object.assign(
+          new Error(`bad response (status=503, headers={}, body=null, ${request}, code=SERVER_ERROR)`),
+          {
+            reason: 'bad response',
+            code: 'SERVER_ERROR',
+            status: 503,
+          }
+        ),
+      });
+      await confirmStep(result);
+
+      const [step] = stepsOf(result.current.action.state);
+      expect(step).toMatchObject({ status: 'blocked', message: expect.stringMatching(/bad response, status 503/) });
+      expect(step).not.toMatchObject({ message: expect.stringMatching(/rpc\.example|eth_call/) });
     });
 
     it('stops without sending when the balance and allowance cannot be read again', async () => {

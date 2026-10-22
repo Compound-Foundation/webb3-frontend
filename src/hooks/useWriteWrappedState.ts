@@ -97,8 +97,14 @@ export function newestReceiptBlock(settled: readonly SettledTransaction[]): numb
   }, undefined);
 }
 
-/** How many more times a failed balance and allowance read is made, at the provider's newest block. */
-const FUND_READ_RETRIES = 2;
+/**
+ * How many more times a read or a simulation that failed without revert data is made: a
+ * load-balanced provider can answer from a node still behind the block another node gave.
+ */
+const CALL_RETRIES = 2;
+
+/** Why a read gave up waiting for the provider. Callers add what the user can do next. */
+const PROVIDER_BEHIND = "This market's network has not shown your last wrapped transaction yet.";
 
 /**
  * Reads the account's base-token balance and its allowance to the wrapper, both at one block that
@@ -108,7 +114,7 @@ const FUND_READ_RETRIES = 2;
  *
  * A load-balanced provider can answer a read from a node still behind the block number another
  * node gave, and that node fails a read pinned to the block. A failed read is made again, from the
- * provider's newest block, up to `FUND_READ_RETRIES` times.
+ * provider's newest block, up to `CALL_RETRIES` times.
  */
 async function readSupplyFunds(
   provider: SupplyReadProvider,
@@ -118,11 +124,7 @@ async function readSupplyFunds(
 ): Promise<SupplyFunds> {
   for (let retries = 0; ; retries++) {
     const blockNumber = await waitForBlock(provider, minBlock, wait);
-    if (blockNumber === undefined) {
-      throw new WrappedSupplyError(
-        "This market's network has not shown your last wrapped transaction yet. Try again in a moment."
-      );
-    }
+    if (blockNumber === undefined) throw new WrappedSupplyError(PROVIDER_BEHIND);
     const read = (method: 'balanceOf' | 'allowance', args: string[]) =>
       provider
         .call({ to: identity.baseTokenAddress, data: baseTokenInterface.encodeFunctionData(method, args) }, blockNumber)
@@ -134,7 +136,7 @@ async function readSupplyFunds(
       ]);
       return { blockNumber, walletBalance, allowance };
     } catch (error) {
-      if (retries >= FUND_READ_RETRIES) throw error;
+      if (retries >= CALL_RETRIES) throw error;
       await new Promise((resolve) => setTimeout(resolve, wait.intervalMs));
     }
   }
@@ -146,6 +148,8 @@ export type WrappedSupplyReads = {
   readFunds: () => Promise<SupplyFunds>;
   /** An `eth_call` at a block. */
   call: (request: { from: string; to: string; data: string }, blockNumber: number) => Promise<string>;
+  /** How long to wait before a call that failed without revert data is made again. */
+  retryIntervalMs: number;
 };
 
 const ERROR_STRING_SELECTOR = '0x08c379a0';
@@ -180,10 +184,20 @@ function describeRevertData(data: string): string {
  * Why a call through the provider failed. Ethers reports every `eth_call` that fails without
  * revert data as a revert without a reason string, a timeout or a rate limit included, and keeps
  * the provider's own error in `error`. That error says what happened, so it is described instead.
+ * Ethers' own errors give a short `reason`, and an HTTP failure its `status`: their `message` also
+ * lists the request, with the account and call data, the response headers and the provider's URL.
  */
 function describeCallFailure(error: unknown): string {
-  const inner = typeof error === 'object' && error !== null ? (error as { error?: unknown }).error : undefined;
-  return describeWalletError(inner ?? error);
+  const outer = typeof error === 'object' && error !== null ? (error as { error?: unknown }) : undefined;
+  const failure = outer?.error ?? error;
+  const { reason, status } = (typeof failure === 'object' && failure !== null ? failure : {}) as {
+    reason?: unknown;
+    status?: unknown;
+  };
+  if (typeof reason === 'string' && reason !== '') {
+    return typeof status === 'number' ? `${reason}, status ${status}` : reason;
+  }
+  return describeWalletError(failure);
 }
 
 /** Why a simulation failed: the revert it carries, or why the call failed. */
@@ -197,9 +211,12 @@ function describeSimulationFailure(error: unknown): string {
  * before the wallet is asked to sign it. The call must return a positive number of shares. Ethers
  * returns a revert's data as the call's result, so the result is decoded rather than trusted. A
  * failed simulation refuses the step. Nothing else is tried in its place.
+ *
+ * A call that fails without revert data, as from a node still behind the block, is made again up
+ * to `CALL_RETRIES` times. A revert at a fixed block repeats, so it is never simulated again.
  */
 async function simulateSupplyAndWrap(
-  call: WrappedSupplyReads['call'],
+  reads: Pick<WrappedSupplyReads, 'call' | 'retryIntervalMs'>,
   identity: WrappedActionIdentity,
   amount: bigint,
   blockNumber: number
@@ -208,16 +225,23 @@ async function simulateSupplyAndWrap(
     ok: false,
     message: `Simulating the supply from your account failed (${detail}), so your wallet was not asked to sign it.`,
   });
+  const request = {
+    from: identity.account,
+    to: identity.wrapperAddress,
+    data: wrapperInterface.encodeFunctionData('supplyAndWrap', [amount]),
+  };
+  let result: string;
+  for (let retries = 0; ; retries++) {
+    try {
+      result = await reads.call(request, blockNumber);
+      break;
+    } catch (error) {
+      if (revertData(error) !== undefined || retries >= CALL_RETRIES) return refuse(describeSimulationFailure(error));
+      await new Promise((resolve) => setTimeout(resolve, reads.retryIntervalMs));
+    }
+  }
   let shares: bigint;
   try {
-    const result = await call(
-      {
-        from: identity.account,
-        to: identity.wrapperAddress,
-        data: wrapperInterface.encodeFunctionData('supplyAndWrap', [amount]),
-      },
-      blockNumber
-    );
     shares = BigInt(wrapperInterface.decodeFunctionResult('supplyAndWrap', result)[0].toString());
   } catch (error) {
     return refuse(describeSimulationFailure(error));
@@ -289,7 +313,7 @@ export async function prepareWrappedSupply({
   try {
     funds = await reads.readFunds();
   } catch (error) {
-    if (error instanceof WrappedSupplyError) throw error;
+    if (error instanceof WrappedSupplyError) throw new WrappedSupplyError(`${error.message} Try again in a moment.`);
     throw new WrappedSupplyError(
       `Your wallet balance and allowance could not be read (${describeCallFailure(error)}). Try again in a moment.`
     );
@@ -305,7 +329,10 @@ export async function prepareWrappedSupply({
     } catch (error) {
       return {
         ok: false,
-        message: `Your wallet balance and allowance could not be read again (${describeCallFailure(error)}).`,
+        message:
+          error instanceof WrappedSupplyError
+            ? `${error.message} Review the supply again in a moment.`
+            : `Your wallet balance and allowance could not be read again (${describeCallFailure(error)}).`,
       };
     }
     if (fundsBeforeSigning.walletBalance < amount) {
@@ -322,7 +349,7 @@ export async function prepareWrappedSupply({
       };
     }
     return shouldSimulate
-      ? simulateSupplyAndWrap(reads.call, identity, amount, fundsBeforeSigning.blockNumber)
+      ? simulateSupplyAndWrap(reads, identity, amount, fundsBeforeSigning.blockNumber)
       : { ok: true };
   };
 
@@ -430,6 +457,7 @@ export function useWriteWrappedState({
               live.current.blockWait
             ),
           call: (request, blockNumber) => provider.call(request, blockNumber),
+          retryIntervalMs: live.current.blockWait.intervalMs,
         },
       });
     });
