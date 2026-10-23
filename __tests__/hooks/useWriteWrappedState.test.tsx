@@ -27,7 +27,7 @@ import { useWrappedAction, WrappedActionController, WrappedActionState } from '@
 import { positionRefreshToken, useWrappedPosition } from '@hooks/useWrappedPosition';
 import {
   newestReceiptBlock,
-  parseWrappedSupplyAmount,
+  parseExactUnits,
   prepareWrappedSupply,
   useWriteWrappedState,
   WriteWrappedState,
@@ -498,19 +498,19 @@ describe('useWriteWrappedState', () => {
       ['0', 0n],
       ['123456789012345678901234567890', 123456789012345678901234567890n * 10n ** 6n],
     ])('parses %p with 6 decimals as %p base units', (input, expected) => {
-      expect(parseWrappedSupplyAmount(input, 6)).toBe(expected);
+      expect(parseExactUnits(input, 6)).toBe(expected);
     });
 
     it.each(['', '.', '1.0000001', '-1', '+1', '1e6', '0x10', ' 1', '1 ', '1,000', '1.2.3', 'abc', '١'])(
       'refuses %p rather than rounding or guessing',
       (input) => {
-        expect(parseWrappedSupplyAmount(input, 6)).toBeUndefined();
+        expect(parseExactUnits(input, 6)).toBeUndefined();
       }
     );
 
     it.each(MARKETS)('to the %s wrapper, from the typed amount', async (_name, market) => {
       const chain = chainFor(market, { balance: 5_000_000_000n, allowance: 0n });
-      const amount = parseWrappedSupplyAmount('1234.567891', market.baseDecimals) as bigint;
+      const amount = parseExactUnits('1234.567891', market.baseDecimals) as bigint;
       const { result, wallet } = renderSupply(chain);
 
       await startSupply(result, amount);

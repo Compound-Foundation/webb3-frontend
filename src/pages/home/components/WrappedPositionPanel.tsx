@@ -7,7 +7,7 @@ import { WrappedBlockReason } from '@helpers/wrappedActions';
 import { getWithdrawableCash, getWrappedPositionValueInDollars, WithdrawableCash } from '@helpers/wrappedPositions';
 import { WalletSessionHealth } from '@hooks/useWrappedAction';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
-import { parseWrappedSupplyAmount } from '@hooks/useWriteWrappedState';
+import { parseExactUnits } from '@hooks/useWriteWrappedState';
 
 import { stringFromBigInt } from './ActionInputView';
 
@@ -106,7 +106,7 @@ const WrappedSupplyForm = ({
   const [input, setInput] = useState('');
   const [refusal, setRefusal] = useState<WrappedBlockReason | undefined>(undefined);
   const typed = input.trim();
-  const amount = typed === '' ? undefined : parseWrappedSupplyAmount(typed, decimals);
+  const amount = typed === '' ? undefined : parseExactUnits(typed, decimals);
   const isMalformed = typed !== '' && amount === undefined;
   const isAboveBalance = amount !== undefined && amount > walletBalance;
   const reviewedAmount = amount !== undefined && amount > 0n && !isAboveBalance ? amount : undefined;

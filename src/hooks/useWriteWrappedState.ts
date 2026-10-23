@@ -52,7 +52,7 @@ const AMOUNT_INPUT = /^(\d*)(?:\.(\d*))?$/;
  * 1234567891 with 6 decimals. Only ASCII digits and one decimal point are accepted, with no more
  * fraction digits than `decimals`, so the amount is never rounded. Anything else is undefined.
  */
-export function parseWrappedSupplyAmount(input: string, decimals: number): bigint | undefined {
+export function parseExactUnits(input: string, decimals: number): bigint | undefined {
   const match = AMOUNT_INPUT.exec(input);
   if (match === null) return undefined;
   const [, whole, fraction = ''] = match;
@@ -72,11 +72,11 @@ export function formatExactUnits(value: bigint, decimals: number): string {
   return `${value < 0n ? '-' : ''}${whole}${fraction}`;
 }
 
-/** Why a wrapped supply could not be reviewed. Its message is shown to the user. */
-class WrappedSupplyError extends Error {
+/** Why a wrapped supply or withdrawal could not be reviewed. Its message is shown to the user. */
+class WrappedReviewError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'WrappedSupplyError';
+    this.name = 'WrappedReviewError';
   }
 }
 
@@ -107,39 +107,51 @@ const CALL_RETRIES = 2;
 const PROVIDER_BEHIND = "This market's network has not shown your last wrapped transaction yet.";
 
 /**
- * Reads the account's base-token balance and its allowance to the wrapper, both at one block that
- * is at least `minBlock`, the block of the account's newest settled wrapper transaction. Otherwise
- * a read just after a confirmed approval can miss it, and a fresh review asks for the approval
- * again. A provider that does not reach the block in time fails the read.
+ * Makes `read` at one block that is at least `minBlock`, the block of the account's newest settled
+ * wrapper transaction. Otherwise a read just after a confirmed transaction can miss it. For example,
+ * a fresh supply review then asks for an approval again. A provider that does not reach the block
+ * in time fails the read.
  *
  * A load-balanced provider can answer a read from a node still behind the block number another
  * node gave, and that node fails a read pinned to the block. A failed read is made again, from the
  * provider's newest block, up to `CALL_RETRIES` times.
  */
-async function readSupplyFunds(
+async function readAtBlock<T>(
   provider: SupplyReadProvider,
-  identity: WrappedActionIdentity,
   minBlock: number | undefined,
-  wait: BlockWait = DEFAULT_BLOCK_WAIT
-): Promise<SupplyFunds> {
+  wait: BlockWait,
+  read: (blockNumber: number) => Promise<T>
+): Promise<T> {
   for (let retries = 0; ; retries++) {
     const blockNumber = await waitForBlock(provider, minBlock, wait);
-    if (blockNumber === undefined) throw new WrappedSupplyError(PROVIDER_BEHIND);
-    const read = (method: 'balanceOf' | 'allowance', args: string[]) =>
-      provider
-        .call({ to: identity.baseTokenAddress, data: baseTokenInterface.encodeFunctionData(method, args) }, blockNumber)
-        .then((result) => BigInt(baseTokenInterface.decodeFunctionResult(method, result)[0].toString()));
+    if (blockNumber === undefined) throw new WrappedReviewError(PROVIDER_BEHIND);
     try {
-      const [walletBalance, allowance] = await Promise.all([
-        read('balanceOf', [identity.account]),
-        read('allowance', [identity.account, identity.wrapperAddress]),
-      ]);
-      return { blockNumber, walletBalance, allowance };
+      return await read(blockNumber);
     } catch (error) {
       if (retries >= CALL_RETRIES) throw error;
       await new Promise((resolve) => setTimeout(resolve, wait.intervalMs));
     }
   }
+}
+
+/** Reads the account's base-token balance and its allowance to the wrapper, both at one block, as `readAtBlock` pins it. */
+function readSupplyFunds(
+  provider: SupplyReadProvider,
+  identity: WrappedActionIdentity,
+  minBlock: number | undefined,
+  wait: BlockWait = DEFAULT_BLOCK_WAIT
+): Promise<SupplyFunds> {
+  return readAtBlock(provider, minBlock, wait, async (blockNumber) => {
+    const read = (method: 'balanceOf' | 'allowance', args: string[]) =>
+      provider
+        .call({ to: identity.baseTokenAddress, data: baseTokenInterface.encodeFunctionData(method, args) }, blockNumber)
+        .then((result) => BigInt(baseTokenInterface.decodeFunctionResult(method, result)[0].toString()));
+    const [walletBalance, allowance] = await Promise.all([
+      read('balanceOf', [identity.account]),
+      read('allowance', [identity.account, identity.wrapperAddress]),
+    ]);
+    return { blockNumber, walletBalance, allowance };
+  });
 }
 
 /** The reads a wrapped supply makes through the configured chain's public provider. */
@@ -231,17 +243,37 @@ function describeSimulationFailure(error: unknown): string {
   return data === undefined ? describeCallFailure(error) : describeRevertData(data);
 }
 
+/** The calls a simulation makes: an `eth_call` at a block, and the wait before one is made again. */
+type SimulationReads = Pick<WrappedSupplyReads, 'call' | 'retryIntervalMs'>;
+
+/**
+ * Simulates `request` with an `eth_call` at `blockNumber`. A call that fails without revert data,
+ * as from a node still behind the block, is made again up to `CALL_RETRIES` times. A revert at a
+ * fixed block repeats, so it is never simulated again. Rejects with the last failure.
+ */
+async function simulateAtBlock(
+  reads: SimulationReads,
+  request: { from: string; to: string; data: string },
+  blockNumber: number
+): Promise<string> {
+  for (let retries = 0; ; retries++) {
+    try {
+      return await reads.call(request, blockNumber);
+    } catch (error) {
+      if (isRevert(error) || retries >= CALL_RETRIES) throw error;
+      await new Promise((resolve) => setTimeout(resolve, reads.retryIntervalMs));
+    }
+  }
+}
+
 /**
  * Simulates `supplyAndWrap(amount)` from the account with an `eth_call` at `blockNumber`, just
  * before the wallet is asked to sign it. The call must return a positive number of shares. Ethers
  * returns a revert's data as the call's result, so the result is decoded rather than trusted. A
  * failed simulation refuses the step. Nothing else is tried in its place.
- *
- * A call that fails without revert data, as from a node still behind the block, is made again up
- * to `CALL_RETRIES` times. A revert at a fixed block repeats, so it is never simulated again.
  */
 async function simulateSupplyAndWrap(
-  reads: Pick<WrappedSupplyReads, 'call' | 'retryIntervalMs'>,
+  reads: SimulationReads,
   identity: WrappedActionIdentity,
   amount: bigint,
   blockNumber: number
@@ -256,14 +288,10 @@ async function simulateSupplyAndWrap(
     data: wrapperInterface.encodeFunctionData('supplyAndWrap', [amount]),
   };
   let result: string;
-  for (let retries = 0; ; retries++) {
-    try {
-      result = await reads.call(request, blockNumber);
-      break;
-    } catch (error) {
-      if (isRevert(error) || retries >= CALL_RETRIES) return refuse(describeSimulationFailure(error));
-      await new Promise((resolve) => setTimeout(resolve, reads.retryIntervalMs));
-    }
+  try {
+    result = await simulateAtBlock(reads, request, blockNumber);
+  } catch (error) {
+    return refuse(describeSimulationFailure(error));
   }
   let shares: bigint;
   try {
@@ -325,10 +353,10 @@ export async function prepareWrappedSupply({
   reads,
 }: PrepareWrappedSupplyInput): Promise<{ amount: bigint; steps: WrappedStep[] }> {
   if (identity.type !== 'supply' || !isMarketOf(market, identity)) {
-    throw new WrappedSupplyError('The wrapper for this market changed. Review the supply again.');
+    throw new WrappedReviewError('The wrapper for this market changed. Review the supply again.');
   }
-  if (amount <= 0n) throw new WrappedSupplyError('Enter an amount greater than 0.');
-  if (amount >= MAX_UINT256) throw new WrappedSupplyError('An unlimited amount cannot be supplied or approved.');
+  if (amount <= 0n) throw new WrappedReviewError('Enter an amount greater than 0.');
+  if (amount >= MAX_UINT256) throw new WrappedReviewError('An unlimited amount cannot be supplied or approved.');
 
   const formatAmount = (value: bigint) =>
     value >= UNLIMITED_AMOUNT
@@ -338,13 +366,13 @@ export async function prepareWrappedSupply({
   try {
     funds = await reads.readFunds();
   } catch (error) {
-    if (error instanceof WrappedSupplyError) throw new WrappedSupplyError(`${error.message} Try again in a moment.`);
-    throw new WrappedSupplyError(
+    if (error instanceof WrappedReviewError) throw new WrappedReviewError(`${error.message} Try again in a moment.`);
+    throw new WrappedReviewError(
       `Your wallet balance and allowance could not be read (${describeCallFailure(error)}). Try again in a moment.`
     );
   }
   if (amount > funds.walletBalance) {
-    throw new WrappedSupplyError(`The amount is more than the ${formatAmount(funds.walletBalance)} in your wallet.`);
+    throw new WrappedReviewError(`The amount is more than the ${formatAmount(funds.walletBalance)} in your wallet.`);
   }
 
   const checkBefore = (rule: AllowanceRule, shouldSimulate: boolean) => async (): Promise<WrappedStepCheck> => {
@@ -355,7 +383,7 @@ export async function prepareWrappedSupply({
       return {
         ok: false,
         message:
-          error instanceof WrappedSupplyError
+          error instanceof WrappedReviewError
             ? `${error.message} Review the supply again in a moment.`
             : `Your wallet balance and allowance could not be read again (${describeCallFailure(error)}).`,
       };
@@ -464,7 +492,7 @@ export function useWriteWrappedState({
     const symbol = current.baseSymbol ?? 'base token';
     return current.action.start('supply', async (identity) => {
       if (provider === undefined) {
-        throw new WrappedSupplyError("This market's network cannot be read right now. Try again in a moment.");
+        throw new WrappedReviewError("This market's network cannot be read right now. Try again in a moment.");
       }
       return prepareWrappedSupply({
         identity,
