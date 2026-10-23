@@ -1,0 +1,30 @@
+@use '../abstracts/variables' as *;
+
+.lightning-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: $neutral--80;
+  width: 0.875rem;
+  height: 0.875rem;
+  cursor: pointer;
+
+  svg {
+    margin-left: 0.0625rem;
+  }
+
+  &:hover {
+    background: $neutral--100;
+  }
+}
+
+.theme--light {
+  .lightning-container {
+    background: $neutral--10;
+
+    &:hover {
+      background: $neutral--00;
+    }
+  }
+}

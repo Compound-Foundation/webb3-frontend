@@ -33,11 +33,13 @@ const hydratedMasthead = ({
             baseAsset: baseAssetToUse,
             baseAssetPost: baseAssetPost ? baseAssetPost : baseAssetToUse,
             borrowAPR: 0n,
+            borrowRewardsAPR: 0n,
             collateralAssets: [],
             collateralValue: 0n,
             collateralValuePost: 0n,
             compare: false,
             earnAPR: 0n,
+            earnRewardsAPR: 0n,
             liquidationCapacity: 0n,
             liquidationCapacityPost: 0n,
             onSupplyAction: () => undefined,
@@ -46,6 +48,7 @@ const hydratedMasthead = ({
             isDeprecatedMarket: isDeprecatedMarket,
             pendingAction: pendingAction,
             theme: Theme.Dark,
+            isInstitutional: false
           },
         ]}
       />

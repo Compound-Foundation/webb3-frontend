@@ -1,5 +1,4 @@
 import { FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
-import { MarketData, MarketDataLoaded, Token } from '@types';
 
 // Display rules for institutional market supply rates.
 //
@@ -43,47 +42,4 @@ export function institutionalSupplyRewardRate(totalSuppliedUsd: bigint): bigint 
   const suppliedUsd = totalSuppliedUsd < cappedUsd ? totalSuppliedUsd : cappedUsd;
   const levelDollars = (suppliedUsd / (BigInt(LEVEL_STEP_DOLLARS) * DOLLAR_SCALE)) * BigInt(LEVEL_STEP_DOLLARS);
   return (BigInt(REWARDS_BUDGET_DOLLARS_PER_YEAR) * 10n ** BigInt(FACTOR_PRECISION)) / levelDollars;
-}
-
-/**
- * The net supply rate to display for a market: institutional markets add the program's
- * reward rate for their current size on top of the market's regular rate; all other
- * markets show the rate unchanged.
- * @param netSupplyRate the market's regular net supply rate, at FACTOR_PRECISION
- * @param totalSuppliedUsd the market's total supplied value in dollars, at PRICE_PRECISION
- */
-export function institutionalNetSupplyRate(
-  market: MarketData | MarketDataLoaded | undefined,
-  netSupplyRate: bigint,
-  totalSuppliedUsd: bigint,
-): bigint {
-  if (!market?.institutional) {
-    return netSupplyRate;
-  }
-  return netSupplyRate + institutionalSupplyRewardRate(totalSuppliedUsd);
-}
-
-/**
- * The rewards component of the displayed net supply rate, and the asset it is
- * denominated in. When an institutional market's program is paying rewards, they are
- * shown in the market's base asset (USDC terms) and isInstitutionalReward is set; any
- * regular rewards are folded into the amount so the displayed total stays
- * earnAPR + earnRewardsAPR. Otherwise the market's regular rewards pass through
- * unchanged.
- */
-export function institutionalSupplyRewards(
-  market: MarketData | MarketDataLoaded | undefined,
-  earnRewardsAPR: bigint | undefined,
-  rewardsAsset: Token | undefined,
-  baseAsset: Token,
-  totalSuppliedUsd: bigint,
-): { earnRewardsAPR: bigint | undefined; rewardsAsset: Token | undefined; isInstitutionalReward: boolean } {
-  if (!market?.institutional) {
-    return { earnRewardsAPR, rewardsAsset, isInstitutionalReward: false };
-  }
-  const rewardRate = institutionalSupplyRewardRate(totalSuppliedUsd);
-  if (rewardRate === 0n) {
-    return { earnRewardsAPR, rewardsAsset, isInstitutionalReward: false };
-  }
-  return { earnRewardsAPR: rewardRate + (earnRewardsAPR ?? 0n), rewardsAsset: baseAsset, isInstitutionalReward: true };
 }
