@@ -560,6 +560,8 @@ function relayed(status, contentType, answer, { isPrivate, printable, methodOf }
  * Forwards anvil's JSON-RPC requests to the upstream `endpoint`, so that only this process holds the
  * upstream URL. It listens on 127.0.0.1, and it refuses these requests:
  * - a request with an Origin header, which a web page sends
+ * - a Host header other than the proxy's own address, 127.0.0.1 or localhost at its port. A request
+ *   through DNS rebinding carries another host's name.
  * - a method other than POST
  * - a content type other than JSON, or a body that is not JSON
  * - a body over 10 MB
@@ -595,6 +597,10 @@ export function startUpstreamProxy(endpoint, { printable, timeoutMs = 40_000 }) 
       response.end();
     };
     if (request.headers.origin !== undefined) return refuse(403, '<an Origin header>');
+    const { port } = server.address();
+    if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(String(request.headers.host).toLowerCase())) {
+      return refuse(403, "<a Host header other than the proxy's address>");
+    }
     if (request.method !== 'POST') return refuse(405, '<a method other than POST>');
     if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) {
       return refuse(415, '<a content type other than JSON>');

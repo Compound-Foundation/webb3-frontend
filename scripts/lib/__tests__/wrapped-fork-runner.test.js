@@ -117,6 +117,28 @@ const post = (url, body, headers = {}) =>
 
 const call = (method, params = []) => ({ jsonrpc: '2.0', id: 1, method, params });
 
+/**
+ * Posts `body` as JSON to `url` with `host` as the Host header, or with no Host header when `host` is
+ * undefined. Resolves to the HTTP status. `fetch` sets the Host header from the URL alone.
+ */
+const postWithHost = (url, host, body) =>
+  new Promise((resolve, reject) => {
+    const request = http.request(
+      url,
+      {
+        method: 'POST',
+        setHost: false,
+        headers: { 'content-type': 'application/json', ...(host === undefined ? {} : { host }) },
+      },
+      (response) => {
+        response.resume();
+        response.on('end', () => resolve(response.statusCode));
+      }
+    );
+    request.on('error', reject);
+    request.end(JSON.stringify(body));
+  });
+
 describe('upstream endpoints', () => {
   test('without WRAPPED_FORK_RPC_URL, the public endpoints, in order, with nothing to redact', () => {
     for (const env of [{}, { WRAPPED_FORK_RPC_URL: '' }]) {
@@ -817,6 +839,29 @@ describe('the upstream proxy', () => {
           ['<an empty batch>', 1],
         ])
       );
+    } finally {
+      await stopProxy();
+    }
+  });
+
+  test("refuses a request whose Host header is not the proxy's own address, and forwards one that is", async () => {
+    await startProxy();
+    try {
+      const { port } = proxy.server.address();
+      const statusWith = (host) => postWithHost(proxy.url, host, call('eth_chainId'));
+      // The review's probe: a JSON POST with a foreign Host header and no Origin header.
+      assert.equal(await statusWith('attacker.example:1234'), 403);
+      assert.equal(await statusWith(`attacker.example:${port}`), 403);
+      assert.equal(await statusWith('127.0.0.1'), 403);
+      assert.equal(await statusWith(`localhost:${port + 1}`), 403);
+      // Node's server answers 400 to an HTTP/1.1 request without a Host header, before the proxy sees it.
+      assert.equal(await statusWith(undefined), 400);
+      assert.equal(stub.received.length, 0);
+      assert.deepEqual([...proxy.stats.refused], [["<a Host header other than the proxy's address>", 4]]);
+      assert.equal(await statusWith(`127.0.0.1:${port}`), 200);
+      assert.equal(await statusWith(`localhost:${port}`), 200);
+      assert.equal(await statusWith(`LOCALHOST:${port}`), 200);
+      assert.equal(stub.received.length, 3);
     } finally {
       await stopProxy();
     }
