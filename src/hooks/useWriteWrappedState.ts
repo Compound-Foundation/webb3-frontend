@@ -463,10 +463,13 @@ export const WRAPPED_WITHDRAW_STEP_ID = 'withdraw';
 export type WithdrawalRead = { blockNumber: number; snapshot: WithdrawalSnapshot };
 
 /**
- * Reads, at one block as `readAtBlock` pins it, what `unwrapAndWithdraw` prices an exit from: the
- * account's shares, the wrapper's `totalSupply`, its Comet balance, which is its `totalAssets()`,
- * and Comet's stored supply index. It also reads Comet's withdraw pause and the base token Comet
- * holds, which decide whether Comet can pay the exit.
+ * Reads what `unwrapAndWithdraw` prices an exit from, at one block as `readAtBlock` pins it:
+ * - the account's shares and the wrapper's `totalSupply`
+ * - the wrapper's Comet balance, which is its `totalAssets()`
+ * - Comet's stored supply index
+ *
+ * It also reads Comet's withdraw pause and the base token Comet holds. They decide whether Comet
+ * can pay the exit.
  */
 function readWithdrawalSnapshot(
   provider: WrappedReadProvider,
@@ -639,8 +642,7 @@ function revisionMessage(
       const fullExit = limits.canExitFully
         ? ` Or choose Everything to withdraw your whole position, about ${formatAmount(limits.fullExitCash)}.`
         : '';
-      const asked = request.kind === 'partial' ? formatAmount(request.cash) : formatAmount(limits.fullExitCash);
-      return `You asked for ${asked}, more than your wrapped position pays now. Enter at most ${formatAmount(
+      return `The amount is more than your wrapped position pays now. Enter at most ${formatAmount(
         limits.maxPartialCash
       )}.${fullExit}`;
     }
@@ -693,13 +695,14 @@ export type PrepareWrappedWithdrawalInput = {
 };
 
 /**
- * Reads the account's position and the market again, at the newest block that shows the account's
- * last settled wrapper transaction, and quotes a wrapped exit through `unwrapAndWithdraw(shares)`.
- * A full exit burns every share read. A partial exit burns the fewest shares that pay the requested
- * cash. An exit that cannot pay what was asked is refused with what the user can ask for instead:
- * an amount the position and the market can pay, or the full exit. It is never lowered here.
+ * Reads the account's position and the market again, and quotes a wrapped exit through
+ * `unwrapAndWithdraw(shares)`. The reads are at a block that shows the account's last settled
+ * wrapper transaction. A full exit burns every share read. A partial exit burns the fewest shares
+ * that pay the requested cash. An exit that cannot pay what was asked is refused. The refusal
+ * names what the user can ask for instead: an amount the position and the market can pay, or the
+ * full exit. The amount is never lowered here.
  *
- * Before the signature, the step reads again and stops when the share balance, the pause, the
+ * Before the signature, the step reads again. It stops when the share balance, the pause, the
  * cash the shares pay or the market's cash no longer allows the reviewed exit. It then simulates
  * the exit from the account at that block. The method has no minimum amount and no deadline, and
  * the simulation enforces neither: the wrapper computes the cash when the transaction runs.
@@ -767,7 +770,7 @@ export async function prepareWrappedWithdrawal({
     description:
       quote.kind === 'full'
         ? `Withdraw all your wrapped ${symbol}, about ${formatAmount(quote.cash)}`
-        : `Withdraw ${formatAmount(quote.cash)} from the wrapper`,
+        : `Withdraw about ${formatAmount(quote.cash)} from the wrapper`,
     request: {
       to: identity.wrapperAddress,
       data: wrapperInterface.encodeFunctionData('unwrapAndWithdraw', [quote.shares]),

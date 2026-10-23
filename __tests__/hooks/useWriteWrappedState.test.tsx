@@ -17,7 +17,12 @@ import { LendingSession, resolveLendingRoute, ValidationStatus, wrappedRouteKey 
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { getBlockExplorerUrl } from '@helpers/urls';
-import { WrappedSession, wrappedActionIdentity } from '@helpers/wrappedActions';
+import {
+  MarketRestriction,
+  WrappedActionIdentity,
+  WrappedSession,
+  wrappedActionIdentity,
+} from '@helpers/wrappedActions';
 import { BlockWait, WrappedPosition } from '@helpers/wrappedPositions';
 import { WithdrawalRequest } from '@helpers/wrappedWithdrawals';
 import {
@@ -544,7 +549,14 @@ function renderWrapped(
     wallet: givenWallet,
     events = [],
     blockWait = QUICK_BLOCK_WAIT,
-  }: { wallet?: Wallet; events?: Event[]; blockWait?: BlockWait } = {}
+    checkRestriction,
+  }: {
+    wallet?: Wallet;
+    events?: Event[];
+    blockWait?: BlockWait;
+    /** Replaces the lifecycle's read of Comet's pause, which goes through `readProvider` otherwise. */
+    checkRestriction?: (identity: WrappedActionIdentity) => Promise<MarketRestriction | undefined>;
+  } = {}
 ) {
   const wallet = givenWallet ?? walletFor(chain, events);
   const readProvider = readProviderFor(chain, events);
@@ -560,7 +572,7 @@ function renderWrapped(
   const hook = renderHook(
     ({ session }: { session: WrappedSession }) => {
       const manager = useTransactionManager(web3);
-      const action = useWrappedAction({ session, manager, readProvider });
+      const action = useWrappedAction({ session, manager, readProvider, checkRestriction });
       const write = useWriteWrappedState({
         action,
         route: session.route,
@@ -2136,6 +2148,45 @@ describe('useWriteWrappedState', () => {
       await confirmStep(result);
 
       expect(stepsOf(result.current.action.state)[0]).toMatchObject({ status: 'blocked', reason: 'withdraw-paused' });
+      expect(events).not.toContain('simulate');
+      expect(walletRequests(wallet)).toEqual([]);
+    });
+
+    it("stops with its own pause check when the lifecycle's earlier read still shows withdrawals running", async () => {
+      const chain = exitChainFor(USDC_MARKET);
+      // The lifecycle's pause read is not pinned to a block, so it can come from a node that has not
+      // seen the pause yet. The step's own reads, pinned to the newest block, have.
+      const { result, wallet, events } = renderWrapped(chain, { checkRestriction: async () => undefined });
+      await startWithdraw(result, { kind: 'full' });
+      events.length = 0;
+
+      chain.isWithdrawPaused = true;
+      await confirmStep(result);
+
+      expect(stepsOf(result.current.action.state)[0]).toMatchObject({
+        status: 'blocked',
+        reason: 'step-check-failed',
+        message: expect.stringMatching(/withdrawals from this market are now paused.*until they resume/i),
+      });
+      expect(events).not.toContain('simulate');
+      expect(walletRequests(wallet)).toEqual([]);
+    });
+
+    it('stops before the simulation when the shares are worth no more than the buffer by the signature', async () => {
+      const chain = exitChainFor(USDC_MARKET);
+      const { result, wallet, events } = renderWrapped(chain);
+      await startWithdraw(result, { kind: 'full' });
+      events.length = 0;
+
+      // A quarter of the wrapper's shares is now worth floor(11 ÷ 4) = 2 base units, under the buffer of 3.
+      chain.totalAssets = 10n;
+      await confirmStep(result);
+
+      expect(stepsOf(result.current.action.state)[0]).toMatchObject({
+        status: 'blocked',
+        reason: 'step-check-failed',
+        message: expect.stringMatching(/no more than the wrapper's rounding buffer.*ZeroAssetsTransferred/),
+      });
       expect(events).not.toContain('simulate');
       expect(walletRequests(wallet)).toEqual([]);
     });

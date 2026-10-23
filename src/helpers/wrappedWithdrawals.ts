@@ -2,8 +2,7 @@ import { getFullExitCash, getGrossAssets, getRedeemBuffer } from '@helpers/wrapp
 
 /**
  * What a wrapped exit is quoted from, all read at one block. `unwrapAndWithdraw(shares)` reads the
- * wrapper's totals and Comet's stored supply index the same way when it runs, so a quote matches a
- * simulation of the exit at that block.
+ * same figures when it runs. So a quote matches a simulation of the exit at that block.
  */
 export type WithdrawalSnapshot = {
   /** The account's wrapper shares. */
@@ -64,7 +63,7 @@ export type WithdrawalLimits = {
   canExitFully: boolean;
 };
 
-/** Why an exit cannot be quoted as asked. None of them is fixed by quoting a smaller amount on the user's behalf. */
+/** Why an exit cannot be quoted as asked. The plan does not lower the amount to resolve any of them. */
 export type WithdrawalRevisionReason =
   /** The account holds no shares. */
   | 'no-shares'
@@ -176,9 +175,13 @@ function quoteFor(kind: WithdrawalQuote['kind'], shares: bigint, snapshot: Withd
  * partial exit burns the fewest shares that pay the requested cash.
  *
  * An exit that cannot pay what was asked needs a revision: a smaller amount, or the full exit when
- * `limits.canExitFully`. The plan never lowers the amount itself. The reasons are an empty
- * position, a pause, a position worth no more than the buffer, an amount of zero, an amount above
- * what the shares pay, and an exit above Comet's cash.
+ * `limits.canExitFully`. The plan never lowers the amount itself. The reasons are:
+ * - the account holds no shares
+ * - Comet withdrawals are paused
+ * - the position is worth no more than the buffer
+ * - the amount is zero
+ * - the amount is above what the shares pay
+ * - the exit pays more than Comet holds
  */
 export function planWrappedWithdrawal(request: WithdrawalRequest, snapshot: WithdrawalSnapshot): WithdrawalPlan {
   const limits = getWithdrawalLimits(snapshot);
@@ -196,9 +199,13 @@ export function planWrappedWithdrawal(request: WithdrawalRequest, snapshot: With
     if (shares > snapshot.shares) return revise('exceeds-position');
     quote = quoteFor('partial', shares, snapshot);
     // The wrapper's rounding-down conversion checks the rounded-up shares: they pay the amount,
-    // and one share fewer does not. A quote that fails this is never reviewed or signed.
+    // and one share fewer does not. Let G = cash + buffer, S = totalSupply + 10^(18 − d) and
+    // A = totalAssets + 1. Then floor(s × A ÷ S) ≥ G holds exactly when s ≥ ceil(G × S ÷ A), so
+    // this check cannot fail. It keeps a quote from review if a later change breaks the rounding.
     if (quote.cash < request.cash || getExitCash(shares - 1n, snapshot) >= request.cash) {
-      throw new WithdrawalQuoteError('The withdrawal could not be quoted exactly.');
+      throw new WithdrawalQuoteError(
+        'This amount could not be quoted exactly, so it was not reviewed. Enter another amount, or choose Everything.'
+      );
     }
   }
   if (quote.cash > snapshot.cometCash) return revise('exceeds-liquidity');
@@ -214,8 +221,8 @@ export function planWrappedWithdrawal(request: WithdrawalRequest, snapshot: With
  * - the shares now pay less than the reviewed cash
  * - Comet holds less than they pay
  *
- * Shares that pay more than the reviewed cash pass: interest accrues every block, so the cash only
- * falls when the wrapper's assets fall.
+ * Shares that pay more than the reviewed cash pass. The same shares pay more as interest accrues.
+ * They pay less only when the wrapper's assets per share fall or the buffer rises.
  */
 export function recheckWithdrawal(quote: WithdrawalQuote, snapshot: WithdrawalSnapshot): WithdrawalRecheck {
   const cash = getExitCash(quote.shares, snapshot);

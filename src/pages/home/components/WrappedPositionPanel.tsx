@@ -278,6 +278,18 @@ const WrappedWithdrawForm = ({
     problem = revisionText(plan, request, snapshot, formatAmount);
   }
 
+  let hint: string;
+  if (problem !== undefined) {
+    hint = problem;
+  } else if (refusal !== undefined) {
+    hint = writeBlockMessage(refusal, 'withdrawals');
+  } else if (plan?.status === 'ready' && plan.quote.leavesDust) {
+    hint = `This leaves wrapped ${symbol} worth no more than the wrapper's rounding buffer, which cannot be withdrawn on its own. To withdraw it all, choose Everything.`;
+  } else {
+    hint =
+      "You review the cash before your wallet signs. The wrapper holds back a few base units for rounding, and pays from the market's cash.";
+  }
+
   const choose = (chosen: WithdrawalRequest['kind']) => {
     setKind(chosen);
     setRefusal(undefined);
@@ -334,11 +346,8 @@ const WrappedWithdrawForm = ({
         </p>
       </div>
       <div className="action-input-view__hint-row">
-        <p className="L4 meta text-color--2">
-          {problem ??
-            (refusal === undefined
-              ? "You review the cash before your wallet signs. The wrapper holds back a few base units for rounding, and pays from the market's cash."
-              : writeBlockMessage(refusal, 'withdrawals'))}
+        <p className="L4 meta text-color--2" data-testid="wrapped-withdraw-hint">
+          {hint}
         </p>
       </div>
       <div className="action-input-view__buttons">

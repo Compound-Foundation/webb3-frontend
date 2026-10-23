@@ -148,7 +148,7 @@ function exitStep(review: WithdrawalReview): WrappedStep {
     description:
       review.quote.kind === 'full'
         ? 'Withdraw all your wrapped USDC, about 250.124997 USDC'
-        : 'Withdraw 100.000000 USDC from the wrapper',
+        : 'Withdraw about 100.000000 USDC from the wrapper',
     request: { to: USDC_WRAPPER, data: CALLS.encodeFunctionData('unwrapAndWithdraw', [review.quote.shares]) },
   };
 }
@@ -404,6 +404,20 @@ describe('WrappedWithdraw', () => {
       expect(onReview).not.toHaveBeenCalled();
     });
 
+    it('says when the amount typed leaves shares that cannot be withdrawn on their own, and lets the user go on', () => {
+      const onReview = renderPanel();
+
+      fireEvent.click(withdrawButton());
+      // The fewest shares that pay the whole position's cash leave shares worth less than a base unit.
+      fireEvent.change(amountInput(), { target: { value: '250.124997' } });
+
+      expect(screen.getByTestId('wrapped-withdraw-hint')).toHaveTextContent(
+        /cannot be withdrawn on its own\. To withdraw it all, choose Everything/
+      );
+      fireEvent.click(reviewButton());
+      expect(onReview).toHaveBeenCalledWith({ kind: 'partial', cash: 250_124_997n }, undefined);
+    });
+
     it("refuses an amount above the market's cash, and a full exit the market cannot pay", () => {
       const onReview = renderPanel({ cometCash: 100_000_000n });
 
@@ -560,7 +574,7 @@ describe('WrappedWithdraw', () => {
       const { onConfirm } = renderModal(inReview());
 
       const dialog = screen.getByRole('dialog');
-      expect(dialog).toHaveTextContent('Withdraw 100.000000 USDC from the wrapper to your wallet.');
+      expect(dialog).toHaveTextContent('Withdraw about 100.000000 USDC from the wrapper to your wallet.');
       expect(within(dialog).getByTestId('wrapped-withdraw-cash')).toHaveTextContent('100.000000 USDC');
       expect(within(dialog).getByTestId('wrapped-withdraw-gross')).toHaveTextContent('100.000003 USDC');
       expect(within(dialog).getByTestId('wrapped-withdraw-buffer')).toHaveTextContent('0.000003 USDC');
@@ -612,6 +626,19 @@ describe('WrappedWithdraw', () => {
       renderModal(inReview(FULL_REVIEW));
 
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it.each<[string, bigint, boolean]>([
+      // One share is worth more than a base unit on an 18-decimal market, so the fewest shares can pay one more.
+      ['pays more than the amount entered', 100_000_001n, true],
+      ['pays exactly the amount entered', 100_000_000n, false],
+    ])('says when a partial exit %s', (_name, cash, isShown) => {
+      renderModal(inReview({ ...PARTIAL_REVIEW, quote: { ...PARTIAL_REVIEW.quote, cash } }));
+
+      const notice =
+        /0\.000001 USDC more than the 100\.000000 USDC you entered, because shares are burned in whole units/;
+      if (isShown) expect(screen.getByRole('dialog')).toHaveTextContent(notice);
+      else expect(screen.getByRole('dialog')).not.toHaveTextContent(/you entered/);
     });
 
     it('says when a partial exit leaves shares that cannot be withdrawn on their own', () => {
@@ -675,8 +702,7 @@ describe('WrappedWithdraw', () => {
 
     it('shows a refused review and closes', () => {
       const identity = draftFor(PARTIAL_REVIEW).identity;
-      const message =
-        'You asked for 300.000000 USDC, more than your wrapped position pays now. Enter at most 250.124997 USDC.';
+      const message = 'The amount is more than your wrapped position pays now. Enter at most 250.124997 USDC.';
       const { onClose } = renderModal({ phase: 'read-failed', identity, message });
 
       expect(screen.getByRole('dialog')).toHaveTextContent(/withdrawal not ready/i);

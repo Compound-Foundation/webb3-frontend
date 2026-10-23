@@ -110,11 +110,14 @@ function QuoteFigures({ review, formatAmount }: { review: WithdrawalReview; form
 }
 
 /**
- * The review and status of a wrapped withdrawal: the estimated cash next to the shares' value and
- * the buffer the wrapper holds back, the shares burned, what became of the exit and a link to its
- * transaction. The review says that the exit has no minimum amount or deadline, and that the
- * simulation before the signature enforces neither. It says when a full exit's estimate changed
- * since the page showed it, and when a partial exit leaves shares that cannot leave on their own.
+ * The review and status of a wrapped withdrawal. It shows:
+ * - the estimated cash, next to the shares' value and the buffer the wrapper holds back
+ * - the shares burned
+ * - what became of the exit, and a link to its transaction
+ *
+ * The review says that the exit has no minimum amount or deadline, and that the simulation before
+ * the signature enforces neither. It says when a full exit's estimate changed since the page
+ * showed it. It also says when a partial exit leaves shares that cannot be withdrawn on their own.
  */
 const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: WrappedWithdrawModalProps) => {
   const isOpen = isWrappedWithdrawModalState(state);
@@ -180,7 +183,7 @@ const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: W
       } else if (quote.kind === 'full') {
         lead = `Withdraw all your wrapped ${symbol}, about ${cash}, from the wrapper to your wallet.`;
       } else {
-        lead = `Withdraw ${cash} from the wrapper to your wallet.`;
+        lead = `Withdraw about ${cash} from the wrapper to your wallet.`;
       }
       const isBeforeSignature = phase === 'review' || phase === 'signing';
       const step = draft.steps[stepIndex];
