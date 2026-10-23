@@ -823,6 +823,49 @@ describe('WrappedWithdraw', () => {
       expect(within(dialog).getByRole('button', { name: 'Close' })).toBeEnabled();
     });
 
+    it('says a wallet error may still go through, and to check the wallet', () => {
+      renderModal({
+        ...inReview(),
+        phase: 'stopped',
+        steps: [{ status: 'provider-failure', message: 'Internal error (-32603)' }],
+      });
+
+      expect(
+        screen.getByText(
+          'Your wallet reported an error (Internal error (-32603)). The request may still go through, so check your ' +
+            'wallet before you try again.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByRole('dialog')).not.toHaveTextContent(/Anchorage app/);
+    });
+
+    it('says how to answer a request the wallet still holds, and that this page cannot follow it', () => {
+      const message =
+        'This request is still pending and can still complete after this message. Check its status in the ' +
+        'Anchorage extension before you try again. (-32005)';
+      renderModal({
+        ...inReview(),
+        phase: 'stopped',
+        steps: [{ status: 'provider-failure', message, isPendingInWallet: true }],
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/withdrawal stopped/i);
+      expect(
+        within(dialog).getByText(
+          'Your wallet still has this request open. Approve or reject it in the Anchorage app on your phone. ' +
+            'Approving it still sends the transaction, but this page cannot follow that transaction. ' +
+            'The request may still go through, so check your wallet before you try again. ' +
+            'Once your wallet shows the request done, reload this page. The panel then shows the result. ' +
+            'After you press Stop waiting there, a new review starts from the new balances. ' +
+            `(Your wallet reported: ${message})`
+        )
+      ).toBeInTheDocument();
+      expect(dialog).not.toHaveTextContent(/your wallet reported an error/i);
+      expect(dialog).toHaveTextContent('This withdrawal stopped, and nothing more is sent from it.');
+      expect(within(dialog).getByRole('button', { name: 'Close' })).toBeEnabled();
+    });
+
     it('shows the position being read', () => {
       const identity = draftFor(PARTIAL_REVIEW).identity;
       renderModal({ phase: 'reading', identity });
