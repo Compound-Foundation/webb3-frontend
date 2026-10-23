@@ -5,6 +5,7 @@ import {
   WRAPPED_MARKET_REGISTRY,
   WrappedMarket,
   WrappedMarketRegistry,
+  WrappedMarketSource,
 } from '@constants/wrappedMarkets';
 import { CONNECTOR_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
@@ -13,6 +14,7 @@ import {
   LendingRoute,
   LendingSession,
   resolveLendingRoute,
+  SessionConnector,
   ValidationStatus,
   wrappedRouteKey,
 } from '@helpers/lendingRoute';
@@ -26,6 +28,15 @@ const CONFIGURED = [
   ['Ethereum institutional USDC', '0x207158a267CBD2598BB3d611D8CBdEE2709F2F8C'],
 ] as const;
 const USDC_COMET = CONFIGURED[0][1];
+
+/** Connectors other than Anchorage's, each with a label. */
+const OTHER_CONNECTORS: [string, SessionConnector][] = [
+  ['MetaMask', { id: 'io.metamask' }],
+  ['WalletConnect', { id: 'walletConnect' }],
+  ['Coinbase', { id: 'coinbaseWalletSDK', rdns: 'com.coinbase.wallet' }],
+  ['Ledger', { id: 'ledger' }],
+  ['generic injected', { id: 'injected' }],
+];
 
 /** The hardcoded registry with both release controls switched on, to observe the other gates. */
 function registryWith(isDepositEnabled: boolean, isExitEnabled: boolean): WrappedMarketRegistry {
@@ -151,13 +162,7 @@ describe('lendingRoute', () => {
 
   describe('keeps other connectors standard while Anchorage is installed', () => {
     // Installation is not an input: only the selected connector's id is.
-    it.each([
-      ['MetaMask', { id: 'io.metamask' }],
-      ['WalletConnect', { id: 'walletConnect' }],
-      ['Coinbase', { id: 'coinbaseWalletSDK', rdns: 'com.coinbase.wallet' }],
-      ['Ledger', { id: 'ledger' }],
-      ['generic injected', { id: 'injected' }],
-    ])('%s', (_label, connector) => {
+    it.each(OTHER_CONNECTORS)('%s', (_label, connector) => {
       for (const [, cometAddress] of CONFIGURED) {
         const route = resolve(cometAddress, anchorage({ connector }));
         expect(route).toEqual({ kind: 'standard', writes: ELIGIBLE });
@@ -339,6 +344,111 @@ describe('lendingRoute', () => {
       expect(route.reads).toEqual(blocked('validation-pending'));
       expect(route.deposit).toEqual(blocked('validation-pending'));
       expect(route.exit).toEqual(blocked('validation-pending'));
+    });
+  });
+
+  describe('rehearses a deposit-disable rollback with registry fixtures', () => {
+    // The release controls that docs/anchorage-release-runbook.md moves through. Each fixture is
+    // the committed source with only the two controls changed, so each setting stays testable
+    // whatever the committed controls are. "selects wrapped deposits only for…" checks the
+    // shipped registry itself.
+    const SETTINGS = [
+      ['deposits and exits on', true, true],
+      ['deposits off and exits on, the deposit-disable rollback', false, true],
+      ['deposits and exits off', false, false],
+    ] as const;
+    const WATCH_ONLY: Partial<LendingSession> = { connector: undefined, isWatchOnly: true, isSignerReady: false };
+    const UNMAPPED_MARKETS = MARKETS.filter(
+      (market) => !CONFIGURED.some(([, comet]) => comet === market.marketAddress)
+    );
+
+    /** The wrapper a mapping names, with its units: every field but the two release controls. */
+    function wrapperIdentity(market: WrappedMarket | undefined): Partial<WrappedMarketSource> {
+      if (market === undefined) throw new Error('the route has no mapping');
+      const identity: Partial<WrappedMarketSource> = { ...market };
+      delete identity.isDepositEnabled;
+      delete identity.isExitEnabled;
+      return identity;
+    }
+
+    describe.each(SETTINGS)('with %s', (_setting, isDepositEnabled, isExitEnabled) => {
+      const registry = registryWith(isDepositEnabled, isExitEnabled);
+
+      it.each(CONFIGURED)(
+        'keeps %s wrapped for Anchorage, with the same wrapper, its reads and its own controls',
+        (_label, cometAddress) => {
+          const route = expectWrapped(resolve(cometAddress, anchorage(), { registry }));
+          const committed = wrappedMarket(WRAPPED_MARKET_REGISTRY, cometAddress);
+          expect(wrapperIdentity(route.market)).toEqual(wrapperIdentity(committed));
+          // The validation key holds no release control, so the same wrapper check applies.
+          expect(route.validationKey).toBe(wrappedRouteKey(committed, anchorage()));
+          expect(route.reads).toEqual(ELIGIBLE);
+          expect(route.deposit).toEqual(isDepositEnabled ? ELIGIBLE : blocked('deposits-disabled'));
+          expect(route.exit).toEqual(isExitEnabled ? ELIGIBLE : blocked('exits-disabled'));
+        }
+      );
+
+      it.each(CONFIGURED)(
+        'leaves other wallets and watch-only sessions on %s on the standard route',
+        (_label, cometAddress) => {
+          // Each result names its session, so a failure says which one broke.
+          const routes = [...OTHER_CONNECTORS, ['watch-only', undefined] as const].map(([label, connector]) => ({
+            label,
+            route: resolve(cometAddress, anchorage(connector === undefined ? WATCH_ONLY : { connector }), { registry }),
+          }));
+          expect(routes).toEqual([
+            ...OTHER_CONNECTORS.map(([label]) => ({ label, route: { kind: 'standard', writes: ELIGIBLE } })),
+            { label: 'watch-only', route: { kind: 'standard', writes: blocked('watch-only') } },
+          ]);
+        }
+      );
+
+      it('leaves Anchorage on the standard route on every market without a wrapper', () => {
+        const routes = UNMAPPED_MARKETS.map((market) => {
+          const chainId = market.chainInformation.chainId;
+          return {
+            market: marketKey(market),
+            route: resolve(market.marketAddress, anchorage({ chainId }), { registry, chainId }),
+          };
+        });
+        expect(routes).toEqual(
+          UNMAPPED_MARKETS.map((market) => ({
+            market: marketKey(market),
+            route: { kind: 'standard', writes: ELIGIBLE },
+          }))
+        );
+      });
+    });
+
+    it('still closes exits under the rollback on a screening, wrapper-check or mapping failure', () => {
+      // Comet's pause and the market's cash stop an exit at its review and its signature, not in the
+      // route. See `readMarketRestriction` in wrappedActions and `planWrappedWithdrawal` in wrappedWithdrawals.
+      // "lets safety failures disable exits as well" covers the wrong chain under the rollback.
+      const rollback = registryWith(false, true);
+      const screened = expectWrapped(
+        resolve(USDC_COMET, anchorage({ screeningStatus: 'blocked' }), { registry: rollback })
+      );
+      expect(screened.exit).toEqual(blocked('screening'));
+      const mismatched = expectWrapped(
+        resolve(USDC_COMET, anchorage(), { registry: rollback, validation: 'asset-mismatch' })
+      );
+      expect(mismatched.reads).toEqual(blocked('asset-mismatch'));
+      expect(mismatched.exit).toEqual(blocked('asset-mismatch'));
+
+      // A broken USDC entry under the rollback's controls: its exit control is on, and still no exit opens.
+      const broken = buildWrappedMarketRegistry({
+        markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({
+          ...market,
+          isDepositEnabled: false,
+          isExitEnabled: true,
+          shareDecimals: market.cometAddress === USDC_COMET ? 6 : market.shareDecimals,
+        })),
+      });
+      const invalid = expectWrapped(resolve(USDC_COMET, anchorage(), { registry: broken }));
+      expect(invalid.reads).toEqual(blocked('invalid-mapping'));
+      expect(invalid.exit).toEqual(blocked('invalid-mapping'));
+      // The other markets' entries stay valid, so their exits stay open.
+      expect(expectWrapped(resolve(CONFIGURED[1][1], anchorage(), { registry: broken })).exit).toEqual(ELIGIBLE);
     });
   });
 
