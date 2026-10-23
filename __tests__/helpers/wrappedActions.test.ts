@@ -1,4 +1,4 @@
-import { Interface } from '@ethersproject/abi';
+import { FunctionFragment, Interface } from '@ethersproject/abi';
 
 import {
   ANCHORAGE_CONNECTOR_ID,
@@ -345,6 +345,50 @@ describe('wrappedActions', () => {
       ],
     ])('refuses %s, whose calls match its amount', (_name, type, amount, onlyStep) => {
       expect(checkWrappedDraft({ ...draft(type, [onlyStep]), amount })).toBe('wrong-amount');
+    });
+
+    describe("with ethers' ES2015 build, which the app is bundled with", () => {
+      // Jest loads ethers' CommonJS build, whose classes are compiled to ES5, so their methods are
+      // enumerable. Vite bundles its ES2015 build, whose class methods are not. `parseTransaction`
+      // returns a copy of the function fragment made with `for...in`, so in the app the copy has no
+      // `format` and ethers throws when it encodes from it. Here the fragment classes' members are
+      // made non-enumerable, as in the app.
+      const restores: (() => void)[] = [];
+
+      beforeAll(() => {
+        let prototype: object = FunctionFragment.prototype;
+        for (; prototype !== Object.prototype; prototype = Object.getPrototypeOf(prototype)) {
+          for (const key of Object.getOwnPropertyNames(prototype)) {
+            const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
+            if (descriptor === undefined || !descriptor.enumerable) continue;
+            const owner = prototype;
+            Object.defineProperty(owner, key, { ...descriptor, enumerable: false });
+            restores.push(() => Object.defineProperty(owner, key, descriptor));
+          }
+        }
+      });
+
+      afterAll(() => restores.forEach((restore) => restore()));
+
+      it('allows the steps of a supply and of a withdrawal', () => {
+        const supply = draft('supply', [{ ...approve(USDC_WRAPPER, 0n), id: 'reset' }, approve(), supplyAndWrap()]);
+
+        expect(CALLS.parseTransaction(approve().request).functionFragment.format).toBeUndefined();
+        expect(checkWrappedDraft(supply)).toBeUndefined();
+        expect(checkWrappedDraft(draft('withdraw', [unwrapAndWithdraw()]))).toBeUndefined();
+      });
+
+      it.each<[string, WrappedStep, string]>([
+        [
+          'trailing bytes',
+          step('supply-and-wrap', USDC_WRAPPER, `${CALLS.encodeFunctionData('supplyAndWrap', [1_000_000n])}00`),
+          'malformed-call',
+        ],
+        ['an approval above the amount', approve(USDC_WRAPPER, 1_000_001n), 'wrong-amount'],
+        ['an approval to the Bulker', approve(BULKER), 'wrong-spender'],
+      ])('still refuses %s', (_name, refusedStep, problem) => {
+        expect(checkWrappedStep(draft('supply', [refusedStep]), refusedStep)).toBe(problem);
+      });
     });
   });
 

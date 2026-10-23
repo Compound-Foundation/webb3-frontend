@@ -554,18 +554,26 @@ export function useWrappedAction({
     } catch (error) {
       reading = Promise.reject(error);
     }
-    reading.then(
-      ({ amount, steps }) => {
+    reading
+      .then(
+        ({ amount, steps }) => {
+          if (runId.current !== run) return;
+          const draft = frozenDraft(`wrapped-action-${++draftCount.current}`, identity, amount, steps);
+          const problem = checkWrappedDraft(draft);
+          if (problem === undefined) dispatch({ type: 'drafted', draft });
+          else dispatch({ type: 'read-failed', message: `The prepared transactions are not allowed (${problem}).` });
+        },
+        (error) => {
+          if (runId.current === run) dispatch({ type: 'read-failed', message: describeWalletError(error) });
+        }
+      )
+      // A draft that cannot be built or checked is refused like one that fails its check, so the
+      // review never stays on reading.
+      .catch((error) => {
         if (runId.current !== run) return;
-        const draft = frozenDraft(`wrapped-action-${++draftCount.current}`, identity, amount, steps);
-        const problem = checkWrappedDraft(draft);
-        if (problem === undefined) dispatch({ type: 'drafted', draft });
-        else dispatch({ type: 'read-failed', message: `The prepared transactions are not allowed (${problem}).` });
-      },
-      (error) => {
-        if (runId.current === run) dispatch({ type: 'read-failed', message: describeWalletError(error) });
-      }
-    );
+        const message = `The prepared transactions could not be checked (${describeWalletError(error)}).`;
+        dispatch({ type: 'read-failed', message });
+      });
     return undefined;
   };
 
