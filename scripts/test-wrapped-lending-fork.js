@@ -46,19 +46,30 @@
 //   key and the proxy forwards only reads. Run the suite with no untrusted page open.
 // - If the runner is killed with SIGKILL, it cannot stop anvil. The orphaned anvil holds no key, and
 //   its upstream is gone. Stop it with `pkill -f 'anvil --fork-url http://127.0.0.1'`.
+//
+// The redaction, the proxy, the cell rules and the retry rule are in `scripts/lib/wrapped-fork-runner.js`.
+// `yarn test:fork-runner` tests them.
 import { spawn, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import fs from 'fs';
-import http from 'http';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import {
+  createRedactor,
+  failedOnUpstreamOnly,
+  heldToJest,
+  MARKET_COLUMNS,
+  PINNED_BLOCK,
+  PINNED_HASH,
+  startUpstreamProxy,
+  upstreamEndpoints,
+  withLast,
+} from './lib/wrapped-fork-runner.js';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const JEST_CONFIG = path.join(ROOT, '__tests__/integration/wrappedLendingFork/jest.config.js');
-/** The block docs/anchorage-wrapper-registry.md records its deployment reads at, and its hash. */
-const PINNED_BLOCK = 26244888;
-const PINNED_HASH = '0x440c51a6a6953b880568c1b60e4ad59044f3fa783e340e34d66793e466883839';
 /** A recent fork stays this many blocks behind the endpoint's latest, so that every node behind it has the block. */
 const RECENT_BLOCK_LAG = 8;
 /**
@@ -69,49 +80,6 @@ const RECENT_BLOCK_LAG = 8;
  * only the gas figures can differ from mainnet's.
  */
 const HARDFORK = 'prague';
-/** Public endpoints, in order of preference. Some of them serve old state, and some only recent state. */
-const PUBLIC_ENDPOINTS = [
-  'https://eth.drpc.org',
-  'https://mainnet.gateway.tenderly.co',
-  'https://eth-mainnet.public.blastapi.io',
-  'https://rpc.mevblocker.io',
-  'https://ethereum-rpc.publicnode.com',
-];
-const MARKET_COLUMNS = ['USDC', 'USDT', 'institutional USDC', 'factory'];
-/**
- * anvil's own error when it cannot fetch the fork's state from the upstream. Its fork backend words
- * it as `failed to get account for <address>: <the upstream's error>`, and the same for storage, a
- * block hash, a full block and a transaction. A test's failure reason carries it when ethers passes
- * anvil's answer on.
- */
-const FORK_FETCH_ERROR = /failed to get (?:account for|storage for|block hash for|full block for|transaction) /;
-/**
- * A refusal by the chain itself: anvil's revert error, ethers' decoded revert of an `eth_call`, or a
- * gas estimate that a revert stopped. A cell that failed on one failed in the app or the test,
- * whatever the upstream did. A fetch failure in an `eth_call` reaches ethers as `missing revert
- * data in call exception`, which this does not match, with anvil's fetch error inside.
- */
-const CHAIN_REFUSAL = /execution reverted|call revert exception|UNPREDICTABLE_GAS_LIMIT/;
-/** The largest JSON-RPC body the proxy forwards: far above anything anvil sends. */
-const MAX_PROXY_BODY_BYTES = 10 * 1024 * 1024;
-/**
- * The JSON-RPC methods the proxy forwards: the reads anvil makes to fork mainnet state, and the gas
- * price anvil reads once at start-up. The proxy refuses every other method. Otherwise any local
- * process can send a transaction to mainnet, or a costly call, through the proxy and the key behind it.
- */
-const UPSTREAM_METHODS = new Set([
-  'eth_chainId',
-  'eth_blockNumber',
-  'eth_gasPrice',
-  'eth_getBlockByNumber',
-  'eth_getBlockByHash',
-  'eth_getBalance',
-  'eth_getCode',
-  'eth_getStorageAt',
-  'eth_getTransactionCount',
-  'eth_getTransactionByHash',
-  'eth_getTransactionReceipt',
-]);
 
 function parseArgs(argv) {
   const options = { block: 'auto', solcOutput: undefined, logDir: undefined, port: 0, test: undefined };
@@ -160,70 +128,8 @@ function parseArgs(argv) {
   return options;
 }
 
-/**
- * A part of the private URL that can be a key: 16 characters or more, and not only digits. A
- * shorter part, such as `v2`, `eth` or a port, also occurs in ordinary text and figures, and a
- * redaction of it corrupts them.
- */
-const isKeyLike = (part) => part.length >= 16 && !/^\d+$/.test(part);
-
-/**
- * The upstream endpoints to try. A private URL is labelled. The runner redacts from every output
- * the whole URL, and each key-like part of it: its host, each path segment and each query value.
- */
-function upstreamEndpoints() {
-  const privateUrl = process.env.WRAPPED_FORK_RPC_URL;
-  if (privateUrl !== undefined && privateUrl !== '') {
-    const url = new URL(privateUrl);
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-      throw new Error('WRAPPED_FORK_RPC_URL must be an HTTP(S) URL.');
-    }
-    // fetch refuses a URL with credentials, and its error quotes the URL.
-    if (url.username !== '' || url.password !== '') {
-      throw new Error('WRAPPED_FORK_RPC_URL must not carry a user name or password. Put the key in its path or query.');
-    }
-    const parts = [url.host, ...url.pathname.split('/'), ...url.searchParams.values()];
-    const secrets = [privateUrl, url.href, ...parts.filter(isKeyLike)];
-    return [{ label: 'WRAPPED_FORK_RPC_URL (private, not printed)', url: privateUrl, secrets }];
-  }
-  return PUBLIC_ENDPOINTS.map((url) => ({ label: `${url} (public)`, url, secrets: [] }));
-}
-
-/** The secrets to redact, the longest first, so that a part never splits a longer secret first. */
-let secretsToRedact = [];
-const redact = (text) =>
-  secretsToRedact.reduce((result, secret) => result.split(secret).join('<redacted>'), String(text));
-
-/** `value` with each string in it redacted. A redaction of the JSON text instead can break its syntax. */
-function redactStrings(value) {
-  if (typeof value === 'string') return redact(value);
-  if (Array.isArray(value)) return value.map(redactStrings);
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactStrings(entry)]));
-  }
-  return value;
-}
-
-/**
- * Writes a child's output to `write` a whole line at a time, each line redacted. A pipe can split a
- * line, and the URL in it, across two chunks, and neither half matches the URL.
- */
-function lineRedactor(write) {
-  let pending = '';
-  return {
-    write: (chunk) => {
-      pending += String(chunk);
-      const end = pending.lastIndexOf('\n');
-      if (end === -1) return;
-      write(redact(pending.slice(0, end + 1)));
-      pending = pending.slice(end + 1);
-    },
-    end: () => {
-      if (pending !== '') write(redact(pending));
-      pending = '';
-    },
-  };
-}
+/** The redaction of the private URL from every output. `main` sets it once it knows the endpoints. */
+let redaction = createRedactor([]);
 
 async function rpc(url, method, params = [], timeoutMs = 20_000) {
   const response = await fetch(url, {
@@ -276,140 +182,11 @@ async function chooseFork(endpoints, option) {
         if (target !== undefined) return { endpoint, target };
         problems.push(`${endpoint.label}: no block for ${attempt}`);
       } catch (error) {
-        problems.push(`${endpoint.label}, ${attempt} block: ${redact(error.message)}`);
+        problems.push(`${endpoint.label}, ${attempt} block: ${redaction.redact(error.message)}`);
       }
     }
   }
   throw new Error(`No upstream endpoint can serve the fork:\n  ${problems.join('\n  ')}`);
-}
-
-/** `method` if it is a JSON-RPC method name, so that a request cannot write other text into the summary. */
-const methodName = (method) =>
-  typeof method === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(method) ? method : '<invalid>';
-
-const countIn = (counts, key) => counts.set(key, (counts.get(key) ?? 0) + 1);
-
-/**
- * `text`, redacted, as one line of printable ASCII of at most 200 characters, for the summary. The
- * redaction comes first, so the cut cannot split a secret that the redaction then misses.
- */
-const printable = (text) =>
-  redact(String(text))
-    .replace(/[^\x20-\x7e]/g, ' ')
-    .slice(0, 200);
-
-/** The error message of each call that a JSON-RPC answer reports as failed. */
-function errorsIn(answer) {
-  try {
-    const parsed = JSON.parse(answer.toString('utf8'));
-    return (Array.isArray(parsed) ? parsed : [parsed])
-      .filter((entry) => entry?.error !== undefined && entry?.error !== null)
-      .map((entry) => printable(entry.error.message ?? JSON.stringify(entry.error)));
-  } catch {
-    return ['an answer that is not JSON'];
-  }
-}
-
-/**
- * Forwards anvil's JSON-RPC requests to the upstream, so that only this process holds the upstream
- * URL. It listens on 127.0.0.1, and it refuses these requests:
- * - a request with an Origin header, which a web page sends
- * - a method other than POST
- * - a content type other than JSON, or a body that is not JSON
- * - a body over 10 MB
- * - an empty batch, or a request or batch that calls a method outside `UPSTREAM_METHODS`
- *
- * It sends anvil no text of its own errors, which can name the upstream URL. The upstream's answers
- * reach anvil unchanged, and the runner redacts every output. It counts the methods it forwards and
- * each refusal, by its method or reason. It also counts the requests that the upstream failed and
- * the calls it answered with an error. It keeps the first such error for the summary.
- */
-function startUpstreamProxy(upstreamUrl) {
-  const stats = {
-    requests: 0,
-    failures: 0,
-    errorAnswers: 0,
-    firstError: undefined,
-    methods: new Map(),
-    refused: new Map(),
-  };
-  const server = http.createServer((request, response) => {
-    const refuse = (status, reason) => {
-      if (reason !== undefined) countIn(stats.refused, reason);
-      response.writeHead(status, { 'content-type': 'text/plain' });
-      response.end();
-    };
-    if (request.headers.origin !== undefined) return refuse(403, '<an Origin header>');
-    if (request.method !== 'POST') return refuse(405, '<a method other than POST>');
-    if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) {
-      return refuse(415, '<a content type other than JSON>');
-    }
-    const chunks = [];
-    let size = 0;
-    request.on('data', (chunk) => {
-      size += chunk.length;
-      if (size <= MAX_PROXY_BODY_BYTES) chunks.push(chunk);
-      else if (!request.destroyed) {
-        countIn(stats.refused, '<a body over 10 MB>');
-        request.destroy();
-      }
-    });
-    request.on('end', async () => {
-      let parsed;
-      try {
-        parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      } catch {
-        return refuse(400, '<a body that is not JSON>');
-      }
-      const calls = Array.isArray(parsed) ? parsed : [parsed];
-      const methods = calls.map((call) => methodName(call?.method));
-      if (methods.length === 0) return refuse(403, '<an empty batch>');
-      const outside = methods.filter((method) => !UPSTREAM_METHODS.has(method));
-      if (outside.length > 0) {
-        for (const method of outside) countIn(stats.refused, method);
-        return refuse(403);
-      }
-      // The calls the proxy checked, rebuilt from their four JSON-RPC members. A raw body can name a
-      // method twice, or under a key in another case, such as `Method`. An upstream can read that name
-      // instead of the one that the proxy checked.
-      const checked = calls.map(({ jsonrpc, id, method, params }) => ({ jsonrpc, id, method, params }));
-      for (const method of methods) countIn(stats.methods, method);
-      stats.requests += 1;
-      try {
-        const upstream = await fetch(upstreamUrl, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(Array.isArray(parsed) ? checked : checked[0]),
-          signal: AbortSignal.timeout(60_000),
-        });
-        const answer = Buffer.from(await upstream.arrayBuffer());
-        if (upstream.status >= 400) {
-          stats.failures += 1;
-          stats.firstError ??= `HTTP ${upstream.status}`;
-        } else {
-          const errors = errorsIn(answer);
-          stats.errorAnswers += errors.length;
-          stats.firstError ??= errors[0];
-        }
-        response.writeHead(upstream.status, {
-          'content-type': upstream.headers.get('content-type') ?? 'application/json',
-        });
-        response.end(answer);
-      } catch {
-        stats.failures += 1;
-        stats.firstError ??= 'no answer within 60 s, or no connection';
-        refuse(502);
-      }
-    });
-  });
-  // anvil's HTTP client keeps an idle connection open for up to 90 s. By default, Node's server
-  // closes an idle connection after 5 s. A request that anvil sends as the proxy closes the
-  // connection fails before the proxy reads it. So the proxy never closes an idle connection.
-  server.keepAliveTimeout = 0;
-  return new Promise((resolve, reject) => {
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => resolve({ server, stats, url: `http://127.0.0.1:${server.address().port}/` }));
-  });
 }
 
 function toolVersion(command, args) {
@@ -495,12 +272,12 @@ async function startFork(anvilCommand, upstreamUrl, target, port, log) {
   });
   children.add(child);
   let boundPort;
-  const stdout = lineRedactor((text) => {
+  const stdout = redaction.lineRedactor((text) => {
     log.write(text);
     const listening = /Listening on 127\.0\.0\.1:(\d+)/.exec(text);
     if (listening !== null) boundPort = Number(listening[1]);
   });
-  const stderr = lineRedactor((text) => log.write(text));
+  const stderr = redaction.lineRedactor((text) => log.write(text));
   child.stdout.on('data', stdout.write);
   child.stdout.on('end', stdout.end);
   child.stderr.on('data', stderr.write);
@@ -565,7 +342,7 @@ function runJest(options, fork, target, privateFiles, log) {
   const child = spawn(process.execPath, args, { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
   children.add(child);
   const relay = (stream) =>
-    lineRedactor((text) => {
+    redaction.lineRedactor((text) => {
       stream.write(text);
       log.write(text);
     });
@@ -598,70 +375,10 @@ function runJest(options, fork, target, privateFiles, log) {
 function readRedacted(file, missing) {
   if (!fs.existsSync(file)) return missing;
   try {
-    return redactStrings(JSON.parse(fs.readFileSync(file, 'utf8')));
+    return redaction.redactStrings(JSON.parse(fs.readFileSync(file, 'utf8')));
   } catch {
     throw new Error('The suite wrote a results file that is not valid JSON, so the run has no results.');
   }
-}
-
-/** The scenario and market of a matrix cell's test title, `<scenario> (<market>)`, or undefined. */
-function cellOf(title) {
-  const market = MARKET_COLUMNS.find((column) => title.endsWith(` (${column})`));
-  return market === undefined ? undefined : { scenario: title.slice(0, -(market.length + 3)), market };
-}
-
-/**
- * The cells, each held to Jest's own result for its test. A scenario records its cell when its body
- * settles, which can come after Jest failed the test, for example on a timeout. Such a cell fails.
- * A test that Jest failed can also have recorded no cell. Its `beforeAll` or `beforeEach` hook
- * failed, or its scenario never settled before Jest timed it out. It gets a failed cell, with Jest's
- * failure as the reason.
- */
-function heldToJest(results, jest) {
-  const failures = new Map(
-    (jest?.tests ?? []).filter((test) => test.status === 'failed').map((test) => [test.title, test.failure])
-  );
-  const held = results.map((result) => {
-    const failure = failures.get(`${result.scenario} (${result.market})`);
-    if (failure === undefined || result.status === 'fail') return result;
-    return {
-      ...result,
-      status: 'fail',
-      reason: `Jest failed this test after its scenario recorded ${result.status}: ${failure}`,
-    };
-  });
-  const recorded = new Set(results.map((result) => `${result.scenario} (${result.market})`));
-  for (const [title, failure] of failures) {
-    const cell = cellOf(title);
-    if (cell === undefined || recorded.has(title)) continue;
-    held.push({
-      ...cell,
-      status: 'fail',
-      reason: `Jest failed this test, and its scenario recorded no cell: ${failure}`,
-    });
-  }
-  return held;
-}
-
-/**
- * Whether `run` failed only because the upstream failed to serve the fork's state. At least one
- * cell must have failed, and every failed cell must carry anvil's fetch error and no refusal by the
- * chain. Jest must have reported its results and failed no other test. No suite must have failed
- * outside its tests, as one does when it fails to load or its `afterAll` hook throws. anvil must not
- * have exited. The proxy must have seen the upstream fail or answer with an error.
- */
-function failedOnUpstreamOnly(run) {
-  const failed = run.results.filter((result) => result.status === 'fail');
-  return (
-    run.exitCode !== 0 &&
-    !run.anvilExited &&
-    failed.length > 0 &&
-    run.jest !== undefined &&
-    run.jest.numRuntimeErrorTestSuites === 0 &&
-    failed.length === run.jest.numFailedTests &&
-    run.stats.failures + run.stats.errorAnswers > 0 &&
-    failed.every((result) => FORK_FETCH_ERROR.test(result.reason ?? '') && !CHAIN_REFUSAL.test(result.reason ?? ''))
-  );
 }
 
 /** The matrix's rows, in the order a reader follows them. A scenario not listed here comes last. */
@@ -734,9 +451,6 @@ function deltas(results) {
   ].join('\n');
 }
 
-/** `endpoints` with `last` moved to the end, so that a retry tries the other endpoints first. */
-const withLast = (endpoints, last) => [...endpoints.filter((endpoint) => endpoint !== last), last];
-
 /** `count` and `noun`, with the noun's plural for any count but 1. */
 const counted = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
@@ -790,7 +504,7 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
     results: path.join(privateDirectory, 'results.json'),
     jestReport: path.join(privateDirectory, 'jest-results.json'),
   };
-  const proxy = await startUpstreamProxy(endpoint.url);
+  const proxy = await startUpstreamProxy(endpoint.url, { printable: redaction.printable });
   servers.add(proxy.server);
   const anvilLog = fs.createWriteStream(path.join(logDir, logFiles.anvil));
   const jestLog = fs.createWriteStream(path.join(logDir, logFiles.jest));
@@ -846,7 +560,7 @@ async function main() {
   const runFiles = ['anvil.log', 'jest.log', 'results.json', 'anvil-2.log', 'jest-2.log', 'results-2.json'];
   for (const file of [...runFiles, 'summary.md']) fs.rmSync(path.join(logDir, file), { force: true });
   const endpoints = upstreamEndpoints();
-  secretsToRedact = [...new Set(endpoints.flatMap((endpoint) => endpoint.secrets))].sort((a, b) => b.length - a.length);
+  redaction = createRedactor(endpoints.flatMap((endpoint) => endpoint.secrets));
 
   const anvil = findAnvil();
   const environment = {
@@ -872,7 +586,7 @@ async function main() {
       runs.push(await runSuite({ choice, options, anvil, environment, logDir, number: runs.length + 1 }));
     } catch (error) {
       if (runs.length === 0) throw error;
-      retryProblem = redact(error?.message ?? error);
+      retryProblem = redaction.redact(error?.message ?? error);
       break;
     }
     if (runs.length === 2 || !failedOnUpstreamOnly(runs[0])) break;
@@ -887,7 +601,7 @@ async function main() {
         ? await chooseFork(endpoints, 'recent')
         : await chooseFork(withLast(endpoints, failedRun.endpoint), String(failedRun.target.number));
     } catch (error) {
-      retryProblem = redact(error?.message ?? error);
+      retryProblem = redaction.redact(error?.message ?? error);
       break;
     }
   }
@@ -964,8 +678,8 @@ async function main() {
       : []),
     `Result: ${verdict}. The fork was stopped, and the runner's temporary directories were removed.`,
   ].join('\n');
-  fs.writeFileSync(path.join(logDir, 'summary.md'), `${redact(report)}\n`);
-  console.log(`\n${redact(report)}`);
+  fs.writeFileSync(path.join(logDir, 'summary.md'), `${redaction.redact(report)}\n`);
+  console.log(`\n${redaction.redact(report)}`);
   return exitCode;
 }
 
@@ -985,7 +699,7 @@ main().then(
     process.exit(code);
   },
   (error) => {
-    console.error(`\n${redact(error?.message ?? error)}`);
+    console.error(`\n${redaction.redact(error?.message ?? error)}`);
     cleanUp();
     process.exit(1);
   }
