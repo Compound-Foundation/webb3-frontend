@@ -54,17 +54,23 @@ https.get = refuseOtherHosts(https.get, 'https:');
 
 // Every TCP connection, whichever library makes it, goes through `net.Socket#connect`. A call from
 // `net.createConnection` passes its arguments already normalized, as an array whose first entry is
-// the options. A connection with no port is a pipe, which the suite never needs.
+// the options. A connection with a `path`, or with no port, is a pipe, which the suite never needs.
+// A custom `lookup` can resolve the fork's host name to another address, so the guard refuses it.
 const connect = net.Socket.prototype.connect;
 net.Socket.prototype.connect = function (this: net.Socket, ...args: unknown[]) {
   const [first, second] = args;
   const normalized = Array.isArray(first) ? first[0] : first;
   const options =
     typeof normalized === 'object' && normalized !== null
-      ? (normalized as { port?: unknown; host?: unknown })
+      ? (normalized as { port?: unknown; host?: unknown; path?: unknown; lookup?: unknown })
       : { port: first, host: typeof second === 'string' ? second : undefined };
-  const isTcp = options.port !== undefined && options.port !== null;
-  if (!isTcp || !isForkHost(options.host ?? 'localhost') || String(options.port) !== fork.port) {
+  const isTcp = !options.path && options.port !== undefined && options.port !== null;
+  if (
+    !isTcp ||
+    options.lookup !== undefined ||
+    !isForkHost(options.host ?? 'localhost') ||
+    String(options.port) !== fork.port
+  ) {
     throw new Error(
       `The fork suite only connects to the local fork, not ${String(options.host)}:${String(options.port)}.`
     );
