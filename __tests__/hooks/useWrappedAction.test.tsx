@@ -1487,7 +1487,7 @@ describe('useWrappedAction', () => {
     });
 
     it('signs a withdrawal when a deposit-disable rollback closes deposits only', async () => {
-      // The check before the signature reads the exit control, not the deposit control.
+      // The checks before the signature and in the wallet request read the exit control, not the deposit control.
       const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({
         session: sessionFor(wallet, { registry: openRegistry({ deposits: false }) }),
@@ -1502,6 +1502,19 @@ describe('useWrappedAction', () => {
 
       expect(requests[0].request.key).toBe(USDC_WRAPPER);
       expect(result.current.state).toMatchObject({ phase: 'signing', steps: [{ status: 'awaiting-signature' }] });
+
+      // The fake manager never calls `send`, so the test calls `send` as the real manager does. `send` checks
+      // the session again, estimates gas and asks the wallet.
+      await expect(requests[0].request.send()).resolves.toBe('0xsent');
+      expect(wallet.getSigner).toHaveBeenCalledWith(ACCOUNT);
+      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
+      // An extra defined field fails this match, so the match also checks that the exit sends no native value.
+      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledWith({
+        to: USDC_WRAPPER,
+        data: CALLS.encodeFunctionData('unwrapAndWithdraw', [SHARES]),
+        chainId: 1,
+        gasLimit: BigNumber.from(120_000),
+      });
     });
 
     it.each<[string, RecheckedWithdrawal, 'supply' | 'withdraw']>([
