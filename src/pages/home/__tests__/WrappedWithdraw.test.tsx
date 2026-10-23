@@ -1,0 +1,723 @@
+import { Interface } from '@ethersproject/abi';
+import { TransactionReceipt } from '@ethersproject/providers';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import '@testing-library/jest-dom';
+
+import {
+  ANCHORAGE_CONNECTOR_ID,
+  buildWrappedMarketRegistry,
+  HARDCODED_WRAPPED_LENDING_SOURCE,
+  WRAPPED_MARKET_REGISTRY,
+  WrappedMarketRegistry,
+} from '@constants/wrappedMarkets';
+import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
+import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
+import { Web3 } from '@contexts/Web3Context';
+import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
+import { getMarket } from '@helpers/markets';
+import { getBlockExplorerUrl } from '@helpers/urls';
+import {
+  WRAPPED_ACTION,
+  WrappedActionDraft,
+  WrappedBlockReason,
+  WrappedStep,
+  wrappedActionIdentity,
+} from '@helpers/wrappedActions';
+import { WrappedPosition } from '@helpers/wrappedPositions';
+import { WithdrawalReview } from '@helpers/wrappedWithdrawals';
+import { Theme } from '@hooks/useThemeManager';
+import { WrappedActionController, WrappedActionState, WrappedStepState } from '@hooks/useWrappedAction';
+import { ActionQueue, BaseAssetWithAccountState, CometState, MarketData, StateType } from '@types';
+
+import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
+import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
+import WrappedWithdrawModal from '../components/ActionModal/WrappedWithdrawModal';
+import WrappedPositionPanel from '../components/WrappedPositionPanel';
+import Home from '../index';
+
+// The wrapped panel and the dialogs are real. Home's other children record their props.
+const mockLastProps: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
+function mockRecordProps(name: string) {
+  return {
+    __esModule: true,
+    default: (props: unknown) => {
+      mockLastProps[name] = props;
+      return null;
+    },
+  };
+}
+jest.mock('../components/Masthead', () => mockRecordProps('Masthead'));
+jest.mock('../components/PositionCard', () => mockRecordProps('PositionCard'));
+jest.mock('../components/ActionModal', () => mockRecordProps('ActionModal'));
+jest.mock('../components/AssetRow', () => mockRecordProps('AssetRow'));
+jest.mock('../components/InstitutionalBanner', () => mockRecordProps('InstitutionalBanner'));
+
+const mockWriteState = {
+  approve: jest.fn(),
+  allowOperator: jest.fn(),
+  supply: jest.fn(),
+  withdraw: jest.fn(),
+  invokeBulker: jest.fn(),
+  claimReward: jest.fn(),
+  drip: jest.fn(),
+};
+jest.mock('@hooks/useWriteCometState', () => ({ useWriteCometState: () => mockWriteState }));
+
+const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
+const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
+const USDC_WRAPPER = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73';
+const USDC_MARKET = getMarket(1, USDC_COMET) as MarketData;
+const WALLET = { name: 'wallet provider' };
+const HASH = `0x${'7'.repeat(64)}`;
+const EXPLORER_LINK = `${getBlockExplorerUrl(1)}/tx/${HASH}`;
+
+/** 250 of the wrapper's 1,000 whole shares of 1,000.5 USDC: a full exit pays 250.124997 USDC. */
+const SHARES = 250n * 10n ** 18n;
+/** The fewest shares that pay 100 USDC. */
+const SHARES_FOR_100 = 99_950_027_886_106_918_655n;
+
+const CALLS = new Interface(['function unwrapAndWithdraw(uint256 shares)']);
+
+function registryWith({ exits }: { exits: boolean }): WrappedMarketRegistry {
+  return buildWrappedMarketRegistry({
+    markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({ ...market, isExitEnabled: exits })),
+  });
+}
+/** A fixture with exits enabled. The committed configuration keeps them off until COM-292. */
+const OPEN = registryWith({ exits: true });
+
+const SESSION: LendingSession = {
+  connector: { id: ANCHORAGE_CONNECTOR_ID, uid: 'uid-1' },
+  status: 'connected',
+  account: ACCOUNT,
+  chainId: 1,
+  isWatchOnly: false,
+  isSignerReady: true,
+  screeningStatus: 'allowed',
+};
+
+/** The route the resolver gives the session, with the wrapper validated for it. */
+function routeFor(registry: WrappedMarketRegistry): Extract<LendingRoute, { kind: 'wrapped' }> {
+  const lookup = registry.lookup(1, USDC_COMET);
+  if (lookup.status !== 'valid') throw new Error('the mapping must be valid');
+  const route = resolveLendingRoute({
+    market: { chainId: 1, cometAddress: USDC_COMET },
+    session: SESSION,
+    conflictedRdns: new Set(),
+    validation: { key: wrappedRouteKey(lookup.market, SESSION), status: 'matched' },
+    registry,
+  });
+  if (route.kind !== 'wrapped') throw new Error('the route must be wrapped');
+  return route;
+}
+
+const PARTIAL_REVIEW: WithdrawalReview = {
+  request: { kind: 'partial', cash: 100_000_000n },
+  quote: {
+    kind: 'partial',
+    shares: SHARES_FOR_100,
+    grossAssets: 100_000_003n,
+    redeemBuffer: 3n,
+    cash: 100_000_000n,
+    leavesDust: false,
+  },
+  shownCash: undefined,
+  blockNumber: 100,
+};
+const FULL_REVIEW: WithdrawalReview = {
+  request: { kind: 'full' },
+  quote: {
+    kind: 'full',
+    shares: SHARES,
+    grossAssets: 250_125_000n,
+    redeemBuffer: 3n,
+    cash: 250_124_997n,
+    leavesDust: false,
+  },
+  shownCash: 250_124_997n,
+  blockNumber: 100,
+};
+
+function exitStep(review: WithdrawalReview): WrappedStep {
+  return {
+    id: 'withdraw',
+    kind: 'unwrap-and-withdraw',
+    description:
+      review.quote.kind === 'full'
+        ? 'Withdraw all your wrapped USDC, about 250.124997 USDC'
+        : 'Withdraw 100.000000 USDC from the wrapper',
+    request: { to: USDC_WRAPPER, data: CALLS.encodeFunctionData('unwrapAndWithdraw', [review.quote.shares]) },
+  };
+}
+
+function draftFor(review: WithdrawalReview): WrappedActionDraft {
+  const identity = wrappedActionIdentity('withdraw', {
+    route: routeFor(OPEN),
+    account: ACCOUNT,
+    chainId: 1,
+    screeningStatus: 'allowed',
+    provider: WALLET,
+  });
+  if (identity === undefined) throw new Error('the session must have an identity');
+  return {
+    kind: WRAPPED_ACTION,
+    id: 'draft-1',
+    identity,
+    amount: review.quote.shares,
+    steps: [exitStep(review)],
+    withdrawal: review,
+  };
+}
+
+type Review = Extract<WrappedActionState, { phase: 'review' }>;
+
+function inReview(review: WithdrawalReview = PARTIAL_REVIEW, step: WrappedStepState = { status: 'waiting' }): Review {
+  return { phase: 'review', draft: draftFor(review), steps: [step], stepIndex: 0 };
+}
+
+type Controller = WrappedActionController & { confirm: jest.Mock; discard: jest.Mock };
+
+function controller(state: WrappedActionState = { phase: 'idle' }): Controller {
+  return {
+    state,
+    session: { status: 'usable' },
+    recovered: { pending: [], settled: [] },
+    canDismissRecovered: false,
+    blockedReason: () => undefined,
+    start: jest.fn(),
+    confirm: jest.fn(),
+    discard: jest.fn(),
+    dismissRecovered: jest.fn(),
+  };
+}
+
+const POSITION: WrappedPosition = {
+  shares: SHARES,
+  shareDecimals: 18,
+  grossAssets: 250_125_000n,
+  baseDecimals: 6,
+  baseWalletBalance: 42_500_001n,
+  wrapperAllowance: 0n,
+  redeemBuffer: 3n,
+  fullExitCash: 250_124_997n,
+  isWithdrawPaused: false,
+  snapshot: {
+    totalSupply: 1_000n * 10n ** 18n - 10n ** 12n,
+    totalAssets: 1_000_500_000n,
+    baseSupplyIndex: 1_050_000_000_000_000n,
+  },
+};
+
+type Lending = WrappedLending & { write: { supply: jest.Mock; withdraw: jest.Mock } };
+
+function lendingWith(action: Controller, registry = OPEN): Lending {
+  return {
+    route: routeFor(registry),
+    position: { status: 'loaded', position: POSITION },
+    retry: jest.fn(),
+    action,
+    write: { supply: jest.fn(() => undefined), withdraw: jest.fn(() => undefined) },
+  };
+}
+
+const BASE_ASSET = mockBaseAsset({ address: USDC, symbol: 'USDC', decimals: 6 });
+
+function cometState(baseAsset: BaseAssetWithAccountState): CometState {
+  return [
+    StateType.Hydrated,
+    {
+      baseAsset,
+      borrowAPR: 0n,
+      collateralAssets: [],
+      collateralValue: 0n,
+      earnAPR: 0n,
+      liquidationCapacity: 0n,
+      borrowRewardsAPR: 0n,
+      supplyRewardsAPR: 0n,
+      isInstitutional: false,
+      rewardsAssetSymbol: 'COMP',
+      isRewardsLoading: false,
+      isBulkerAllowed: true,
+      totalBaseSupplyUsd: 0n,
+    },
+  ] as unknown as CometState;
+}
+
+function actionQueue(): ActionQueue {
+  return {
+    addOrUpdateAction: jest.fn(),
+    clearActions: jest.fn(),
+    queueActions: jest.fn(),
+    getActions: () => [],
+    getPendingAction: () => undefined,
+    removeAction: jest.fn(),
+    setPendingAction: jest.fn(),
+  };
+}
+
+const WEB3: Web3 = {
+  ...mockWeb3,
+  read: { ...mockWeb3.read, account: ACCOUNT, chainId: 1 },
+  write: { ...mockWeb3.write, account: ACCOUNT, chainId: 1, connector: { uid: 'uid-1' } as Web3['write']['connector'] },
+};
+
+SelectedMarketContextHelpers.initializeContext({
+  selectedMarket: [StateType.Hydrated, USDC_MARKET],
+  selectMarket: jest.fn(),
+  selectMarketByAddress: jest.fn(),
+});
+ActionQueueContextHelpers.initializeContext(actionQueue());
+
+function homeElement(lending: WrappedLending, state: CometState, queue: ActionQueue = actionQueue()) {
+  const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
+  const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
+  const selectedMarketData = {
+    selectedMarket: [StateType.Hydrated, USDC_MARKET] as const,
+    selectMarket: jest.fn(),
+    selectMarketByAddress: jest.fn(),
+  };
+  return (
+    <WrappedLendingContext.Provider value={lending}>
+      <SelectedMarketContext.Provider value={selectedMarketData as never}>
+        <ActionQueueContext.Provider value={queue}>
+          <Home
+            transactions={[]}
+            web3={WEB3}
+            selectedMarketData={selectedMarketData as never}
+            cometState={state}
+            addTransaction={jest.fn()}
+            switchWriteNetwork={jest.fn()}
+            estimatedGasMap={new Map()}
+            theme={Theme.Dark}
+          />
+        </ActionQueueContext.Provider>
+      </SelectedMarketContext.Provider>
+    </WrappedLendingContext.Provider>
+  );
+}
+
+function renderModal(state: WrappedActionState) {
+  const onConfirm = jest.fn();
+  const onClose = jest.fn();
+  render(<WrappedWithdrawModal state={state} symbol="USDC" decimals={6} onConfirm={onConfirm} onClose={onClose} />);
+  return { onConfirm, onClose };
+}
+
+const explorerLinks = () =>
+  screen.queryAllByRole('link', { name: /view on explorer/i }).map((link) => link.getAttribute('href'));
+
+describe('WrappedWithdraw', () => {
+  beforeEach(() => {
+    Object.values(mockWriteState).forEach((fn) => fn.mockReset());
+  });
+
+  describe('withdraw entry', () => {
+    type PanelSetup = {
+      registry?: WrappedMarketRegistry;
+      position?: WrappedPosition | 'loading';
+      cometCash?: bigint;
+      blockedReason?: WrappedBlockReason;
+      onReview?: jest.Mock;
+    };
+
+    function renderPanel({
+      registry = OPEN,
+      position = POSITION,
+      cometCash = 10n ** 15n,
+      blockedReason,
+      onReview,
+    }: PanelSetup = {}) {
+      const review = onReview ?? jest.fn(() => undefined);
+      render(
+        <WrappedPositionPanel
+          route={routeFor(registry)}
+          position={position === 'loading' ? { status: 'loading' } : { status: 'loaded', position }}
+          baseAsset={{ symbol: 'USDC', baseAssetPriceInDollars: 100_000_000n, balanceOfComet: cometCash }}
+          earnAPR={0n}
+          withdraw={{ blockedReason, onReview: review }}
+          onRetry={jest.fn()}
+        />
+      );
+      return review;
+    }
+    const withdrawButton = () => screen.getByRole('button', { name: 'Withdraw USDC from the wrapper' });
+    const amountInput = () => screen.getByRole('textbox', { name: /amount of usdc to withdraw/i });
+    const reviewButton = () => screen.getByRole('button', { name: 'Review' });
+
+    it('keeps the withdraw control disabled by the committed release control', () => {
+      expect(HARDCODED_WRAPPED_LENDING_SOURCE.markets.every((market) => market.isExitEnabled === false)).toBe(true);
+      renderPanel({ registry: WRAPPED_MARKET_REGISTRY, blockedReason: 'exits-disabled' });
+
+      expect(withdrawButton()).toBeDisabled();
+      expect(screen.getByTestId('wrapped-withdraw-message')).toHaveTextContent('Wrapped withdrawals are not open yet.');
+    });
+
+    it('keeps the withdraw control disabled when the route refuses exits, whatever the lifecycle reports', () => {
+      renderPanel({ registry: WRAPPED_MARKET_REGISTRY, blockedReason: undefined });
+
+      expect(withdrawButton()).toBeDisabled();
+      expect(screen.getByTestId('wrapped-withdraw-message')).toHaveTextContent('Wrapped withdrawals are not open yet.');
+    });
+
+    it('reviews the exact amount typed as a partial exit, which is the choice the form starts with', () => {
+      const onReview = renderPanel();
+
+      fireEvent.click(withdrawButton());
+      expect(screen.getByRole('radio', { name: /an amount/i })).toBeChecked();
+      expect(screen.getByRole('radio', { name: /everything/i })).not.toBeChecked();
+      expect(screen.getByTestId('wrapped-withdraw-limit')).toHaveTextContent('Up to 250.124997 USDC now');
+      fireEvent.change(amountInput(), { target: { value: '100' } });
+      fireEvent.click(reviewButton());
+
+      expect(onReview).toHaveBeenCalledWith({ kind: 'partial', cash: 100_000_000n }, undefined);
+    });
+
+    it('reviews the whole position only when the user chooses Everything, with the cash the form showed', () => {
+      const onReview = renderPanel();
+
+      fireEvent.click(withdrawButton());
+      fireEvent.click(screen.getByRole('radio', { name: /everything/i }));
+      expect(screen.queryByRole('textbox', { name: /amount of usdc to withdraw/i })).not.toBeInTheDocument();
+      expect(screen.getByTestId('wrapped-withdraw-limit')).toHaveTextContent(
+        'About 250.124997 USDC for all your shares'
+      );
+      fireEvent.click(reviewButton());
+
+      expect(onReview).toHaveBeenCalledWith({ kind: 'full' }, 250_124_997n);
+    });
+
+    it('refuses an amount above what the position pays, offers the full exit, and keeps the amount as typed', () => {
+      const onReview = renderPanel();
+
+      fireEvent.click(withdrawButton());
+      fireEvent.change(amountInput(), { target: { value: '250.124998' } });
+
+      expect(screen.getByText(/more than you can withdraw now/i)).toHaveTextContent(
+        /enter at most 250\.124997 USDC, or choose Everything/i
+      );
+      expect(amountInput()).toHaveValue('250.124998');
+      expect(reviewButton()).toBeDisabled();
+      fireEvent.click(reviewButton());
+      expect(onReview).not.toHaveBeenCalled();
+    });
+
+    it("refuses an amount above the market's cash, and a full exit the market cannot pay", () => {
+      const onReview = renderPanel({ cometCash: 100_000_000n });
+
+      fireEvent.click(withdrawButton());
+      fireEvent.change(amountInput(), { target: { value: '100.000001' } });
+      expect(screen.getByText(/the market holds only 100\.000000 USDC now/i)).toHaveTextContent(
+        /enter at most 100\.000000 USDC/i
+      );
+      expect(reviewButton()).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('radio', { name: /everything/i }));
+      expect(screen.getByText(/less than a full exit pays/i)).toHaveTextContent(/at most 100\.000000 USDC/);
+      expect(reviewButton()).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('radio', { name: /an amount/i }));
+      fireEvent.change(amountInput(), { target: { value: '100' } });
+      fireEvent.click(reviewButton());
+      expect(onReview).toHaveBeenCalledTimes(1);
+      expect(onReview).toHaveBeenCalledWith({ kind: 'partial', cash: 100_000_000n }, undefined);
+    });
+
+    it.each(['1.1234567', '1,5', '1.000.000', '1e6', '-1', '0x10', 'one'])(
+      'keeps %p as typed and refuses to review it, rather than dropping characters',
+      (value) => {
+        const onReview = renderPanel();
+
+        fireEvent.click(withdrawButton());
+        fireEvent.change(amountInput(), { target: { value } });
+
+        expect(amountInput()).toHaveValue(value);
+        expect(screen.getByText(/use digits and one point, with up to 6 decimals/i)).toBeInTheDocument();
+        expect(reviewButton()).toBeDisabled();
+        fireEvent.click(reviewButton());
+        expect(onReview).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each(['0', ''])('does not review an amount of %p', (value) => {
+      const onReview = renderPanel();
+
+      fireEvent.click(withdrawButton());
+      fireEvent.change(amountInput(), { target: { value } });
+
+      expect(reviewButton()).toBeDisabled();
+      fireEvent.click(reviewButton());
+      expect(onReview).not.toHaveBeenCalled();
+    });
+
+    it.each<[string, PanelSetup, RegExp]>([
+      [
+        'withdrawals are paused',
+        { position: { ...POSITION, isWithdrawPaused: true } },
+        /withdrawals from this market are paused/i,
+      ],
+      [
+        'the position is worth no more than the buffer',
+        { position: { ...POSITION, shares: 2_998_500_746_629n, grossAssets: 3n, fullExitCash: 0n } },
+        /too small to withdraw.*rounding buffer/i,
+      ],
+      [
+        'the account holds no shares',
+        { position: { ...POSITION, shares: 0n, grossAssets: 0n, fullExitCash: 0n } },
+        /you hold no wrapped USDC/i,
+      ],
+      ['the position is loading', { position: 'loading' }, /waiting for your wrapped position/i],
+      [
+        'an earlier wrapped transaction is pending',
+        { blockedReason: 'transaction-pending' },
+        /earlier wrapped transaction/i,
+      ],
+      ['another wrapped transaction is in review', { blockedReason: 'action-in-progress' }, /already in review/i],
+    ])('disables the withdraw control and says why when %s', (_name, setup, message) => {
+      renderPanel(setup);
+
+      expect(withdrawButton()).toBeDisabled();
+      expect(screen.getByTestId('wrapped-withdraw-message')).toHaveTextContent(message);
+    });
+
+    it('says why a review did not start', () => {
+      renderPanel({ onReview: jest.fn(() => 'transaction-pending') });
+
+      fireEvent.click(withdrawButton());
+      fireEvent.change(amountInput(), { target: { value: '1' } });
+      fireEvent.click(reviewButton());
+
+      expect(screen.getByText(/earlier wrapped transaction/i)).toBeInTheDocument();
+      expect(amountInput()).toHaveValue('1');
+    });
+
+    it('opens one form at a time, and closes it when the session or market changes', () => {
+      const props = {
+        position: { status: 'loaded' as const, position: POSITION },
+        baseAsset: { symbol: 'USDC', baseAssetPriceInDollars: 100_000_000n, balanceOfComet: 10n ** 15n },
+        earnAPR: 0n,
+        supply: { blockedReason: undefined, onReview: jest.fn(() => undefined) },
+        withdraw: { blockedReason: undefined, onReview: jest.fn(() => undefined) },
+        onRetry: jest.fn(),
+      };
+      const both = buildWrappedMarketRegistry({
+        markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({
+          ...market,
+          isDepositEnabled: true,
+          isExitEnabled: true,
+        })),
+      });
+      const { rerender } = render(<WrappedPositionPanel route={routeFor(both)} {...props} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Supply USDC through the wrapper' }));
+      expect(screen.getByRole('textbox', { name: /amount of usdc to supply/i })).toBeInTheDocument();
+      fireEvent.click(withdrawButton());
+      expect(screen.queryByRole('textbox', { name: /amount of usdc to supply/i })).not.toBeInTheDocument();
+      expect(amountInput()).toBeInTheDocument();
+
+      // A reconnect gives the route a new validation key.
+      rerender(<WrappedPositionPanel route={{ ...routeFor(both), validationKey: 'another-session' }} {...props} />);
+      expect(screen.queryByRole('textbox', { name: /amount of usdc to withdraw/i })).not.toBeInTheDocument();
+
+      // The session returns to the key the form was opened for. The form stays closed.
+      rerender(<WrappedPositionPanel route={routeFor(both)} {...props} />);
+      expect(screen.queryByRole('textbox', { name: /amount of usdc to withdraw/i })).not.toBeInTheDocument();
+    });
+
+    it('starts the review from Home through the wrapped withdrawal, never the standard queue or a direct withdraw', () => {
+      const lending = lendingWith(controller());
+      const queue = actionQueue();
+      render(homeElement(lending, cometState(BASE_ASSET), queue));
+
+      fireEvent.click(withdrawButton());
+      fireEvent.change(amountInput(), { target: { value: '5' } });
+      fireEvent.click(reviewButton());
+
+      expect(lending.write.withdraw).toHaveBeenCalledWith({ kind: 'partial', cash: 5_000_000n }, undefined);
+      expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
+      expect(mockWriteState.withdraw).not.toHaveBeenCalled();
+      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+      expect(mockWriteState.approve).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('review dialog', () => {
+    it('shows the estimated cash next to the gross value and the buffer, and the shares it burns', () => {
+      const { onConfirm } = renderModal(inReview());
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent('Withdraw 100.000000 USDC from the wrapper to your wallet.');
+      expect(within(dialog).getByTestId('wrapped-withdraw-cash')).toHaveTextContent('100.000000 USDC');
+      expect(within(dialog).getByTestId('wrapped-withdraw-gross')).toHaveTextContent('100.000003 USDC');
+      expect(within(dialog).getByTestId('wrapped-withdraw-buffer')).toHaveTextContent('0.000003 USDC');
+      expect(within(dialog).getByTestId('wrapped-withdraw-shares')).toHaveTextContent('99.950027886106918655');
+      // The shares in their base units, as a wallet can show them.
+      expect(dialog).toHaveTextContent('99950027886106918655');
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw 100.000000 USDC' }));
+      expect(onConfirm).toHaveBeenCalledTimes(1);
+    });
+
+    it.each<[string, WithdrawalReview]>([
+      ['a partial exit', PARTIAL_REVIEW],
+      ['a full exit', FULL_REVIEW],
+    ])('says the simulation enforces no minimum amount and no deadline, for %s', (_name, review) => {
+      renderModal(inReview(review));
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/no minimum amount and no deadline/i);
+      expect(dialog).toHaveTextContent(/simulates the withdrawal from your account/i);
+      expect(dialog).toHaveTextContent(/can pay a different amount, or fail/i);
+      expect(dialog).toHaveTextContent(/cannot open a borrow/i);
+    });
+
+    it('confirms a full exit as Everything', () => {
+      const { onConfirm } = renderModal(inReview(FULL_REVIEW));
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(
+        'Withdraw all your wrapped USDC, about 250.124997 USDC, from the wrapper to your wallet.'
+      );
+      expect(within(dialog).getByTestId('wrapped-withdraw-shares')).toHaveTextContent('250.000000000000000000');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw Everything' }));
+      expect(onConfirm).toHaveBeenCalledTimes(1);
+    });
+
+    it.each<[string, bigint, RegExp]>([
+      ['rose', 250_000_000n, /now 250\.124997 USDC, 0\.124997 USDC more than the 250\.000000 USDC shown before/],
+      ['fell', 250_200_000n, /now 250\.124997 USDC, 0\.075003 USDC less than the 250\.200000 USDC shown before/],
+    ])('asks the user to check a full exit whose estimate %s since the panel showed it', (_name, shownCash, text) => {
+      renderModal(inReview({ ...FULL_REVIEW, shownCash }));
+
+      const alert = within(screen.getByRole('dialog')).getByRole('alert');
+      expect(alert).toHaveTextContent(text);
+      expect(alert).toHaveTextContent(/check it before you confirm/i);
+    });
+
+    it('shows no change notice when the estimate is what the panel showed', () => {
+      renderModal(inReview(FULL_REVIEW));
+
+      expect(within(screen.getByRole('dialog')).queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('says when a partial exit leaves shares that cannot be withdrawn on their own', () => {
+      renderModal(inReview({ ...PARTIAL_REVIEW, quote: { ...PARTIAL_REVIEW.quote, leavesDust: true } }));
+
+      expect(screen.getByRole('dialog')).toHaveTextContent(/cannot be withdrawn on its own.*choose Everything/i);
+    });
+
+    it('shows the exit being checked and signed, with nothing to confirm', () => {
+      renderModal({ ...inReview(), phase: 'signing', steps: [{ status: 'checking' }] });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/simulating the withdrawal from your account, before asking your wallet/i);
+      expect(within(dialog).queryByRole('button', { name: /withdraw 100/i })).not.toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: 'Checking' })).toBeDisabled();
+    });
+
+    it('confirms success with the transaction link, and closes', () => {
+      const receipt = { transactionHash: HASH, status: 1 } as TransactionReceipt;
+      const { onClose } = renderModal({
+        ...inReview(),
+        phase: 'complete',
+        steps: [{ status: 'confirmed', hash: HASH, receipt }],
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/withdrawal confirmed/i);
+      expect(dialog).toHaveTextContent(/withdrew about 100\.000000 USDC/i);
+      expect(explorerLinks()).toEqual([EXPLORER_LINK]);
+      fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it.each<[WrappedStepState, RegExp]>([
+      [{ status: 'blocked', reason: 'withdraw-paused' }, /withdrawals from this market are paused/],
+      [{ status: 'blocked', reason: 'exits-disabled' }, /wrapped withdrawals are closed/],
+      [{ status: 'blocked', reason: 'restriction-unknown' }, /pause state could not be read/],
+      [
+        {
+          status: 'blocked',
+          reason: 'step-check-failed',
+          message: 'Your wrapped balance changed since the review. Review the withdrawal again.',
+        },
+        /your wrapped balance changed since the review/i,
+      ],
+    ])('says why the exit stopped before the wallet was asked: %p', (step, text) => {
+      renderModal({ ...inReview(), phase: 'stopped', steps: [step] });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/withdrawal stopped/i);
+      expect(dialog).toHaveTextContent(/nothing was sent/i);
+      expect(dialog).toHaveTextContent(text);
+      expect(within(dialog).getByRole('button', { name: 'Close' })).toBeEnabled();
+    });
+
+    it('shows the position being read', () => {
+      const identity = draftFor(PARTIAL_REVIEW).identity;
+      renderModal({ phase: 'reading', identity });
+      expect(screen.getByRole('dialog')).toHaveTextContent(/reading your wrapped position/i);
+    });
+
+    it('shows a refused review and closes', () => {
+      const identity = draftFor(PARTIAL_REVIEW).identity;
+      const message =
+        'You asked for 300.000000 USDC, more than your wrapped position pays now. Enter at most 250.124997 USDC.';
+      const { onClose } = renderModal({ phase: 'read-failed', identity, message });
+
+      expect(screen.getByRole('dialog')).toHaveTextContent(/withdrawal not ready/i);
+      expect(screen.getByRole('dialog')).toHaveTextContent(message);
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('lists what was already sent when an identity change closed the withdrawal', () => {
+      renderModal({
+        phase: 'discarded',
+        reason: 'identity-changed',
+        type: 'withdraw',
+        chainId: 1,
+        submittedHashes: [HASH],
+        isWalletRequestOpen: false,
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/so this withdrawal was closed/i);
+      expect(dialog).toHaveTextContent(/not cancelled/i);
+      expect(explorerLinks()).toEqual([EXPLORER_LINK]);
+    });
+
+    it('Home shows the withdrawal dialog for a withdrawal only, and closes it through the wrapper lifecycle', () => {
+      const action = controller(inReview());
+      render(homeElement(lendingWith(action), cometState(BASE_ASSET)));
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveAccessibleName('Withdraw USDC From the Wrapper');
+      expect(screen.getAllByRole('dialog')).toHaveLength(1);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
+      expect(action.discard).toHaveBeenCalledTimes(2);
+      expect(action.confirm).not.toHaveBeenCalled();
+    });
+
+    it.each<[string, WrappedActionState]>([
+      ['nothing is in progress', { phase: 'idle' }],
+      [
+        'the user closed a withdrawal that had sent nothing',
+        {
+          phase: 'discarded',
+          reason: 'cleared',
+          type: 'withdraw',
+          chainId: 1,
+          submittedHashes: [],
+          isWalletRequestOpen: false,
+        },
+      ],
+    ])('Home shows no dialog when %s', (_name, state) => {
+      render(homeElement(lendingWith(controller(state)), cometState(BASE_ASSET)));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+});
