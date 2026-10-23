@@ -266,19 +266,23 @@ export type AddTransaction = (
  * - `rejected`: the user declined, by an explicit rejection only.
  * - `provider-failure`: the wallet reported another error. Whether anything reached the chain is
  *   unknown, so this is never shown as a rejection and never retried automatically.
+ * - `pending-in-wallet`: the wallet answered that it still holds the request, as the Anchorage
+ *   extension does after a request waits for approval on a phone for about 4 minutes 47 seconds.
+ *   Whether anything reaches the chain is unknown, and it is handled as a `provider-failure`.
  * - `session-broken`: the provider itself is broken, as after an extension update.
  * - `session-changed`: the session is gone, or is not the account or chain the caller checked, or
  *   the caller withdrew the request. Nothing was sent.
  * - `not-sent`: the request failed before the wallet was asked to sign, for example while
  *   reading the nonce or estimating gas. Nothing was sent.
  *
- * After `provider-failure` or `session-broken`, a wrapper step's record stays, marked interrupted,
- * since the wallet can still send it. Other records are removed.
+ * After `provider-failure`, `pending-in-wallet` or `session-broken`, a wrapper step's record stays,
+ * marked interrupted, since the wallet can still send it. Other records are removed.
  */
 export type SendResult =
   | { status: 'submitted'; id: string; hash: string; response?: TransactionResponse }
   | { status: 'rejected' }
   | { status: 'provider-failure'; message: string }
+  | { status: 'pending-in-wallet'; message: string }
   | { status: 'session-broken'; message: string }
   | { status: 'session-changed' }
   | { status: 'not-sent'; message: string };
@@ -573,7 +577,11 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         // The wallet had the request and can still send it. A wrapper step stays, marked
         // interrupted, so the next review of its action waits until the user dismisses it.
         if (record !== undefined && isWrapperStep(record)) {
-          updateTransactions([ActionType.Update, { ...record, isInterrupted: true }]);
+          const interrupted = { ...record, isInterrupted: true };
+          updateTransactions([
+            ActionType.Update,
+            kind === 'pending-in-wallet' ? { ...interrupted, isPendingInWallet: true } : interrupted,
+          ]);
         } else {
           forget();
         }

@@ -20,6 +20,12 @@ const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
 const WRAPPER = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73';
 const COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
 const BROKEN_EXTENSION = new TypeError("Cannot read properties of undefined (reading 'sendMessage')");
+/** The Anchorage extension's answer to a request that waited for approval on a phone for about 4 minutes 47 seconds. */
+const STILL_PENDING = {
+  code: -32005,
+  message:
+    'This request is still pending and can still complete after this message. Check its status in the Anchorage extension before you try again.',
+};
 
 /** A transaction hash made from a label, so that the test reads by name. */
 function tx(label: string): string {
@@ -425,6 +431,25 @@ describe('useTransactionManager', () => {
       act(() => result.current.dismissTransaction(result.current.transactions[0].id));
       expect(result.current.transactions).toEqual([]);
       expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
+    });
+
+    it("keeps the wallet's answer that a request is still pending in it across a reload", async () => {
+      store([
+        {
+          ...storedRecord('', { key: WRAPPER, step: 'approve' }),
+          state: TransactionState.AwaitingConfirmation,
+          hash: undefined,
+          isInterrupted: true,
+          isPendingInWallet: true,
+        },
+      ]);
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
+
+      await waitFor(() =>
+        expect(result.current.transactions).toEqual([
+          expect.objectContaining({ step: 'approve', isInterrupted: true, isPendingInWallet: true }),
+        ])
+      );
     });
 
     it('is an ordinary transaction when it is not keyed to a wrapper', async () => {
@@ -863,6 +888,11 @@ describe('useTransactionManager', () => {
         BROKEN_EXTENSION,
         { status: 'session-broken', message: "Cannot read properties of undefined (reading 'sendMessage')" },
       ],
+      [
+        "the Anchorage extension's answer that the request is still pending (-32005)",
+        STILL_PENDING,
+        { status: 'pending-in-wallet', message: `${STILL_PENDING.message} (-32005)` },
+      ],
     ])('reports %s, and treats only an explicit rejection as one', async (_name, error, expected) => {
       const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
       const { result } = renderManager(web3For(ACCOUNT, provider));
@@ -899,7 +929,35 @@ describe('useTransactionManager', () => {
       expect(result.current.transactions).toEqual([
         expect.objectContaining({ state: TransactionState.AwaitingConfirmation, step: 'supply', isInterrupted: true }),
       ]);
+      expect(result.current.transactions[0]).not.toHaveProperty('isPendingInWallet');
       expect(JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]')).toHaveLength(1);
+    });
+
+    it('keeps a wrapper step, marked interrupted and pending in the wallet, when the wallet says it still holds it', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+
+      let submission: SendResult | undefined;
+      await act(async () => {
+        submission = await result.current.submitTransaction({
+          key: WRAPPER,
+          description: 'Approve USDC for the wrapper',
+          step: 'approve',
+          send: async () => Promise.reject(STILL_PENDING),
+        });
+      });
+
+      expect(submission).toEqual({ status: 'pending-in-wallet', message: `${STILL_PENDING.message} (-32005)` });
+      // The wallet still sends it if the user approves it on mobile, so the next review waits for it.
+      const interrupted = expect.objectContaining({
+        state: TransactionState.AwaitingConfirmation,
+        step: 'approve',
+        isInterrupted: true,
+        isPendingInWallet: true,
+      });
+      expect(result.current.transactions).toEqual([interrupted]);
+      expect(JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]')).toEqual([interrupted]);
+      // The wallet answered, so its session is not broken.
+      expect(result.current.walletFailure).toBeUndefined();
     });
 
     it('drops a wrapper step the user rejected, or one that failed before the wallet was asked', async () => {

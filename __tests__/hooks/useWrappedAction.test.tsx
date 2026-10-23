@@ -20,7 +20,7 @@ import {
   TransactionRequest,
   useTransactionManager,
 } from '@hooks/useTransactionManager';
-import { useWrappedAction, WrappedActionController } from '@hooks/useWrappedAction';
+import { useWrappedAction, WrappedActionController, WrappedStepState } from '@hooks/useWrappedAction';
 import {
   AwaitingConfirmationTransaction,
   PendingTransaction,
@@ -43,6 +43,12 @@ const USDC_WRAPPER = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73';
 const USDT_WRAPPER = '0xD7c9F42a35C8d13b71D4c0B024AE9eb0e77b9cFf';
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 const BROKEN_EXTENSION = new TypeError("Cannot read properties of undefined (reading 'sendMessage')");
+/** The Anchorage extension's answer to a request that waited for approval on a phone for about 4 minutes 47 seconds. */
+const STILL_PENDING = {
+  code: -32005,
+  message:
+    'This request is still pending and can still complete after this message. Check its status in the Anchorage extension before you try again.',
+};
 
 const CALLS = new Interface([
   'function approve(address spender, uint256 amount)',
@@ -926,6 +932,11 @@ describe('useWrappedAction', () => {
         { status: 'provider-failure', message: 'Internal error (-32603)' },
         'provider-failure',
       ],
+      [
+        "the wallet's answer that it still holds the request (not proof of anything)",
+        { status: 'pending-in-wallet', message: `${STILL_PENDING.message} (-32005)` },
+        'provider-failure',
+      ],
       ['a revert', 'reverted', 'reverted'],
       ['a replacement', 'replaced', 'replaced'],
     ])('stops on %s without retrying or sending the next step', async (_name, outcome, status) => {
@@ -951,6 +962,37 @@ describe('useWrappedAction', () => {
       expect(stepStatuses(result)).toEqual([status, 'waiting']);
       expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
     });
+
+    it.each<[string, SendResult, WrappedStepState]>([
+      [
+        'a provider error',
+        { status: 'provider-failure', message: 'Internal error (-32603)' },
+        { status: 'provider-failure', message: 'Internal error (-32603)' },
+      ],
+      [
+        "the wallet's answer that it still holds the request",
+        { status: 'pending-in-wallet', message: `${STILL_PENDING.message} (-32005)` },
+        { status: 'provider-failure', message: `${STILL_PENDING.message} (-32005)`, isPendingInWallet: true },
+      ],
+    ])(
+      'records %s as a provider failure that only reads differently, and signs nothing more',
+      async (_name, outcome, step) => {
+        const { manager, requests } = fakeManager(wallet);
+        const { result } = renderAction({ session: sessionFor(wallet), manager });
+        await reachReview(result);
+        await confirmAndWaitForWallet(result, requests, 1);
+
+        await act(async () => requests[0].resolve(outcome));
+
+        expect(result.current.state).toMatchObject({ phase: 'stopped', stepIndex: 0 });
+        expect('steps' in result.current.state && result.current.state.steps).toEqual([step, { status: 'waiting' }]);
+        // The wallet answered, so the session stays usable.
+        expect(result.current.session).toEqual({ status: 'usable' });
+        act(() => result.current.confirm());
+        await act(async () => undefined);
+        expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
+      }
+    );
 
     it('keeps an outcome that arrives before the hash it belongs to is recorded', async () => {
       const { manager, requests } = fakeManager(wallet);
@@ -1220,6 +1262,37 @@ describe('useWrappedAction', () => {
       expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
 
+    it.each<[string, Transaction, boolean, boolean]>([
+      [
+        'an interrupted request the wallet said it still holds',
+        interruptedRequest({ isPendingInWallet: true }),
+        true,
+        true,
+      ],
+      ['an interrupted request with no such answer', interruptedRequest(), true, false],
+      [
+        'a request with no answer yet, whatever its record says',
+        interruptedRequest({ isInterrupted: false, isPendingInWallet: true }),
+        false,
+        false,
+      ],
+      ['a broadcast transaction', wrapperTransaction(), false, false],
+    ])(
+      'reports whether the wallet still holds a request it waits for: %s',
+      (_name, transaction, canDismiss, isPending) => {
+        const { manager } = fakeManager(wallet);
+        const { result } = renderAction({
+          session: sessionFor(wallet),
+          manager: { ...manager, transactions: [transaction] },
+        });
+
+        expect(result.current.canDismissRecovered).toBe(canDismiss);
+        expect(result.current.isRecoveredRequestPendingInWallet).toBe(isPending);
+        // Either way, a fresh review waits for it.
+        expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+      }
+    );
+
     it('checks again at the signature for another wrapper transaction of the account, and sends nothing', async () => {
       const { manager } = fakeManager(wallet);
       const restriction = jest.fn(async (): Promise<MarketRestriction | undefined> => undefined);
@@ -1441,6 +1514,48 @@ describe('useWrappedAction with the transaction manager', () => {
 
     expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(2);
     expect(stepStatuses(result)).toEqual(['confirmed', 'confirmed']);
+  });
+
+  it('stops at -32005 from the wallet, keeps the request open, and waits for the user to stop waiting', async () => {
+    const wallet = Object.assign(walletProvider(), {
+      getNetwork: jest.fn(async () => ({ chainId: 1, name: 'homestead' })),
+      getTransactionReceipt: jest.fn(async () => null),
+      getTransaction: jest.fn(async () => null),
+      getTransactionCount: jest.fn(async () => 5),
+    });
+    // As the Anchorage extension answers about 4 minutes 47 seconds after a request waits on mobile.
+    wallet.sendUncheckedTransaction.mockRejectedValue(STILL_PENDING);
+    const { result } = renderWithManager(wallet);
+    await waitFor(() => expect(result.current.blockedReason('supply')).toBeUndefined());
+
+    await reachReview(result);
+    act(() => result.current.confirm());
+    await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+    const message = `${STILL_PENDING.message} (-32005)`;
+    expect(result.current.state).toMatchObject({
+      stepIndex: 0,
+      steps: [{ status: 'provider-failure', message, isPendingInWallet: true }, { status: 'waiting' }],
+    });
+    expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
+    expect(result.current.session).toEqual({ status: 'usable' });
+    // The request stays open in the wallet, so its record stays, marked interrupted.
+    expect(result.current.recovered.pending).toEqual([
+      expect.objectContaining({ step: 'approve', isInterrupted: true, isPendingInWallet: true }),
+    ]);
+    expect(result.current.canDismissRecovered).toBe(true);
+    expect(result.current.isRecoveredRequestPendingInWallet).toBe(true);
+
+    // Closing the dialog does not end the wait.
+    act(() => result.current.discard());
+    expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+
+    // The user stops waiting after checking the wallet. A fresh review then starts from its first step.
+    act(() => result.current.dismissRecovered());
+    expect(result.current.isRecoveredRequestPendingInWallet).toBe(false);
+    await reachReview(result);
+    expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
+    expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
   });
 
   it('keeps a broken session unusable when a request through the earlier wallet provider fails late', async () => {
