@@ -723,9 +723,9 @@ export type PrepareWrappedWithdrawalInput = {
  * full exit. The amount is never lowered here.
  *
  * Before the signature, the step reads again. It stops when that read is of an older block than
- * the review's. It also stops when the share balance, the pause, the cash the shares pay or the
- * market's cash no longer allows the reviewed exit, as `recheckWithdrawal` decides. It then
- * simulates the exit from the account at that block. A check that passes gives the reviewed shares
+ * the review's. `recheckWithdrawal` then stops it when the share balance, the pause, the cash the
+ * shares pay or the market's cash no longer allows the reviewed exit. The step then simulates the
+ * exit from the account at that block. A check that passes gives the reviewed shares
  * quoted at that block, so the dialog and the transaction list show the cash the exit pays there.
  * The method has no minimum amount and no deadline, and the simulation enforces neither: the
  * wrapper computes the cash when the transaction runs.

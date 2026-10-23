@@ -1576,6 +1576,31 @@ describe('useWrappedAction', () => {
       expect(result.current.state).toMatchObject({ phase: 'signing', rechecked });
       expect(requests[0].request.description).toBe(RECHECKED.description);
     });
+
+    it("calls a step's own check on that step", async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const calledOn: unknown[] = [];
+      const check = function (this: unknown) {
+        calledOn.push(this);
+        return Promise.resolve({ ok: true as const, rechecked: RECHECKED });
+      };
+      act(() => {
+        result.current.start('withdraw', async () => ({
+          amount: SHARES,
+          steps: [{ ...EXIT, check }],
+          withdrawal: reviewOf(SHARES),
+        }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      const { state } = result.current;
+      if (!('draft' in state)) throw new Error('the withdrawal must have a draft');
+      expect(calledOn).toHaveLength(1);
+      expect(calledOn[0]).toBe(state.draft.steps[0]);
+    });
   });
 });
 

@@ -627,12 +627,12 @@ export function useWrappedAction({
     if (step.check === undefined) {
       if (isExitStep) return block('missing-recheck');
     } else {
-      // Called as either kind of check. Through the union of the two, TypeScript reduces the result
-      // to the supply's shape, which has no `rechecked`.
+      // Typed as either kind of check. Through the union of the two, TypeScript reduces the result
+      // to the supply's shape, which has no `rechecked`. It is still called on its step.
       const check: () => Promise<WrappedStepCheck> = step.check;
-      const stepCheck = await check().catch(
-        (error): WrappedStepRefusal => ({ ok: false, message: describeWalletError(error) })
-      );
+      const stepCheck = await check
+        .call(step)
+        .catch((error): WrappedStepRefusal => ({ ok: false, message: describeWalletError(error) }));
       if (!isCurrentRun()) return;
       if (!stepCheck.ok) return block('step-check-failed', stepCheck.message);
       const found = 'rechecked' in stepCheck ? stepCheck.rechecked : undefined;

@@ -2138,6 +2138,24 @@ describe('useWriteWrappedState', () => {
       expect(chain.balance).toBe(10_000_000_000n);
     });
 
+    it('stops a partial exit, and simulates nothing, when its check reads at a block number of NaN', async () => {
+      const chain = exitChainFor(USDC_MARKET);
+      const { result, wallet, events, readProvider } = renderWrapped(chain);
+      await startWithdraw(result, { kind: 'partial', cash: 100_000_000n });
+      events.length = 0;
+
+      readProvider.getBlockNumber.mockResolvedValue(Number.NaN);
+      await confirmStep(result);
+
+      expect(stepsOf(result.current.action.state)[0]).toMatchObject({
+        status: 'blocked',
+        reason: 'step-check-failed',
+        message: expect.stringMatching(/answered from an older block than your review/),
+      });
+      expect(events).not.toContain('simulate');
+      expect(walletRequests(wallet)).toEqual([]);
+    });
+
     it('signs the whole balance of a full exit when its cash doubles, and describes the cash it now pays', async () => {
       const chain = exitChainFor(USDC_MARKET);
       const { result, wallet } = renderWrapped(chain);

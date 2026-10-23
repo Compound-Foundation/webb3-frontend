@@ -48,7 +48,7 @@ export type WrappedSupplyCheck = { ok: true } | WrappedStepRefusal;
 /**
  * The result of a withdrawal's own check. A check that passes gives `rechecked`, and the lifecycle
  * stops one that does not. The dialog then shows the cash the exit pays at the block the check
- * read, not the reviewed cash, and the transaction list describes the request by it.
+ * read, not the reviewed cash. The transaction list describes the request by that cash too.
  */
 export type WrappedWithdrawalCheck = { ok: true; rechecked: RecheckedWithdrawal } | WrappedStepRefusal;
 
