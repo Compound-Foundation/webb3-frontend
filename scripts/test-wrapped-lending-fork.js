@@ -73,6 +73,7 @@ import {
   finalVerdict,
   heldToJest,
   isBlockHeader,
+  isBlockNumber,
   isRetryable,
   MARKET_COLUMNS,
   notExercisedCells,
@@ -173,7 +174,9 @@ async function forkTarget(endpoint, block) {
       mode: number === PINNED_BLOCK ? 'pinned' : 'recent',
     };
   }
-  const latest = Number(await call('eth_blockNumber'));
+  const answer = await call('eth_blockNumber');
+  if (!isBlockNumber(answer)) throw new Error('eth_blockNumber: an answer that is not a block number');
+  const latest = Number(answer);
   const header = await call('eth_getBlockByNumber', [hex(latest - RECENT_BLOCK_LAG), false]);
   if (!isBlockHeader(header)) throw new Error(`block ${latest - RECENT_BLOCK_LAG} has no valid hash or timestamp`);
   return { number: latest - RECENT_BLOCK_LAG, hash: header.hash, timestamp: Number(header.timestamp), mode: 'recent' };

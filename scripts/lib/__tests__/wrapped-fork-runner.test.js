@@ -23,6 +23,7 @@ import {
   finalVerdict,
   heldToJest,
   isBlockHeader,
+  isBlockNumber,
   isKeyLike,
   isRetryable,
   MATRIX_CELLS,
@@ -466,6 +467,24 @@ describe('the upstream proxy for a private endpoint', () => {
           error: { code: -32603, message: "the private upstream's message is withheld" },
         });
         assert.equal(proxy.stats.firstError, WITHHELD_CODE);
+      }
+    ));
+
+  test('relays a backoff hint of at most five digits, rounded up to whole seconds, and drops a longer one', () =>
+    // An upstream can echo a numeric key as the hint, whole or after a decimal point.
+    withProxy(
+      ({ params }) => ({
+        body: `{"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"x","data":{"rate":{"backoff_seconds":${params[1]}}}}}`,
+      }),
+      async (proxy) => {
+        const hintFor = async (seconds) =>
+          (await (await post(proxy.url, call('eth_getBalance', ['0x1', seconds]))).json()).error.data?.rate
+            ?.backoff_seconds;
+        assert.equal(await hintFor('86400'), 86400);
+        assert.equal(await hintFor('2.5'), 3);
+        assert.equal(await hintFor(`0.${NUMERIC_KEY}`), 1);
+        assert.equal(await hintFor(LONG_NUMERIC_KEY), undefined);
+        assert.equal(await hintFor(NUMERIC_KEY), undefined);
       }
     ));
 
@@ -980,6 +999,16 @@ describe('a fork that could not start', () => {
 });
 
 describe('the fork block an upstream reports', () => {
+  test('needs a hex block number below 2^32, because the runner prints the block it chose', () => {
+    assert.equal(isBlockNumber('0x1907ba0'), true);
+    assert.equal(isBlockNumber('0xffffffff'), true);
+    assert.equal(isBlockNumber('0x100000000'), false);
+    assert.equal(isBlockNumber(`0x${Number(NUMERIC_KEY).toString(16)}`), false);
+    assert.equal(isBlockNumber(Number(NUMERIC_KEY)), false);
+    assert.equal(isBlockNumber(NUMERIC_KEY), false);
+    assert.equal(isBlockNumber(null), false);
+  });
+
   test('needs a 32-byte hash and a hex timestamp, because the runner prints both', () => {
     const hash = `0x${'ab'.repeat(32)}`;
     assert.equal(isBlockHeader({ hash, timestamp: '0x6717fb4f' }), true);
@@ -1255,6 +1284,32 @@ describe('the runner, end to end, with a private upstream that echoes its key', 
     assert.equal(run.code, 1);
     assertKeyNeverWritten(run, NUMERIC_KEY);
     assert.match(run.files['anvil.log'], /error code -32603: the private upstream's message is withheld/);
+  });
+
+  test("never passes a numeric key in an error's backoff hint to anvil, so anvil's log holds none of it", async () => {
+    // alloy prints an error's data in anvil's log. Parsed, the 20-digit key keeps 16 of its digits.
+    answers = pinnedBlockUpstream(({ id }) => ({
+      body: `{"jsonrpc":"2.0","id":${id},"error":{"code":-32000,"message":"invalid key","data":{"rate":{"backoff_seconds":${LONG_NUMERIC_KEY}}}}}`,
+    }));
+    const run = await runRunner({ privateUrl: `${stub.url}/?key=${LONG_NUMERIC_KEY}`, anvil: 'genesis' });
+    assert.equal(run.code, 1);
+    assertKeyNeverWritten(run, LONG_NUMERIC_KEY.slice(0, 12));
+    assert.match(run.files['anvil.log'], /error code -32000: the private upstream's message is withheld/);
+  });
+
+  test('never prints a numeric key that the upstream answers as the latest block number', async () => {
+    // The runner prints the block it chooses, the latest less 8, which no redaction of the key matches.
+    answers = ({ id, method }) => ({
+      body: {
+        jsonrpc: '2.0',
+        id,
+        result: { eth_chainId: '0x1', eth_blockNumber: Number(NUMERIC_KEY) }[method] ?? null,
+      },
+    });
+    const run = await runRunner({ privateUrl: `${stub.url}/?key=${NUMERIC_KEY}`, anvil: 'genesis', block: 'recent' });
+    assert.equal(run.code, 1);
+    assertKeyNeverWritten(run, NUMERIC_KEY.slice(0, 12));
+    assert.match(run.output, /recent block: eth_blockNumber: an answer that is not a block number/);
   });
 
   test("redacts a key that an upstream's answer echoes into anvil's log", async () => {
