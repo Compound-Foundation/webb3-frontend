@@ -6,6 +6,7 @@
 // - the retry rule, for a fork that could not start and for a suite that failed on the upstream
 // - the verdict
 import http from 'http';
+import { StringDecoder } from 'string_decoder';
 
 /** The block docs/anchorage-wrapper-registry.md records its deployment reads at, and its hash. */
 export const PINNED_BLOCK = 26244888;
@@ -78,8 +79,10 @@ const eitherCase = (hex) =>
 
 /**
  * A pattern for `character` in each form that an echo of a URL can give it: the character itself,
- * percent-encoded once or twice with hex digits in either case, or a JSON `\u` escape. A `+` and a
- * space each also match the other, because a form-encoded query writes a space as `+`.
+ * percent-encoded once or twice with hex digits in either case, or a JSON `\u` escape. A JSON
+ * string can also write `/`, `"` and `\` after a backslash. A `+` and a space each also match the
+ * other, because a form-encoded query writes a space as `+`. `createRedactor` matches letters in
+ * either case.
  */
 function characterPattern(character) {
   const forms = (character === '+' || character === ' ' ? ['+', ' '] : [character]).flatMap((each) => {
@@ -92,6 +95,7 @@ function characterPattern(character) {
       bytes.map((byte) => `%${byte}`).join(''),
       bytes.map((byte) => `%25${byte}`).join(''),
       units.map((unit) => `\\\\u${unit}`).join(''),
+      ...(each === '/' || each === '"' || each === '\\' ? [`\\\\${escapeRegExp(each)}`] : []),
     ];
   });
   return `(?:${forms.join('|')})`;
@@ -181,10 +185,11 @@ export function upstreamEndpoints(env = process.env) {
 /**
  * The redaction of the secrets that `secretPatterns` match from the runner's outputs. It replaces
  * each stretch of text that one or more patterns match with `<redacted>`. Two matches that overlap
- * or touch become one stretch, so no part of either secret stays.
+ * or touch become one stretch, so no part of either secret stays. It matches letters in either
+ * case, because an upstream can echo a key in another case.
  */
 export function createRedactor(secretPatterns) {
-  const expressions = [...new Set(secretPatterns)].map((source) => new RegExp(source, 'g'));
+  const expressions = [...new Set(secretPatterns)].map((source) => new RegExp(source, 'gi'));
   const redact = (value) => {
     const text = String(value);
     const matches = [];
@@ -224,19 +229,22 @@ export function createRedactor(secretPatterns) {
 
   /**
    * Writes a child's output to `write` a whole line at a time, each line redacted. A pipe can split a
-   * line, and the URL in it, across two chunks, and neither half matches the URL.
+   * line, and the URL in it, across two chunks, and neither half matches the URL. It can also split
+   * a character's UTF-8 bytes, so one decoder reads the whole stream.
    */
   function lineRedactor(write) {
+    const decoder = new StringDecoder('utf8');
     let pending = '';
     return {
       write: (chunk) => {
-        pending += String(chunk);
+        pending += typeof chunk === 'string' ? chunk : decoder.write(chunk);
         const end = pending.lastIndexOf('\n');
         if (end === -1) return;
         write(redact(pending.slice(0, end + 1)));
         pending = pending.slice(end + 1);
       },
       end: () => {
+        pending += decoder.end();
         if (pending !== '') write(redact(pending));
         pending = '';
       },
@@ -348,20 +356,50 @@ export const countIn = (counts, key) => counts.set(key, (counts.get(key) ?? 0) +
 const hasError = (entry) => entry?.error !== undefined && entry?.error !== null;
 const isResponse = (entry) =>
   entry !== null && typeof entry === 'object' && !Array.isArray(entry) && ('result' in entry || 'error' in entry);
+/**
+ * Whether `parsed` is a bare JSON-RPC error, `{ code, message }`, which some upstreams answer with in
+ * place of a response. anvil reads such an answer as an error, and retries it by its code.
+ */
+const isBareError = (parsed) =>
+  parsed !== null &&
+  typeof parsed === 'object' &&
+  !Array.isArray(parsed) &&
+  Number.isInteger(parsed.code) &&
+  typeof parsed.message === 'string' &&
+  !isResponse(parsed);
+
+/** anvil's backoff hint in a JSON-RPC error's data, `data.rate.backoff_seconds`, as Infura sends it, or undefined. */
+function backoffSeconds(error) {
+  const seconds = error?.data?.rate?.backoff_seconds;
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+}
+
+/**
+ * A private upstream's JSON-RPC error without its text: its code, `withheldMessage`, and anvil's
+ * backoff hint if it has one. An error with no integer code gets -32603, the internal error.
+ */
+function withheldError(error) {
+  const seconds = backoffSeconds(error);
+  return {
+    code: errorCode(error) ?? -32603,
+    message: withheldMessage(error !== null && typeof error === 'object' ? error.message : undefined),
+    ...(seconds === undefined ? {} : { data: { rate: { backoff_seconds: seconds } } }),
+  };
+}
 
 /**
  * What the proxy relays to anvil for the upstream's answer, and what it records: an HTTP error as a
- * failure, and each call answered with an error. For a public endpoint, the answer goes to anvil
- * unchanged, and the record keeps each error's message, as `printable` gives it.
+ * failure, and each call answered with an error, a bare error included. For a public endpoint, the
+ * answer goes to anvil unchanged, and the record keeps each error's message, as `printable` gives it.
  *
- * For a private endpoint, no text of the upstream's reaches anvil. anvil prints the upstream's
+ * For a private endpoint, no error text of the upstream's reaches anvil. anvil prints the upstream's
  * answer in its log and in its errors to the tests, and an upstream can echo the key there in any
- * encoding. So the proxy changes an answer that carries text, and the record names only a status,
- * an error code or a kind of answer:
+ * encoding. So the proxy changes an answer that carries an error, and the record names only a
+ * status, an error code or a kind of answer:
  * - an HTTP error goes on with its status and no body
- * - each JSON-RPC error goes on with its code and `withheldMessage`, and no data
+ * - each JSON-RPC error, and a bare error, goes on as `withheldError` gives it
  * - an answer that is not JSON, or not a JSON-RPC response, becomes HTTP 502 with no body
- * - any other answer goes on unchanged
+ * - any other answer goes on unchanged, so only the redaction covers text inside a result
  */
 function relayed(status, contentType, answer, { isPrivate, printable }) {
   const withheld = (error) => ({ status: 502, contentType: 'text/plain', body: Buffer.alloc(0), errors: [error] });
@@ -378,6 +416,16 @@ function relayed(status, contentType, answer, { isPrivate, printable }) {
       ? withheld('an answer that is not JSON')
       : { status, contentType, body: answer, errors: ['an answer that is not JSON'] };
   }
+  if (isBareError(parsed)) {
+    return isPrivate
+      ? {
+          status,
+          contentType: 'application/json',
+          body: Buffer.from(JSON.stringify(withheldError(parsed))),
+          errors: [describedError(parsed)],
+        }
+      : { status, contentType, body: answer, errors: [printable(parsed.message)] };
+  }
   const entries = Array.isArray(parsed) ? parsed : [parsed];
   if (!isPrivate) {
     const errors = entries
@@ -390,14 +438,7 @@ function relayed(status, contentType, answer, { isPrivate, printable }) {
   if (errors.length === 0) return { status, contentType, body: answer, errors };
   const relayedEntries = entries.map((entry) =>
     hasError(entry)
-      ? {
-          jsonrpc: '2.0',
-          id: Number.isInteger(entry.id) ? entry.id : null,
-          error: {
-            code: errorCode(entry.error) ?? -32603,
-            message: withheldMessage(typeof entry.error === 'object' ? entry.error.message : undefined),
-          },
-        }
+      ? { jsonrpc: '2.0', id: Number.isInteger(entry.id) ? entry.id : null, error: withheldError(entry.error) }
       : entry
   );
   const body = Buffer.from(JSON.stringify(Array.isArray(parsed) ? relayedEntries : relayedEntries[0]));
@@ -572,12 +613,22 @@ export function failedOnUpstreamOnly(run) {
 
 /**
  * Whether anvil could not start the fork only because the upstream failed to serve what anvil reads
- * at start-up. The proxy must have seen the upstream fail a request or answer a call with an error,
- * and anvil's `output` must name a failed fetch. A refusal by the proxy is not an upstream failure,
- * and an error of anvil's own, such as a port in use, names no fetch.
+ * at start-up. The proxy must have seen the upstream fail a request or answer a call with an error.
+ * Also, anvil's `output` must name a failed fetch, or the runner stopped anvil at its deadline
+ * (`isTimedOut`). anvil names a failed fetch only when it gives up, and an upstream that fails slowly
+ * keeps anvil retrying past the deadline. A refusal by the proxy is not an upstream failure, and an
+ * error of anvil's own, such as a port in use, names no fetch.
  */
-export const failedToStartOnUpstream = ({ stats, output }) =>
-  stats.failures + stats.errorAnswers > 0 && FORK_STARTUP_FETCH_ERROR.test(output);
+export const failedToStartOnUpstream = ({ stats, output, isTimedOut = false }) =>
+  stats.failures + stats.errorAnswers > 0 && (isTimedOut || FORK_STARTUP_FETCH_ERROR.test(output));
+
+/**
+ * Whether the block `header` that an upstream reports has a 32-byte hash and a hex timestamp. The
+ * runner prints both in its header. Otherwise a private upstream's text can reach the console in
+ * them, and a timestamp that is not a number stops the run after anvil started.
+ */
+export const isBlockHeader = (header) =>
+  /^0x[0-9a-fA-F]{64}$/.test(header?.hash ?? '') && /^0x[0-9a-fA-F]{1,16}$/.test(header?.timestamp ?? '');
 
 /**
  * Whether the runner runs the suite once more after `run`: anvil could not start the fork on the

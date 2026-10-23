@@ -21,10 +21,12 @@
 // logs, errors and JSON-RPC methods carry only the proxy's address. The proxy forwards only the reads
 // anvil makes to fork mainnet state. The runner redacts the URL, and each part of it that can carry a
 // key, from every output it writes, in each form an upstream can echo it: as written, decoded,
-// re-encoded or JSON-escaped. An upstream's error text can echo the key, so the runner prints none
-// of a private upstream's text. It names a failure by its HTTP status and a reason, and the proxy
-// passes anvil a private upstream's error codes without their text. The tests get none of the
-// runner's environment except the variables they need, so they never see the URL.
+// re-encoded, JSON-escaped or in another case. An upstream's error text can echo the key, so the
+// runner prints no error text of a private upstream's. It names a failure by its HTTP status and a
+// reason, and the proxy passes anvil a private upstream's error codes without their text. A
+// successful answer reaches anvil unchanged, so only the redaction covers text inside a result. The
+// tests get none of the runner's environment except the variables they need, so they never see the
+// URL.
 //
 // The fork listens on 127.0.0.1 only, sends no CORS headers, and is stopped on exit, on Ctrl-C and
 // on any error. The tests sign with impersonated accounts on the fork. Nothing is signed with a real
@@ -34,7 +36,8 @@
 // proxy must have seen the upstream fail a request or answer a call with an error, and one of these
 // must hold:
 // - anvil could not start the fork, and its output names a failed fetch, such as `failed to get
-//   account for <address>` under `failed to create genesis`.
+//   account for <address>` under `failed to create genesis`. Or anvil was still not ready at the
+//   runner's 120 s deadline, still retrying the upstream.
 // - At least one cell failed, and every failed cell carries anvil's own fetch error and no revert.
 //   Jest reported its results and failed no other test. No suite failed outside its tests, as one
 //   does when it fails to load or its afterAll hook throws. anvil did not exit.
@@ -69,6 +72,7 @@ import {
   failedToStartOnUpstream,
   finalVerdict,
   heldToJest,
+  isBlockHeader,
   isRetryable,
   MARKET_COLUMNS,
   notExercisedCells,
@@ -147,9 +151,10 @@ let redaction = createRedactor([]);
 const hex = (value) => `0x${Number(value).toString(16)}`;
 
 /**
- * The block and hash to fork from on `endpoint`, or undefined when it cannot serve them. The pinned
- * block must have the hash that the registry records. Its state must also be readable. A balance
- * read at that block fails on a node that keeps only recent state.
+ * The block and hash to fork from on `endpoint`, or undefined when it cannot serve them. The block
+ * must have a hash and a timestamp in hex, which the runner prints. The pinned block must have the
+ * hash that the registry records. Its state must also be readable. A balance read at that block
+ * fails on a node that keeps only recent state.
  */
 async function forkTarget(endpoint, block) {
   const call = (method, params) => rpc(endpoint.url, method, params, { isPrivate: endpoint.isPrivate });
@@ -158,6 +163,7 @@ async function forkTarget(endpoint, block) {
     const number = block === 'pinned' ? PINNED_BLOCK : Number(block);
     const header = await call('eth_getBlockByNumber', [hex(number), false]);
     if (header === null) return undefined;
+    if (!isBlockHeader(header)) throw new Error(`block ${number} has no valid hash or timestamp`);
     if (number === PINNED_BLOCK && header.hash !== PINNED_HASH) throw new Error(`block ${number} has another hash`);
     await call('eth_getBalance', ['0x0000000000000000000000000000000000000000', hex(number)]);
     return {
@@ -169,6 +175,7 @@ async function forkTarget(endpoint, block) {
   }
   const latest = Number(await call('eth_blockNumber'));
   const header = await call('eth_getBlockByNumber', [hex(latest - RECENT_BLOCK_LAG), false]);
+  if (!isBlockHeader(header)) throw new Error(`block ${latest - RECENT_BLOCK_LAG} has no valid hash or timestamp`);
   return { number: latest - RECENT_BLOCK_LAG, hash: header.hash, timestamp: Number(header.timestamp), mode: 'recent' };
 }
 
@@ -233,11 +240,15 @@ function stopped(child, timeoutMs = 5_000) {
   });
 }
 
-/** anvil's failure to start the fork, with anvil's output until it stopped, redacted. */
+/**
+ * anvil's failure to start the fork, with anvil's output until it stopped, redacted. `isTimedOut`
+ * says whether the runner stopped anvil at its deadline.
+ */
 class ForkStartError extends Error {
-  constructor(message, output) {
+  constructor(message, output, isTimedOut) {
     super(message);
     this.output = output;
+    this.isTimedOut = isTimedOut;
   }
 }
 
@@ -300,15 +311,15 @@ async function startFork(anvilCommand, upstreamUrl, target, port, log, logName) 
   child.stdout.on('end', stdout.end);
   child.stderr.on('data', stderr.write);
   child.stderr.on('end', stderr.end);
-  const failed = async (message) => {
+  const failed = async (message, isTimedOut) => {
     await stopped(child);
     await Promise.race([closed, new Promise((resolve) => setTimeout(resolve, 5_000))]);
-    return new ForkStartError(message, startupOutput);
+    return new ForkStartError(message, startupOutput, isTimedOut);
   };
   const deadline = Date.now() + 120_000;
   while (boundPort === undefined) {
-    if (hasExited(child)) throw await failed(`anvil exited before it was ready. See ${logName}.`);
-    if (Date.now() > deadline) throw await failed(`anvil was not ready within 120 s. See ${logName}.`);
+    if (hasExited(child)) throw await failed(`anvil exited before it was ready. See ${logName}.`, false);
+    if (Date.now() > deadline) throw await failed(`anvil was not ready within 120 s. See ${logName}.`, true);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return { child, localUrl: `http://127.0.0.1:${boundPort}`, port: boundPort };
@@ -555,15 +566,18 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
       fork = await startFork(anvil.command, proxy.url, target, options.port, anvilLog, logFiles.anvil);
     } catch (error) {
       if (!(error instanceof ForkStartError)) throw error;
-      if (!failedToStartOnUpstream({ stats: proxy.stats, output: error.output })) throw error;
+      const { output, isTimedOut } = error;
+      if (!failedToStartOnUpstream({ stats: proxy.stats, output, isTimedOut })) throw error;
       startupFailure = `anvil could not start the fork, because the upstream failed to serve what anvil reads at start-up. See ${logFiles.anvil}.`;
     }
     header = runHeader({ number, endpoint, target, fork, startupFailure, environment, options, logDir });
-    console.log(header);
+    console.log(redaction.redact(header));
     if (fork !== undefined) {
       const { clientVersion } = await verifyFork(fork, target);
       console.log(
-        `  verified:      ${clientVersion} on 127.0.0.1, chain ID 1, fork block and hash match the upstream\n`
+        redaction.redact(
+          `  verified:      ${clientVersion} on 127.0.0.1, chain ID 1, fork block and hash match the upstream\n`
+        )
       );
       jestLog = fs.createWriteStream(path.join(logDir, logFiles.jest));
       ({ exitCode, anvilExited } = await runJest(options, fork, target, privateFiles, jestLog));
