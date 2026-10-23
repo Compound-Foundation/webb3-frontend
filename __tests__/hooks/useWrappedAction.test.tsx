@@ -13,6 +13,7 @@ import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { LendingSession, resolveLendingRoute, ValidationStatus, wrappedRouteKey } from '@helpers/lendingRoute';
 import { NotSentError, SendWithdrawnError, SessionProbeResult } from '@helpers/walletErrors';
 import { MarketRestriction, WrappedActionIdentity, WrappedSession, WrappedStep } from '@helpers/wrappedActions';
+import { WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import {
   SendResult,
   TransactionManager,
@@ -46,6 +47,7 @@ const BROKEN_EXTENSION = new TypeError("Cannot read properties of undefined (rea
 const CALLS = new Interface([
   'function approve(address spender, uint256 amount)',
   'function supplyAndWrap(uint256 amount)',
+  'function unwrapAndWithdraw(uint256 shares)',
 ]);
 const APPROVE: WrappedStep = {
   id: 'approve',
@@ -1367,6 +1369,66 @@ describe('useWrappedAction', () => {
     rerender({ session: sessionFor(wallet, { registry: openRegistry({ deposits: false }) }), manager });
     expect(result.current.start('supply', prepareSupply)).toBe('deposits-disabled');
     expect(result.current.state).toEqual({ phase: 'idle' });
+  });
+
+  describe('withdrawal drafts', () => {
+    const SHARES = 99_950_027_886_106_918_655n;
+    const EXIT: WrappedStep = {
+      id: 'withdraw',
+      kind: 'unwrap-and-withdraw',
+      description: 'Withdraw 100.000000 USDC from the wrapper',
+      request: { to: USDC_WRAPPER, data: CALLS.encodeFunctionData('unwrapAndWithdraw', [SHARES]) },
+    };
+    const reviewOf = (shares: bigint): WithdrawalReview => ({
+      request: { kind: 'partial', cash: 100_000_000n },
+      quote: {
+        kind: 'partial',
+        shares,
+        grossAssets: 100_000_003n,
+        redeemBuffer: 3n,
+        cash: 100_000_000n,
+        leavesDust: false,
+      },
+      shownCash: undefined,
+      blockNumber: 101,
+    });
+
+    it('keeps the quote a withdrawal was prepared with on its frozen draft', async () => {
+      const { manager } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const withdrawal = reviewOf(SHARES);
+
+      act(() => {
+        result.current.start('withdraw', async () => ({ amount: SHARES, steps: [EXIT], withdrawal }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      const { state } = result.current;
+      if (state.phase !== 'review') throw new Error('the withdrawal must be in review');
+      expect(state.draft.withdrawal).toEqual(withdrawal);
+      // The draft keeps its own copy, so a change to the object prepare returned changes nothing.
+      expect(state.draft.withdrawal).not.toBe(withdrawal);
+      expect(Object.isFrozen(state.draft.withdrawal)).toBe(true);
+      expect(Object.isFrozen(state.draft.withdrawal?.quote)).toBe(true);
+      expect(Object.isFrozen(state.draft.withdrawal?.request)).toBe(true);
+    });
+
+    it('refuses a withdrawal whose quote is for other shares than its call burns', async () => {
+      const { manager } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+
+      act(() => {
+        result.current.start('withdraw', async () => ({
+          amount: SHARES,
+          steps: [EXIT],
+          withdrawal: reviewOf(SHARES - 1n),
+        }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('read-failed'));
+
+      expect(result.current.state).toMatchObject({ message: expect.stringMatching(/quote-mismatch/) });
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
   });
 });
 

@@ -41,6 +41,19 @@ export type WithdrawalQuote = {
   leavesDust: boolean;
 };
 
+/**
+ * A wrapped exit as its review shows it: what the user asked for, the quote and the block it was
+ * read at. The signed call carries only `quote.shares`, and the submission guard holds the two
+ * together.
+ */
+export type WithdrawalReview = {
+  request: WithdrawalRequest;
+  quote: WithdrawalQuote;
+  /** The cash the page showed for a full exit before the review read the position again, if it showed one. */
+  shownCash: bigint | undefined;
+  blockNumber: number;
+};
+
 /** What the account's position can pay at a snapshot, in base units. */
 export type WithdrawalLimits = {
   /** What a full exit pays, before the pause and Comet's cash are applied. Zero for a position worth no more than the buffer. */

@@ -5,6 +5,7 @@ import { HARDCODED_WRAPPED_LENDING_SOURCE } from '@constants/wrappedMarkets';
 import CometAbi from '@helpers/abis/Comet';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { MAX_UINT256 } from '@helpers/numbers';
+import type { WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import type { ScreeningStatus } from '@hooks/useAddressScreening';
 import { Action, ActionType } from '@types';
 
@@ -67,6 +68,8 @@ export type WrappedActionDraft = {
   /** In base-token units for a supply, in shares for a withdrawal. */
   amount: bigint;
   steps: readonly WrappedStep[];
+  /** A withdrawal's quote, which its review shows. It must be for the draft's shares. */
+  withdrawal?: WithdrawalReview;
 };
 
 /** The live session a wrapper action is checked against. */
@@ -265,7 +268,9 @@ export type WrappedStepProblem =
   | 'wrong-spender'
   | 'wrong-amount'
   | 'malformed-call'
-  | 'bad-sequence';
+  | 'bad-sequence'
+  /** A withdrawal has no quote, or its quote is for other shares than its call burns. */
+  | 'quote-mismatch';
 
 const BASE_TOKEN_CALLS = new Interface(['function approve(address spender, uint256 amount)']);
 const WRAPPER_CALLS = new Interface([
@@ -324,8 +329,9 @@ function approvedAmount(step: WrappedStep): bigint {
 /**
  * Checks a draft's steps as a whole. Its amount is positive and never the unlimited sentinel. A
  * supply is one `supplyAndWrap`, after either no approval, an approval of exactly its amount, or a
- * reset to zero and then that approval. A withdrawal is one `unwrapAndWithdraw`. Step ids are
- * unique, since hashes are stored under them.
+ * reset to zero and then that approval. A withdrawal is one `unwrapAndWithdraw`, and its quote is
+ * for the shares that call burns, so the review shows the cash of the shares that are signed. Step
+ * ids are unique, since hashes are stored under them.
  */
 export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem | undefined {
   if (draft.amount <= 0n || draft.amount >= MAX_UINT256) return 'wrong-amount';
@@ -344,7 +350,9 @@ export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem
     approvals.length === 0 ||
     (approvals.length === 1 && approvals[0] === draft.amount) ||
     (approvals.length === 2 && approvals[0] === 0n && approvals[1] === draft.amount);
-  return isApprovalSequence ? undefined : 'bad-sequence';
+  if (!isApprovalSequence) return 'bad-sequence';
+  if (draft.identity.type === 'withdraw' && draft.withdrawal?.quote.shares !== draft.amount) return 'quote-mismatch';
+  return undefined;
 }
 
 export type MarketRestriction = 'supply-paused' | 'withdraw-paused' | 'restriction-unknown';

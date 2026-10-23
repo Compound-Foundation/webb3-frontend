@@ -25,6 +25,7 @@ import {
   WrappedStep,
   wrappedActionIdentity,
 } from '@helpers/wrappedActions';
+import type { WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import { SettledTransaction, Transaction, TransactionOutcome, TransactionState } from '@types';
 
 import type { TransactionManager } from './useTransactionManager';
@@ -106,10 +107,10 @@ export type WrappedActionState =
       isWalletRequestOpen: boolean;
     };
 
-/** Reads what a wrapper action needs and builds its steps, for the identity given. */
+/** Reads what a wrapper action needs and builds its steps, for the identity given. A withdrawal also returns its quote. */
 export type PrepareWrappedAction = (
   identity: WrappedActionIdentity
-) => Promise<{ amount: bigint; steps: readonly WrappedStep[] }>;
+) => Promise<{ amount: bigint; steps: readonly WrappedStep[]; withdrawal?: WithdrawalReview }>;
 
 export type WrappedActionController = {
   state: WrappedActionState;
@@ -324,14 +325,16 @@ async function sendStep(
 const GAS_LIMIT_PERCENT = 120;
 
 /**
- * The draft's own copy of the calls `prepare` returned. It is frozen, so the call that was checked
- * is the call that is sent, whatever later happens to the objects `prepare` built.
+ * The draft's own copy of the calls `prepare` returned, and of a withdrawal's quote. It is frozen,
+ * so the call that was checked is the call that is sent, and the quote that was checked is the one
+ * the review shows, whatever later happens to the objects `prepare` built.
  */
 function frozenDraft(
   id: string,
   identity: WrappedActionIdentity,
   amount: bigint,
-  steps: readonly WrappedStep[]
+  steps: readonly WrappedStep[],
+  withdrawal: WithdrawalReview | undefined
 ): WrappedActionDraft {
   return Object.freeze({
     kind: WRAPPED_ACTION,
@@ -346,6 +349,15 @@ function frozenDraft(
         })
       )
     ),
+    ...(withdrawal === undefined
+      ? {}
+      : {
+          withdrawal: Object.freeze({
+            ...withdrawal,
+            request: Object.freeze({ ...withdrawal.request }),
+            quote: Object.freeze({ ...withdrawal.quote }),
+          }),
+        }),
   });
 }
 
@@ -543,9 +555,9 @@ export function useWrappedAction({
       reading = Promise.reject(error);
     }
     reading.then(
-      ({ amount, steps }) => {
+      ({ amount, steps, withdrawal }) => {
         if (runId.current !== run) return;
-        const draft = frozenDraft(`wrapped-action-${++draftCount.current}`, identity, amount, steps);
+        const draft = frozenDraft(`wrapped-action-${++draftCount.current}`, identity, amount, steps, withdrawal);
         const problem = checkWrappedDraft(draft);
         if (problem === undefined) dispatch({ type: 'drafted', draft });
         else dispatch({ type: 'read-failed', message: `The prepared transactions are not allowed (${problem}).` });
