@@ -13,7 +13,14 @@ import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { LendingSession, resolveLendingRoute, ValidationStatus, wrappedRouteKey } from '@helpers/lendingRoute';
 import { NotSentError, SendWithdrawnError, SessionProbeResult } from '@helpers/walletErrors';
 import * as wrappedActions from '@helpers/wrappedActions';
-import { MarketRestriction, WrappedActionIdentity, WrappedSession, WrappedStep } from '@helpers/wrappedActions';
+import {
+  MarketRestriction,
+  RecheckedWithdrawal,
+  WrappedActionIdentity,
+  WrappedSession,
+  WrappedStep,
+} from '@helpers/wrappedActions';
+import { WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import {
   SendResult,
   TransactionManager,
@@ -53,6 +60,7 @@ const STILL_PENDING = {
 const CALLS = new Interface([
   'function approve(address spender, uint256 amount)',
   'function supplyAndWrap(uint256 amount)',
+  'function unwrapAndWithdraw(uint256 shares)',
 ]);
 const APPROVE: WrappedStep = {
   id: 'approve',
@@ -1502,6 +1510,232 @@ describe('useWrappedAction', () => {
     rerender({ session: sessionFor(wallet, { registry: openRegistry({ deposits: false }) }), manager });
     expect(result.current.start('supply', prepareSupply)).toBe('deposits-disabled');
     expect(result.current.state).toEqual({ phase: 'idle' });
+  });
+
+  describe('withdrawal drafts', () => {
+    const SHARES = 99_950_027_886_106_918_655n;
+    const reviewOf = (shares: bigint): WithdrawalReview => ({
+      request: { kind: 'partial', cash: 100_000_000n },
+      quote: {
+        kind: 'partial',
+        shares,
+        grossAssets: 100_000_003n,
+        redeemBuffer: 3n,
+        cash: 100_000_000n,
+        leavesDust: false,
+      },
+      shownCash: undefined,
+      blockNumber: 101,
+    });
+    /** The exit as its check found it just before the signature, after interest raised its cash. */
+    const RECHECKED: RecheckedWithdrawal = {
+      quote: { ...reviewOf(SHARES).quote, grossAssets: 100_049_978n, cash: 100_049_975n },
+      blockNumber: 102,
+      description: 'Withdraw about 100.049975 USDC from the wrapper',
+    };
+    const EXIT: WrappedStep = {
+      id: 'withdraw',
+      kind: 'unwrap-and-withdraw',
+      description: 'Withdraw 100.000000 USDC from the wrapper',
+      request: { to: USDC_WRAPPER, data: CALLS.encodeFunctionData('unwrapAndWithdraw', [SHARES]) },
+      check: async () => ({ ok: true, rechecked: RECHECKED }),
+    };
+
+    it('keeps the quote a withdrawal was prepared with on its frozen draft', async () => {
+      const { manager } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const withdrawal = reviewOf(SHARES);
+
+      act(() => {
+        result.current.start('withdraw', async () => ({ amount: SHARES, steps: [EXIT], withdrawal }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      const { state } = result.current;
+      if (state.phase !== 'review') throw new Error('the withdrawal must be in review');
+      expect(state.draft.withdrawal).toEqual(withdrawal);
+      // The draft keeps its own copy, so a change to the object prepare returned changes nothing.
+      expect(state.draft.withdrawal).not.toBe(withdrawal);
+      expect(Object.isFrozen(state.draft.withdrawal)).toBe(true);
+      expect(Object.isFrozen(state.draft.withdrawal?.quote)).toBe(true);
+      expect(Object.isFrozen(state.draft.withdrawal?.request)).toBe(true);
+    });
+
+    it('refuses a withdrawal whose quote is for other shares than its call burns', async () => {
+      const { manager } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+
+      act(() => {
+        result.current.start('withdraw', async () => ({
+          amount: SHARES,
+          steps: [EXIT],
+          withdrawal: reviewOf(SHARES - 1n),
+        }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('read-failed'));
+
+      expect(result.current.state).toMatchObject({ message: expect.stringMatching(/quote-mismatch/) });
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
+    it("describes the wallet's request by the exit its check found, and keeps a frozen copy for the dialog", async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const check = jest.fn(async () => ({ ok: true as const, rechecked: RECHECKED }));
+      act(() => {
+        result.current.start('withdraw', async () => ({
+          amount: SHARES,
+          steps: [{ ...EXIT, check }],
+          withdrawal: reviewOf(SHARES),
+        }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      expect(requests[0].request.description).toBe('Withdraw about 100.049975 USDC from the wrapper');
+      const { state } = result.current;
+      expect(state).toMatchObject({
+        phase: 'signing',
+        steps: [{ status: 'awaiting-signature' }],
+        rechecked: RECHECKED,
+        // The review the user confirmed stays on the draft.
+        draft: { withdrawal: reviewOf(SHARES) },
+      });
+      if (!('rechecked' in state) || state.rechecked === undefined) throw new Error('the check must be kept');
+      expect(state.rechecked).not.toBe(RECHECKED);
+      expect(Object.isFrozen(state.rechecked)).toBe(true);
+      expect(Object.isFrozen(state.rechecked.quote)).toBe(true);
+    });
+
+    it.each<[string, RecheckedWithdrawal, 'supply' | 'withdraw']>([
+      [
+        'other shares than the call burns',
+        { ...RECHECKED, quote: { ...RECHECKED.quote, shares: SHARES - 1n } },
+        'withdraw',
+      ],
+      ['another kind of exit', { ...RECHECKED, quote: { ...RECHECKED.quote, kind: 'full' } }, 'withdraw'],
+      // The supply's draft carries a quote for its amount, so only its type tells it from an exit.
+      ['an exit, for a supply', { ...RECHECKED, quote: { ...RECHECKED.quote, shares: 1_000_000n } }, 'supply'],
+    ])('signs nothing when a check describes %s', async (_name, rechecked, type) => {
+      const { manager } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const check = async () => ({ ok: true as const, rechecked });
+      act(() => {
+        result.current.start(type, async () =>
+          type === 'withdraw'
+            ? { amount: SHARES, steps: [{ ...EXIT, check }], withdrawal: reviewOf(SHARES) }
+            : { amount: 1_000_000n, steps: [{ ...SUPPLY, check }], withdrawal: reviewOf(1_000_000n) }
+        );
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      act(() => result.current.confirm());
+      await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+      expect(result.current.state).toMatchObject({ steps: [{ status: 'blocked', reason: 'quote-mismatch' }] });
+      expect((result.current.state as { rechecked?: unknown }).rechecked).toBeUndefined();
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
+    /** The exit step with `check` set to any value, as code outside these types can build it. */
+    const exitCheckedBy = (check: unknown) => ({ ...EXIT, check } as unknown as WrappedStep);
+
+    it.each<[string, unknown]>([
+      ['no check', undefined],
+      ['a check that passes without the exit it found', async () => ({ ok: true })],
+      ['a check that passes with null for the exit it found', async () => ({ ok: true, rechecked: null })],
+    ])(
+      "signs nothing for an exit step with %s, rather than describe the wallet's request by the reviewed cash",
+      async (_name, check) => {
+        const { manager } = fakeManager(wallet);
+        const { result } = renderAction({ session: sessionFor(wallet), manager });
+        act(() => {
+          result.current.start('withdraw', async () => ({
+            amount: SHARES,
+            steps: [exitCheckedBy(check)],
+            withdrawal: reviewOf(SHARES),
+          }));
+        });
+        await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+        act(() => result.current.confirm());
+        await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+        expect(result.current.state).toMatchObject({ steps: [{ status: 'blocked', reason: 'missing-recheck' }] });
+        expect((result.current.state as { rechecked?: unknown }).rechecked).toBeUndefined();
+        expect(manager.submitTransaction).not.toHaveBeenCalled();
+        expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each<[string, number]>([
+      ['block 100, before the review at block 101', 100],
+      ['NaN as its block', Number.NaN],
+    ])('signs nothing for a withdrawal whose check gives %s', async (_name, blockNumber) => {
+      const { manager } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const check = async () => ({ ok: true as const, rechecked: { ...RECHECKED, blockNumber } });
+      act(() => {
+        result.current.start('withdraw', async () => ({
+          amount: SHARES,
+          steps: [{ ...EXIT, check }],
+          withdrawal: reviewOf(SHARES),
+        }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      act(() => result.current.confirm());
+      await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+      expect(result.current.state).toMatchObject({ steps: [{ status: 'blocked', reason: 'stale-recheck' }] });
+      expect((result.current.state as { rechecked?: unknown }).rechecked).toBeUndefined();
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('signs a withdrawal whose check read the block of its review', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const rechecked: RecheckedWithdrawal = { ...RECHECKED, blockNumber: reviewOf(SHARES).blockNumber };
+      act(() => {
+        result.current.start('withdraw', async () => ({
+          amount: SHARES,
+          steps: [{ ...EXIT, check: async () => ({ ok: true as const, rechecked }) }],
+          withdrawal: reviewOf(SHARES),
+        }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      expect(result.current.state).toMatchObject({ phase: 'signing', rechecked });
+      expect(requests[0].request.description).toBe(RECHECKED.description);
+    });
+
+    it("calls a step's own check on that step", async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const calledOn: unknown[] = [];
+      const check = function (this: unknown) {
+        calledOn.push(this);
+        return Promise.resolve({ ok: true as const, rechecked: RECHECKED });
+      };
+      act(() => {
+        result.current.start('withdraw', async () => ({
+          amount: SHARES,
+          steps: [{ ...EXIT, check }],
+          withdrawal: reviewOf(SHARES),
+        }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      const { state } = result.current;
+      if (!('draft' in state)) throw new Error('the withdrawal must have a draft');
+      expect(calledOn).toHaveLength(1);
+      expect(calledOn[0]).toBe(state.draft.steps[0]);
+    });
   });
 });
 

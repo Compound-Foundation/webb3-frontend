@@ -12,10 +12,12 @@ import {
 } from '@helpers/walletErrors';
 import {
   checkBeforeSignature,
+  checkRecheckedWithdrawal,
   checkWrappedDraft,
   isSameWrappedIdentity,
   MarketRestriction,
   readMarketRestriction,
+  RecheckedWithdrawal,
   WRAPPED_ACTION,
   WrappedActionDraft,
   WrappedActionIdentity,
@@ -23,8 +25,11 @@ import {
   WrappedBlockReason,
   WrappedSession,
   WrappedStep,
+  WrappedStepCheck,
+  WrappedStepRefusal,
   wrappedActionIdentity,
 } from '@helpers/wrappedActions';
+import type { WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import { SettledTransaction, Transaction, TransactionOutcome, TransactionState } from '@types';
 
 import type { TransactionManager } from './useTransactionManager';
@@ -82,6 +87,11 @@ type DraftProgress = {
   steps: readonly WrappedStepState[];
   /** The step the user confirms next, or the one in progress or that stopped the draft. */
   stepIndex: number;
+  /**
+   * A withdrawal as its step's check found it just before the signature, once that check passes.
+   * The draft keeps the review the user confirmed.
+   */
+  rechecked?: RecheckedWithdrawal;
 };
 
 /**
@@ -109,10 +119,10 @@ export type WrappedActionState =
       isWalletRequestOpen: boolean;
     };
 
-/** Reads what a wrapper action needs and builds its steps, for the identity given. */
+/** Reads what a wrapper action needs and builds its steps, for the identity given. A withdrawal also returns its quote. */
 export type PrepareWrappedAction = (
   identity: WrappedActionIdentity
-) => Promise<{ amount: bigint; steps: readonly WrappedStep[] }>;
+) => Promise<{ amount: bigint; steps: readonly WrappedStep[]; withdrawal?: WithdrawalReview }>;
 
 export type WrappedActionController = {
   state: WrappedActionState;
@@ -188,6 +198,7 @@ type LifecycleEvent =
   | { type: 'reading'; identity: WrappedActionIdentity }
   | { type: 'read-failed'; message: string }
   | { type: 'drafted'; draft: WrappedActionDraft }
+  | { type: 'rechecked'; rechecked: RecheckedWithdrawal }
   | { type: 'step'; index: number; step: WrappedStepState }
   | { type: 'session-unusable' }
   | { type: 'discarded'; reason: 'identity-changed' | 'cleared' }
@@ -300,6 +311,8 @@ function lifecycleReducer(state: WrappedActionState, event: LifecycleEvent): Wra
             stepIndex: 0,
           }
         : state;
+    case 'rechecked':
+      return state.phase === 'signing' ? { ...state, rechecked: event.rechecked } : state;
     case 'step':
       return withStep(state, event.index, event.step);
     case 'session-unusable':
@@ -354,14 +367,16 @@ async function sendStep(
 const GAS_LIMIT_PERCENT = 120;
 
 /**
- * The draft's own copy of the calls `prepare` returned. It is frozen, so the call that was checked
- * is the call that is sent, whatever later happens to the objects `prepare` built.
+ * The draft's own copy of the calls `prepare` returned, and of a withdrawal's quote. It is frozen,
+ * so the call that was checked is the call that is sent, and the quote that was checked is the one
+ * the review shows, whatever later happens to the objects `prepare` built.
  */
 function frozenDraft(
   id: string,
   identity: WrappedActionIdentity,
   amount: bigint,
-  steps: readonly WrappedStep[]
+  steps: readonly WrappedStep[],
+  withdrawal: WithdrawalReview | undefined
 ): WrappedActionDraft {
   return Object.freeze({
     kind: WRAPPED_ACTION,
@@ -376,6 +391,28 @@ function frozenDraft(
         })
       )
     ),
+    ...(withdrawal === undefined
+      ? {}
+      : {
+          withdrawal: Object.freeze({
+            ...withdrawal,
+            request: Object.freeze({ ...withdrawal.request }),
+            quote: Object.freeze({ ...withdrawal.quote }),
+          }),
+        }),
+  });
+}
+
+/**
+ * The lifecycle's own frozen copy of a withdrawal as its check found it. The quote that was checked
+ * against the draft is then the one the dialog shows, whatever later happens to the object the check
+ * returned.
+ */
+function frozenRecheck(rechecked: RecheckedWithdrawal): RecheckedWithdrawal {
+  return Object.freeze({
+    quote: Object.freeze({ ...rechecked.quote }),
+    blockNumber: rechecked.blockNumber,
+    description: String(rechecked.description),
   });
 }
 
@@ -574,9 +611,9 @@ export function useWrappedAction({
     }
     reading
       .then(
-        ({ amount, steps }) => {
+        ({ amount, steps, withdrawal }) => {
           if (runId.current !== run) return;
-          const draft = frozenDraft(`wrapped-action-${++draftCount.current}`, identity, amount, steps);
+          const draft = frozenDraft(`wrapped-action-${++draftCount.current}`, identity, amount, steps, withdrawal);
           const problem = checkWrappedDraft(draft);
           if (problem === undefined) dispatch({ type: 'drafted', draft });
           else dispatch({ type: 'read-failed', message: `The prepared transactions are not allowed (${problem}).` });
@@ -621,12 +658,35 @@ export function useWrappedAction({
     if (!isCurrentRun()) return;
     if (restriction !== undefined) return block(restriction);
 
-    if (step.check !== undefined) {
-      const stepCheck = await step
-        .check()
-        .catch((error): { ok: false; message: string } => ({ ok: false, message: describeWalletError(error) }));
+    // The wallet's request for an exit is described by the exit its own check found, never by the
+    // reviewed cash. So an exit step without a check, or whose check passes without that exit, stops.
+    const isExitStep = step.kind === 'unwrap-and-withdraw';
+    let { description } = step;
+    if (step.check === undefined) {
+      if (isExitStep) return block('missing-recheck');
+    } else {
+      // Typed as either kind of check. Through the union of the two, TypeScript reduces the result
+      // to the supply's shape, which has no `rechecked`. It is still called on its step.
+      const check: () => Promise<WrappedStepCheck> = step.check;
+      const stepCheck = await check
+        .call(step)
+        .catch((error): WrappedStepRefusal => ({ ok: false, message: describeWalletError(error) }));
       if (!isCurrentRun()) return;
       if (!stepCheck.ok) return block('step-check-failed', stepCheck.message);
+      const found = 'rechecked' in stepCheck ? stepCheck.rechecked : undefined;
+      // A check written without these types can give null.
+      if (found === undefined || found === null) {
+        if (isExitStep) return block('missing-recheck');
+      } else {
+        const rechecked = frozenRecheck(found);
+        const problem = checkRecheckedWithdrawal(draft, rechecked);
+        if (problem !== undefined) return block(problem);
+        // The dialog shows the exit as the check found it before the wallet is asked, and the
+        // transaction list describes the request by it. Both show the cash the exit pays at the block
+        // the check read.
+        dispatch({ type: 'rechecked', rechecked });
+        description = rechecked.description;
+      }
     }
 
     const probed = await live.current
@@ -645,7 +705,7 @@ export function useWrappedAction({
     let withdrawnBecause: WrappedBlockReason | undefined;
     const result = await live.current.manager.submitTransaction({
       key: draft.identity.wrapperAddress,
-      description: step.description,
+      description,
       step: step.id,
       account: draft.identity.account,
       chainId: draft.identity.chainId,
