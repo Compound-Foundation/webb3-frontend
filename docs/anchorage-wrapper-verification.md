@@ -20,14 +20,14 @@ node scripts/test-wrapped-lending-fork.js --solc-output <path to solc output>
 
 The runner needs `yarn install`, Node 22 and Foundry's `anvil`. The recorded runs used anvil 1.2.3. Set `ANVIL` to anvil's path if it is not on `PATH`.
 
-| Option                                                 | Effect                                                                                                                                            |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--block auto`                                         | The default. Forks the pinned block 26244888 when the upstream serves its state, and a recent block otherwise.                                    |
-| `--block pinned`, `--block recent`, `--block <number>` | Forks that block. A recent block is the latest block less 8.                                                                                      |
-| `--solc-output <path>`                                 | solc's standard-JSON output for the wrappers' build input, for the bytecode comparison. Without it, that comparison is recorded as not exercised. |
-| `--log-dir <path>`                                     | Where `anvil.log`, `jest.log`, `results.json` and `summary.md` go. The default is a new directory under the system's temporary directory.         |
-| `--port <number>`                                      | The fork's local port. The default is a free port.                                                                                                |
-| `--test <pattern>`                                     | Runs only the fork suites whose path matches the pattern.                                                                                         |
+| Option                                                 | Effect                                                                                                                                                                               |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--block auto`                                         | The default. Forks the pinned block 26244888 when the upstream serves its state, and a recent block otherwise.                                                                       |
+| `--block pinned`, `--block recent`, `--block <number>` | Forks that block. A recent block is the latest block less 8.                                                                                                                         |
+| `--solc-output <path>`                                 | solc's standard-JSON output for the wrappers' build input, for the bytecode comparison. Without it, that comparison is recorded as not exercised, so the run cannot pass.            |
+| `--log-dir <path>`                                     | Where `anvil.log`, `jest.log`, `results.json` and `summary.md` go. The default is a new directory under the system's temporary directory.                                            |
+| `--port <number>`                                      | The fork's local port. The default is a free port.                                                                                                                                   |
+| `--test <pattern>`                                     | Runs only the fork suites whose path matches the pattern. The result then names its scope, such as `PASS (scoped by --test: 7 of 64 cells)`, and does not stand for the full matrix. |
 
 ### Upstream RPC
 
@@ -74,6 +74,16 @@ The verdict comes from the last run that ran the suite, or from the last run whe
 
 In both cases the result is `NOT EXERCISED`, with exit code 1. Any other failure is never retried, and it fails the run. Such failures include a configuration error, a fork that reports other metadata than the runner chose, and a failure in the app or a test. When a failed run's upstream failed requests, the summary says so.
 
+The result is `PASS`, with exit code 0, only when the final run exercised the whole matrix:
+
+- Jest passed, and the cell reporter wrote Jest's own result for each test.
+- The run recorded each of the matrix's 64 cells exactly once, and each cell passed.
+- Jest passed the test of each cell.
+
+If Jest passed and no cell failed, a cell that did not pass this way makes the result `NOT EXERCISED`, with exit code 1. Such a cell is one that the suite could not exercise on the fork, or one recorded as a pass whose test Jest did not pass. It can also be a cell that the run did not record, such as one whose test Jest skipped. The summary's matrix marks an unrecorded cell `missing`, and its list gives Jest's status for the test. Without `--solc-output`, the four `source-build` cells are not exercised. A cell that the run recorded twice fails.
+
+A run with `--test` needs only the cells of the suites that it ran, at least one. Its result names its scope, for example `Result: PASS (scoped by --test: 7 of 64 cells)`. Only a run without `--test` checks the full matrix.
+
 ### What the runner does
 
 1. It chooses the upstream endpoint and the fork block, as above.
@@ -83,10 +93,10 @@ In both cases the result is `NOT EXERCISED`, with exit code 1. Any other failure
    - `anvil_metadata` reports the chosen fork block and hash. `anvil_metadata` carries no upstream URL, unlike `anvil_nodeInfo`.
    - The fork's block at that number has the hash that the upstream reported.
 4. It runs Jest with `__tests__/integration/wrappedLendingFork/jest.config.js`, in one process, with the local fork's URL. If anvil exits while Jest runs, the runner stops Jest and the run fails. A reporter, `cellReporter.js`, writes Jest's own result for each test, and the runner fails any matrix cell whose test Jest failed. A scenario can record its cell after Jest failed its test, for example on a timeout.
-5. It prints the environment, the proxy's use of the upstream, the scenario matrix, each exit of the supply-and-exit sequence against its quote, and every failed or unexercised scenario. It writes the same report to `summary.md`.
+5. It prints the environment, the proxy's use of the upstream, the scenario matrix, each exit of the supply-and-exit sequence against its quote, and every failed, unexercised or missing cell. It writes the same report to `summary.md`.
 6. It stops anvil and removes its temporary directories, anvil's working directory and the tests' results directory, on success, on failure, on Ctrl-C and on SIGTERM.
 
-The runner exits with 0 only when Jest passes and no scenario failed. Its summary ends with `Result: PASS`, `FAIL` or `NOT EXERCISED`. The default `yarn test` skips `__tests__/integration/wrappedLendingFork/`, because that suite needs the fork.
+The runner exits with 0 only when Jest passed and every cell of the matrix passed, as the verdict above requires. Its summary ends with `Result: PASS`, `FAIL` or `NOT EXERCISED`, and with the scope of a `--test` run. The default `yarn test` skips `__tests__/integration/wrappedLendingFork/`, because that suite needs the fork.
 
 The suite also refuses connections to other hosts. `forkSetup.ts` replaces the request functions of Node's `http` and `https` modules, which ethers sends its requests through, and `net.Socket`'s `connect`, which every TCP connection goes through. Each throws for any destination but the local fork. `connect` also throws for a connection with a `path`, which is a pipe. It throws for a connection with its own `lookup` too, because a `lookup` can resolve the fork's host name to another address. A test confirms that each of these fails:
 
@@ -108,7 +118,8 @@ The suite also refuses connections to other hosts. `forkSetup.ts` replaces the r
 - each matrix cell held to Jest's own result for its test, a timeout included
 - the retry rule, against each failure that it must not retry
 - a fork that anvil could not start: one retry at the pinned block, then every cell not exercised, with run 1's log kept, and no retry for an error of anvil's own or a fork with other metadata
-- the verdict over one or two runs, and the full matrix against the scenarios that the fork suites declare
+- the verdict over one or two runs, which passes only a run that passed every cell of the matrix, each with a passing Jest test, and a run scoped by `--test`
+- the full matrix against the scenarios that the fork suites declare, and the matrix's table with a missing cell
 
 ### Build the solc output for the bytecode comparison
 

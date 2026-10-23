@@ -4,7 +4,7 @@
 // - the proxy that holds the URL, its read-only method allowlist, and its check of a private upstream's results
 // - each matrix cell held to Jest's own result for its test
 // - the retry rule, for a fork that could not start and for a suite that failed on the upstream
-// - the verdict
+// - the verdict, which needs every cell of the full matrix, and the matrix's table in the summary
 import http from 'http';
 import { StringDecoder } from 'string_decoder';
 
@@ -684,6 +684,9 @@ export function cellOf(title) {
   return market === undefined ? undefined : { scenario: title.slice(0, -(market.length + 3)), market };
 }
 
+/** The test title of a matrix cell, `<scenario> (<market>)`, which also identifies the cell. */
+const titleOf = ({ scenario, market }) => `${scenario} (${market})`;
+
 /**
  * The cells, each held to Jest's own result for its test. A scenario records its cell when its body
  * settles, which can come after Jest failed the test, for example on a timeout. Such a cell fails.
@@ -696,7 +699,7 @@ export function heldToJest(results, jest) {
     (jest?.tests ?? []).filter((test) => test.status === 'failed').map((test) => [test.title, test.failure])
   );
   const held = results.map((result) => {
-    const failure = failures.get(`${result.scenario} (${result.market})`);
+    const failure = failures.get(titleOf(result));
     if (failure === undefined || result.status === 'fail') return result;
     return {
       ...result,
@@ -704,7 +707,7 @@ export function heldToJest(results, jest) {
       reason: `Jest failed this test after its scenario recorded ${result.status}: ${failure}`,
     };
   });
-  const recorded = new Set(results.map((result) => `${result.scenario} (${result.market})`));
+  const recorded = new Set(results.map(titleOf));
   for (const [title, failure] of failures) {
     const cell = cellOf(title);
     if (cell === undefined || recorded.has(title)) continue;
@@ -841,21 +844,73 @@ export const MATRIX_CELLS = SCENARIO_ORDER.flatMap((scenario) =>
 export const notExercisedCells = (reason) => MATRIX_CELLS.map((cell) => ({ ...cell, status: 'not-exercised', reason }));
 
 /**
+ * The cells that the verdict judges: `results`, as `heldToJest` gives them, checked against the full
+ * matrix and against `jest`, the cell reporter's record of Jest's own result for each test:
+ * - A cell that the run recorded more than once fails, because each cell needs exactly one test.
+ * - A cell recorded as a pass stays one only when Jest passed its test. Otherwise it was not
+ *   exercised, as when Jest skipped the test or the reporter wrote no results.
+ * - Each cell of the full matrix that the run did not record is missing.
+ *
+ * For a run scoped by --test (`isScoped`), the full matrix is the cells that the run recorded and
+ * the cells that Jest reported a test for.
+ */
+function judgedCells(results, jest, isScoped) {
+  const jestStatuses = new Map((jest?.tests ?? []).map((test) => [test.title, test.status]));
+  const recorded = new Map();
+  for (const result of results) recorded.set(titleOf(result), [...(recorded.get(titleOf(result)) ?? []), result]);
+  const judged = [...recorded].map(([title, records]) => {
+    if (records.length > 1) {
+      return (
+        records.find((result) => result.status === 'fail') ?? {
+          ...records[0],
+          status: 'fail',
+          reason: `the run recorded this cell ${records.length} times, and each cell needs exactly one test`,
+        }
+      );
+    }
+    const [result] = records;
+    if (result.status !== 'pass' || jestStatuses.get(title) === 'passed') return result;
+    const reason =
+      jest === undefined
+        ? "its scenario recorded a pass, but Jest's reporter wrote no result for its test"
+        : jestStatuses.has(title)
+        ? `its scenario recorded a pass, but Jest reported this test as ${jestStatuses.get(title)}`
+        : 'its scenario recorded a pass, but Jest reported no test with this title';
+    return { ...result, status: 'not-exercised', reason };
+  });
+  const expected = isScoped ? [...jestStatuses.keys()].map(cellOf).filter((cell) => cell !== undefined) : MATRIX_CELLS;
+  const missing = new Map(expected.filter((cell) => !recorded.has(titleOf(cell))).map((cell) => [titleOf(cell), cell]));
+  for (const [title, cell] of missing) {
+    const reason =
+      jest === undefined
+        ? "the run recorded no cell, and Jest's reporter wrote no results"
+        : jestStatuses.has(title)
+        ? `Jest reported this test as ${jestStatuses.get(title)}, and its scenario recorded no cell`
+        : 'the run has no test for this cell';
+    judged.push({ ...cell, status: 'missing', reason });
+  }
+  return judged;
+}
+
+/**
  * The verdict on `runs`. It comes from the final run: the last run that ran the suite, or the last
  * run when none did.
  * - When no run started the fork, every cell was not exercised, and the result is NOT EXERCISED.
  * - A cell that failed only because the upstream failed to serve the fork's state was not
  *   exercised, and the result is NOT EXERCISED.
- * - The result is PASS only when Jest passed, and the run recorded cells, none of which failed.
- *   Otherwise it is FAIL.
+ * - The result is PASS only when Jest passed and every cell of the full matrix passed, as
+ *   `judgedCells` judges the cells. A run scoped by --test (`isScoped`) needs only the cells that it
+ *   ran, and at least one.
+ * - Otherwise the result is FAIL when a cell failed or Jest failed. It is NOT EXERCISED when Jest
+ *   passed, no cell failed, and a cell is missing or was not exercised.
  */
-export function finalVerdict(runs) {
+export function finalVerdict(runs, { isScoped = false } = {}) {
   const final = runs.findLast((run) => run.startupFailure === undefined) ?? runs[runs.length - 1];
   if (final.startupFailure !== undefined) {
-    return { final, results: final.results, exitCode: 1, verdict: 'NOT EXERCISED' };
+    return { final, results: final.results, exitCode: 1, verdict: 'NOT EXERCISED', isUpstreamOnly: false };
   }
   const isUpstreamOnly = failedOnUpstreamOnly(final);
-  const results = isUpstreamOnly
+  const held = isUpstreamOnly
     ? final.results.map((result) =>
         result.status === 'fail'
           ? {
@@ -866,7 +921,37 @@ export function finalVerdict(runs) {
           : result
       )
     : final.results;
-  const hasFailed = results.length === 0 || results.some((result) => result.status === 'fail');
-  const exitCode = final.exitCode === 0 && hasFailed ? 1 : final.exitCode;
-  return { final, results, exitCode, verdict: exitCode === 0 ? 'PASS' : isUpstreamOnly ? 'NOT EXERCISED' : 'FAIL' };
+  const results = judgedCells(held, final.jest, isScoped);
+  const hasFailed = results.some((result) => result.status === 'fail');
+  const hasPassedEvery = results.length > 0 && results.every((result) => result.status === 'pass');
+  const exitCode = final.exitCode !== 0 ? final.exitCode : hasPassedEvery ? 0 : 1;
+  const isNotExercised = isUpstreamOnly || (final.exitCode === 0 && !hasFailed);
+  const verdict = exitCode === 0 ? 'PASS' : isNotExercised ? 'NOT EXERCISED' : 'FAIL';
+  return { final, results, exitCode, verdict, isUpstreamOnly };
+}
+
+/**
+ * The scenario matrix as a Markdown table: one row for each scenario in `results`, in
+ * `SCENARIO_ORDER`, and one column for each market in `results`. A cell shows FAIL, pass, missing or
+ * not exercised. A `-` marks a scenario and market that `results` has no cell for, such as
+ * `deployment` on the factory, which the full matrix does not hold.
+ */
+export function scenarioMatrix(results) {
+  const rank = (scenario) =>
+    SCENARIO_ORDER.includes(scenario) ? SCENARIO_ORDER.indexOf(scenario) : SCENARIO_ORDER.length;
+  const scenarios = [...new Set(results.map((result) => result.scenario))].sort((a, b) => rank(a) - rank(b));
+  const columns = MARKET_COLUMNS.filter((market) => results.some((result) => result.market === market));
+  const cell = (scenario, market) => {
+    const found = results.filter((result) => result.scenario === scenario && result.market === market);
+    if (found.length === 0) return '-';
+    if (found.some((result) => result.status === 'fail')) return 'FAIL';
+    if (found.every((result) => result.status === 'pass')) return 'pass';
+    if (found.every((result) => result.status === 'missing')) return 'missing';
+    return 'not exercised';
+  };
+  return [
+    `| Scenario | ${columns.join(' | ')} |`,
+    `| --- | ${columns.map(() => '---').join(' | ')} |`,
+    ...scenarios.map((scenario) => `| ${scenario} | ${columns.map((market) => cell(scenario, market)).join(' | ')} |`),
+  ].join('\n');
 }
