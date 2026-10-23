@@ -20,14 +20,14 @@ node scripts/test-wrapped-lending-fork.js --solc-output <path to solc output>
 
 The runner needs `yarn install`, Node 22 and Foundry's `anvil`. The recorded runs used anvil 1.2.3. Set `ANVIL` to anvil's path if it is not on `PATH`.
 
-| Option                                                 | Effect                                                                                                                                            |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--block auto`                                         | The default. Forks the pinned block 26244888 when the upstream serves its state, and a recent block otherwise.                                    |
-| `--block pinned`, `--block recent`, `--block <number>` | Forks that block. A recent block is the latest block less 8.                                                                                      |
-| `--solc-output <path>`                                 | solc's standard-JSON output for the wrappers' build input, for the bytecode comparison. Without it, that comparison is recorded as not exercised. |
-| `--log-dir <path>`                                     | Where `anvil.log`, `jest.log`, `results.json` and `summary.md` go. The default is a new directory under the system's temporary directory.         |
-| `--port <number>`                                      | The fork's local port. The default is a free port.                                                                                                |
-| `--test <pattern>`                                     | Runs only the fork suites whose path matches the pattern.                                                                                         |
+| Option                                                 | Effect                                                                                                                                                                               |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--block auto`                                         | The default. Forks the pinned block 26244888 when the upstream serves its state, and a recent block otherwise.                                                                       |
+| `--block pinned`, `--block recent`, `--block <number>` | Forks that block. A recent block is the latest block less 8.                                                                                                                         |
+| `--solc-output <path>`                                 | solc's standard-JSON output for the wrappers' build input, for the bytecode comparison. Without it, that comparison is recorded as not exercised, so the run cannot pass.            |
+| `--log-dir <path>`                                     | Where `anvil.log`, `jest.log`, `results.json` and `summary.md` go. The default is a new directory under the system's temporary directory.                                            |
+| `--port <number>`                                      | The fork's local port. The default is a free port.                                                                                                                                   |
+| `--test <pattern>`                                     | Runs only the fork suites whose path matches the pattern. The result then names its scope, such as `PASS (scoped by --test: 7 of 64 cells)`, and does not stand for the full matrix. |
 
 ### Upstream RPC
 
@@ -36,19 +36,22 @@ The runner reads the upstream RPC URL from `WRAPPED_FORK_RPC_URL`, a private var
 Only the runner's own process holds the URL:
 
 - anvil reaches the upstream through a proxy that the runner runs on 127.0.0.1. Its arguments, logs, errors and JSON-RPC methods, `anvil_nodeInfo` included, carry only the proxy's local address.
-- The proxy refuses what a web page can send. It refuses any request with an Origin header, any method other than POST, and any content type or body that is not JSON. It also refuses a body over 10 MB and an empty batch. It sends anvil no text of its own errors, which can name the upstream. A public endpoint's answers reach anvil unchanged, and the runner redacts every output.
+- The proxy refuses what a web page can send. It refuses any request with an Origin header, or with a Host header other than its own address, `127.0.0.1:<port>` or `localhost:<port>`. It refuses any method other than POST, and any content type or body that is not JSON. It also refuses a body over 10 MB and an empty batch. It sends anvil no text of its own errors, which can name the upstream. A public endpoint's answers reach anvil unchanged, and the runner redacts every output.
 - The proxy forwards only the reads anvil makes to fork mainnet state: `eth_chainId`, `eth_blockNumber`, `eth_gasPrice`, `eth_getBlockByNumber`, `eth_getBlockByHash`, `eth_getBalance`, `eth_getCode`, `eth_getStorageAt`, `eth_getTransactionCount`, `eth_getTransactionByHash` and `eth_getTransactionReceipt`. It refuses any other method, and any batch that holds one, with 403. So no local process can send a transaction to mainnet through it. It forwards each call it checked, rebuilt from its four JSON-RPC members: `jsonrpc`, `id`, `method` and `params`. A body can name a method twice, or under a key in another case such as `Method`. The rebuilt call still carries only the method that the proxy checked. The summary lists the methods the proxy forwarded, and each refusal by its method or reason.
-- The runner prints no error text of a private upstream's, because an upstream's error text can echo the key in any encoding:
+- The runner keeps a private upstream's text out of its outputs and out of anvil, because an upstream's text can echo the key in any encoding:
   - The runner's own reads name a failure by the method, the HTTP status and a reason, such as `eth_chainId: HTTP 200, a JSON-RPC error with code -32000`. They withhold an error code of more than five digits, because an upstream can echo a numeric key as the code. For a recent block, the latest block number must be a hex number below 2^32, because the runner prints the block it forks.
   - The proxy relays an HTTP error to anvil with its status and no body. It relays a JSON-RPC error with its code, or with -32603 in place of a code of more than five digits, and with only the phrases of anvil's retry rule that its message holds. It relays a bare error, `{ code, message }`, which some upstreams send in place of a response, the same way. Of an error's data, it keeps only anvil's backoff hint, `data.rate.backoff_seconds`, rounded up to whole seconds, and only when it is at most 99,999 s. So anvil retries what it would have retried, after the same wait. anvil 1.2.3 retries an error with code 429 or -32005, or with code -32012 and `credits` in its message. It also retries a message that contains `rate limit`, `rate exceeded`, `too many requests`, `credits limited` or `request limit`, or that is `header not found` or `daily request count exceeded, request rate limited`.
-  - The proxy answers anvil with 502 and no body for an answer that is not JSON or not a JSON-RPC response. It relays every other answer unchanged, so only the redaction covers text inside a result.
+  - The proxy answers anvil with 502 and no body for an answer that is not JSON or not a JSON-RPC response.
+  - anvil prints a result that it cannot parse, so the proxy relays a result only in the shape that its method returns. For `eth_getCode`, that shape is hex data in whole bytes. For a block, a transaction or a receipt, it is null or a record of hex fields, whose names are letters and digits. Each hex field is a hex string, a boolean, null, or an array or record of hex fields. For each other method, the shape is a hex number of at most 64 digits.
+  - The proxy sends each result in a JSON-RPC response of its own, without the upstream's other members. In place of any other result, it sends a JSON-RPC error with code -32603 and no text of the upstream's. It counts that result as a call answered with an error.
   - The summary's first upstream error names only the HTTP status, the error code or the kind of answer.
-- The runner never prints the URL. It redacts the URL from every output it writes, a whole line at a time. It redacts the whole URL, and each part of it that can be a key, both as written and decoded. Such a part is the host or one of its labels, a path segment, the query, a query field or its name or value, or the fragment, with 16 characters or more, digits only included. A shorter part, such as `v2` or `eth`, also occurs in ordinary output, and redacting it corrupts that output.
+- The runner never prints the URL. It redacts the URL from every output it writes, a whole line at a time. It redacts the whole URL, and each part of it that can be a key, both as written and decoded.
+- RPC providers put the key in a path segment or a query field, and such a key can be short, such as a 12-digit number. So the runner takes a path segment, or a query field or its name or value, for a key from 6 characters. A word of letters only, such as `ethereum` or `eth-mainnet`, is the exception. The runner takes any other part for a key from 16 characters, digits only included. Such a part is the host or one of its labels, the query or the fragment. A shorter part, such as `v2`, `eth`, a chain ID or a port, also occurs in ordinary output, and redacting it corrupts that output.
 - The runner redacts each such part in every form an upstream can echo it, in either case. Each character can appear as itself, percent-encoded once or twice, or as a JSON `\u` escape. In JSON, `/`, `"` and `\` can also follow a backslash. A `+` and a space stand for each other, as in a form-encoded query. Where two redacted stretches of text overlap, the runner redacts both whole. It decodes each output stream whole, so a character whose bytes a pipe splits still matches.
 - The tests write their results into a temporary directory that only the user can read. When Jest ends, the runner parses the results, redacts them value by value and writes them to the log directory. So the redaction cannot break the file's JSON, and no unredacted copy stays in the log directory, even after Ctrl-C.
 - The tests inherit only `PATH`, `HOME`, `TMPDIR`, `CI` and `NODE_OPTIONS` from the runner's environment, so no key in that environment reaches them.
 - A run of the deployment suite at `18cfa4e`, with a 26-character fake key in the query of `WRAPPED_FORK_RPC_URL`, found no trace of the key, the query's name or the host in the console output, `anvil.log`, `jest.log`, `results.json` or `summary.md`. anvil's banner showed only the proxy's address.
-- The runner's own tests run it against a stand-in upstream that echoes a fake key: percent-encoded from the query, decoded from the path, in an error to anvil, and in an answer that anvil prints. Neither the console output nor any file in the log directory holds the key in any of eleven forms. The eleven forms are decoded, percent-encoded, percent-encoded in lower case, form-decoded, form-encoded, encoded twice, JSON-escaped, JSON with `\/`, partly encoded, upper case and lower case.
+- The runner's own tests run it against a stand-in upstream that echoes a fake key: percent-encoded from the query, decoded from the path, in an error to anvil, and in a malformed result. One of the fake keys is a 12-digit number in the query. Neither the console output nor any file in the log directory holds the key in any of eleven forms. The eleven forms are decoded, percent-encoded, percent-encoded in lower case, form-decoded, form-encoded, encoded twice, JSON-escaped, JSON with `\/`, partly encoded, upper case and lower case.
 
 Without `WRAPPED_FORK_RPC_URL`, the runner tries these public endpoints in order: `eth.drpc.org`, `mainnet.gateway.tenderly.co`, `eth-mainnet.public.blastapi.io`, `rpc.mevblocker.io` and `ethereum-rpc.publicnode.com`. The first four served state at the pinned block during these runs. `ethereum-rpc.publicnode.com` refuses state outside its recent window. An endpoint serves the pinned block only if its block 26244888 has the hash the registry records, `0x440c51a6…883839`, and a balance read at that block succeeds. Any block that the runner forks must have a 32-byte hash and a hex timestamp, because the runner prints both.
 
@@ -71,6 +74,16 @@ The verdict comes from the last run that ran the suite, or from the last run whe
 
 In both cases the result is `NOT EXERCISED`, with exit code 1. Any other failure is never retried, and it fails the run. Such failures include a configuration error, a fork that reports other metadata than the runner chose, and a failure in the app or a test. When a failed run's upstream failed requests, the summary says so.
 
+The result is `PASS`, with exit code 0, only when the final run exercised the whole matrix:
+
+- Jest passed, and the cell reporter wrote Jest's own result for each test.
+- The run recorded each of the matrix's 64 cells exactly once, and each cell passed.
+- Jest passed the test of each cell.
+
+If Jest passed and no cell failed, a cell that did not pass this way makes the result `NOT EXERCISED`, with exit code 1. Such a cell is one that the suite could not exercise on the fork, or one recorded as a pass whose test Jest did not pass. It can also be a cell that the run did not record, such as one whose test Jest skipped. The summary's matrix marks an unrecorded cell `missing`, and its list gives Jest's status for the test. Without `--solc-output`, the four `source-build` cells are not exercised. A cell that the run recorded twice fails.
+
+A run with `--test` needs only the cells of the suites that it ran, at least one. Its result names its scope, for example `Result: PASS (scoped by --test: 7 of 64 cells)`. Only a run without `--test` checks the full matrix.
+
 ### What the runner does
 
 1. It chooses the upstream endpoint and the fork block, as above.
@@ -80,10 +93,10 @@ In both cases the result is `NOT EXERCISED`, with exit code 1. Any other failure
    - `anvil_metadata` reports the chosen fork block and hash. `anvil_metadata` carries no upstream URL, unlike `anvil_nodeInfo`.
    - The fork's block at that number has the hash that the upstream reported.
 4. It runs Jest with `__tests__/integration/wrappedLendingFork/jest.config.js`, in one process, with the local fork's URL. If anvil exits while Jest runs, the runner stops Jest and the run fails. A reporter, `cellReporter.js`, writes Jest's own result for each test, and the runner fails any matrix cell whose test Jest failed. A scenario can record its cell after Jest failed its test, for example on a timeout.
-5. It prints the environment, the proxy's use of the upstream, the scenario matrix, each exit of the supply-and-exit sequence against its quote, and every failed or unexercised scenario. It writes the same report to `summary.md`.
+5. It prints the environment, the proxy's use of the upstream, the scenario matrix, each exit of the supply-and-exit sequence against its quote, and every failed, unexercised or missing cell. It writes the same report to `summary.md`.
 6. It stops anvil and removes its temporary directories, anvil's working directory and the tests' results directory, on success, on failure, on Ctrl-C and on SIGTERM.
 
-The runner exits with 0 only when Jest passes and no scenario failed. Its summary ends with `Result: PASS`, `FAIL` or `NOT EXERCISED`. The default `yarn test` skips `__tests__/integration/wrappedLendingFork/`, because that suite needs the fork.
+The runner exits with 0 only when Jest passed and every cell of the matrix passed, as the verdict above requires. Its summary ends with `Result: PASS`, `FAIL` or `NOT EXERCISED`, and with the scope of a `--test` run. The default `yarn test` skips `__tests__/integration/wrappedLendingFork/`, because that suite needs the fork.
 
 The suite also refuses connections to other hosts. `forkSetup.ts` replaces the request functions of Node's `http` and `https` modules, which ethers sends its requests through, and `net.Socket`'s `connect`, which every TCP connection goes through. Each throws for any destination but the local fork. `connect` also throws for a connection with a `path`, which is a pipe. It throws for a connection with its own `lookup` too, because a `lookup` can resolve the fork's host name to another address. A test confirms that each of these fails:
 
@@ -97,14 +110,16 @@ The suite also refuses connections to other hosts. `forkSetup.ts` replaces the r
 `yarn test:fork-runner` tests the runner's rules in `scripts/lib/wrapped-fork-runner.js` with Node's test runner, `node:test`. The tests need no fork and no network. Each test that needs an upstream runs a stand-in for it on 127.0.0.1. The end-to-end tests run the runner itself, with `scripts/lib/__tests__/fake-anvil.js` in place of anvil. `yarn test` also runs them, through `__tests__/scripts/wrappedForkRunner.test.ts`. They cover these rules:
 
 - the upstream endpoints, and the redaction of the private URL from text, JSON results and split lines
-- the redaction of a key in each form an upstream can echo it, from the query, the path and a query field without a value
+- the redaction of a key in each form an upstream can echo it, from the query, the path and a query field without a value, and of a short key in a path segment or a query field
 - a private upstream's error text kept from the runner's reads, from anvil and from the summary, with anvil's retry phrases and backoff hint kept, and a bare error relayed as one
+- a private upstream's result relayed to anvil only in the shape that its method returns, and any other result withheld
 - the fork block's hash and timestamp, checked before the runner prints them
 - the proxy's address, its read-only method allowlist, the calls it rebuilds, and each request it refuses
 - each matrix cell held to Jest's own result for its test, a timeout included
 - the retry rule, against each failure that it must not retry
 - a fork that anvil could not start: one retry at the pinned block, then every cell not exercised, with run 1's log kept, and no retry for an error of anvil's own or a fork with other metadata
-- the verdict over one or two runs, and the full matrix against the scenarios that the fork suites declare
+- the verdict over one or two runs, which passes only a run that passed every cell of the matrix, each with a passing Jest test, and a run scoped by `--test`
+- the full matrix against the scenarios that the fork suites declare, and the matrix's table with a missing cell
 
 ### Build the solc output for the bytecode comparison
 
@@ -374,9 +389,14 @@ The unit suites cover the standard flows that need no chain. `yarn test` ran the
 - **Hooks, not screens.** The suite renders the app's hooks, not the panel or the dialogs. The unit suites cover the components (`WrappedSupply`, `WrappedWithdraw`, `WrappedPositionPanel`, `wrappedRouteWiring`).
 - **Fresh state on each run.** Each run fetches state again, because the runner disables anvil's cache. So anvil writes nothing outside the runner's log and temporary directories.
 - **Local processes during a run.** While the suite runs, any process on the machine can call the fork and the proxy on 127.0.0.1. Such a process can change the fork's state, and so a run's results. Through the proxy, it can make only the reads that anvil makes, and they spend the upstream's quota. Neither the fork nor the proxy gives it the upstream URL. On Linux and macOS, a process of the same user can read the runner's environment, which holds the URL. Set `WRAPPED_FORK_RPC_URL` only on a machine you control.
-- **Web pages during a run.** A browser sends an Origin header with each POST, so the proxy refuses every request from a web page. The fork's anvil checks no Host header, so a web page open during a run can reach the fork through DNS rebinding. Such a page can change the fork's state and so a run's results. It cannot read the upstream URL, which anvil does not hold. Run the suite with no untrusted page open.
+- **Web pages during a run.** A browser sends an Origin header with each POST, so the proxy refuses every request from a web page. The proxy also refuses a Host header other than its own address, and a page that rebinds DNS sends its own host name. The fork's anvil checks no Host header, so a web page open during a run can reach the fork through DNS rebinding. Such a page can change the fork's state and so a run's results. It cannot read the upstream URL, which anvil does not hold. Run the suite with no untrusted page open.
 - **A killed runner.** If the runner itself is killed with SIGKILL, anvil keeps running until you stop it, with `pkill -f 'anvil --fork-url http://127.0.0.1'`. It holds no secret, and its upstream, the proxy, stopped with the runner.
-- **What the redaction cannot catch.** The runner redacts each key-like part of a private URL in the forms listed under [Upstream RPC](#upstream-rpc). It does not catch a part of a key, a key shorter than 16 characters, a short host label echoed alone, HTML character references, the Unicode form of a host written in punycode, or a `"` or `\` in a key inside text that JSON escapes twice. A private upstream's error text never reaches an output, and its error code and backoff hint reach one only when each has at most five digits. Its successful answers reach anvil unchanged. anvil prints a result that it cannot parse, so the redaction alone covers text inside a result.
+- **What the redaction cannot catch.** The runner redacts each key-like part of a private URL in the forms listed under [Upstream RPC](#upstream-rpc). A private upstream's error text, and a result without the shape that its method returns, never reach an output or anvil. Its error code and backoff hint reach one only when each has at most five digits. A result with that shape reaches anvil, and the redaction alone covers the digits of a numeric key in its hex values. The redaction does not catch these:
+  - a part of a key
+  - a key of 5 characters or fewer in a path segment or a query field, or a key there of letters only shorter than 16 characters
+  - a key shorter than 16 characters elsewhere in the URL, such as a short host label echoed alone
+  - HTML character references, and the Unicode form of a host written in punycode
+  - a `"` or `\` in a key inside text that JSON escapes twice
 - **Prague rules.** anvil 1.2.3 runs the fork under Prague, the latest hardfork it implements. Its default for a fork was Cancun. Mainnet runs at least Osaka's rules at these blocks, so the fork trails mainnet. Osaka adds the CLZ opcode and a P-256 precompile, reprices MODEXP and caps a transaction's gas at 2^24. The wrappers and Comet use none of the three, and each suite transaction stays far below the cap. A later hardfork can change gas costs, so the recorded gas figures can differ from mainnet's.
 
 ## Findings

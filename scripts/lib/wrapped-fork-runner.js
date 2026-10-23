@@ -1,10 +1,10 @@
 // The rules and the upstream proxy of the wrapped lending fork runner, `scripts/test-wrapped-lending-fork.js`.
 // They live apart from the runner so that its own tests, `yarn test:fork-runner`, can check them without a fork:
 // - the upstream endpoints, and the redaction of the private URL
-// - the proxy that holds the URL, and its read-only method allowlist
+// - the proxy that holds the URL, its read-only method allowlist, and its check of a private upstream's results
 // - each matrix cell held to Jest's own result for its test
 // - the retry rule, for a fork that could not start and for a suite that failed on the upstream
-// - the verdict
+// - the verdict, which needs every cell of the full matrix, and the matrix's table in the summary
 import http from 'http';
 import { StringDecoder } from 'string_decoder';
 
@@ -66,9 +66,20 @@ export const UPSTREAM_METHODS = new Set([
 /**
  * A part of the private URL that can be a key: 16 characters or more, digits only included. A
  * shorter part, such as `v2`, `eth` or a port, also occurs in ordinary text and figures, and a
- * redaction of it corrupts them.
+ * redaction of it corrupts them. A path segment or a query field can be a shorter key (see
+ * `isKeyLikeSegmentOrValue`).
  */
 export const isKeyLike = (part) => part.length >= 16;
+
+/**
+ * A path segment, a query field, or a query field's name or value, that can be a key. RPC providers
+ * put the key in one of these places, and a key there can be short, such as a 12-digit number. So
+ * such a part is key-like from 6 characters, unless it is a word of letters only, such as `ethereum`
+ * or `eth-mainnet`. Ordinary output carries such words, and a redaction of them corrupts it. A part
+ * of at most 5 characters, such as `v2`, `eth` or a chain ID, is too short to be a key.
+ */
+export const isKeyLikeSegmentOrValue = (part) =>
+  isKeyLike(part) || (part.length >= 6 && !/^[A-Za-z]+(?:[-_.][A-Za-z]+)*$/.test(part));
 
 /** `text` with each character that a regular expression reads specially escaped. */
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -112,8 +123,9 @@ function decoded(text) {
 
 /**
  * The parts of a private URL that can each carry a key, both as the URL is written and as the URL
- * parser reads it: the host and each of its labels, each path segment, the query, each query field
- * with its name and value, and the fragment.
+ * parser reads it:
+ * - `segmentsAndFields`: each path segment, and each query field with its name and value
+ * - `otherParts`: the host and each of its labels, the query, and the fragment
  */
 function urlParts(privateUrl, url) {
   // RFC 3986, appendix B: the URL's parts as written, before the parser normalizes them.
@@ -124,31 +136,38 @@ function urlParts(privateUrl, url) {
       const equals = field.indexOf('=');
       return equals === -1 ? [field] : [field, field.slice(0, equals), field.slice(equals + 1)];
     });
-  return [
-    authority,
-    ...authority.split(/[.:@]/),
-    url.host,
-    ...url.hostname.split('.'),
-    ...pathname.split('/'),
-    ...url.pathname.split('/'),
-    query,
-    ...fields(query),
-    ...fields(url.search.slice(1)),
-    ...[...url.searchParams].flat(),
-    fragment,
-    url.hash.slice(1),
-  ];
+  return {
+    segmentsAndFields: [
+      ...pathname.split('/'),
+      ...url.pathname.split('/'),
+      ...fields(query),
+      ...fields(url.search.slice(1)),
+      ...[...url.searchParams].flat(),
+    ],
+    otherParts: [
+      authority,
+      ...authority.split(/[.:@]/),
+      url.host,
+      ...url.hostname.split('.'),
+      query,
+      fragment,
+      url.hash.slice(1),
+    ],
+  };
 }
 
 /**
  * The patterns of the secrets in a private URL: the whole URL, and each key-like part of it, as
- * written and decoded. A part's decoded form is never longer than the part, so the part decides
- * whether it is key-like. Each pattern matches its secret in any mix of the forms that
- * `characterPattern` lists. So an upstream's echo of a key, encoded, decoded or escaped, matches it.
+ * written and decoded. A path segment or a query field is key-like as `isKeyLikeSegmentOrValue`
+ * decides, and any other part as `isKeyLike` decides. The part as written decides, so a part whose
+ * percent-encoding hides a word is key-like in both forms. Each pattern matches its secret in any
+ * mix of the forms that `characterPattern` lists. So an upstream's echo of a key, encoded, decoded or
+ * escaped, matches it.
  */
 function secretPatternsOf(privateUrl, url) {
-  const parts = urlParts(privateUrl, url).flatMap((part) =>
-    isKeyLike(part) ? [part, decoded(part)].filter((form) => form !== undefined) : []
+  const { segmentsAndFields, otherParts } = urlParts(privateUrl, url);
+  const parts = [...segmentsAndFields.filter(isKeyLikeSegmentOrValue), ...otherParts.filter(isKeyLike)].flatMap(
+    (part) => [part, decoded(part)].filter((form) => form !== undefined)
   );
   return [...new Set([privateUrl, url.href, ...parts])].map((secret) => [...secret].map(characterPattern).join(''));
 }
@@ -403,21 +422,91 @@ function withheldError(error) {
   };
 }
 
+/** Whether `value` is a hex number of at most 256 bits, as anvil reads a block number, a balance or a storage word. */
+const isQuantity = (value) => typeof value === 'string' && /^0x[0-9a-fA-F]{1,64}$/.test(value);
+
+/** Whether `value` is hex data in whole bytes, as anvil reads an account's code. */
+const isData = (value) => typeof value === 'string' && /^0x(?:[0-9a-fA-F]{2})*$/.test(value);
+
+/**
+ * The deepest that a field of a block, a transaction or a receipt can be. A block's transaction's
+ * access list's storage key is at depth 6.
+ */
+const MAX_FIELD_DEPTH = 8;
+
+/**
+ * Whether `value`, at `depth` inside a block, a transaction or a receipt, is a hex field: a hex
+ * string, a boolean, null, or an array or a record of hex fields.
+ */
+function isHexField(value, depth) {
+  if (depth > MAX_FIELD_DEPTH) return false;
+  if (typeof value === 'string') return /^0x[0-9a-fA-F]*$/.test(value);
+  if (typeof value === 'boolean' || value === null) return true;
+  if (Array.isArray(value)) return value.every((item) => isHexField(item, depth + 1));
+  return isHexRecord(value, depth);
+}
+
+/**
+ * Whether `value` is a record of hex fields, as anvil reads a block, a transaction or a receipt: an
+ * object whose field names are letters and digits, and whose fields are `isHexField`.
+ */
+function isHexRecord(value, depth = 0) {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.entries(value).every(
+      ([name, field]) => /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name) && isHexField(field, depth + 1)
+    )
+  );
+}
+
+/** Whether `value` is null, as for a block or a transaction that the upstream does not know, or a record of hex fields. */
+const isRecordOrNull = (value) => value === null || isHexRecord(value);
+
+/**
+ * The shape of the result of each method in `UPSTREAM_METHODS`, as anvil reads it. anvil prints a
+ * result that it cannot parse, in its log and in its errors to the tests. A private upstream can
+ * answer with text in place of a result, such as an error message that echoes the key.
+ */
+const RESULT_SHAPES = {
+  eth_chainId: isQuantity,
+  eth_blockNumber: isQuantity,
+  eth_gasPrice: isQuantity,
+  eth_getBalance: isQuantity,
+  eth_getTransactionCount: isQuantity,
+  eth_getStorageAt: isQuantity,
+  eth_getCode: isData,
+  eth_getBlockByNumber: isRecordOrNull,
+  eth_getBlockByHash: isRecordOrNull,
+  eth_getTransactionByHash: isRecordOrNull,
+  eth_getTransactionReceipt: isRecordOrNull,
+};
+
+/** Whether `result` has the shape that `RESULT_SHAPES` gives for `method`. */
+const hasResultShape = (method, result) => Object.hasOwn(RESULT_SHAPES, method) && RESULT_SHAPES[method](result);
+
+/** The error that anvil gets in place of a private upstream's result that has the wrong shape. */
+const MALFORMED_RESULT = { code: -32603, message: "the private upstream's malformed result is withheld" };
+
 /**
  * What the proxy relays to anvil for the upstream's answer, and what it records: an HTTP error as a
  * failure, and each call answered with an error, a bare error included. For a public endpoint, the
  * answer goes to anvil unchanged, and the record keeps each error's message, as `printable` gives it.
  *
- * For a private endpoint, no error text of the upstream's reaches anvil. anvil prints the upstream's
+ * For a private endpoint, no text of the upstream's reaches anvil. anvil prints the upstream's
  * answer in its log and in its errors to the tests, and an upstream can echo the key there in any
- * encoding. So the proxy changes an answer that carries an error, and the record names only a
- * status, an error code or a kind of answer:
+ * encoding. So the proxy rebuilds each answer, and the record names only a status, an error code or
+ * a kind of answer:
  * - an HTTP error goes on with its status and no body
  * - each JSON-RPC error, and a bare error, goes on as `withheldError` gives it
+ * - each result goes on alone, in its own JSON-RPC response, when it has the shape that its call's
+ *   method returns (see `RESULT_SHAPES`). `methodOf` gives the method of a response's call. Any
+ *   other result goes on as `MALFORMED_RESULT`, and the record counts it as a call answered with an
+ *   error.
  * - an answer that is not JSON, or not a JSON-RPC response, becomes HTTP 502 with no body
- * - any other answer goes on unchanged, so only the redaction covers text inside a result
  */
-function relayed(status, contentType, answer, { isPrivate, printable }) {
+function relayed(status, contentType, answer, { isPrivate, printable, methodOf }) {
   const withheld = (error) => ({ status: 502, contentType: 'text/plain', body: Buffer.alloc(0), errors: [error] });
   if (status >= 400) {
     return isPrivate
@@ -450,14 +539,19 @@ function relayed(status, contentType, answer, { isPrivate, printable }) {
     return { status, contentType, body: answer, errors };
   }
   if (entries.length === 0 || !entries.every(isResponse)) return withheld('an answer that is not a JSON-RPC response');
-  const errors = entries.filter(hasError).map((entry) => describedError(entry.error));
-  if (errors.length === 0) return { status, contentType, body: answer, errors };
-  const relayedEntries = entries.map((entry) =>
-    hasError(entry)
-      ? // An id above 2^53 loses digits when parsed, as a code does (see `errorCode`).
-        { jsonrpc: '2.0', id: Number.isSafeInteger(entry.id) ? entry.id : null, error: withheldError(entry.error) }
-      : entry
-  );
+  const errors = [];
+  const relayedEntries = entries.map((entry) => {
+    // An id above 2^53 loses digits when parsed, as a code does (see `errorCode`).
+    const id = Number.isSafeInteger(entry.id) ? entry.id : null;
+    if (hasError(entry)) {
+      errors.push(describedError(entry.error));
+      return { jsonrpc: '2.0', id, error: withheldError(entry.error) };
+    }
+    const method = methodOf(entry);
+    if (hasResultShape(method, entry.result)) return { jsonrpc: '2.0', id, result: entry.result };
+    errors.push(`a malformed ${method ?? 'JSON-RPC'} result`);
+    return { jsonrpc: '2.0', id, error: MALFORMED_RESULT };
+  });
   const body = Buffer.from(JSON.stringify(Array.isArray(parsed) ? relayedEntries : relayedEntries[0]));
   return { status, contentType: 'application/json', body, errors };
 }
@@ -466,6 +560,8 @@ function relayed(status, contentType, answer, { isPrivate, printable }) {
  * Forwards anvil's JSON-RPC requests to the upstream `endpoint`, so that only this process holds the
  * upstream URL. It listens on 127.0.0.1, and it refuses these requests:
  * - a request with an Origin header, which a web page sends
+ * - a Host header other than the proxy's own address, 127.0.0.1 or localhost at its port. A request
+ *   through DNS rebinding carries another host's name.
  * - a method other than POST
  * - a content type other than JSON, or a body that is not JSON
  * - a body over 10 MB
@@ -501,6 +597,10 @@ export function startUpstreamProxy(endpoint, { printable, timeoutMs = 40_000 }) 
       response.end();
     };
     if (request.headers.origin !== undefined) return refuse(403, '<an Origin header>');
+    const { port } = server.address();
+    if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(String(request.headers.host).toLowerCase())) {
+      return refuse(403, "<a Host header other than the proxy's address>");
+    }
     if (request.method !== 'POST') return refuse(405, '<a method other than POST>');
     if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) {
       return refuse(415, '<a content type other than JSON>');
@@ -546,7 +646,15 @@ export function startUpstreamProxy(endpoint, { printable, timeoutMs = 40_000 }) 
         });
         const answer = Buffer.from(await upstream.arrayBuffer());
         const contentType = upstream.headers.get('content-type') ?? 'application/json';
-        const relay = relayed(upstream.status, contentType, answer, { isPrivate: endpoint.isPrivate, printable });
+        // The method of a response's call: the one call, or in a batch, the call with the response's id.
+        const methodOf = Array.isArray(parsed)
+          ? (entry) => checked.find(({ id }) => id === entry.id)?.method
+          : () => checked[0].method;
+        const relay = relayed(upstream.status, contentType, answer, {
+          isPrivate: endpoint.isPrivate,
+          printable,
+          methodOf,
+        });
         if (relay.failure !== undefined) {
           stats.failures += 1;
           stats.firstError ??= relay.failure;
@@ -582,6 +690,9 @@ export function cellOf(title) {
   return market === undefined ? undefined : { scenario: title.slice(0, -(market.length + 3)), market };
 }
 
+/** The test title of a matrix cell, `<scenario> (<market>)`, which also identifies the cell. */
+const titleOf = ({ scenario, market }) => `${scenario} (${market})`;
+
 /**
  * The cells, each held to Jest's own result for its test. A scenario records its cell when its body
  * settles, which can come after Jest failed the test, for example on a timeout. Such a cell fails.
@@ -594,7 +705,7 @@ export function heldToJest(results, jest) {
     (jest?.tests ?? []).filter((test) => test.status === 'failed').map((test) => [test.title, test.failure])
   );
   const held = results.map((result) => {
-    const failure = failures.get(`${result.scenario} (${result.market})`);
+    const failure = failures.get(titleOf(result));
     if (failure === undefined || result.status === 'fail') return result;
     return {
       ...result,
@@ -602,7 +713,7 @@ export function heldToJest(results, jest) {
       reason: `Jest failed this test after its scenario recorded ${result.status}: ${failure}`,
     };
   });
-  const recorded = new Set(results.map((result) => `${result.scenario} (${result.market})`));
+  const recorded = new Set(results.map(titleOf));
   for (const [title, failure] of failures) {
     const cell = cellOf(title);
     if (cell === undefined || recorded.has(title)) continue;
@@ -739,21 +850,73 @@ export const MATRIX_CELLS = SCENARIO_ORDER.flatMap((scenario) =>
 export const notExercisedCells = (reason) => MATRIX_CELLS.map((cell) => ({ ...cell, status: 'not-exercised', reason }));
 
 /**
+ * The cells that the verdict judges: `results`, as `heldToJest` gives them, checked against the full
+ * matrix and against `jest`, the cell reporter's record of Jest's own result for each test:
+ * - A cell that the run recorded more than once fails, because each cell needs exactly one test.
+ * - A cell recorded as a pass stays one only when Jest passed its test. Otherwise it was not
+ *   exercised, as when Jest skipped the test or the reporter wrote no results.
+ * - Each cell of the full matrix that the run did not record is missing.
+ *
+ * For a run scoped by --test (`isScoped`), the full matrix is the cells that the run recorded and
+ * the cells that Jest reported a test for.
+ */
+function judgedCells(results, jest, isScoped) {
+  const jestStatuses = new Map((jest?.tests ?? []).map((test) => [test.title, test.status]));
+  const recorded = new Map();
+  for (const result of results) recorded.set(titleOf(result), [...(recorded.get(titleOf(result)) ?? []), result]);
+  const judged = [...recorded].map(([title, records]) => {
+    if (records.length > 1) {
+      return (
+        records.find((result) => result.status === 'fail') ?? {
+          ...records[0],
+          status: 'fail',
+          reason: `the run recorded this cell ${records.length} times, and each cell needs exactly one test`,
+        }
+      );
+    }
+    const [result] = records;
+    if (result.status !== 'pass' || jestStatuses.get(title) === 'passed') return result;
+    const reason =
+      jest === undefined
+        ? "its scenario recorded a pass, but Jest's reporter wrote no result for its test"
+        : jestStatuses.has(title)
+        ? `its scenario recorded a pass, but Jest reported this test as ${jestStatuses.get(title)}`
+        : 'its scenario recorded a pass, but Jest reported no test with this title';
+    return { ...result, status: 'not-exercised', reason };
+  });
+  const expected = isScoped ? [...jestStatuses.keys()].map(cellOf).filter((cell) => cell !== undefined) : MATRIX_CELLS;
+  const missing = new Map(expected.filter((cell) => !recorded.has(titleOf(cell))).map((cell) => [titleOf(cell), cell]));
+  for (const [title, cell] of missing) {
+    const reason =
+      jest === undefined
+        ? "the run recorded no cell, and Jest's reporter wrote no results"
+        : jestStatuses.has(title)
+        ? `Jest reported this test as ${jestStatuses.get(title)}, and its scenario recorded no cell`
+        : 'the run has no test for this cell';
+    judged.push({ ...cell, status: 'missing', reason });
+  }
+  return judged;
+}
+
+/**
  * The verdict on `runs`. It comes from the final run: the last run that ran the suite, or the last
  * run when none did.
  * - When no run started the fork, every cell was not exercised, and the result is NOT EXERCISED.
  * - A cell that failed only because the upstream failed to serve the fork's state was not
  *   exercised, and the result is NOT EXERCISED.
- * - The result is PASS only when Jest passed, and the run recorded cells, none of which failed.
- *   Otherwise it is FAIL.
+ * - The result is PASS only when Jest passed and every cell of the full matrix passed, as
+ *   `judgedCells` judges the cells. A run scoped by --test (`isScoped`) needs only the cells that it
+ *   ran, and at least one.
+ * - Otherwise the result is FAIL when a cell failed or Jest failed. It is NOT EXERCISED when Jest
+ *   passed, no cell failed, and a cell is missing or was not exercised.
  */
-export function finalVerdict(runs) {
+export function finalVerdict(runs, { isScoped = false } = {}) {
   const final = runs.findLast((run) => run.startupFailure === undefined) ?? runs[runs.length - 1];
   if (final.startupFailure !== undefined) {
-    return { final, results: final.results, exitCode: 1, verdict: 'NOT EXERCISED' };
+    return { final, results: final.results, exitCode: 1, verdict: 'NOT EXERCISED', isUpstreamOnly: false };
   }
   const isUpstreamOnly = failedOnUpstreamOnly(final);
-  const results = isUpstreamOnly
+  const held = isUpstreamOnly
     ? final.results.map((result) =>
         result.status === 'fail'
           ? {
@@ -764,7 +927,37 @@ export function finalVerdict(runs) {
           : result
       )
     : final.results;
-  const hasFailed = results.length === 0 || results.some((result) => result.status === 'fail');
-  const exitCode = final.exitCode === 0 && hasFailed ? 1 : final.exitCode;
-  return { final, results, exitCode, verdict: exitCode === 0 ? 'PASS' : isUpstreamOnly ? 'NOT EXERCISED' : 'FAIL' };
+  const results = judgedCells(held, final.jest, isScoped);
+  const hasFailed = results.some((result) => result.status === 'fail');
+  const hasPassedEvery = results.length > 0 && results.every((result) => result.status === 'pass');
+  const exitCode = final.exitCode !== 0 ? final.exitCode : hasPassedEvery ? 0 : 1;
+  const isNotExercised = isUpstreamOnly || (final.exitCode === 0 && !hasFailed);
+  const verdict = exitCode === 0 ? 'PASS' : isNotExercised ? 'NOT EXERCISED' : 'FAIL';
+  return { final, results, exitCode, verdict, isUpstreamOnly };
+}
+
+/**
+ * The scenario matrix as a Markdown table: one row for each scenario in `results`, in
+ * `SCENARIO_ORDER`, and one column for each market in `results`. A cell shows FAIL, pass, missing or
+ * not exercised. A `-` marks a scenario and market that `results` has no cell for, such as
+ * `deployment` on the factory, which the full matrix does not hold.
+ */
+export function scenarioMatrix(results) {
+  const rank = (scenario) =>
+    SCENARIO_ORDER.includes(scenario) ? SCENARIO_ORDER.indexOf(scenario) : SCENARIO_ORDER.length;
+  const scenarios = [...new Set(results.map((result) => result.scenario))].sort((a, b) => rank(a) - rank(b));
+  const columns = MARKET_COLUMNS.filter((market) => results.some((result) => result.market === market));
+  const cell = (scenario, market) => {
+    const found = results.filter((result) => result.scenario === scenario && result.market === market);
+    if (found.length === 0) return '-';
+    if (found.some((result) => result.status === 'fail')) return 'FAIL';
+    if (found.every((result) => result.status === 'pass')) return 'pass';
+    if (found.every((result) => result.status === 'missing')) return 'missing';
+    return 'not exercised';
+  };
+  return [
+    `| Scenario | ${columns.join(' | ')} |`,
+    `| --- | ${columns.map(() => '---').join(' | ')} |`,
+    ...scenarios.map((scenario) => `| ${scenario} | ${columns.map((market) => cell(scenario, market)).join(' | ')} |`),
+  ].join('\n');
 }

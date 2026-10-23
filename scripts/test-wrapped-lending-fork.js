@@ -7,11 +7,13 @@
 //                                        forks a recent block, the latest less 8.
 //   --solc-output <path>                 solc's standard-JSON output for the wrappers' build input,
 //                                        for the deployed bytecode comparison. Without it, that check
-//                                        is recorded as not exercised.
+//                                        is recorded as not exercised, so the run cannot pass.
 //   --log-dir <path>                     Where the logs, results and summary go. Default: a new
 //                                        directory under the system's temporary directory.
 //   --port <number>                      The fork's local port. Default: a port anvil chooses.
-//   --test <pattern>                     Runs only the fork suites whose path matches.
+//   --test <pattern>                     Runs only the fork suites whose path matches. The result
+//                                        then names its scope, such as `PASS (scoped by --test: 7
+//                                        of 64 cells)`, and does not stand for the full matrix.
 //
 // The upstream RPC comes from WRAPPED_FORK_RPC_URL, a private variable for an archive-capable
 // mainnet RPC. Never use a VITE_ variable for it, because Vite embeds those in the public bundle.
@@ -24,9 +26,11 @@
 // re-encoded, JSON-escaped or in another case. An upstream's error text can echo the key, so the
 // runner prints no error text of a private upstream's. It names a failure by its HTTP status and a
 // reason, and the proxy passes anvil a private upstream's error codes of at most five digits
-// without their text. A successful answer reaches anvil unchanged, so only the redaction covers text
-// inside a result. The tests get none of the runner's environment except the variables they need, so
-// they never see the URL.
+// without their text. anvil prints a result that it cannot parse, so the proxy passes anvil a
+// private upstream's result only when it has the shape that its method returns, such as a hex
+// number or a block of hex fields. It passes an error without text in place of any other result.
+// The tests get none of the runner's environment except the variables they need, so they never see
+// the URL.
 //
 // The fork listens on 127.0.0.1 only, sends no CORS headers, and is stopped on exit, on Ctrl-C and
 // on any error. The tests sign with impersonated accounts on the fork. Nothing is signed with a real
@@ -47,6 +51,11 @@
 // fails. When no run started the fork, every cell of the matrix is recorded as not exercised. A
 // configuration error, a fork with other metadata, and a failure in the app or a test are never
 // retried.
+//
+// The run passes only when Jest passed, and each of the matrix's 64 cells passed once, with a
+// passing Jest test. If no cell failed, a cell that is missing, that Jest skipped or that was not
+// exercised makes the result NOT EXERCISED. The summary's matrix marks each missing cell. A run
+// scoped by --test needs only the cells that it ran.
 //
 // Three risks remain. In none of them do the fork or the proxy give out the URL, and no real funds
 // are at stake:
@@ -75,13 +84,13 @@ import {
   isBlockHeader,
   isBlockNumber,
   isRetryable,
-  MARKET_COLUMNS,
+  MATRIX_CELLS,
   notExercisedCells,
   PINNED_BLOCK,
   PINNED_HASH,
   retryFork,
   rpc,
-  SCENARIO_ORDER,
+  scenarioMatrix,
   startUpstreamProxy,
   upstreamEndpoints,
 } from './lib/wrapped-fork-runner.js';
@@ -418,26 +427,6 @@ function readRedacted(file, missing) {
   }
 }
 
-/** The scenario matrix as a Markdown table: one row per scenario, one column per market. */
-function matrix(results) {
-  const rank = (scenario) =>
-    SCENARIO_ORDER.includes(scenario) ? SCENARIO_ORDER.indexOf(scenario) : SCENARIO_ORDER.length;
-  const scenarios = [...new Set(results.map((result) => result.scenario))].sort((a, b) => rank(a) - rank(b));
-  const columns = MARKET_COLUMNS.filter((market) => results.some((result) => result.market === market));
-  const cell = (scenario, market) => {
-    const found = results.filter((result) => result.scenario === scenario && result.market === market);
-    if (found.length === 0) return '-';
-    if (found.some((result) => result.status === 'fail')) return 'FAIL';
-    if (found.every((result) => result.status === 'pass')) return 'pass';
-    return 'not exercised';
-  };
-  return [
-    `| Scenario | ${columns.join(' | ')} |`,
-    `| --- | ${columns.map(() => '---').join(' | ')} |`,
-    ...scenarios.map((scenario) => `| ${scenario} | ${columns.map((market) => cell(scenario, market)).join(' | ')} |`),
-  ].join('\n');
-}
-
 /**
  * The exits of each market's supply-and-exit sequence against their receipts, in raw base units and
  * shares: the partial, one-slot, held-open and full exits. Each other signed exit records no
@@ -672,9 +661,29 @@ async function main() {
     }
   }
 
-  const { final, results, exitCode, verdict } = finalVerdict(runs);
-  const notExercised = results.filter((result) => result.status === 'not-exercised');
+  const isScoped = options.test !== undefined;
+  const { final, results, exitCode, verdict, isUpstreamOnly } = finalVerdict(runs, { isScoped });
+  const notExercised = results.filter((result) => result.status === 'not-exercised' || result.status === 'missing');
   const failed = results.filter((result) => result.status === 'fail');
+  const passed = results.filter((result) => result.status === 'pass');
+  const recorded = results.filter((result) => result.status !== 'missing');
+  // A run scoped by --test needs only the cells that it ran, so its result names its scope. It never
+  // stands for the full matrix.
+  const scope = isScoped
+    ? ` (scoped by --test: ${final.startupFailure === undefined ? results.length : 0} of ${MATRIX_CELLS.length} cells)`
+    : '';
+  // The summary's reason for a NOT EXERCISED result when the suite ran.
+  const incomplete = [
+    `${passed.length} of the ${results.length} cells passed. The run passes only when every cell of the matrix passed, each with a passing Jest test.`,
+    ...(options.solcOutput === undefined && notExercised.some((result) => result.scenario === 'source-build')
+      ? ['Without --solc-output, the source-build cells are not exercised.']
+      : []),
+    ...(final.jest === undefined
+      ? [
+          "Jest's reporter wrote no results, so the runner could hold no cell to Jest's own result. Check the reporters in the suite's jest.config.js.",
+        ]
+      : []),
+  ].join(' ');
   // The final run's results file says what the summary says.
   fs.writeFileSync(path.join(logDir, final.logFiles.results), JSON.stringify(results, null, 2));
   const { stats } = final;
@@ -685,7 +694,7 @@ async function main() {
     ...runs.filter((run) => run !== final).flatMap(runSection),
     ...(retryProblem !== undefined ? [`The runner could not start a second run: ${retryProblem}`, ''] : []),
     '## Scenario matrix',
-    matrix(results),
+    scenarioMatrix(results),
     '',
     "## The supply-and-exit sequence's exits against their quotes (raw base units, shares in share units)",
     deltas(results),
@@ -694,7 +703,10 @@ async function main() {
     ...failed.map((result) => `- ${result.market}, ${result.scenario}: ${result.reason}`),
     '',
     `## Not exercised (${notExercised.length})`,
-    ...notExercised.map((result) => `- ${result.market}, ${result.scenario}: ${result.reason}`),
+    ...notExercised.map(
+      (result) =>
+        `- ${result.market}, ${result.scenario}${result.status === 'missing' ? ' (missing)' : ''}: ${result.reason}`
+    ),
     '',
     ...(final.anvilExited
       ? [
@@ -702,10 +714,10 @@ async function main() {
           '',
         ]
       : []),
-    ...(verdict === 'FAIL' && results.length === 0 && !final.anvilExited
+    ...(verdict === 'FAIL' && recorded.length === 0 && !final.anvilExited
       ? ['The run recorded no matrix cell. Check the --test pattern, and see the Jest log.', '']
       : []),
-    ...(verdict === 'FAIL' && failed.length === 0 && results.length > 0 && !final.anvilExited
+    ...(verdict === 'FAIL' && failed.length === 0 && recorded.length > 0 && !final.anvilExited
       ? [
           'No matrix cell failed, but the run did. A test outside the matrix failed, such as the network guard, or an error came after a cell passed. See the Jest log.',
           '',
@@ -720,13 +732,20 @@ async function main() {
           '',
         ]
       : []),
-    ...(verdict === 'NOT EXERCISED'
+    ...(verdict === 'NOT EXERCISED' && (final.startupFailure !== undefined || isUpstreamOnly)
       ? [
           "The upstream failed to serve the fork's state, so the cells that needed it were not exercised. Use an archive RPC in WRAPPED_FORK_RPC_URL, or run the suite again.",
           '',
         ]
       : []),
-    `Result: ${verdict}. The fork was stopped, and the runner's temporary directories were removed.`,
+    ...(verdict === 'NOT EXERCISED' && final.startupFailure === undefined ? [incomplete, ''] : []),
+    ...(isScoped && final.startupFailure === undefined
+      ? [
+          `This run was scoped by --test to ${results.length} of the ${MATRIX_CELLS.length} cells. Only a run without --test checks the full matrix.`,
+          '',
+        ]
+      : []),
+    `Result: ${verdict}${scope}. The fork was stopped, and the runner's temporary directories were removed.`,
   ].join('\n');
   fs.writeFileSync(path.join(logDir, 'summary.md'), `${redaction.redact(report)}\n`);
   console.log(`\n${redaction.redact(report)}`);
