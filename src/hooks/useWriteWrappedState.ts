@@ -722,12 +722,13 @@ export type PrepareWrappedWithdrawalInput = {
  * names what the user can ask for instead: an amount the position and the market can pay, or the
  * full exit. The amount is never lowered here.
  *
- * Before the signature, the step reads again. It stops when the share balance, the pause, the
- * cash the shares pay or the market's cash no longer allows the reviewed exit, as
- * `recheckWithdrawal` decides. It then simulates the exit from the account at that block. A check
- * that passes gives the reviewed shares quoted at that block, so the dialog and the transaction
- * list show the cash the exit pays there. The method has no minimum amount and no deadline, and
- * the simulation enforces neither: the wrapper computes the cash when the transaction runs.
+ * Before the signature, the step reads again. It stops when that read is of an older block than
+ * the review's. It also stops when the share balance, the pause, the cash the shares pay or the
+ * market's cash no longer allows the reviewed exit, as `recheckWithdrawal` decides. It then
+ * simulates the exit from the account at that block. A check that passes gives the reviewed shares
+ * quoted at that block, so the dialog and the transaction list show the cash the exit pays there.
+ * The method has no minimum amount and no deadline, and the simulation enforces neither: the
+ * wrapper computes the cash when the transaction runs.
  */
 export async function prepareWrappedWithdrawal({
   identity,
@@ -774,6 +775,16 @@ export async function prepareWrappedWithdrawal({
           error instanceof WrappedReviewError
             ? `${error.message} Review the withdrawal again in a moment.`
             : `Your wrapped position could not be read again (${describeCallFailure(error)}).`,
+      };
+    }
+    // A read of an older block than the review's cannot show what changed after the review, such as
+    // a donation to the wrapper. A block number that is not a number fails this comparison too.
+    const isReviewBlockOrLater = latest.blockNumber >= read.blockNumber;
+    if (!isReviewBlockOrLater) {
+      return {
+        ok: false,
+        message:
+          "This market's network answered from an older block than your review. Review the withdrawal again in a moment.",
       };
     }
     const recheck = recheckWithdrawal(quote, latest.snapshot);

@@ -2114,6 +2114,30 @@ describe('useWriteWrappedState', () => {
       expect(walletRequests(wallet)).toEqual([]);
     });
 
+    it("stops a partial exit, and simulates nothing, when its check reads a block before the review's", async () => {
+      const chain = exitChainFor(USDC_MARKET);
+      const { result, wallet, events } = renderWrapped(chain);
+      // The market's provider can serve the block before the review.
+      chain.history.set(99, ledgerOf(chain));
+      await startWithdraw(result, { kind: 'partial', cash: 100_000_000n });
+      expect(result.current.action.state).toMatchObject({ draft: { withdrawal: { blockNumber: 100 } } });
+      events.length = 0;
+
+      // The wrapper's assets double in block 101, and the provider then answers from block 99.
+      changeAssets(chain, 2_001_000_000n);
+      chain.providerLag = 2;
+      await confirmStep(result);
+
+      expect(stepsOf(result.current.action.state)[0]).toMatchObject({
+        status: 'blocked',
+        reason: 'step-check-failed',
+        message: expect.stringMatching(/answered from an older block than your review\. Review the withdrawal again/),
+      });
+      expect(events).not.toContain('simulate');
+      expect(walletRequests(wallet)).toEqual([]);
+      expect(chain.balance).toBe(10_000_000_000n);
+    });
+
     it('signs the whole balance of a full exit when its cash doubles, and describes the cash it now pays', async () => {
       const chain = exitChainFor(USDC_MARKET);
       const { result, wallet } = renderWrapped(chain);
@@ -2503,7 +2527,7 @@ describe('useWriteWrappedState', () => {
 
     it('refreshes shares and wallet balances after the confirmed exit, from a block that shows it', async () => {
       const chain = exitChainFor(USDC_MARKET, { balance: 5_000_000n });
-      const { result } = renderWrapped(chain);
+      const { result, wallet } = renderWrapped(chain);
       await waitFor(() =>
         expect(result.current.position.state).toMatchObject({
           status: 'loaded',
@@ -2512,8 +2536,15 @@ describe('useWriteWrappedState', () => {
       );
       await startWithdraw(result, { kind: 'partial', cash: 100_000_000n });
 
-      // The market's provider trails the wallet's node by a block, so it does not show the exit yet.
-      chain.providerLag = 1;
+      // Once the exit is mined, the market's provider trails the wallet's node by a block, so it does
+      // not show the exit yet. The check before the signature still reads the block of the review.
+      const send = wallet.sendUncheckedTransaction.getMockImplementation();
+      if (send === undefined) throw new Error('the wallet must send');
+      wallet.sendUncheckedTransaction.mockImplementationOnce(async (request) => {
+        const hash = await send(request);
+        chain.providerLag = 1;
+        return hash;
+      });
       await confirmStep(result);
       expect(result.current.action.state.phase).toBe('complete');
       await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));

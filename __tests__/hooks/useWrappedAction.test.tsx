@@ -1533,6 +1533,49 @@ describe('useWrappedAction', () => {
         expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
       }
     );
+
+    it.each<[string, number]>([
+      ['block 100, before the review at block 101', 100],
+      ['NaN as its block', Number.NaN],
+    ])('signs nothing for a withdrawal whose check gives %s', async (_name, blockNumber) => {
+      const { manager } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const check = async () => ({ ok: true as const, rechecked: { ...RECHECKED, blockNumber } });
+      act(() => {
+        result.current.start('withdraw', async () => ({
+          amount: SHARES,
+          steps: [{ ...EXIT, check }],
+          withdrawal: reviewOf(SHARES),
+        }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      act(() => result.current.confirm());
+      await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+      expect(result.current.state).toMatchObject({ steps: [{ status: 'blocked', reason: 'stale-recheck' }] });
+      expect((result.current.state as { rechecked?: unknown }).rechecked).toBeUndefined();
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('signs a withdrawal whose check read the block of its review', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      const rechecked: RecheckedWithdrawal = { ...RECHECKED, blockNumber: reviewOf(SHARES).blockNumber };
+      act(() => {
+        result.current.start('withdraw', async () => ({
+          amount: SHARES,
+          steps: [{ ...EXIT, check: async () => ({ ok: true as const, rechecked }) }],
+          withdrawal: reviewOf(SHARES),
+        }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      expect(result.current.state).toMatchObject({ phase: 'signing', rechecked });
+      expect(requests[0].request.description).toBe(RECHECKED.description);
+    });
   });
 });
 

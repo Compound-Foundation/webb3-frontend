@@ -318,7 +318,9 @@ export type WrappedStepProblem =
   /** A withdrawal has no quote, or its quote is for other shares than its call burns. */
   | 'quote-mismatch'
   /** A withdrawal's exit step has no check, or its check passed without the exit it found. */
-  | 'missing-recheck';
+  | 'missing-recheck'
+  /** A withdrawal's check read an older block than its review. */
+  | 'stale-recheck';
 
 const BASE_TOKEN_CALLS = new Interface(['function approve(address spender, uint256 amount)']);
 const WRAPPER_CALLS = new Interface([
@@ -406,7 +408,9 @@ export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem
 /**
  * Checks a withdrawal as its check found it against the draft. It must quote the draft's kind of
  * exit for the shares the draft's call burns. Otherwise the dialog and the transaction list
- * describe other shares than the wallet signs.
+ * describe other shares than the wallet signs. It must also be read at the review's block or a
+ * later one. A read of an older block cannot show what changed after the review, such as a
+ * donation to the wrapper.
  */
 export function checkRecheckedWithdrawal(
   draft: WrappedActionDraft,
@@ -418,7 +422,9 @@ export function checkRecheckedWithdrawal(
     reviewed !== undefined &&
     rechecked.quote.kind === reviewed.quote.kind &&
     rechecked.quote.shares === draft.amount;
-  return isSameExit ? undefined : 'quote-mismatch';
+  if (!isSameExit) return 'quote-mismatch';
+  // A block number that is not a number, such as NaN, fails this comparison too.
+  return rechecked.blockNumber >= reviewed.blockNumber ? undefined : 'stale-recheck';
 }
 
 export type MarketRestriction = 'supply-paused' | 'withdraw-paused' | 'restriction-unknown';
