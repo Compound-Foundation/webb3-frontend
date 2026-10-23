@@ -35,6 +35,7 @@ import {
   retryFork,
   rpc,
   SCENARIO_ORDER,
+  scenarioMatrix,
   startUpstreamProxy,
   upstreamEndpoints,
   UPSTREAM_METHODS,
@@ -1167,17 +1168,59 @@ describe('the matrix', () => {
     assert.equal(cells.length, 64);
     assert.ok(cells.every((cell) => cell.status === 'not-exercised' && cell.reason === 'the upstream failed'));
   });
+
+  test("prints every cell in the matrix's table, a missing cell as missing, and - where the matrix has no cell", () => {
+    const statusOf = { 'dust (USDC)': 'pass', 'pause (USDT)': 'fail', 'accrued-value (USDC)': 'not-exercised' };
+    const results = MATRIX_CELLS.map((cell) => ({
+      ...cell,
+      status: statusOf[`${cell.scenario} (${cell.market})`] ?? 'missing',
+    }));
+    const table = scenarioMatrix(results).split('\n');
+    assert.deepEqual(table.slice(0, 2), [
+      '| Scenario | USDC | USDT | institutional USDC | factory |',
+      '| --- | --- | --- | --- | --- |',
+    ]);
+    assert.deepEqual(
+      table.slice(2).map((row) => row.split(' | ')[0].slice(2)),
+      SCENARIO_ORDER
+    );
+    assert.ok(table.includes('| deployment | missing | missing | missing | - |'));
+    assert.ok(table.includes('| source-build | missing | missing | missing | missing |'));
+    assert.ok(table.includes('| dust | pass | missing | missing | - |'));
+    assert.ok(table.includes('| pause | missing | FAIL | missing | - |'));
+    assert.ok(table.includes('| accrued-value | not exercised | missing | missing | - |'));
+  });
 });
 
 describe('the verdict', () => {
   const cell = (scenario, market, status, reason) => ({ scenario, market, status, ...(reason ? { reason } : {}) });
+  const titleOf = ({ scenario, market }) => `${scenario} (${market})`;
   const fetchError = 'failed to get account for 0x1: HTTP error 429';
-  const suiteRun = (number, exitCode, results, stats = { failures: 0, errorAnswers: 0 }) => ({
+  /** Every cell of the full matrix, passed, with `changes` merged into the cells that they name by title. */
+  const fullMatrix = (changes = {}) =>
+    MATRIX_CELLS.map((each) => ({ ...each, status: 'pass', ...changes[titleOf(each)] }));
+  /** The cell reporter's file for `results`: one test for each cell, failed if the cell failed, and passed otherwise. */
+  const jestReportFor = (results) => ({
+    numFailedTests: results.filter((result) => result.status === 'fail').length,
+    numRuntimeErrorTestSuites: 0,
+    tests: results.map((result) => ({
+      title: titleOf(result),
+      status: result.status === 'fail' ? 'failed' : 'passed',
+      failure: '',
+    })),
+  });
+  const suiteRun = (
+    number,
+    exitCode,
+    results,
+    stats = { failures: 0, errorAnswers: 0 },
+    jest = jestReportFor(results)
+  ) => ({
     number,
     exitCode,
     anvilExited: false,
     results,
-    jest: { numFailedTests: results.filter((result) => result.status === 'fail').length, numRuntimeErrorTestSuites: 0 },
+    jest,
     stats,
   });
   const startupRun = (number) => ({
@@ -1189,25 +1232,120 @@ describe('the verdict', () => {
     stats: { failures: 1, errorAnswers: 0 },
   });
 
-  test('passes only a run whose Jest passed, which recorded cells, and none of which failed', () => {
-    assert.equal(finalVerdict([suiteRun(1, 0, [cell('dust', 'USDC', 'pass')])]).verdict, 'PASS');
+  test('passes only a run whose Jest passed, and which passed every cell of the matrix once', () => {
+    const passed = finalVerdict([suiteRun(1, 0, fullMatrix())]);
+    assert.deepEqual([passed.verdict, passed.exitCode, passed.results.length], ['PASS', 0, 64]);
     // A cell that recorded a pass after Jest failed its test fails, so Jest's exit code alone is not enough.
     const timedOut = finalVerdict([suiteRun(1, 0, [cell('dust', 'USDC', 'fail', 'Jest failed this test after ...')])]);
     assert.deepEqual([timedOut.verdict, timedOut.exitCode], ['FAIL', 1]);
     const empty = finalVerdict([suiteRun(1, 0, [])]);
-    assert.deepEqual([empty.verdict, empty.exitCode], ['FAIL', 1]);
+    assert.deepEqual([empty.verdict, empty.exitCode, empty.results.length], ['NOT EXERCISED', 1, 64]);
+    assert.ok(empty.results.every((result) => result.status === 'missing'));
+  });
+
+  test('is NOT EXERCISED when the four source-build cells were not exercised, as without --solc-output', () => {
+    // The review's first case: `notExercised` records each cell, and Jest reports a todo under another title.
+    const reason = 'no solc output of the pinned build input was given (--solc-output)';
+    const sourceBuild = MATRIX_CELLS.filter((each) => each.scenario === 'source-build').map(titleOf);
+    const results = fullMatrix(
+      Object.fromEntries(sourceBuild.map((title) => [title, { status: 'not-exercised', reason }]))
+    );
+    const jest = jestReportFor(results);
+    for (const test of jest.tests.filter((each) => sourceBuild.includes(each.title))) {
+      Object.assign(test, { title: `${test.title}: not exercised: ${reason}`, status: 'todo' });
+    }
+    const { verdict, exitCode, results: judged } = finalVerdict([suiteRun(1, 0, results, undefined, jest)]);
+    assert.deepEqual([verdict, exitCode], ['NOT EXERCISED', 1]);
+    assert.deepEqual(judged.filter((result) => result.status !== 'pass').map(titleOf), sourceBuild);
+  });
+
+  test('is NOT EXERCISED when Jest skipped a matrix test, and lists its cell as missing', () => {
+    // The review's second case: `test.skip` on one matrix test, whose scenario then records no cell.
+    const [skipped, ...ran] = fullMatrix();
+    const jest = jestReportFor(ran);
+    jest.tests.unshift({ title: titleOf(skipped), status: 'pending', failure: '' });
+    const { verdict, exitCode, results } = finalVerdict([suiteRun(1, 0, ran, undefined, jest)]);
+    assert.deepEqual([verdict, exitCode, results.length], ['NOT EXERCISED', 1, 64]);
+    assert.deepEqual(
+      results.find((result) => titleOf(result) === titleOf(skipped)),
+      cell(
+        skipped.scenario,
+        skipped.market,
+        'missing',
+        'Jest reported this test as pending, and its scenario recorded no cell'
+      )
+    );
+  });
+
+  test('is NOT EXERCISED when the cell reporter wrote no results, so Jest confirms no cell', () => {
+    // The review's third case: the suite's Jest config without `cellReporter.js`.
+    const { verdict, exitCode, results } = finalVerdict([{ ...suiteRun(1, 0, fullMatrix()), jest: undefined }]);
+    assert.deepEqual([verdict, exitCode, results.length], ['NOT EXERCISED', 1, 64]);
+    for (const result of results) {
+      assert.equal(result.status, 'not-exercised');
+      assert.equal(result.reason, "its scenario recorded a pass, but Jest's reporter wrote no result for its test");
+    }
+  });
+
+  test('is NOT EXERCISED when the run recorded a single passing cell, and lists the 63 others as missing', () => {
+    // The review's fourth case.
+    const { verdict, exitCode, results } = finalVerdict([suiteRun(1, 0, [cell('dust', 'USDC', 'pass')])]);
+    assert.deepEqual([verdict, exitCode, results.length], ['NOT EXERCISED', 1, 64]);
+    const missing = results.filter((result) => result.status === 'missing');
+    assert.equal(missing.length, 63);
+    assert.ok(missing.every((result) => result.reason === 'the run has no test for this cell'));
+  });
+
+  test('is NOT EXERCISED when Jest did not pass the test of a cell that recorded a pass', () => {
+    const jest = jestReportFor(fullMatrix());
+    jest.tests[0].status = 'pending';
+    jest.tests.pop();
+    const { verdict, exitCode, results } = finalVerdict([suiteRun(1, 0, fullMatrix(), undefined, jest)]);
+    assert.deepEqual([verdict, exitCode], ['NOT EXERCISED', 1]);
+    assert.deepEqual(
+      results.filter((result) => result.status !== 'pass').map((result) => result.reason),
+      [
+        'its scenario recorded a pass, but Jest reported this test as pending',
+        'its scenario recorded a pass, but Jest reported no test with this title',
+      ]
+    );
+  });
+
+  test('fails a cell that the run recorded twice', () => {
+    const { verdict, exitCode, results } = finalVerdict([
+      suiteRun(1, 0, [...fullMatrix(), cell('dust', 'USDC', 'pass')]),
+    ]);
+    assert.deepEqual([verdict, exitCode, results.length], ['FAIL', 1, 64]);
+    assert.deepEqual(
+      results.filter((result) => titleOf(result) === 'dust (USDC)'),
+      [cell('dust', 'USDC', 'fail', 'the run recorded this cell 2 times, and each cell needs exactly one test')]
+    );
+  });
+
+  test('judges a run scoped by --test by the cells that Jest ran', () => {
+    const inScope = fullMatrix().filter((result) => ['deployment', 'source-build'].includes(result.scenario));
+    const passed = finalVerdict([suiteRun(1, 0, inScope)], { isScoped: true });
+    assert.deepEqual([passed.verdict, passed.exitCode, passed.results.length], ['PASS', 0, 7]);
+    // A test that Jest skipped inside the scope still keeps the run from passing.
+    const [skipped, ...ran] = inScope;
+    const jest = jestReportFor(ran);
+    jest.tests.push({ title: titleOf(skipped), status: 'pending', failure: '' });
+    const withSkipped = finalVerdict([suiteRun(1, 0, ran, undefined, jest)], { isScoped: true });
+    assert.deepEqual([withSkipped.verdict, withSkipped.exitCode, withSkipped.results.length], ['NOT EXERCISED', 1, 7]);
+    const none = finalVerdict([suiteRun(1, 0, [])], { isScoped: true });
+    assert.deepEqual([none.verdict, none.exitCode, none.results.length], ['NOT EXERCISED', 1, 0]);
   });
 
   test("records a run's cells that failed only on the upstream as not exercised", () => {
-    const run = suiteRun(1, 1, [cell('dust', 'USDC', 'pass'), cell('pause', 'USDT', 'fail', fetchError)], {
+    const run = suiteRun(1, 1, fullMatrix({ 'pause (USDT)': { status: 'fail', reason: fetchError } }), {
       failures: 2,
       errorAnswers: 0,
     });
     const { verdict, exitCode, results } = finalVerdict([run]);
     assert.deepEqual([verdict, exitCode], ['NOT EXERCISED', 1]);
     assert.deepEqual(
-      results.map((result) => result.status),
-      ['pass', 'not-exercised']
+      results.filter((result) => result.status !== 'pass').map((result) => [titleOf(result), result.status]),
+      [['pause (USDT)', 'not-exercised']]
     );
   });
 
@@ -1221,7 +1359,7 @@ describe('the verdict', () => {
   });
 
   test('keeps the last run that ran the suite when the retry could not start the fork', () => {
-    const run1 = suiteRun(1, 1, [cell('dust', 'USDC', 'pass'), cell('pause', 'USDT', 'fail', fetchError)], {
+    const run1 = suiteRun(1, 1, fullMatrix({ 'pause (USDT)': { status: 'fail', reason: fetchError } }), {
       failures: 1,
       errorAnswers: 0,
     });
@@ -1229,13 +1367,13 @@ describe('the verdict', () => {
     assert.equal(final, run1);
     assert.equal(verdict, 'NOT EXERCISED');
     assert.deepEqual(
-      results.map((result) => result.status),
-      ['pass', 'not-exercised']
+      results.filter((result) => result.status !== 'pass').map((result) => [titleOf(result), result.status]),
+      [['pause (USDT)', 'not-exercised']]
     );
   });
 
   test('judges a retry that started after a start-up failure by its own cells', () => {
-    assert.equal(finalVerdict([startupRun(1), suiteRun(2, 0, [cell('dust', 'USDC', 'pass')])]).verdict, 'PASS');
+    assert.equal(finalVerdict([startupRun(1), suiteRun(2, 0, fullMatrix())]).verdict, 'PASS');
     const failed = finalVerdict([startupRun(1), suiteRun(2, 1, [cell('dust', 'USDC', 'fail', 'execution reverted')])]);
     assert.deepEqual([failed.verdict, failed.exitCode], ['FAIL', 1]);
   });

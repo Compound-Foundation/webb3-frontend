@@ -38,7 +38,8 @@ function serialize(measurements: Measurements): ScenarioResult['measurements'] {
  * A Jest test that is also a cell of the matrix. The cell passes when the test passes, and fails
  * with the test's error otherwise. The test still fails or passes as usual. A scenario that throws
  * `NotExercisedOnThisFork` passes as a test, and its cell is recorded as not exercised. The runner
- * fails any cell whose test Jest failed, whatever the cell records.
+ * fails any cell whose test Jest failed, whatever the cell records. It counts a pass only when Jest
+ * passed the test, and the run passes only when every cell of the matrix passed.
  */
 export function scenario(name: string, market: string, run: (measurements: Measurements) => Promise<void>) {
   test(`${name} (${market})`, async () => {
@@ -69,7 +70,10 @@ export function scenario(name: string, market: string, run: (measurements: Measu
   });
 }
 
-/** A cell the suite does not exercise, with the reason. It is recorded, never silently skipped. */
+/**
+ * A cell the suite does not exercise, with the reason. It is recorded, never silently skipped, and
+ * it keeps the run from passing.
+ */
 export function notExercised(name: string, market: string, reason: string) {
   test.todo(`${name} (${market}): not exercised: ${reason}`);
   append({ scenario: name, market, status: 'not-exercised', reason });
