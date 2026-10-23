@@ -76,6 +76,15 @@ The suite also refuses connections to other hosts. `forkSetup.ts` replaces the r
 - a pipe
 - a connection to the fork's port with its own `lookup`
 
+### The runner's own tests
+
+`yarn test:fork-runner` tests the runner's rules in `scripts/lib/wrapped-fork-runner.js` with Node's test runner, `node:test`. The tests need no fork and no network. Each test that needs an upstream runs a stand-in for it on 127.0.0.1. `yarn test` also runs them, through `__tests__/scripts/wrappedForkRunner.test.ts`. They cover these rules:
+
+- the upstream endpoints, and the redaction of the private URL from text, JSON results and split lines
+- the proxy's address, its read-only method allowlist, the calls it rebuilds, and each request it refuses
+- each matrix cell held to Jest's own result for its test, a timeout included
+- the retry rule, against each failure that it must not retry
+
 ### Build the solc output for the bytecode comparison
 
 The wrappers and the factory were deployed from the Hardhat build input committed in `Compound-Foundation/comet-erc4626` at `1152de2b3942df189817ff03213177061455fb1d`:

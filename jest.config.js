@@ -35,10 +35,12 @@ export default {
   // .claude/ holds Claude Code worktrees (checkouts of other branches) whose test files must not run here.
   // The wrapped lending fork suite needs a local mainnet fork, so only its own runner starts it:
   // `node scripts/test-wrapped-lending-fork.js`.
+  // scripts/ holds Node test runner files, which Jest cannot load. `__tests__/scripts/` runs them.
   testPathIgnorePatterns: [
     '<rootDir>/__tests__/mocks/',
     '<rootDir>/.claude/',
     '<rootDir>/__tests__/integration/wrappedLendingFork/',
+    '<rootDir>/scripts/',
   ],
   moduleNameMapper: {
     '\\.(scss|css)$': 'identity-obj-proxy', // Mock SCSS imports for CSS Modules (if you use them)
