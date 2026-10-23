@@ -66,11 +66,11 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     return app.result.current.extra.comet[1] as ProtocolAndAccountState;
   }
 
-  /** Waits until the dashboard's Comet state shows the chain's wallet balance and ETH collateral. */
-  async function freshCometState(app: WrappedApp<DirectHooks>) {
+  /** Waits until the dashboard's Comet state shows the chain's wallet balance and ETH collateral for `holder`. */
+  async function freshCometState(app: WrappedApp<DirectHooks>, holder = account) {
     const [wallet, collateral] = await Promise.all([
-      readBigInt(market.baseTokenAddress, ERC20, 'balanceOf', [account]),
-      readBigInt(market.cometAddress, COMET, 'collateralBalanceOf', [account, WETH]),
+      readBigInt(market.baseTokenAddress, ERC20, 'balanceOf', [holder]),
+      readBigInt(market.cometAddress, COMET, 'collateralBalanceOf', [holder, WETH]),
     ]);
     await waitFor(
       () => {
@@ -353,6 +353,71 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
           collateralAfterWithdraw: chainAfterRepay.collateral,
         });
         expect(chainAfterRepay).toMatchObject({ principal: 0n, debt: 0n, collateral: 0n });
+      } finally {
+        app.unmount();
+        await anvil.unfreezeTime();
+      }
+    })
+  );
+  scenario('standard-route-lending', label, (measured) =>
+    onSnapshot(async () => {
+      // Another wallet on the same market lends directly to Comet through the standard route.
+      const lender = forkAccount('standard lender', forkMarket);
+      await fundedAccount(market, lender, units(10_000));
+      await anvil.freezeTime();
+      const app = await renderWrappedApp<DirectHooks>(
+        { market, symbol, account: lender, cometAddress: market.cometAddress, connectorId: 'io.metamask' },
+        ({ manager, web3 }) => ({
+          comet: useCometState(web3, marketState, manager.transactions, NO_REWARDS),
+          writeComet: useWriteCometState(web3, manager.addTransaction),
+        })
+      );
+      try {
+        measured.route = app.result.current.session.route.kind;
+        expect(measured.route).toBe('standard');
+        await cometState(app);
+        await standardWrite(app, ({ writeComet }) =>
+          writeComet.approve(market.cometAddress, market.baseTokenAddress, `Approve ${symbol}`, 0)
+        );
+        await standardWrite(app, ({ writeComet }) =>
+          writeComet.allowOperator(marketData, marketData.bulkerAddress, 'Allow the Bulker', 0)
+        );
+        let state = await freshCometState(app, lender);
+        const supply: Action = [ActionType.Supply, state.baseAsset, units(1_000)];
+        const live = {
+          route: app.result.current.session.route,
+          account: lender,
+          selectedMarket: identity,
+          comet: { market: identity, account: lender, state: app.result.current.extra.comet },
+        };
+        measured.directSupplyRefused = isSubmissionRefused(live, identity, [supply]);
+        expect(measured.directSupplyRefused).toBe(false);
+        await standardWrite(app, ({ writeComet }) =>
+          writeComet.invokeBulker(loadedMarket, [supply], state.baseAsset, state.collateralAssets, 'Supply', 0)
+        );
+        const supplied = await readBigInt(market.cometAddress, COMET, 'balanceOf', [lender]);
+        state = await freshCometState(app, lender);
+        Object.assign(measured, { suppliedOnChain: supplied, dashboardBaseBalance: state.baseAsset.balance });
+        // Comet credits up to 2 base units less than it supplies.
+        expect(units(1_000) - supplied).toBeGreaterThanOrEqual(0n);
+        expect(units(1_000) - supplied).toBeLessThanOrEqual(2n);
+        expect(state.baseAsset.balance).toBe(supplied);
+
+        await standardWrite(app, ({ writeComet }) =>
+          writeComet.invokeBulker(
+            loadedMarket,
+            [[ActionType.Withdraw, state.baseAsset, MAX_UINT256]],
+            state.baseAsset,
+            state.collateralAssets,
+            'Withdraw everything',
+            0
+          )
+        );
+        const left = await readBigInt(market.cometAddress, COMET, 'balanceOf', [lender]);
+        const wallet = await readBigInt(market.baseTokenAddress, ERC20, 'balanceOf', [lender]);
+        Object.assign(measured, { suppliedAfterWithdraw: left, walletAfterWithdraw: wallet });
+        expect(left).toBe(0n);
+        expect(units(10_000) - wallet).toBeLessThanOrEqual(2n);
       } finally {
         app.unmount();
         await anvil.unfreezeTime();
