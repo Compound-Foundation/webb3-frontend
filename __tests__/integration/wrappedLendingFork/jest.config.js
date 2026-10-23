@@ -11,6 +11,8 @@ export default {
   // No msw server: every request goes to the local fork, and `forkSetup.ts` refuses any other target.
   setupFilesAfterEnv: ['<rootDir>/setup.jest.ts', '<rootDir>/__tests__/integration/wrappedLendingFork/forkSetup.ts'],
   testTimeout: 600_000,
+  // The runner holds each matrix cell to Jest's own result, which this reporter writes.
+  reporters: ['default', '<rootDir>/__tests__/integration/wrappedLendingFork/cellReporter.js'],
   // One fork, one chain: suites must not run at the same time, even when Jest is run directly.
   maxWorkers: 1,
 };

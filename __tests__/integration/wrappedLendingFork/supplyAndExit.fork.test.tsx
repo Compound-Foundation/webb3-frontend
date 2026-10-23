@@ -195,7 +195,22 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     expect(effects.after.allowance).toBe(0n);
   });
 
+  /**
+   * Comet's supply rate at the latest block. At a rate of 0, no interest accrues, so a scenario about
+   * interest is recorded as not exercised.
+   */
+  async function supplyRateForInterest() {
+    const utilization = await readBigInt(market.cometAddress, COMET, 'getUtilization');
+    const supplyRate = await readBigInt(market.cometAddress, COMET, 'getSupplyRate', [utilization]);
+    if (supplyRate === 0n) {
+      const block = await anvil.latestBlock();
+      throw new NotExercisedOnThisFork(`Comet's supply rate is 0 at block ${block.number}, so no interest accrues.`);
+    }
+    return supplyRate;
+  }
+
   scenario('accrued-value', label, async (measured) => {
+    await supplyRateForInterest();
     const before = await app.refreshPosition();
     const startBlock = await anvil.latestBlock();
     await anvil.increaseTime(THIRTY_DAYS);
@@ -312,15 +327,8 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
    * review, the check's quote at the confirmation's block and the step.
    */
   async function confirmAfter(requested: bigint, secondsFor: (secondsToBound: number) => number) {
-    // The review reads the same block as these reads, because no block is mined between them.
-    const utilization = await readBigInt(market.cometAddress, COMET, 'getUtilization');
-    const supplyRate = await readBigInt(market.cometAddress, COMET, 'getSupplyRate', [utilization]);
-    if (supplyRate === 0n) {
-      const block = await anvil.latestBlock();
-      throw new NotExercisedOnThisFork(
-        `Comet's supply rate is 0 at block ${block.number}, so interest cannot raise the payout.`
-      );
-    }
+    // The review reads the same block as this read, because no block is mined between them.
+    const supplyRate = await supplyRateForInterest();
     expect(await app.startWithdraw({ kind: 'partial', cash: requested })).toBeUndefined();
     const review = app.draft().withdrawal;
     if (review === undefined) throw new Error('The withdrawal draft has no quote.');

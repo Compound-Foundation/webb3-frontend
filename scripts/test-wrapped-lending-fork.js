@@ -103,7 +103,6 @@ const UPSTREAM_METHODS = new Set([
   'eth_getTransactionCount',
   'eth_getTransactionByHash',
   'eth_getTransactionReceipt',
-  'eth_getLogs',
 ]);
 
 function parseArgs(argv) {
@@ -308,7 +307,8 @@ function errorsIn(answer) {
  * - a body that is not JSON
  * - a request, or a batch, that calls a method outside `UPSTREAM_METHODS`
  *
- * It never forwards an error's text, which can name the upstream URL. It counts the methods it
+ * It sends anvil no text of its own errors, which can name the upstream URL. The upstream's answers
+ * reach anvil unchanged, and the runner redacts every output. It counts the methods it
  * forwards, the methods it refuses, the requests that the upstream failed and the calls it answered
  * with an error. It keeps the first such error, for the summary.
  */
@@ -337,14 +337,13 @@ function startUpstreamProxy(upstreamUrl) {
       else chunks.push(chunk);
     });
     request.on('end', async () => {
-      const body = Buffer.concat(chunks);
-      let calls;
+      let parsed;
       try {
-        const parsed = JSON.parse(body.toString('utf8'));
-        calls = Array.isArray(parsed) ? parsed : [parsed];
+        parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       } catch {
         return refuse(400);
       }
+      const calls = Array.isArray(parsed) ? parsed : [parsed];
       const methods = calls.map((call) => methodName(call?.method));
       const refused = methods.filter((method) => !UPSTREAM_METHODS.has(method));
       if (methods.length === 0 || refused.length > 0) {
@@ -357,7 +356,9 @@ function startUpstreamProxy(upstreamUrl) {
         const upstream = await fetch(upstreamUrl, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body,
+          // The calls the proxy checked, serialized again. A raw body can name a method twice, and
+          // an upstream that reads the first name runs a method that the check never saw.
+          body: JSON.stringify(parsed),
           signal: AbortSignal.timeout(60_000),
         });
         const answer = Buffer.from(await upstream.arrayBuffer());
@@ -524,7 +525,7 @@ const INHERITED_VARIABLES = ['PATH', 'HOME', 'TMPDIR', 'CI', 'NODE_OPTIONS'];
  * Runs the fork suite. If anvil exits while the suite runs, the runner stops the suite and the run
  * fails. Whatever answers on the port afterwards is not the fork that the runner verified.
  */
-function runJest(options, fork, target, resultsPath, log) {
+function runJest(options, fork, target, files, log) {
   const env = {
     ...Object.fromEntries(
       INHERITED_VARIABLES.filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]])
@@ -534,7 +535,8 @@ function runJest(options, fork, target, resultsPath, log) {
     WRAPPED_FORK_BLOCK: String(target.number),
     WRAPPED_FORK_BLOCK_HASH: target.hash,
     WRAPPED_FORK_MODE: target.mode,
-    WRAPPED_FORK_RESULTS: resultsPath,
+    WRAPPED_FORK_RESULTS: files.results,
+    WRAPPED_FORK_JEST_RESULTS: files.jestReport,
     WRAPPED_FORK_SOLC_OUTPUT: options.solcOutput ?? '',
   };
   const args = [path.join(ROOT, 'node_modules/jest/bin/jest.js'), '--config', JEST_CONFIG, '--runInBand'];
@@ -569,29 +571,35 @@ function runJest(options, fork, target, resultsPath, log) {
 }
 
 /**
- * The suite's results, with each string redacted in the file as well. The tests write failure
- * messages into the file, and an upstream error can fill a message.
+ * The JSON file at `file`, with each string in it redacted, or `missing` when there is no file.
+ * The tests write failure messages into their files, and an upstream error can fill a message.
  */
-function readResults(resultsPath) {
-  if (!fs.existsSync(resultsPath)) return [];
-  const text = fs.readFileSync(resultsPath, 'utf8');
-  let results;
+function readRedacted(file, missing) {
+  if (!fs.existsSync(file)) return missing;
   try {
-    results = redactStrings(JSON.parse(text));
+    return redactStrings(JSON.parse(fs.readFileSync(file, 'utf8')));
   } catch {
-    fs.writeFileSync(resultsPath, redact(text));
-    throw new Error(`${resultsPath} is not valid JSON, so the run has no results.`);
+    throw new Error('The suite wrote a results file that is not valid JSON, so the run has no results.');
   }
-  fs.writeFileSync(resultsPath, JSON.stringify(results, null, 2));
-  return results;
 }
 
-/** The number of tests that Jest failed, from its summary line in `jestLogPath`, or undefined without one. */
-function failedTestCount(jestLogPath) {
-  const summary = /^Tests:\s+(.*)$/m.exec(fs.readFileSync(jestLogPath, 'utf8'));
-  if (summary === null) return undefined;
-  const failed = /(\d+) failed/.exec(summary[1]);
-  return failed === null ? 0 : Number(failed[1]);
+/**
+ * The cells, each held to Jest's own result for its test. A scenario records its cell when its body
+ * settles, which can come after Jest failed the test, for example on a timeout. Such a cell fails.
+ */
+function heldToJest(results, jest) {
+  const failures = new Map(
+    (jest?.tests ?? []).filter((test) => test.status === 'failed').map((test) => [test.title, test.failure])
+  );
+  return results.map((result) => {
+    const failure = failures.get(`${result.scenario} (${result.market})`);
+    if (failure === undefined || result.status === 'fail') return result;
+    return {
+      ...result,
+      status: 'fail',
+      reason: `Jest failed this test after its scenario recorded ${result.status}: ${failure}`,
+    };
+  });
 }
 
 /**
@@ -604,7 +612,9 @@ function failedOnUpstreamOnly(run) {
   return (
     run.exitCode !== 0 &&
     failed.length > 0 &&
-    failed.length === run.failedTests &&
+    run.jest !== undefined &&
+    run.jest.numRuntimeErrorTestSuites === 0 &&
+    failed.length === run.jest.numFailedTests &&
     run.stats.failures + run.stats.errorAnswers > 0 &&
     failed.every((result) => FORK_FETCH_ERROR.test(result.reason ?? '') && !CHAIN_REFUSAL.test(result.reason ?? ''))
   );
@@ -721,12 +731,20 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
   const { endpoint, target } = choice;
   const suffix = number === 1 ? '' : `-${number}`;
   const files = { anvil: `anvil${suffix}.log`, jest: `jest${suffix}.log`, results: `results${suffix}.json` };
+  fs.rmSync(path.join(logDir, files.results), { force: true });
+  // The tests write their results into a directory that only this user can read. The runner writes
+  // them to the log directory, redacted, when Jest ends. So no unredacted file stays there, even
+  // after Ctrl-C.
+  const privateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-lending-fork-results-'));
+  temporaryDirectories.add(privateDirectory);
+  const written = {
+    results: path.join(privateDirectory, 'results.json'),
+    jestReport: path.join(privateDirectory, 'jest-results.json'),
+  };
   const proxy = await startUpstreamProxy(endpoint.url);
   servers.add(proxy.server);
   const anvilLog = fs.createWriteStream(path.join(logDir, files.anvil));
   const jestLog = fs.createWriteStream(path.join(logDir, files.jest));
-  const resultsPath = path.join(logDir, files.results);
-  fs.rmSync(resultsPath, { force: true });
 
   let exitCode = 1;
   let fork;
@@ -756,23 +774,17 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
     console.log(header);
     const { clientVersion } = await verifyFork(fork, target);
     console.log(`  verified:      ${clientVersion} on 127.0.0.1, chain ID 1, fork block and hash match the upstream\n`);
-    exitCode = await runJest(options, fork, target, resultsPath, jestLog);
+    exitCode = await runJest(options, fork, target, written, jestLog);
   } finally {
     if (fork !== undefined) await stopped(fork.child);
     await Promise.all([anvilLog, jestLog].map((log) => new Promise((resolve) => log.end(resolve))));
     proxy.server.close();
     servers.delete(proxy.server);
   }
-  return {
-    endpoint,
-    target,
-    header,
-    exitCode,
-    files,
-    stats: proxy.stats,
-    results: readResults(resultsPath),
-    failedTests: failedTestCount(path.join(logDir, files.jest)),
-  };
+  const jest = readRedacted(written.jestReport, undefined);
+  const results = heldToJest(readRedacted(written.results, []), jest);
+  fs.writeFileSync(path.join(logDir, files.results), JSON.stringify(results, null, 2));
+  return { endpoint, target, header, exitCode, files, jest, results, stats: proxy.stats };
 }
 
 async function main() {
@@ -881,7 +893,7 @@ async function main() {
           '',
         ]
       : []),
-    `Result: ${verdict}. The fork was stopped and its temporary directory removed.`,
+    `Result: ${verdict}. The fork was stopped, and the runner's temporary directories were removed.`,
   ].join('\n');
   fs.writeFileSync(path.join(logDir, 'summary.md'), `${redact(report)}\n`);
   console.log(`\n${redact(report)}`);
