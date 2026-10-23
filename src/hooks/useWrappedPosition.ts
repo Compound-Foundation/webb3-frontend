@@ -53,7 +53,8 @@ type StoredState = { key: string; state: WrappedPositionState };
  * route only. Each read belongs to the route key it started under. The key covers the market,
  * the wrapper, the connector, the account, the chain and the connection status. A result that
  * arrives after the key changed is dropped. A new key shows as loading until its own read
- * finishes, so one wallet's position never appears under another.
+ * finishes, so one wallet's position never appears under another. A return to an earlier key
+ * counts as a new key, so the key's earlier position does not reappear.
  */
 export function useWrappedPosition({
   route,
@@ -125,9 +126,12 @@ export function useWrappedPosition({
     );
   };
 
-  // A new key, provider or retry makes any read in flight obsolete, so it starts over.
+  // A new key, provider or retry makes any read in flight obsolete, so it starts over. The effect
+  // also clears the stored position. Otherwise a return to an earlier key shows that key's old
+  // position until the new read finishes.
   useEffect(() => {
     isReading.current = false;
+    setStored(undefined);
     startRead.current();
     return () => {
       requestId.current++;
