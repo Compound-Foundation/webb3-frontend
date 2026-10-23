@@ -485,6 +485,23 @@ describe('WrappedWithdraw', () => {
       expect(onReview).not.toHaveBeenCalled();
     });
 
+    it.each(['0', '0.0', '00', '.0', '0.000000'])('says why it refuses %p, an amount of zero', (value) => {
+      const onReview = renderPanel();
+
+      fireEvent.click(withdrawButton());
+      fireEvent.change(amountInput(), { target: { value } });
+
+      expect(screen.getByText('Enter an amount greater than 0')).toBeInTheDocument();
+      expect(amountInput()).toHaveAttribute('aria-invalid', 'true');
+      expect(reviewButton()).toBeDisabled();
+      fireEvent.click(reviewButton());
+      expect(onReview).not.toHaveBeenCalled();
+
+      fireEvent.change(amountInput(), { target: { value: '' } });
+      expect(screen.queryByText('Enter an amount greater than 0')).not.toBeInTheDocument();
+      expect(amountInput()).toHaveAttribute('aria-invalid', 'false');
+    });
+
     it.each<[string, PanelSetup, RegExp]>([
       [
         'withdrawals are paused',

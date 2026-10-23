@@ -199,19 +199,19 @@ const WrappedSupplyForm = ({
 };
 
 /**
- * What the withdrawal form says about a choice the position or the market cannot pay now. It gives
- * the most they can pay, and the full exit when that can pay. Undefined for an empty amount.
+ * What the withdrawal form says about an amount of zero, or about a choice the position or the
+ * market cannot pay now. It gives the most they can pay, and the full exit when that can pay.
  */
 function revisionText(
   plan: Extract<WithdrawalPlan, { status: 'needs-revision' }>,
   request: WithdrawalRequest,
   snapshot: WithdrawalSnapshot,
   formatAmount: (value: bigint) => string
-): string | undefined {
+): string {
   const { limits } = plan;
   switch (plan.reason) {
     case 'no-amount':
-      return undefined;
+      return 'Enter an amount greater than 0';
     case 'no-shares':
       return 'You hold no wrapped shares to withdraw.';
     case 'paused':
