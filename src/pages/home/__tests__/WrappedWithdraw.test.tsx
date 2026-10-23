@@ -20,6 +20,7 @@ import { getBlockExplorerUrl } from '@helpers/urls';
 import {
   WRAPPED_ACTION,
   WrappedActionDraft,
+  WrappedActionType,
   WrappedBlockReason,
   WrappedStep,
   wrappedActionIdentity,
@@ -525,6 +526,18 @@ describe('WrappedWithdraw', () => {
       expect(screen.queryByRole('textbox', { name: /amount of usdc to withdraw/i })).not.toBeInTheDocument();
     });
 
+    it("gives the withdraw control the lifecycle's reason for withdrawals, not for supplies", () => {
+      const action = {
+        ...controller(),
+        blockedReason: (type: WrappedActionType): WrappedBlockReason | undefined =>
+          type === 'withdraw' ? 'action-in-progress' : undefined,
+      };
+      render(homeElement(lendingWith(action), cometState(BASE_ASSET)));
+
+      expect(withdrawButton()).toBeDisabled();
+      expect(screen.getByTestId('wrapped-withdraw-message')).toHaveTextContent(/already in review/i);
+    });
+
     it('starts the review from Home through the wrapped withdrawal, never the standard queue or a direct withdraw', () => {
       const lending = lendingWith(controller());
       const queue = actionQueue();
@@ -699,6 +712,24 @@ describe('WrappedWithdraw', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
       expect(action.discard).toHaveBeenCalledTimes(2);
       expect(action.confirm).not.toHaveBeenCalled();
+    });
+
+    it('Home shows only the supply dialog while a supply review is read', () => {
+      const supplyIdentity = wrappedActionIdentity('supply', {
+        route: routeFor(OPEN),
+        account: ACCOUNT,
+        chainId: 1,
+        screeningStatus: 'allowed',
+        provider: WALLET,
+      });
+      if (supplyIdentity === undefined) throw new Error('the session must have an identity');
+      render(
+        homeElement(lendingWith(controller({ phase: 'reading', identity: supplyIdentity })), cometState(BASE_ASSET))
+      );
+
+      const dialogs = screen.getAllByRole('dialog');
+      expect(dialogs).toHaveLength(1);
+      expect(dialogs[0]).toHaveAccessibleName('Checking Your Balance');
     });
 
     it.each<[string, WrappedActionState]>([

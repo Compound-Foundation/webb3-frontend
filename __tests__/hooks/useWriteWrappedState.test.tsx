@@ -1858,6 +1858,29 @@ describe('useWriteWrappedState', () => {
       expect(chain.balance).toBe(10_000_000_000n + 250_249_997n);
     });
 
+    it("simulates at the block of the reads made just before the signature, not at the review's", async () => {
+      const chain = exitChainFor(USDC_MARKET);
+      const { result, wallet, readProvider } = renderWrapped(chain);
+      await startWithdraw(result, { kind: 'full' });
+
+      // Another account's transaction makes a new block, and the wrapper's assets grow with interest.
+      chain.history.set(chain.block, ledgerOf(chain));
+      chain.block += 1;
+      chain.totalAssets = 1_001_000_000n;
+      await confirmStep(result);
+
+      expect(result.current.action.state.phase).toBe('complete');
+      expect(readProvider.call).toHaveBeenCalledWith(
+        {
+          from: ACCOUNT,
+          to: USDC_MARKET.wrapperAddress,
+          data: CALLS.encodeFunctionData('unwrapAndWithdraw', [SHARES]),
+        },
+        101
+      );
+      expect(walletRequests(wallet)).toEqual([unwrapAndWithdraw(USDC_MARKET, SHARES)]);
+    });
+
     it('requires the simulation to pay what the quote of the same block pays', async () => {
       const chain = exitChainFor(USDC_MARKET);
       const { result, wallet } = renderWrapped(chain);
@@ -1956,7 +1979,6 @@ describe('useWriteWrappedState', () => {
         { kind: 'full' },
         [/holds only 100\.000000 USDC/, /at most 100\.000000 USDC/],
       ],
-      ['zero', {}, { kind: 'partial', cash: 0n }, [/greater than 0/]],
       ['from an account with no shares', { shares: 0n }, { kind: 'full' }, [/no wrapped USDC/]],
     ])(
       'requires a revised amount or an explicit full exit, and signs nothing, for %s',
@@ -1973,6 +1995,24 @@ describe('useWriteWrappedState', () => {
         expect(walletRequests(wallet)).toEqual([]);
       }
     );
+  });
+
+  describe('wrappedWithdraw: refuses an amount of zero', () => {
+    it('before reading anything', async () => {
+      const chain = exitChainFor(USDC_MARKET);
+      const { result, wallet, events } = renderWrapped(chain);
+      await waitFor(() => expect(result.current.position.state).toMatchObject({ status: 'loaded' }));
+      events.length = 0;
+
+      await startWithdraw(result, { kind: 'partial', cash: 0n });
+
+      expect(result.current.action.state).toMatchObject({
+        phase: 'read-failed',
+        message: expect.stringMatching(/greater than 0/),
+      });
+      expect(events).not.toContain('exit-read');
+      expect(walletRequests(wallet)).toEqual([]);
+    });
   });
 
   describe('wrappedWithdraw: surfaces ZeroAssetsTransferred, ExcessiveAssetsDebited, pause, liquidity, and failed-simulation errors without a direct-Comet call', () => {
