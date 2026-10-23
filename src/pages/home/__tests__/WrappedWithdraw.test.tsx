@@ -879,4 +879,52 @@ describe('WrappedWithdraw', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
   });
+
+  describe('scroll lock', () => {
+    /** A wrapped supply in review, which only the supply dialog shows. */
+    function supplyReview(): WrappedActionState {
+      const identity = wrappedActionIdentity('supply', {
+        route: routeFor(OPEN),
+        account: ACCOUNT,
+        chainId: 1,
+        screeningStatus: 'allowed',
+        provider: WALLET,
+      });
+      if (identity === undefined) throw new Error('the session must have an identity');
+      const supply = new Interface(['function supplyAndWrap(uint256 amount)']);
+      return {
+        phase: 'review',
+        draft: {
+          kind: WRAPPED_ACTION,
+          id: 'draft-2',
+          identity,
+          amount: 1_000_000n,
+          steps: [
+            {
+              id: 'supply',
+              kind: 'supply-and-wrap',
+              description: 'Supply 1.000000 USDC through the wrapper',
+              request: { to: USDC_WRAPPER, data: supply.encodeFunctionData('supplyAndWrap', [1_000_000n]) },
+            },
+          ],
+        },
+        steps: [{ status: 'waiting' }],
+        stepIndex: 0,
+      };
+    }
+
+    it('locks no scrolling for a supply review, which it does not show', () => {
+      renderModal(supplyReview());
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(document.body).not.toHaveClass('no-scroll');
+    });
+
+    it("Home keeps the supply dialog's scroll lock while the withdrawal dialog is closed", () => {
+      render(homeElement(lendingWith(controller(supplyReview())), cometState(BASE_ASSET)));
+
+      expect(screen.getByRole('dialog')).toHaveAccessibleName('Supply USDC Through the Wrapper');
+      expect(document.body).toHaveClass('no-scroll');
+    });
+  });
 });
