@@ -78,7 +78,8 @@ function EstimateChange({
 
 /**
  * Tells the user that the check before the signature found a different estimate from the one they
- * reviewed, and by how much. While the wallet has the request, the user can reject it there.
+ * reviewed, and by how much. While the wallet has the request, the user can reject it there. The
+ * estimate can still change after the check, because the exit has no minimum or maximum amount.
  */
 function RecheckedChange({
   reviewedCash,
@@ -99,7 +100,8 @@ function RecheckedChange({
         This page read the market again before it asked your wallet. The estimate is now {formatAmount(recheckedCash)},{' '}
         {formatAmount(difference)} {recheckedCash > reviewedCash ? 'more' : 'less'} than the{' '}
         {formatAmount(reviewedCash)} you reviewed.
-        {canReject && ' If you do not want this amount, reject the request in your wallet.'}
+        {canReject && ' If you do not want to withdraw about this amount, reject the request in your wallet.'} The
+        amount can still change before the transaction is mined.
       </p>
     </div>
   );

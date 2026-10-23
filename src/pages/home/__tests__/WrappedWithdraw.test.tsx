@@ -708,7 +708,10 @@ describe('WrappedWithdraw', () => {
       expect(alert).toHaveTextContent(
         /now 100\.049975 USDC, 0\.049975 USDC more than the 100\.000000 USDC you reviewed/
       );
-      expect(alert).toHaveTextContent(/if you do not want this amount, reject the request in your wallet/i);
+      expect(alert).toHaveTextContent(
+        /if you do not want to withdraw about this amount, reject the request in your wallet/i
+      );
+      expect(alert).toHaveTextContent(/the amount can still change before the transaction is mined/i);
     });
 
     it('no longer tells the user to reject the request once the wallet has sent the transaction', () => {
@@ -724,6 +727,7 @@ describe('WrappedWithdraw', () => {
         /now 100\.049975 USDC, 0\.049975 USDC more than the 100\.000000 USDC you reviewed/
       );
       expect(alert).not.toHaveTextContent(/reject/i);
+      expect(alert).toHaveTextContent(/the amount can still change before the transaction is mined/i);
     });
 
     it("shows a full exit's cash as its check before the signature found it, in the one alert", () => {

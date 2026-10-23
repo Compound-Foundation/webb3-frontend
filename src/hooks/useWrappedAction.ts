@@ -630,7 +630,8 @@ export function useWrappedAction({
         const problem = checkRecheckedWithdrawal(draft, rechecked);
         if (problem !== undefined) return block(problem);
         // The dialog shows the exit as the check found it before the wallet is asked, and the
-        // transaction list describes the request by it. Neither then shows a cash the exit no longer pays.
+        // transaction list describes the request by it. Both show the cash the exit pays at the block
+        // the check read.
         dispatch({ type: 'rechecked', rechecked });
         description = rechecked.description;
       }
