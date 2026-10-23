@@ -175,7 +175,7 @@ Preconditions: preflight items 1 and 10, and Adam's and Leo's signoff of Stage 0
 The controls are as committed: both off on every market. Release the stack's merge commit with steps 8 to 11 of [Ship a release-control change](#ship-a-release-control-change). Verify the [standard checks](#verify-after-each-release), and check the Anchorage session on each market:
 
 - The wrapped panel shows the holdings.
-- The supply control reads "Wrapped deposits are not open yet.", and the withdraw control "Wrapped withdrawals are not open yet." (`src/pages/home/components/WrappedPositionPanel.tsx:85-87`).
+- The supply control reads "Wrapped deposits are not open yet.", and the withdraw control "Wrapped withdrawals are not open yet." (`src/pages/home/components/WrappedPositionPanel.tsx:90-92`).
 - The direct Supply button is absent.
 
 ### Stage 1: exits on, deposits off
