@@ -707,6 +707,9 @@ function deltas(results) {
 /** `endpoints` with `last` moved to the end, so that a retry tries the other endpoints first. */
 const withLast = (endpoints, last) => [...endpoints.filter((endpoint) => endpoint !== last), last];
 
+/** `count` and `noun`, with the noun's plural for any count but 1. */
+const counted = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
 const listed = (counts) =>
   [...counts]
     .sort((a, b) => b[1] - a[1])
@@ -717,7 +720,10 @@ const listed = (counts) =>
 function upstreamUse(stats) {
   const refused = [...stats.refused.values()].reduce((total, count) => total + count, 0);
   return [
-    `  upstream use:  ${stats.requests} requests forwarded, ${stats.failures} failed upstream, ${stats.errorAnswers} calls answered with an error, ${refused} refused`,
+    `  upstream use:  ${counted(stats.requests, 'request')} forwarded, ${stats.failures} failed upstream, ${counted(
+      stats.errorAnswers,
+      'call'
+    )} answered with an error, ${refused} refused`,
     `  forwarded:     ${listed(stats.methods) || 'none'}`,
     ...(refused > 0 ? [`  refused:       ${listed(stats.refused)}`] : []),
     ...(stats.firstError !== undefined ? [`  first error:   ${stats.firstError}`] : []),
@@ -907,7 +913,10 @@ async function main() {
       : []),
     ...(verdict === 'FAIL' && stats.failures + stats.errorAnswers > 0
       ? [
-          `The upstream failed ${stats.failures} requests and answered ${stats.errorAnswers} calls with an error, so a failure above can come from the upstream, not the app. Run the suite again to tell them apart.`,
+          `The upstream failed ${counted(stats.failures, 'request')} and answered ${counted(
+            stats.errorAnswers,
+            'call'
+          )} with an error, so a failure above can come from the upstream, not the app. Run the suite again to tell them apart.`,
           '',
         ]
       : []),
