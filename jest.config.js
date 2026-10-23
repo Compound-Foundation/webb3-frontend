@@ -32,8 +32,14 @@ export default {
   },
   transformIgnorePatterns: ['<rootDir>/node_modules/(?!(msw|react-router|cookie-es)/)'],
   setupFilesAfterEnv: ['<rootDir>/setup.jest.ts', '<rootDir>/setupTests.ts'],
-  // .claude/ holds Claude Code worktrees (checkouts of other branches) whose test files must not run here
-  testPathIgnorePatterns: ['<rootDir>/__tests__/mocks/', '<rootDir>/.claude/'],
+  // .claude/ holds Claude Code worktrees (checkouts of other branches) whose test files must not run here.
+  // The wrapped lending fork suite needs a local mainnet fork, so only its own runner starts it:
+  // `node scripts/test-wrapped-lending-fork.js`.
+  testPathIgnorePatterns: [
+    '<rootDir>/__tests__/mocks/',
+    '<rootDir>/.claude/',
+    '<rootDir>/__tests__/integration/wrappedLendingFork/',
+  ],
   moduleNameMapper: {
     '\\.(scss|css)$': 'identity-obj-proxy', // Mock SCSS imports for CSS Modules (if you use them)
     '^@components(.*)$': '<rootDir>/src/components$1',
