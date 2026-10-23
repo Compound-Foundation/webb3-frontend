@@ -1266,10 +1266,43 @@ describe('useWrappedAction', () => {
 
       expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
       expect(result.current.canDismissRecovered).toBe(true);
+      expect(result.current.hasUnansweredWalletRequest).toBe(false);
       act(() => result.current.dismissRecovered());
 
       expect(manager.dismissTransaction).toHaveBeenCalledWith('interrupted');
       expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('says when the wallet has not answered a request of this account, once no draft is in progress', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+      // The manager tracks the step's own request, with no hash and not interrupted, until the
+      // wallet answers it.
+      const unanswered: Transaction = {
+        id: 'unanswered',
+        key: USDC_WRAPPER,
+        networkId: 1,
+        networkName: 'homestead',
+        description: 'Approve USDC for the wrapper',
+        nonce: 7,
+        account: ACCOUNT,
+        step: 'approve',
+        state: TransactionState.AwaitingConfirmation,
+      };
+      rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [unanswered] } });
+      expect(result.current.state.phase).toBe('signing');
+      expect(result.current.hasUnansweredWalletRequest).toBe(false);
+
+      act(() => result.current.discard());
+
+      expect(result.current.hasUnansweredWalletRequest).toBe(true);
+      expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+      // The user can stop waiting for the request only after a reload.
+      expect(result.current.canDismissRecovered).toBe(false);
+      act(() => result.current.dismissRecovered());
+      expect(manager.dismissTransaction).not.toHaveBeenCalled();
     });
 
     it('checks again at the signature for another wrapper transaction of the account, and sends nothing', async () => {
@@ -1325,6 +1358,7 @@ describe('useWrappedAction', () => {
 
       expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
       expect(result.current.canDismissRecovered).toBe(false);
+      expect(result.current.hasUnansweredWalletRequest).toBe(false);
       act(() => result.current.dismissRecovered());
 
       expect(manager.dismissTransaction).not.toHaveBeenCalled();

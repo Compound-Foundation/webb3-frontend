@@ -1,6 +1,6 @@
 import { Interface } from '@ethersproject/abi';
 import { JsonRpcProvider, TransactionReceipt } from '@ethersproject/providers';
-import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { BigNumber, utils } from 'ethers';
 
@@ -44,6 +44,7 @@ import {
 } from '@hooks/useWriteWrappedState';
 import WrappedSupplyModal from '@pages/home/components/ActionModal/WrappedSupplyModal';
 import WrappedWithdrawModal from '@pages/home/components/ActionModal/WrappedWithdrawModal';
+import WrappedPositionPanel from '@pages/home/components/WrappedPositionPanel';
 import { MarketData, SettledTransaction, TransactionState } from '@types';
 
 import { mockWeb3 } from '../mocks/mockWeb3';
@@ -1386,6 +1387,27 @@ describe('useWriteWrappedState', () => {
   describe('wrappedSupply: requires new user review after reconnect or an interrupted sequence', () => {
     const AMOUNT = 4_000_000n;
 
+    /** The wrapped panel as Home renders it from the lifecycle, the wrapped writes and the position read. */
+    function renderPanel({ action, write, position }: Harness, wallet: Wallet) {
+      const { route } = sessionFor(wallet);
+      if (route.kind !== 'wrapped') throw new Error('the route must be wrapped');
+      return render(
+        <WrappedPositionPanel
+          route={route}
+          position={position.state}
+          baseAsset={{ symbol: 'USDC', baseAssetPriceInDollars: 100_000_000n, balanceOfComet: 10n ** 12n }}
+          earnAPR={0n}
+          session={action.session}
+          canDismissRecovered={action.canDismissRecovered}
+          onDismissRecovered={action.dismissRecovered}
+          hasUnansweredWalletRequest={action.hasUnansweredWalletRequest}
+          supply={{ blockedReason: action.blockedReason('supply'), onReview: write.supply }}
+          withdraw={{ blockedReason: action.blockedReason('withdraw'), onReview: write.withdraw }}
+          onRetry={jest.fn()}
+        />
+      );
+    }
+
     it('closes the reviewed supply on a reconnect, and the next review starts from the new allowance', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, rerender, wallet } = renderWrapped(chain);
@@ -1440,7 +1462,7 @@ describe('useWriteWrappedState', () => {
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
     });
 
-    it('waits for a supply request the wallet left unanswered until the user stops waiting, and resends nothing', async () => {
+    it('waits for a supply request the wallet answered with an ambiguous error until the user stops waiting, and resends nothing', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: AMOUNT });
       const events: Event[] = [];
       const wallet = walletFor(chain, events);
@@ -1458,6 +1480,78 @@ describe('useWriteWrappedState', () => {
       act(() => result.current.action.dismissRecovered());
       await startSupply(result, AMOUNT);
       expect(stepStatuses(result)).toEqual(['waiting']);
+      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('says how to stop waiting for a supply request the wallet never answers, and resends nothing', async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: AMOUNT });
+      const events: Event[] = [];
+      const wallet = walletFor(chain, events);
+      // The wallet drops the request without an answer, so the send never settles. The test above
+      // covers a wallet that answers with an ambiguous error.
+      wallet.sendUncheckedTransaction.mockImplementation(() => new Promise<string>(() => undefined));
+      const first = renderWrapped(chain, { wallet, events });
+      await startSupply(first.result, AMOUNT);
+      act(() => first.result.current.action.confirm());
+      await waitFor(() => expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1));
+
+      // Five minutes pass with no answer. The request stays open, and the session stays usable.
+      jest.useFakeTimers();
+      try {
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(5 * 60_000);
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+      expect(stepStatuses(first.result)).toEqual(['awaiting-signature']);
+      expect(first.result.current.action.session.status).toBe('usable');
+
+      // The user closes the dialog. Its notice says how to stop waiting, not to start a new review.
+      act(() => first.result.current.action.discard());
+      const notice = render(
+        <WrappedSupplyModal
+          state={first.result.current.action.state}
+          symbol="USDC"
+          decimals={6}
+          directBorrowBalance={0n}
+          onConfirm={jest.fn()}
+          onClose={jest.fn()}
+        />
+      );
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/approving it there still sends it/i);
+      expect(dialog).toHaveTextContent(/look for the request in your wallet app/i);
+      expect(dialog).toHaveTextContent(/if it is not there, reload the page and reconnect your wallet/i);
+      expect(dialog).not.toHaveTextContent(/start a new review/i);
+      notice.unmount();
+      act(() => first.result.current.action.discard());
+
+      // The request still holds back a new supply. The panel says how to stop waiting for it and,
+      // before a reload, offers no dismissal.
+      expect(first.result.current.action.state).toEqual({ phase: 'idle' });
+      expect(first.result.current.write.supply(AMOUNT)).toBe('transaction-pending');
+      expect(first.result.current.action.canDismissRecovered).toBe(false);
+      const waiting = renderPanel(first.result.current, wallet);
+      const guidance = screen.getByText(/your wallet has not answered a request/i);
+      expect(guidance).toHaveTextContent(/look for the request in your wallet app/i);
+      expect(guidance).toHaveTextContent(/if it is not there, reload the page and reconnect your wallet/i);
+      expect(screen.queryByRole('button', { name: 'Stop waiting' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Supply USDC through the wrapper' })).toBeDisabled();
+      waiting.unmount();
+
+      // After the reload, the panel offers Stop waiting, with its warning that the request can still
+      // go through. Stopping sends nothing, and the next review waits for its own confirmation.
+      first.unmount();
+      const second = renderWrapped(chain, { wallet, events });
+      await waitFor(() => expect(second.result.current.action.canDismissRecovered).toBe(true));
+      const restored = renderPanel(second.result.current, wallet);
+      expect(screen.queryByText(/your wallet has not answered a request/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/the request can still go through/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Stop waiting' }));
+      restored.unmount();
+      await startSupply(second.result, AMOUNT);
+      expect(stepStatuses(second.result)).toEqual(['waiting']);
       expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
     });
   });

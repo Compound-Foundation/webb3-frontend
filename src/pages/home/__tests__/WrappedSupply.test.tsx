@@ -179,6 +179,7 @@ function controller(
     session: { status: 'usable' },
     recovered: { pending: [], settled: [] },
     canDismissRecovered: false,
+    hasUnansweredWalletRequest: false,
     blockedReason: () => blockedReason,
     start: jest.fn(),
     confirm: jest.fn(),
@@ -622,6 +623,19 @@ describe('WrappedSupply', () => {
       expect(mockWriteState.approve).not.toHaveBeenCalled();
       expect(mockWriteState.supply).not.toHaveBeenCalled();
     });
+
+    it('says from Home how to stop waiting for a wallet request with no answer, and offers no dismissal', () => {
+      const action = { ...controller({ phase: 'idle' }, 'transaction-pending'), hasUnansweredWalletRequest: true };
+      render(homeElement(lendingWith(action), cometState(BASE_ASSET)));
+
+      const guidance = screen.getByText(/your wallet has not answered a request/i);
+      expect(guidance).toHaveTextContent(/new wrapped deposits and withdrawals wait for that answer/i);
+      expect(guidance).toHaveTextContent(/look for the request in your wallet app/i);
+      expect(guidance).toHaveTextContent(/if it is not there, reload the page and reconnect your wallet/i);
+      expect(guidance).toHaveTextContent(/you can then stop waiting for it/i);
+      expect(screen.queryByRole('button', { name: 'Stop waiting' })).not.toBeInTheDocument();
+      expect(supplyButton()).toBeDisabled();
+    });
   });
 
   describe('review dialog', () => {
@@ -744,6 +758,40 @@ describe('WrappedSupply', () => {
       expect(dialog).toHaveTextContent(/not cancelled/i);
       expect(dialog).toHaveTextContent(/still open in your wallet/i);
       expect(explorerLinks()).toEqual([EXPLORER_LINK]);
+    });
+
+    it('says how to stop waiting for a request still open in the wallet, not to start a new review', () => {
+      renderModal({
+        phase: 'discarded',
+        reason: 'cleared',
+        type: 'supply',
+        chainId: 1,
+        submittedHashes: [],
+        isWalletRequestOpen: true,
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/approving it there still sends it/i);
+      expect(dialog).toHaveTextContent(/new supplies from this account wait until your wallet answers the request/i);
+      expect(dialog).toHaveTextContent(/look for the request in your wallet app/i);
+      expect(dialog).toHaveTextContent(/if it is not there, reload the page and reconnect your wallet/i);
+      expect(dialog).toHaveTextContent(/you can then stop waiting for it/i);
+      expect(dialog).not.toHaveTextContent(/start a new review/i);
+    });
+
+    it('says to start a new review when no request is left open in the wallet', () => {
+      renderModal({
+        phase: 'discarded',
+        reason: 'cleared',
+        type: 'supply',
+        chainId: 1,
+        submittedHashes: [HASH],
+        isWalletRequestOpen: false,
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent('Nothing more is sent from this review. Start a new review to continue.');
+      expect(dialog).not.toHaveTextContent(/look for the request/i);
     });
 
     it('shows a failed read and closes', () => {
