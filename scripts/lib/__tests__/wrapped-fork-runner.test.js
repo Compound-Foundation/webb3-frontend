@@ -647,6 +647,8 @@ describe('the upstream proxy', () => {
       assert.equal(proxy.stats.failures, 1);
       assert.equal(proxy.stats.errorAnswers, 1);
       assert.equal(proxy.stats.firstError, 'HTTP 429');
+      assert.ok(Date.now() - proxy.stats.lastFailureAt < 5_000);
+      assert.equal(proxy.stats.pending, 0);
     } finally {
       await stopProxy();
     }
@@ -703,7 +705,13 @@ describe('the upstream proxy', () => {
       { printable: createRedactor([]).printable, timeoutMs: 300 }
     );
     try {
-      assert.equal((await post(hanging.url, call('eth_getBalance', ['0x1', '0x1']))).status, 502);
+      const answer = post(hanging.url, call('eth_getBalance', ['0x1', '0x1']));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(hanging.stats.pending, 1);
+      const before = Date.now();
+      assert.equal((await answer).status, 502);
+      assert.equal(hanging.stats.pending, 0);
+      assert.ok(hanging.stats.lastFailureAt >= before);
       assert.equal(hanging.stats.failures, 1);
       assert.equal(hanging.stats.firstError, 'no answer within 0.3 s, or no connection');
     } finally {
@@ -892,11 +900,13 @@ describe('a fork that could not start', () => {
 
   test('failed on the upstream when anvil was still retrying it at the deadline', () => {
     // anvil prints its fetch error only when it gives up, and a slow upstream outlasts the deadline.
-    assert.equal(failedToStartOnUpstream({ stats: upstreamFailed, output: '', isTimedOut: true }), true);
-    assert.equal(
-      failedToStartOnUpstream({ stats: { failures: 0, errorAnswers: 0 }, output: '', isTimedOut: true }),
-      false
-    );
+    const now = 1_000_000;
+    const timedOut = (stats) => failedToStartOnUpstream({ stats, output: '', isTimedOut: true, now });
+    assert.equal(timedOut({ ...upstreamFailed, pending: 1, lastFailureAt: now - 100_000 }), true);
+    assert.equal(timedOut({ ...upstreamFailed, pending: 0, lastFailureAt: now - 10_000 }), true);
+    // An upstream failure long before the deadline, with nothing open, leaves anvil's own failure.
+    assert.equal(timedOut({ ...upstreamFailed, pending: 0, lastFailureAt: now - 115_000 }), false);
+    assert.equal(timedOut({ failures: 0, errorAnswers: 0, pending: 1, lastFailureAt: undefined }), false);
   });
 });
 
@@ -907,6 +917,9 @@ describe('the fork block an upstream reports', () => {
     assert.equal(isBlockHeader({ hash: `invalid key ${FAKE_KEY}`, timestamp: '0x1' }), false);
     assert.equal(isBlockHeader({ hash: `${hash}00`, timestamp: '0x1' }), false);
     assert.equal(isBlockHeader({ hash, timestamp: `invalid key ${FAKE_KEY}` }), false);
+    // A timestamp past JavaScript's last date, 8.64e12 s, makes the header's date throw.
+    assert.equal(isBlockHeader({ hash, timestamp: `0x${'f'.repeat(12)}` }), false);
+    assert.equal(isBlockHeader({ hash, timestamp: `0x${(8.64e12).toString(16)}` }), true);
     assert.equal(isBlockHeader({ hash }), false);
     assert.equal(isBlockHeader(null), false);
     assert.equal(isBlockHeader(`invalid key ${FAKE_KEY}`), false);
