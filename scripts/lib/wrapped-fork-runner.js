@@ -1,7 +1,7 @@
 // The rules and the upstream proxy of the wrapped lending fork runner, `scripts/test-wrapped-lending-fork.js`.
 // They live apart from the runner so that its own tests, `yarn test:fork-runner`, can check them without a fork:
 // - the upstream endpoints, and the redaction of the private URL
-// - the proxy that holds the URL, and its read-only method allowlist
+// - the proxy that holds the URL, its read-only method allowlist, and its check of a private upstream's results
 // - each matrix cell held to Jest's own result for its test
 // - the retry rule, for a fork that could not start and for a suite that failed on the upstream
 // - the verdict
@@ -66,9 +66,20 @@ export const UPSTREAM_METHODS = new Set([
 /**
  * A part of the private URL that can be a key: 16 characters or more, digits only included. A
  * shorter part, such as `v2`, `eth` or a port, also occurs in ordinary text and figures, and a
- * redaction of it corrupts them.
+ * redaction of it corrupts them. A path segment or a query field can be a shorter key (see
+ * `isKeyLikeSegmentOrValue`).
  */
 export const isKeyLike = (part) => part.length >= 16;
+
+/**
+ * A path segment, a query field, or a query field's name or value, that can be a key. RPC providers
+ * put the key in one of these places, and a key there can be short, such as a 12-digit number. So
+ * such a part is key-like from 6 characters, unless it is a word of letters only, such as `ethereum`
+ * or `eth-mainnet`. Ordinary output carries such words, and a redaction of them corrupts it. A part
+ * of at most 5 characters, such as `v2`, `eth` or a chain ID, is too short to be a key.
+ */
+export const isKeyLikeSegmentOrValue = (part) =>
+  isKeyLike(part) || (part.length >= 6 && !/^[A-Za-z]+(?:[-_.][A-Za-z]+)*$/.test(part));
 
 /** `text` with each character that a regular expression reads specially escaped. */
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -112,8 +123,9 @@ function decoded(text) {
 
 /**
  * The parts of a private URL that can each carry a key, both as the URL is written and as the URL
- * parser reads it: the host and each of its labels, each path segment, the query, each query field
- * with its name and value, and the fragment.
+ * parser reads it:
+ * - `segmentsAndFields`: each path segment, and each query field with its name and value
+ * - `otherParts`: the host and each of its labels, the query, and the fragment
  */
 function urlParts(privateUrl, url) {
   // RFC 3986, appendix B: the URL's parts as written, before the parser normalizes them.
@@ -124,31 +136,38 @@ function urlParts(privateUrl, url) {
       const equals = field.indexOf('=');
       return equals === -1 ? [field] : [field, field.slice(0, equals), field.slice(equals + 1)];
     });
-  return [
-    authority,
-    ...authority.split(/[.:@]/),
-    url.host,
-    ...url.hostname.split('.'),
-    ...pathname.split('/'),
-    ...url.pathname.split('/'),
-    query,
-    ...fields(query),
-    ...fields(url.search.slice(1)),
-    ...[...url.searchParams].flat(),
-    fragment,
-    url.hash.slice(1),
-  ];
+  return {
+    segmentsAndFields: [
+      ...pathname.split('/'),
+      ...url.pathname.split('/'),
+      ...fields(query),
+      ...fields(url.search.slice(1)),
+      ...[...url.searchParams].flat(),
+    ],
+    otherParts: [
+      authority,
+      ...authority.split(/[.:@]/),
+      url.host,
+      ...url.hostname.split('.'),
+      query,
+      fragment,
+      url.hash.slice(1),
+    ],
+  };
 }
 
 /**
  * The patterns of the secrets in a private URL: the whole URL, and each key-like part of it, as
- * written and decoded. A part's decoded form is never longer than the part, so the part decides
- * whether it is key-like. Each pattern matches its secret in any mix of the forms that
- * `characterPattern` lists. So an upstream's echo of a key, encoded, decoded or escaped, matches it.
+ * written and decoded. A path segment or a query field is key-like as `isKeyLikeSegmentOrValue`
+ * decides, and any other part as `isKeyLike` decides. The part as written decides, so a part whose
+ * percent-encoding hides a word is key-like in both forms. Each pattern matches its secret in any
+ * mix of the forms that `characterPattern` lists. So an upstream's echo of a key, encoded, decoded or
+ * escaped, matches it.
  */
 function secretPatternsOf(privateUrl, url) {
-  const parts = urlParts(privateUrl, url).flatMap((part) =>
-    isKeyLike(part) ? [part, decoded(part)].filter((form) => form !== undefined) : []
+  const { segmentsAndFields, otherParts } = urlParts(privateUrl, url);
+  const parts = [...segmentsAndFields.filter(isKeyLikeSegmentOrValue), ...otherParts.filter(isKeyLike)].flatMap(
+    (part) => [part, decoded(part)].filter((form) => form !== undefined)
   );
   return [...new Set([privateUrl, url.href, ...parts])].map((secret) => [...secret].map(characterPattern).join(''));
 }
@@ -403,21 +422,91 @@ function withheldError(error) {
   };
 }
 
+/** Whether `value` is a hex number of at most 256 bits, as anvil reads a block number, a balance or a storage word. */
+const isQuantity = (value) => typeof value === 'string' && /^0x[0-9a-fA-F]{1,64}$/.test(value);
+
+/** Whether `value` is hex data in whole bytes, as anvil reads an account's code. */
+const isData = (value) => typeof value === 'string' && /^0x(?:[0-9a-fA-F]{2})*$/.test(value);
+
+/**
+ * The deepest that a field of a block, a transaction or a receipt can be. A block's transaction's
+ * access list's storage key is at depth 6.
+ */
+const MAX_FIELD_DEPTH = 8;
+
+/**
+ * Whether `value`, at `depth` inside a block, a transaction or a receipt, is a hex field: a hex
+ * string, a boolean, null, or an array or a record of hex fields.
+ */
+function isHexField(value, depth) {
+  if (depth > MAX_FIELD_DEPTH) return false;
+  if (typeof value === 'string') return /^0x[0-9a-fA-F]*$/.test(value);
+  if (typeof value === 'boolean' || value === null) return true;
+  if (Array.isArray(value)) return value.every((item) => isHexField(item, depth + 1));
+  return isHexRecord(value, depth);
+}
+
+/**
+ * Whether `value` is a record of hex fields, as anvil reads a block, a transaction or a receipt: an
+ * object whose field names are letters and digits, and whose fields are `isHexField`.
+ */
+function isHexRecord(value, depth = 0) {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.entries(value).every(
+      ([name, field]) => /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name) && isHexField(field, depth + 1)
+    )
+  );
+}
+
+/** Whether `value` is null, as for a block or a transaction that the upstream does not know, or a record of hex fields. */
+const isRecordOrNull = (value) => value === null || isHexRecord(value);
+
+/**
+ * The shape of the result of each method in `UPSTREAM_METHODS`, as anvil reads it. anvil prints a
+ * result that it cannot parse, in its log and in its errors to the tests. A private upstream can
+ * answer with text in place of a result, such as an error message that echoes the key.
+ */
+const RESULT_SHAPES = {
+  eth_chainId: isQuantity,
+  eth_blockNumber: isQuantity,
+  eth_gasPrice: isQuantity,
+  eth_getBalance: isQuantity,
+  eth_getTransactionCount: isQuantity,
+  eth_getStorageAt: isQuantity,
+  eth_getCode: isData,
+  eth_getBlockByNumber: isRecordOrNull,
+  eth_getBlockByHash: isRecordOrNull,
+  eth_getTransactionByHash: isRecordOrNull,
+  eth_getTransactionReceipt: isRecordOrNull,
+};
+
+/** Whether `result` has the shape that `RESULT_SHAPES` gives for `method`. */
+const hasResultShape = (method, result) => Object.hasOwn(RESULT_SHAPES, method) && RESULT_SHAPES[method](result);
+
+/** The error that anvil gets in place of a private upstream's result that has the wrong shape. */
+const MALFORMED_RESULT = { code: -32603, message: "the private upstream's malformed result is withheld" };
+
 /**
  * What the proxy relays to anvil for the upstream's answer, and what it records: an HTTP error as a
  * failure, and each call answered with an error, a bare error included. For a public endpoint, the
  * answer goes to anvil unchanged, and the record keeps each error's message, as `printable` gives it.
  *
- * For a private endpoint, no error text of the upstream's reaches anvil. anvil prints the upstream's
+ * For a private endpoint, no text of the upstream's reaches anvil. anvil prints the upstream's
  * answer in its log and in its errors to the tests, and an upstream can echo the key there in any
- * encoding. So the proxy changes an answer that carries an error, and the record names only a
- * status, an error code or a kind of answer:
+ * encoding. So the proxy rebuilds each answer, and the record names only a status, an error code or
+ * a kind of answer:
  * - an HTTP error goes on with its status and no body
  * - each JSON-RPC error, and a bare error, goes on as `withheldError` gives it
+ * - each result goes on alone, in its own JSON-RPC response, when it has the shape that its call's
+ *   method returns (see `RESULT_SHAPES`). `methodOf` gives the method of a response's call. Any
+ *   other result goes on as `MALFORMED_RESULT`, and the record counts it as a call answered with an
+ *   error.
  * - an answer that is not JSON, or not a JSON-RPC response, becomes HTTP 502 with no body
- * - any other answer goes on unchanged, so only the redaction covers text inside a result
  */
-function relayed(status, contentType, answer, { isPrivate, printable }) {
+function relayed(status, contentType, answer, { isPrivate, printable, methodOf }) {
   const withheld = (error) => ({ status: 502, contentType: 'text/plain', body: Buffer.alloc(0), errors: [error] });
   if (status >= 400) {
     return isPrivate
@@ -450,14 +539,19 @@ function relayed(status, contentType, answer, { isPrivate, printable }) {
     return { status, contentType, body: answer, errors };
   }
   if (entries.length === 0 || !entries.every(isResponse)) return withheld('an answer that is not a JSON-RPC response');
-  const errors = entries.filter(hasError).map((entry) => describedError(entry.error));
-  if (errors.length === 0) return { status, contentType, body: answer, errors };
-  const relayedEntries = entries.map((entry) =>
-    hasError(entry)
-      ? // An id above 2^53 loses digits when parsed, as a code does (see `errorCode`).
-        { jsonrpc: '2.0', id: Number.isSafeInteger(entry.id) ? entry.id : null, error: withheldError(entry.error) }
-      : entry
-  );
+  const errors = [];
+  const relayedEntries = entries.map((entry) => {
+    // An id above 2^53 loses digits when parsed, as a code does (see `errorCode`).
+    const id = Number.isSafeInteger(entry.id) ? entry.id : null;
+    if (hasError(entry)) {
+      errors.push(describedError(entry.error));
+      return { jsonrpc: '2.0', id, error: withheldError(entry.error) };
+    }
+    const method = methodOf(entry);
+    if (hasResultShape(method, entry.result)) return { jsonrpc: '2.0', id, result: entry.result };
+    errors.push(`a malformed ${method ?? 'JSON-RPC'} result`);
+    return { jsonrpc: '2.0', id, error: MALFORMED_RESULT };
+  });
   const body = Buffer.from(JSON.stringify(Array.isArray(parsed) ? relayedEntries : relayedEntries[0]));
   return { status, contentType: 'application/json', body, errors };
 }
@@ -546,7 +640,15 @@ export function startUpstreamProxy(endpoint, { printable, timeoutMs = 40_000 }) 
         });
         const answer = Buffer.from(await upstream.arrayBuffer());
         const contentType = upstream.headers.get('content-type') ?? 'application/json';
-        const relay = relayed(upstream.status, contentType, answer, { isPrivate: endpoint.isPrivate, printable });
+        // The method of a response's call: the one call, or in a batch, the call with the response's id.
+        const methodOf = Array.isArray(parsed)
+          ? (entry) => checked.find(({ id }) => id === entry.id)?.method
+          : () => checked[0].method;
+        const relay = relayed(upstream.status, contentType, answer, {
+          isPrivate: endpoint.isPrivate,
+          printable,
+          methodOf,
+        });
         if (relay.failure !== undefined) {
           stats.failures += 1;
           stats.firstError ??= relay.failure;

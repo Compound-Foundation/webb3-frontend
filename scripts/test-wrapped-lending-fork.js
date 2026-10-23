@@ -24,9 +24,11 @@
 // re-encoded, JSON-escaped or in another case. An upstream's error text can echo the key, so the
 // runner prints no error text of a private upstream's. It names a failure by its HTTP status and a
 // reason, and the proxy passes anvil a private upstream's error codes of at most five digits
-// without their text. A successful answer reaches anvil unchanged, so only the redaction covers text
-// inside a result. The tests get none of the runner's environment except the variables they need, so
-// they never see the URL.
+// without their text. anvil prints a result that it cannot parse, so the proxy passes anvil a
+// private upstream's result only when it has the shape that its method returns, such as a hex
+// number or a block of hex fields. It passes an error without text in place of any other result.
+// The tests get none of the runner's environment except the variables they need, so they never see
+// the URL.
 //
 // The fork listens on 127.0.0.1 only, sends no CORS headers, and is stopped on exit, on Ctrl-C and
 // on any error. The tests sign with impersonated accounts on the fork. Nothing is signed with a real

@@ -25,6 +25,7 @@ import {
   isBlockHeader,
   isBlockNumber,
   isKeyLike,
+  isKeyLikeSegmentOrValue,
   isRetryable,
   MATRIX_CELLS,
   notExercisedCells,
@@ -55,6 +56,8 @@ const SEPARATOR_KEY = 'Fake+Key/For=Runner&Tests~0123456789';
 const NUMERIC_KEY = '1234567890123456';
 /** A fake numeric key of 20 digits. As a JSON number it parses to 98765432109876540000, which keeps 16 of its digits. */
 const LONG_NUMERIC_KEY = '98765432109876543210';
+/** The fake key of the GPT 6 Astra review's probe: 12 digits, fewer than the 16 that make any part of a URL key-like. */
+const SHORT_NUMERIC_KEY = '123456789012';
 /** How the runner names a private upstream's JSON-RPC error whose code has more than five digits. */
 const WITHHELD_CODE = 'a JSON-RPC error with a code of more than five digits, withheld';
 
@@ -190,6 +193,30 @@ describe('redaction', () => {
       // The URL's short path segment 32000 is no secret, so the code -32000 stays whole.
       assert.equal(redact('error code -32000: x'), 'error code -32000: x', privateUrl);
     }
+  });
+
+  test('redacts a short key in a path segment or a query field, and leaves a short part or a word', () => {
+    // The review's probe put a 12-digit key in the query. A provider can also put one in the path.
+    for (const privateUrl of [
+      `https://rpc.example.test/?key=${SHORT_NUMERIC_KEY}`,
+      `https://rpc.example.test/ogrpc?network=ethereum&chainid=1&key=${SHORT_NUMERIC_KEY}`,
+      `https://rpc.example.test/v2/${SHORT_NUMERIC_KEY}`,
+      `https://rpc.example.test/?${SHORT_NUMERIC_KEY}`,
+    ]) {
+      const { redact } = createRedactor(upstreamEndpoints({ WRAPPED_FORK_RPC_URL: privateUrl })[0].secretPatterns);
+      assert.equal(redact(`Invalid API key ${SHORT_NUMERIC_KEY}.`), 'Invalid API key <redacted>.', privateUrl);
+      const ordinary = 'ogrpc network ethereum chainid 1 v2 key 12345 eth-mainnet';
+      assert.equal(redact(ordinary), ordinary, privateUrl);
+    }
+    assert.equal(isKeyLikeSegmentOrValue(SHORT_NUMERIC_KEY), true);
+    assert.equal(isKeyLikeSegmentOrValue('ab12cd'), true);
+    assert.equal(isKeyLikeSegmentOrValue('12345'), false);
+    assert.equal(isKeyLikeSegmentOrValue('v2'), false);
+    assert.equal(isKeyLikeSegmentOrValue('ethereum'), false);
+    assert.equal(isKeyLikeSegmentOrValue('eth-mainnet'), false);
+    assert.equal(isKeyLikeSegmentOrValue('abcdefghijklmnop'), true);
+    // Another part, such as a host label or a port, keeps the 16-character rule.
+    assert.equal(isKeyLike(SHORT_NUMERIC_KEY), false);
   });
 
   test('redacts each string in a parsed JSON value and keeps the rest of the value', () => {
@@ -545,18 +572,108 @@ describe('the upstream proxy for a private endpoint', () => {
     }
   });
 
-  test('relays a successful answer byte for byte', () => {
-    const body = '{"jsonrpc":"2.0","id":1,"result":"0x2a"}\n';
-    return withProxy(
-      () => ({ body }),
-      async (proxy) => {
-        const response = await post(proxy.url, call('eth_chainId'));
-        assert.equal(response.status, 200);
-        assert.equal(await response.text(), body);
-        assert.equal(proxy.stats.errorAnswers, 0);
-      }
-    );
+  test('relays a well-formed result of each method it forwards, in an envelope of its own', async () => {
+    const hash = `0x${'ab'.repeat(32)}`;
+    const address = `0x${'cd'.repeat(20)}`;
+    const results = {
+      eth_chainId: '0x1',
+      eth_blockNumber: '0x1907ba0',
+      eth_gasPrice: '0x3b9aca00',
+      eth_getBalance: '0x0',
+      eth_getTransactionCount: '0x2a',
+      eth_getStorageAt: `0x${'0'.repeat(63)}1`,
+      eth_getCode: '0x6080',
+      eth_getBlockByNumber: {
+        number: '0x1907ba0',
+        hash,
+        sha3Uncles: hash,
+        transactions: [{ hash, to: null, accessList: [{ address, storageKeys: [hash] }] }],
+        withdrawals: [{ index: '0x1', address, amount: '0x2' }],
+      },
+      eth_getBlockByHash: null,
+      eth_getTransactionByHash: { hash, input: '0x', yParity: '0x0' },
+      eth_getTransactionReceipt: { status: '0x1', contractAddress: null, logs: [{ topics: [hash], removed: false }] },
+    };
+    assert.deepEqual(Object.keys(results).sort(), [...UPSTREAM_METHODS].sort());
+    for (const [method, result] of Object.entries(results)) {
+      await withProxy(
+        // A member outside the envelope can carry the upstream's text, so the proxy drops it.
+        ({ id }) => ({ body: { jsonrpc: '2.0', id, result, note: `Invalid API key ${SHORT_NUMERIC_KEY}` } }),
+        async (proxy) => {
+          const response = await post(proxy.url, { ...call(method), id: 8 });
+          assert.equal(response.status, 200);
+          assert.equal(await response.text(), JSON.stringify({ jsonrpc: '2.0', id: 8, result }), method);
+          assert.equal(proxy.stats.errorAnswers, 0);
+        }
+      );
+    }
   });
+
+  test('withholds a result without the shape that its method returns, and never relays its text', async () => {
+    // The review's probe: the upstream answers with a success whose result is text that echoes the key.
+    const text = `Invalid API key ${SHORT_NUMERIC_KEY}`;
+    const hash = `0x${'ab'.repeat(32)}`;
+    const block = { number: '0x1907ba0', hash, transactions: [hash] };
+    const malformed = [
+      ['eth_getBalance', text],
+      ['eth_getBalance', `0x${'f'.repeat(65)}`],
+      ['eth_getBalance', 42],
+      ['eth_getStorageAt', `0x${SHORT_NUMERIC_KEY}x`],
+      ['eth_getCode', '0x608'],
+      ['eth_getCode', text],
+      ['eth_getBlockByNumber', text],
+      ['eth_getBlockByNumber', [block]],
+      ['eth_getBlockByNumber', { ...block, miner: text }],
+      ['eth_getBlockByNumber', { ...block, [text]: '0x1' }],
+      ['eth_getBlockByNumber', { ...block, transactions: [{ hash, input: text }] }],
+      ['eth_getTransactionReceipt', { status: '0x1', gasUsed: 21000 }],
+    ];
+    for (const [method, result] of malformed) {
+      await withProxy(
+        ({ id }) => ({ body: { jsonrpc: '2.0', id, result } }),
+        async (proxy) => {
+          const response = await post(proxy.url, { ...call(method), id: 8 });
+          const answer = await response.text();
+          assert.ok(!answer.includes(SHORT_NUMERIC_KEY), `${method}: ${answer}`);
+          assert.deepEqual(JSON.parse(answer), {
+            jsonrpc: '2.0',
+            id: 8,
+            error: { code: -32603, message: "the private upstream's malformed result is withheld" },
+          });
+          assert.equal(proxy.stats.errorAnswers, 1);
+          assert.equal(proxy.stats.firstError, `a malformed ${method} result`);
+        }
+      );
+    }
+  });
+
+  test('withholds a malformed result in a batch, and relays the other results', () =>
+    withProxy(
+      () => ({
+        body: [
+          { jsonrpc: '2.0', id: 1, result: '0x2a' },
+          { jsonrpc: '2.0', id: 2, result: `Invalid API key ${SHORT_NUMERIC_KEY}` },
+          { jsonrpc: '2.0', id: 3, result: '0x1' },
+        ],
+      }),
+      async (proxy) => {
+        const response = await post(proxy.url, [
+          { ...call('eth_chainId'), id: 1 },
+          { ...call('eth_getBalance', ['0x1', '0x1']), id: 2 },
+        ]);
+        const text = await response.text();
+        assert.ok(!text.includes(SHORT_NUMERIC_KEY), text);
+        const withheld = { code: -32603, message: "the private upstream's malformed result is withheld" };
+        assert.deepEqual(JSON.parse(text), [
+          { jsonrpc: '2.0', id: 1, result: '0x2a' },
+          { jsonrpc: '2.0', id: 2, error: withheld },
+          // No call in the batch has the id 3, so no method gives the shape of its result.
+          { jsonrpc: '2.0', id: 3, error: withheld },
+        ]);
+        assert.equal(proxy.stats.errorAnswers, 2);
+        assert.equal(proxy.stats.firstError, 'a malformed eth_getBalance result');
+      }
+    ));
 });
 
 describe('the upstream proxy', () => {
@@ -1312,15 +1429,30 @@ describe('the runner, end to end, with a private upstream that echoes its key', 
     assert.match(run.output, /recent block: eth_blockNumber: an answer that is not a block number/);
   });
 
-  test("redacts a key that an upstream's answer echoes into anvil's log", async () => {
-    // An answer that is not an error reaches anvil unchanged, and anvil prints it when it cannot parse it.
+  test('never writes a short numeric key that the upstream answers as a malformed result', async () => {
+    // The review's probe: the upstream answers anvil's genesis read with a success whose result is
+    // text that echoes the 12-digit query key. anvil prints a result that it cannot parse.
+    answers = pinnedBlockUpstream(({ id }) => ({
+      body: { jsonrpc: '2.0', id, result: `Invalid API key ${SHORT_NUMERIC_KEY}` },
+    }));
+    const run = await runRunner({ privateUrl: `${stub.url}/?key=${SHORT_NUMERIC_KEY}`, anvil: 'genesis' });
+    assert.equal(run.code, 1);
+    assertKeyNeverWritten(run, SHORT_NUMERIC_KEY, 'Invalid API key');
+    assert.match(run.files['anvil.log'], /error code -32603: the private upstream's malformed result is withheld/);
+    assert.match(run.output, /Result: NOT EXERCISED\./);
+  });
+
+  test("never passes an upstream's malformed result to anvil, so anvil's log holds none of its text", async () => {
     answers = pinnedBlockUpstream(({ id }, requestPath) => ({
       body: { jsonrpc: '2.0', id, result: `no balance for ${decodeURIComponent(requestPath.split('/').pop())}` },
     }));
     const run = await runRunner({ privateUrl: `${stub.url}/api/${encodeURIComponent(PLUS_KEY)}`, anvil: 'genesis' });
     assert.equal(run.code, 1);
-    assertKeyNeverWritten(run, PLUS_KEY);
-    assert.match(run.files['anvil.log'], /deserialization error: invalid value, text: .*no balance for <redacted>/);
+    assertKeyNeverWritten(run, PLUS_KEY, 'no balance for');
+    assert.match(
+      run.files['anvil.log'],
+      /failed to get account for .*: server returned an error response: error code -32603: the private upstream's malformed result is withheld/
+    );
   });
 });
 
