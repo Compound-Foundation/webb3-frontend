@@ -2,6 +2,7 @@ import { Interface } from '@ethersproject/abi';
 import { TransactionReceipt } from '@ethersproject/providers';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { useLayoutEffect } from 'react';
 
 import {
   ANCHORAGE_CONNECTOR_ID,
@@ -563,7 +564,7 @@ describe('WrappedSupply', () => {
       expect(screen.getByText(/waiting for your wrapped position/i)).toBeInTheDocument();
     });
 
-    it('closes the amount form when the session or market changes', () => {
+    it('closes the amount form when the session or market changes, from the first render under the new key', () => {
       const lending = lendingWith(controller());
       const props = {
         position: lending.position,
@@ -572,17 +573,33 @@ describe('WrappedSupply', () => {
         supply: { blockedReason: undefined, onReview: jest.fn(() => undefined) },
         onRetry: jest.fn(),
       };
-      const { rerender } = render(<WrappedPositionPanel route={routeFor(OPEN)} {...props} />);
+      const amountInput = () => screen.queryByRole('textbox', { name: /amount of usdc to supply/i });
+      // Whether the form was on screen at each commit, seen before the panel's passive effects run.
+      const committed: boolean[] = [];
+      function Panel({ route }: { route: Extract<LendingRoute, { kind: 'wrapped' }> }) {
+        useLayoutEffect(() => {
+          committed.push(amountInput() !== null);
+        });
+        return <WrappedPositionPanel route={route} {...props} />;
+      }
+      const { rerender } = render(<Panel route={routeFor(OPEN)} />);
       fireEvent.click(supplyButton());
-      expect(screen.getByRole('textbox', { name: /amount of usdc to supply/i })).toBeInTheDocument();
+      fireEvent.change(amountInput() as HTMLElement, { target: { value: '123.456789' } });
+      expect(amountInput()).toHaveValue('123.456789');
 
-      // A reconnect gives the route a new validation key.
-      rerender(<WrappedPositionPanel route={{ ...routeFor(OPEN), validationKey: 'another-session' }} {...props} />);
-      expect(screen.queryByRole('textbox', { name: /amount of usdc to supply/i })).not.toBeInTheDocument();
+      // A reconnect gives the route a new validation key. No commit under it shows the old form.
+      committed.length = 0;
+      rerender(<Panel route={{ ...routeFor(OPEN), validationKey: 'another-session' }} />);
+      expect(committed.length).toBeGreaterThan(0);
+      expect(committed).not.toContain(true);
+      expect(amountInput()).not.toBeInTheDocument();
 
       // The session returns to the key the form was opened for. The form stays closed.
-      rerender(<WrappedPositionPanel route={routeFor(OPEN)} {...props} />);
-      expect(screen.queryByRole('textbox', { name: /amount of usdc to supply/i })).not.toBeInTheDocument();
+      committed.length = 0;
+      rerender(<Panel route={routeFor(OPEN)} />);
+      expect(committed.length).toBeGreaterThan(0);
+      expect(committed).not.toContain(true);
+      expect(amountInput()).not.toBeInTheDocument();
     });
 
     it('keeps the withdraw control disabled', () => {
