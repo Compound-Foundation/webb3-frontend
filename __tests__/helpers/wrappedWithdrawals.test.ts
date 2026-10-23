@@ -5,6 +5,7 @@ import {
   getWithdrawalLimits,
   planWrappedWithdrawal,
   recheckWithdrawal,
+  requoteWithdrawal,
   WithdrawalPlan,
   WithdrawalQuote,
   WithdrawalSnapshot,
@@ -459,10 +460,59 @@ describe('wrappedWithdrawals: handles zero shares, a position at/below the buffe
         100_000_000n,
       ],
       ['the shares are now worth no more than the buffer', { totalAssets: 20n }, 'partial', 'dust', 0n],
+      [
+        'the shares now pay one unit more than 0.1% above the reviewed cash',
+        { totalAssets: 1_001_500_510n },
+        'partial',
+        'cash-rose',
+        100_100_001n,
+      ],
+      [
+        "the wrapper's assets double, as a donation to the wrapper can make them",
+        { totalAssets: 2_001_000_000n },
+        'partial',
+        'cash-rose',
+        200_000_002n,
+      ],
     ])('stops when %s', (_name, change, kind, reason, cash) => {
       const quote = kind === 'partial' ? partialQuote() : fullQuote();
 
       expect(recheckWithdrawal(quote, { ...SNAPSHOT, ...change })).toEqual({ status: 'changed', reason, cash });
+    });
+
+    it('lets a partial exit go on when its cash rises by exactly 0.1% of the reviewed cash', () => {
+      expect(recheckWithdrawal(partialQuote(), { ...SNAPSHOT, totalAssets: 1_001_500_500n })).toEqual({
+        status: 'ready',
+        cash: 100_100_000n,
+      });
+    });
+
+    it('lets a full exit go on when its cash doubles, because it still burns exactly the reviewed balance', () => {
+      expect(recheckWithdrawal(fullQuote(), { ...SNAPSHOT, totalAssets: 2_001_000_000n })).toEqual({
+        status: 'ready',
+        cash: 500_249_997n,
+      });
+    });
+
+    it('quotes the reviewed shares again at the newer snapshot, and never other shares', () => {
+      const accrued = { ...SNAPSHOT, totalAssets: 1_001_000_000n };
+
+      expect(requoteWithdrawal(partialQuote(), { ...accrued, shares: SNAPSHOT.shares * 2n })).toEqual({
+        kind: 'partial',
+        shares: 99_950_027_886_106_918_655n,
+        grossAssets: 100_049_978n,
+        redeemBuffer: 3n,
+        cash: 100_049_975n,
+        leavesDust: false,
+      });
+      expect(requoteWithdrawal(fullQuote(), accrued)).toEqual({
+        kind: 'full',
+        shares: SNAPSHOT.shares,
+        grossAssets: 250_250_000n,
+        redeemBuffer: 3n,
+        cash: 250_249_997n,
+        leavesDust: false,
+      });
     });
 
     it('lets a partial exit burn its reviewed shares from a larger balance', () => {

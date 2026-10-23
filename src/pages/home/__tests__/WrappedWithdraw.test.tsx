@@ -18,6 +18,7 @@ import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } fr
 import { getMarket } from '@helpers/markets';
 import { getBlockExplorerUrl } from '@helpers/urls';
 import {
+  RecheckedWithdrawal,
   WRAPPED_ACTION,
   WrappedActionDraft,
   WrappedActionType,
@@ -139,6 +140,19 @@ const FULL_REVIEW: WithdrawalReview = {
   },
   shownCash: 250_124_997n,
   blockNumber: 100,
+};
+
+/** The partial exit as its check found it just before the signature, after interest raised its cash. */
+const PARTIAL_RECHECKED: RecheckedWithdrawal = {
+  quote: { ...PARTIAL_REVIEW.quote, grossAssets: 100_049_978n, cash: 100_049_975n },
+  blockNumber: 101,
+  description: 'Withdraw about 100.049975 USDC from the wrapper',
+};
+/** The full exit as its check found it just before the signature, after interest raised its cash. */
+const FULL_RECHECKED: RecheckedWithdrawal = {
+  quote: { ...FULL_REVIEW.quote, grossAssets: 250_250_000n, cash: 250_249_997n },
+  blockNumber: 101,
+  description: 'Withdraw all your wrapped USDC, about 250.249997 USDC',
 };
 
 function exitStep(review: WithdrawalReview): WrappedStep {
@@ -670,6 +684,94 @@ describe('WrappedWithdraw', () => {
       expect(explorerLinks()).toEqual([EXPLORER_LINK]);
       fireEvent.click(screen.getByRole('button', { name: 'Done' }));
       expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the cash its check before the signature found, never the reviewed cash, while the wallet has the request', () => {
+      renderModal({
+        ...inReview(),
+        phase: 'signing',
+        steps: [{ status: 'awaiting-signature' }],
+        rechecked: PARTIAL_RECHECKED,
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent('Withdraw about 100.049975 USDC from the wrapper to your wallet.');
+      expect(within(dialog).getByTestId('wrapped-withdraw-cash')).toHaveTextContent('100.049975 USDC');
+      expect(within(dialog).getByTestId('wrapped-withdraw-gross')).toHaveTextContent('100.049978 USDC');
+      expect(within(dialog).getByTestId('wrapped-withdraw-buffer')).toHaveTextContent('0.000003 USDC');
+      expect(within(dialog).getByTestId('wrapped-withdraw-shares')).toHaveTextContent('99.950027886106918655');
+      expect(within(dialog).getByRole('listitem')).toHaveTextContent('Withdraw about 100.049975 USDC from the wrapper');
+      expect(dialog).not.toHaveTextContent(/about 100\.000000 USDC/);
+      // The notice of a payout above the amount entered gives whole shares as the reason, which no longer holds.
+      expect(dialog).not.toHaveTextContent(/you entered/);
+      const alert = within(dialog).getByRole('alert');
+      expect(alert).toHaveTextContent(
+        /now 100\.049975 USDC, 0\.049975 USDC more than the 100\.000000 USDC you reviewed/
+      );
+      expect(alert).toHaveTextContent(/if you do not want this amount, reject the request in your wallet/i);
+    });
+
+    it('no longer tells the user to reject the request once the wallet has sent the transaction', () => {
+      renderModal({
+        ...inReview(),
+        phase: 'signing',
+        steps: [{ status: 'submitted', hash: HASH }],
+        rechecked: PARTIAL_RECHECKED,
+      });
+
+      const alert = within(screen.getByRole('dialog')).getByRole('alert');
+      expect(alert).toHaveTextContent(
+        /now 100\.049975 USDC, 0\.049975 USDC more than the 100\.000000 USDC you reviewed/
+      );
+      expect(alert).not.toHaveTextContent(/reject/i);
+    });
+
+    it("shows a full exit's cash as its check before the signature found it, in the one alert", () => {
+      renderModal({
+        ...inReview({ ...FULL_REVIEW, shownCash: 250_000_000n }),
+        phase: 'signing',
+        steps: [{ status: 'awaiting-signature' }],
+        rechecked: FULL_RECHECKED,
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(
+        'Withdraw all your wrapped USDC, about 250.249997 USDC, from the wrapper to your wallet.'
+      );
+      expect(within(dialog).getByRole('listitem')).toHaveTextContent(
+        'Withdraw all your wrapped USDC, about 250.249997 USDC'
+      );
+      expect(within(dialog).getAllByRole('alert')).toHaveLength(1);
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        /now 250\.249997 USDC, 0\.125000 USDC more than the 250\.124997 USDC you reviewed/
+      );
+    });
+
+    it('shows no change alert when its check before the signature finds the reviewed cash', () => {
+      renderModal({
+        ...inReview(),
+        phase: 'signing',
+        steps: [{ status: 'awaiting-signature' }],
+        rechecked: {
+          quote: PARTIAL_REVIEW.quote,
+          blockNumber: 101,
+          description: 'Withdraw about 100.000000 USDC from the wrapper',
+        },
+      });
+
+      expect(within(screen.getByRole('dialog')).queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('confirms success with the cash its check before the signature found', () => {
+      const receipt = { transactionHash: HASH, status: 1 } as TransactionReceipt;
+      renderModal({
+        ...inReview(),
+        phase: 'complete',
+        steps: [{ status: 'confirmed', hash: HASH, receipt }],
+        rechecked: PARTIAL_RECHECKED,
+      });
+
+      expect(screen.getByRole('dialog')).toHaveTextContent(/withdrew about 100\.049975 USDC/i);
     });
 
     it.each<[WrappedStepState, RegExp]>([

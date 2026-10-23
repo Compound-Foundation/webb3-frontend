@@ -12,8 +12,10 @@ import { describeWalletError } from '@helpers/walletErrors';
 import { WrappedActionIdentity, WrappedBlockReason, WrappedStep, WrappedStepCheck } from '@helpers/wrappedActions';
 import { BlockWait, DEFAULT_BLOCK_WAIT, getRedeemBuffer, waitForBlock } from '@helpers/wrappedPositions';
 import {
+  PARTIAL_EXIT_CASH_RISE_TOLERANCE_BPS,
   planWrappedWithdrawal,
   recheckWithdrawal,
+  requoteWithdrawal,
   WithdrawalPlan,
   WithdrawalQuote,
   WithdrawalRecheck,
@@ -659,6 +661,9 @@ function revisionMessage(
   }
 }
 
+/** `PARTIAL_EXIT_CASH_RISE_TOLERANCE_BPS` as a percentage, such as "0.1%". */
+const PARTIAL_EXIT_CASH_RISE_TOLERANCE_PERCENT = `${Number(PARTIAL_EXIT_CASH_RISE_TOLERANCE_BPS) / 100}%`;
+
 /** Why a reviewed exit stopped before its signature, and what the user can do. */
 function changeMessage(
   recheck: Extract<WithdrawalRecheck, { status: 'changed' }>,
@@ -677,6 +682,12 @@ function changeMessage(
       return "These shares are now worth no more than the wrapper's rounding buffer, so the wrapper would refuse the withdrawal (ZeroAssetsTransferred). Review the withdrawal again.";
     case 'cash-fell':
       return `This withdrawal now pays about ${formatAmount(recheck.cash)}, less than the ${formatAmount(
+        quote.cash
+      )} you reviewed. Review it again.`;
+    case 'cash-rose':
+      return `This withdrawal now pays about ${formatAmount(
+        recheck.cash
+      )}, more than ${PARTIAL_EXIT_CASH_RISE_TOLERANCE_PERCENT} above the ${formatAmount(
         quote.cash
       )} you reviewed. Review it again.`;
     case 'exceeds-liquidity':
@@ -705,8 +716,10 @@ export type PrepareWrappedWithdrawalInput = {
  * full exit. The amount is never lowered here.
  *
  * Before the signature, the step reads again. It stops when the share balance, the pause, the
- * cash the shares pay or the market's cash no longer allows the reviewed exit. It then simulates
- * the exit from the account at that block. The method has no minimum amount and no deadline, and
+ * cash the shares pay or the market's cash no longer allows the reviewed exit, as
+ * `recheckWithdrawal` decides. It then simulates the exit from the account at that block. A check
+ * that passes gives the reviewed shares quoted at that block, so the dialog and the transaction
+ * list show the cash the exit pays there. The method has no minimum amount and no deadline, and
  * the simulation enforces neither: the wrapper computes the cash when the transaction runs.
  */
 export async function prepareWrappedWithdrawal({
@@ -737,6 +750,11 @@ export async function prepareWrappedWithdrawal({
     throw new WrappedReviewError(revisionMessage(plan, request, read.snapshot, formatAmount, symbol));
   }
   const { quote } = plan;
+  // The step's description, with the cash `exitQuote` pays.
+  const describeExit = (exitQuote: WithdrawalQuote) =>
+    exitQuote.kind === 'full'
+      ? `Withdraw all your wrapped ${symbol}, about ${formatAmount(exitQuote.cash)}`
+      : `Withdraw about ${formatAmount(exitQuote.cash)} from the wrapper`;
 
   const checkBeforeExit = async (): Promise<WrappedStepCheck> => {
     let latest: WithdrawalRead;
@@ -755,7 +773,7 @@ export async function prepareWrappedWithdrawal({
     if (recheck.status === 'changed') {
       return { ok: false, message: changeMessage(recheck, quote, latest.snapshot, formatAmount) };
     }
-    return simulateUnwrapAndWithdraw(
+    const simulation = await simulateUnwrapAndWithdraw(
       reads,
       identity,
       quote.shares,
@@ -764,15 +782,18 @@ export async function prepareWrappedWithdrawal({
       formatAmount,
       symbol
     );
+    if (!simulation.ok) return simulation;
+    const requote = requoteWithdrawal(quote, latest.snapshot);
+    return {
+      ok: true,
+      rechecked: { quote: requote, blockNumber: latest.blockNumber, description: describeExit(requote) },
+    };
   };
 
   const step: WrappedStep = {
     id: WRAPPED_WITHDRAW_STEP_ID,
     kind: 'unwrap-and-withdraw',
-    description:
-      quote.kind === 'full'
-        ? `Withdraw all your wrapped ${symbol}, about ${formatAmount(quote.cash)}`
-        : `Withdraw about ${formatAmount(quote.cash)} from the wrapper`,
+    description: describeExit(quote),
     request: {
       to: identity.wrapperAddress,
       data: wrapperInterface.encodeFunctionData('unwrapAndWithdraw', [quote.shares]),

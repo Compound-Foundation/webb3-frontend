@@ -76,6 +76,35 @@ function EstimateChange({
   );
 }
 
+/**
+ * Tells the user that the check before the signature found a different estimate from the one they
+ * reviewed, and by how much. While the wallet has the request, the user can reject it there.
+ */
+function RecheckedChange({
+  reviewedCash,
+  recheckedCash,
+  canReject,
+  formatAmount,
+}: {
+  reviewedCash: bigint;
+  recheckedCash: bigint;
+  /** Whether the wallet has the request, so the user can still reject it. */
+  canReject: boolean;
+  formatAmount: (value: bigint) => string;
+}) {
+  const difference = recheckedCash > reviewedCash ? recheckedCash - reviewedCash : reviewedCash - recheckedCash;
+  return (
+    <div className="wrapped-action-modal__warning" role="alert">
+      <p className="body">
+        This page read the market again before it asked your wallet. The estimate is now {formatAmount(recheckedCash)},{' '}
+        {formatAmount(difference)} {recheckedCash > reviewedCash ? 'more' : 'less'} than the{' '}
+        {formatAmount(reviewedCash)} you reviewed.
+        {canReject && ' If you do not want this amount, reject the request in your wallet.'}
+      </p>
+    </div>
+  );
+}
+
 /** The quoted figures: the cash, the shares' value, the buffer the wrapper holds back, and the shares burned. */
 function QuoteFigures({ review, formatAmount }: { review: WithdrawalReview; formatAmount: (value: bigint) => string }) {
   const { quote } = review;
@@ -118,6 +147,10 @@ function QuoteFigures({ review, formatAmount }: { review: WithdrawalReview; form
  * The review says that the exit has no minimum amount or deadline, and that the simulation before
  * the signature enforces neither. It says when a full exit's estimate changed since the page
  * showed it. It also says when a partial exit leaves shares that cannot be withdrawn on their own.
+ *
+ * Once the check before the signature passes, the dialog shows the exit as that check found it,
+ * and says when its estimate changed since the review. The wallet's request then pays what the
+ * dialog shows at the block the check read.
  */
 const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: WrappedWithdrawModalProps) => {
   const isOpen = isWrappedWithdrawModalState(state);
@@ -164,10 +197,15 @@ const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: W
       actions = closeButton('Close');
       break;
     default: {
-      const { draft, steps, stepIndex, phase } = state;
-      const review = draft.withdrawal;
+      const { draft, steps, stepIndex, phase, rechecked } = state;
+      const reviewed = draft.withdrawal;
       // The submission guard refuses a withdrawal without its quote, so none reaches review.
-      if (review === undefined) return null;
+      if (reviewed === undefined) return null;
+      const review =
+        rechecked === undefined
+          ? reviewed
+          : { ...reviewed, quote: rechecked.quote, blockNumber: rechecked.blockNumber };
+      const isRecheckedCashChanged = rechecked !== undefined && rechecked.quote.cash !== reviewed.quote.cash;
       const { quote, request } = review;
       const cash = formatAmount(quote.cash);
       const isStopped = phase === 'stopped';
@@ -196,8 +234,19 @@ const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: W
           <p className="L4 meta text-color--2">
             Your wallet may show the shares in their base units: {quote.shares.toString()}.
           </p>
-          {isBeforeSignature && <EstimateChange review={review} formatAmount={formatAmount} />}
-          {isBeforeSignature && request.kind === 'partial' && quote.cash > request.cash && (
+          {isBeforeSignature &&
+            (isRecheckedCashChanged ? (
+              <RecheckedChange
+                reviewedCash={reviewed.quote.cash}
+                recheckedCash={quote.cash}
+                canReject={stepState.status === 'awaiting-signature'}
+                formatAmount={formatAmount}
+              />
+            ) : (
+              <EstimateChange review={review} formatAmount={formatAmount} />
+            ))}
+          {/* This notice gives whole shares as the reason, which explains only the reviewed cash. */}
+          {isBeforeSignature && !isRecheckedCashChanged && request.kind === 'partial' && quote.cash > request.cash && (
             <p className="L4 meta text-color--2">
               This is {formatAmount(quote.cash - request.cash)} more than the {formatAmount(request.cash)} you entered,
               because shares are burned in whole units.
@@ -224,7 +273,7 @@ const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: W
           )}
           <ol className="wrapped-action-modal__steps">
             <li key={step.id} className="wrapped-action-modal__step">
-              <p className="body body--emphasized">{step.description}</p>
+              <p className="body body--emphasized">{rechecked?.description ?? step.description}</p>
               <p className="L4 meta text-color--2">
                 {stepStatusText(stepState, phase === 'review', isStopped, WITHDRAW_CHECKING_TEXT)}
               </p>

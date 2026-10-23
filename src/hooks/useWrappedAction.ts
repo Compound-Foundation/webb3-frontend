@@ -12,10 +12,12 @@ import {
 } from '@helpers/walletErrors';
 import {
   checkBeforeSignature,
+  checkRecheckedWithdrawal,
   checkWrappedDraft,
   isSameWrappedIdentity,
   MarketRestriction,
   readMarketRestriction,
+  RecheckedWithdrawal,
   WRAPPED_ACTION,
   WrappedActionDraft,
   WrappedActionIdentity,
@@ -80,6 +82,11 @@ type DraftProgress = {
   steps: readonly WrappedStepState[];
   /** The step the user confirms next, or the one in progress or that stopped the draft. */
   stepIndex: number;
+  /**
+   * A withdrawal as its step's check found it just before the signature, once that check passes.
+   * The draft keeps the review the user confirmed.
+   */
+  rechecked?: RecheckedWithdrawal;
 };
 
 /**
@@ -173,6 +180,7 @@ type LifecycleEvent =
   | { type: 'reading'; identity: WrappedActionIdentity }
   | { type: 'read-failed'; message: string }
   | { type: 'drafted'; draft: WrappedActionDraft }
+  | { type: 'rechecked'; rechecked: RecheckedWithdrawal }
   | { type: 'step'; index: number; step: WrappedStepState }
   | { type: 'session-unusable' }
   | { type: 'discarded'; reason: 'identity-changed' | 'cleared' }
@@ -271,6 +279,8 @@ function lifecycleReducer(state: WrappedActionState, event: LifecycleEvent): Wra
             stepIndex: 0,
           }
         : state;
+    case 'rechecked':
+      return state.phase === 'signing' ? { ...state, rechecked: event.rechecked } : state;
     case 'step':
       return withStep(state, event.index, event.step);
     case 'session-unusable':
@@ -358,6 +368,19 @@ function frozenDraft(
             quote: Object.freeze({ ...withdrawal.quote }),
           }),
         }),
+  });
+}
+
+/**
+ * The lifecycle's own frozen copy of a withdrawal as its check found it. The quote that was checked
+ * against the draft is then the one the dialog shows, whatever later happens to the object the check
+ * returned.
+ */
+function frozenRecheck(rechecked: RecheckedWithdrawal): RecheckedWithdrawal {
+  return Object.freeze({
+    quote: Object.freeze({ ...rechecked.quote }),
+    blockNumber: rechecked.blockNumber,
+    description: String(rechecked.description),
   });
 }
 
@@ -595,12 +618,22 @@ export function useWrappedAction({
     if (!isCurrentRun()) return;
     if (restriction !== undefined) return block(restriction);
 
+    let { description } = step;
     if (step.check !== undefined) {
       const stepCheck = await step
         .check()
         .catch((error): { ok: false; message: string } => ({ ok: false, message: describeWalletError(error) }));
       if (!isCurrentRun()) return;
       if (!stepCheck.ok) return block('step-check-failed', stepCheck.message);
+      if (stepCheck.rechecked !== undefined) {
+        const rechecked = frozenRecheck(stepCheck.rechecked);
+        const problem = checkRecheckedWithdrawal(draft, rechecked);
+        if (problem !== undefined) return block(problem);
+        // The dialog shows the exit as the check found it before the wallet is asked, and the
+        // transaction list describes the request by it. Neither then shows a cash the exit no longer pays.
+        dispatch({ type: 'rechecked', rechecked });
+        description = rechecked.description;
+      }
     }
 
     const probed = await live.current
@@ -619,7 +652,7 @@ export function useWrappedAction({
     let withdrawnBecause: WrappedBlockReason | undefined;
     const result = await live.current.manager.submitTransaction({
       key: draft.identity.wrapperAddress,
-      description: step.description,
+      description,
       step: step.id,
       account: draft.identity.account,
       chainId: draft.identity.chainId,

@@ -5,7 +5,7 @@ import { HARDCODED_WRAPPED_LENDING_SOURCE } from '@constants/wrappedMarkets';
 import CometAbi from '@helpers/abis/Comet';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { MAX_UINT256 } from '@helpers/numbers';
-import type { WithdrawalReview } from '@helpers/wrappedWithdrawals';
+import type { WithdrawalQuote, WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import type { ScreeningStatus } from '@hooks/useAddressScreening';
 import { Action, ActionType } from '@types';
 
@@ -23,8 +23,27 @@ export type WrappedActionType = 'supply' | 'withdraw';
  */
 export type WrappedStepKind = 'approve' | 'supply-and-wrap' | 'unwrap-and-withdraw';
 
-/** The result of a step's own check. */
-export type WrappedStepCheck = { ok: true } | { ok: false; message: string };
+/**
+ * A withdrawal as its check found it just before the signature. The step still burns the reviewed
+ * shares, so only what they pay can differ from the review.
+ */
+export type RecheckedWithdrawal = {
+  /** The reviewed shares, quoted again at `blockNumber`. */
+  quote: WithdrawalQuote;
+  /** The block the check read. */
+  blockNumber: number;
+  /**
+   * The step's description with the cash of `quote`. The transaction list describes the wallet's
+   * request by it.
+   */
+  description: string;
+};
+
+/**
+ * The result of a step's own check. A withdrawal's check that passes gives `rechecked`. The dialog
+ * then shows the cash the exit pays at the block the check read, not the reviewed cash.
+ */
+export type WrappedStepCheck = { ok: true; rechecked?: RecheckedWithdrawal } | { ok: false; message: string };
 
 /** One transaction of a wrapper action. COM-287 and COM-288 build these. */
 export type WrappedStep = {
@@ -353,6 +372,24 @@ export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem
   if (!isApprovalSequence) return 'bad-sequence';
   if (draft.identity.type === 'withdraw' && draft.withdrawal?.quote.shares !== draft.amount) return 'quote-mismatch';
   return undefined;
+}
+
+/**
+ * Checks a withdrawal as its check found it against the draft. It must quote the draft's kind of
+ * exit for the shares the draft's call burns. Otherwise the dialog and the transaction list
+ * describe other shares than the wallet signs.
+ */
+export function checkRecheckedWithdrawal(
+  draft: WrappedActionDraft,
+  rechecked: RecheckedWithdrawal
+): WrappedStepProblem | undefined {
+  const reviewed = draft.withdrawal;
+  const isSameExit =
+    draft.identity.type === 'withdraw' &&
+    reviewed !== undefined &&
+    rechecked.quote.kind === reviewed.quote.kind &&
+    rechecked.quote.shares === draft.amount;
+  return isSameExit ? undefined : 'quote-mismatch';
 }
 
 export type MarketRestriction = 'supply-paused' | 'withdraw-paused' | 'restriction-unknown';

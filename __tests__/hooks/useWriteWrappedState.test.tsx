@@ -1,6 +1,6 @@
 import { Interface } from '@ethersproject/abi';
 import { JsonRpcProvider, TransactionReceipt } from '@ethersproject/providers';
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { BigNumber, utils } from 'ethers';
 
@@ -43,6 +43,7 @@ import {
   WriteWrappedState,
 } from '@hooks/useWriteWrappedState';
 import WrappedSupplyModal from '@pages/home/components/ActionModal/WrappedSupplyModal';
+import WrappedWithdrawModal from '@pages/home/components/ActionModal/WrappedWithdrawModal';
 import { MarketData, SettledTransaction, TransactionState } from '@types';
 
 import { mockWeb3 } from '../mocks/mockWeb3';
@@ -2007,6 +2008,187 @@ describe('useWriteWrappedState', () => {
         expect(walletRequests(wallet)).toEqual([]);
       }
     );
+  });
+
+  describe('wrappedWithdraw: a payout that changes between the review and the signature', () => {
+    /** Ends the review's block, and gives the wrapper `totalAssets` in the next one. */
+    function changeAssets(chain: Chain, totalAssets: bigint) {
+      chain.history.set(chain.block, ledgerOf(chain));
+      chain.block += 1;
+      chain.totalAssets = totalAssets;
+    }
+
+    it("stops a partial exit for a fresh review when the wrapper's assets double before the signature", async () => {
+      const chain = exitChainFor(USDC_MARKET);
+      const { result, wallet, events } = renderWrapped(chain);
+      await startWithdraw(result, { kind: 'partial', cash: 100_000_000n });
+      events.length = 0;
+
+      // Assets sent to the wrapper's Comet balance, such as a donation, double what each share is worth.
+      changeAssets(chain, 2_001_000_000n);
+      await confirmStep(result);
+
+      expect(result.current.action.state).toMatchObject({
+        phase: 'stopped',
+        steps: [
+          {
+            status: 'blocked',
+            reason: 'step-check-failed',
+            message: expect.stringMatching(
+              /now pays about 200\.000002 USDC, more than 0\.1% above the 100\.000000 USDC you reviewed\. Review it again/
+            ),
+          },
+        ],
+      });
+      expect(events).not.toContain('simulate');
+      expect(walletRequests(wallet)).toEqual([]);
+      expect(chain.balance).toBe(10_000_000_000n);
+
+      // A fresh review quotes the same amount from fewer shares.
+      act(() => result.current.action.discard());
+      await startWithdraw(result, { kind: 'partial', cash: 100_000_000n });
+      expect(draftCalls(result)).toEqual([
+        {
+          id: WRAPPED_WITHDRAW_STEP_ID,
+          kind: 'unwrap-and-withdraw',
+          ...encodeExit(USDC_MARKET, 49_975_013_968_028_478_777n),
+        },
+      ]);
+    });
+
+    it.each<[string, bigint, bigint, string]>([
+      ['interest raises its cash by 0.05%', 1_001_000_000n, 100_049_975n, '100.049975'],
+      ['its cash rises by exactly 0.1%', 1_001_500_500n, 100_100_000n, '100.100000'],
+    ])(
+      'signs the reviewed shares of a partial exit when %s, and describes the cash they now pay',
+      async (_name, totalAssets, cash, shownCash) => {
+        const chain = exitChainFor(USDC_MARKET);
+        const { result, wallet } = renderWrapped(chain);
+        await startWithdraw(result, { kind: 'partial', cash: 100_000_000n });
+
+        changeAssets(chain, totalAssets);
+        await confirmStep(result);
+
+        const description = `Withdraw about ${shownCash} USDC from the wrapper`;
+        expect(result.current.action.state).toMatchObject({
+          phase: 'complete',
+          draft: { withdrawal: { quote: { shares: SHARES_FOR_100, cash: 100_000_000n } } },
+          rechecked: { description, quote: { shares: SHARES_FOR_100, cash }, blockNumber: 101 },
+        });
+        expect(walletRequests(wallet)).toEqual([unwrapAndWithdraw(USDC_MARKET, SHARES_FOR_100)]);
+        await waitFor(() =>
+          expect(result.current.manager.settledTransactions.map((transaction) => transaction.description)).toEqual([
+            description,
+          ])
+        );
+        expect(chain.balance).toBe(10_000_000_000n + cash);
+      }
+    );
+
+    it.each<[string, bigint, RegExp]>([
+      [
+        'rises by one unit more than 0.1%',
+        1_001_500_510n,
+        /now pays about 100\.100001 USDC, more than 0\.1% above the 100\.000000 USDC you reviewed\. Review it again/,
+      ],
+      [
+        'falls by one unit',
+        1_000_499_990n,
+        /now pays about 99\.999999 USDC, less than the 100\.000000 USDC you reviewed/,
+      ],
+    ])('stops a partial exit for a fresh review when its cash %s', async (_name, totalAssets, message) => {
+      const chain = exitChainFor(USDC_MARKET);
+      const { result, wallet, events } = renderWrapped(chain);
+      await startWithdraw(result, { kind: 'partial', cash: 100_000_000n });
+      events.length = 0;
+
+      changeAssets(chain, totalAssets);
+      await confirmStep(result);
+
+      expect(stepsOf(result.current.action.state)[0]).toMatchObject({
+        status: 'blocked',
+        reason: 'step-check-failed',
+        message: expect.stringMatching(message),
+      });
+      expect(events).not.toContain('simulate');
+      expect(walletRequests(wallet)).toEqual([]);
+    });
+
+    it('signs the whole balance of a full exit when its cash doubles, and describes the cash it now pays', async () => {
+      const chain = exitChainFor(USDC_MARKET);
+      const { result, wallet } = renderWrapped(chain);
+      await startWithdraw(result, { kind: 'full' });
+
+      changeAssets(chain, 2_001_000_000n);
+      await confirmStep(result);
+
+      const description = 'Withdraw all your wrapped USDC, about 500.249997 USDC';
+      expect(result.current.action.state).toMatchObject({
+        phase: 'complete',
+        rechecked: { description, quote: { kind: 'full', shares: SHARES, cash: 500_249_997n } },
+      });
+      expect(walletRequests(wallet)).toEqual([unwrapAndWithdraw(USDC_MARKET, SHARES)]);
+      await waitFor(() =>
+        expect(result.current.manager.settledTransactions.map((transaction) => transaction.description)).toEqual([
+          description,
+        ])
+      );
+      expect(chain.balance).toBe(10_000_000_000n + 500_249_997n);
+    });
+
+    it('stops a full exit when the account receives shares, even when its cash also rises', async () => {
+      const chain = exitChainFor(USDC_MARKET);
+      const { result, wallet } = renderWrapped(chain);
+      await startWithdraw(result, { kind: 'full' });
+
+      changeAssets(chain, 2_001_000_000n);
+      chain.shares += 10n ** 18n;
+      await confirmStep(result);
+
+      expect(stepsOf(result.current.action.state)[0]).toMatchObject({
+        status: 'blocked',
+        message: expect.stringMatching(/wrapped balance changed/),
+      });
+      expect(walletRequests(wallet)).toEqual([]);
+    });
+
+    it('shows the cash the exit now pays in its dialog while the wallet has the request', async () => {
+      const chain = exitChainFor(USDC_MARKET);
+      const { result, wallet } = renderWrapped(chain);
+      await startWithdraw(result, { kind: 'partial', cash: 100_000_000n });
+      // The wallet holds the request until the test has read the dialog.
+      let approve: () => void = () => undefined;
+      const approval = new Promise<void>((resolve) => (approve = resolve));
+      const send = wallet.sendUncheckedTransaction.getMockImplementation();
+      if (send === undefined) throw new Error('the wallet must send');
+      wallet.sendUncheckedTransaction.mockImplementationOnce(async (request) => {
+        await approval;
+        return send(request);
+      });
+
+      changeAssets(chain, 1_001_000_000n);
+      act(() => result.current.action.confirm());
+      await waitFor(() => expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(stepsOf(result.current.action.state)[0]?.status).toBe('awaiting-signature'));
+      render(
+        <WrappedWithdrawModal
+          state={result.current.action.state}
+          symbol="USDC"
+          decimals={6}
+          onConfirm={jest.fn()}
+          onClose={jest.fn()}
+        />
+      );
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent('Withdraw about 100.049975 USDC from the wrapper to your wallet.');
+      expect(within(dialog).getByTestId('wrapped-withdraw-cash')).toHaveTextContent('100.049975 USDC');
+      expect(within(dialog).getByRole('listitem')).toHaveTextContent('Withdraw about 100.049975 USDC from the wrapper');
+      expect(dialog).not.toHaveTextContent(/about 100\.000000 USDC/);
+
+      approve();
+      await waitFor(() => expect(result.current.action.state.phase).toBe('complete'));
+    });
   });
 
   describe('wrappedWithdraw: refuses an amount of zero', () => {

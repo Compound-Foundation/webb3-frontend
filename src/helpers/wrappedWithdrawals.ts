@@ -87,9 +87,19 @@ export type WithdrawalRecheck =
   | { status: 'ready'; cash: bigint }
   | {
       status: 'changed';
-      reason: 'shares-changed' | 'paused' | 'dust' | 'cash-fell' | 'exceeds-liquidity';
+      reason: 'shares-changed' | 'paused' | 'dust' | 'cash-fell' | 'cash-rose' | 'exceeds-liquidity';
       cash: bigint;
     };
+
+/**
+ * The most a partial exit's cash can rise between its review and its signature, in basis points
+ * (hundredths of a percent) of the reviewed cash. A larger rise stops the exit for a fresh review.
+ * Interest raises what the same shares pay every block, and a user can leave a review open for
+ * minutes before confirming it. At a supply rate of 10% a year, 10 basis points (0.1%) is about
+ * 3.6 days of interest. At that rate, interest alone stops an exit only when its review stays open
+ * that long. A larger rise within hours then has another cause, such as a donation to the wrapper.
+ */
+export const PARTIAL_EXIT_CASH_RISE_TOLERANCE_BPS = 10n;
 
 /** The wrapper's virtual shares: `10^(18 − baseDecimals)`, which OpenZeppelin's ERC-4626 conversions add to `totalSupply`. */
 function virtualShares(baseDecimals: number): bigint {
@@ -219,10 +229,13 @@ export function planWrappedWithdrawal(request: WithdrawalRequest, snapshot: With
  * - Comet withdrawals are paused
  * - the shares are now worth no more than the buffer
  * - the shares now pay less than the reviewed cash
+ * - a partial exit's shares now pay more than `PARTIAL_EXIT_CASH_RISE_TOLERANCE_BPS` above the
+ *   reviewed cash
  * - Comet holds less than they pay
  *
- * Shares that pay more than the reviewed cash pass. The same shares pay more as interest accrues.
- * They pay less only when the wrapper's assets per share fall or the buffer rises.
+ * A full exit passes however much more its shares pay, because it still burns exactly the balance
+ * the user chose to withdraw. The same shares pay more as interest accrues. They pay less only when
+ * the wrapper's assets per share fall or the buffer rises.
  */
 export function recheckWithdrawal(quote: WithdrawalQuote, snapshot: WithdrawalSnapshot): WithdrawalRecheck {
   const cash = getExitCash(quote.shares, snapshot);
@@ -237,6 +250,18 @@ export function recheckWithdrawal(quote: WithdrawalQuote, snapshot: WithdrawalSn
   if (snapshot.isWithdrawPaused) return change('paused');
   if (cash === 0n) return change('dust');
   if (cash < quote.cash) return change('cash-fell');
+  // The rise is more than the tolerance when (cash − quote.cash) × 10,000 > quote.cash × tolerance.
+  // Both sides are whole numbers, so the comparison does not round.
+  const isAboveRiseTolerance = (cash - quote.cash) * 10_000n > quote.cash * PARTIAL_EXIT_CASH_RISE_TOLERANCE_BPS;
+  if (quote.kind === 'partial' && isAboveRiseTolerance) return change('cash-rose');
   if (cash > snapshot.cometCash) return change('exceeds-liquidity');
   return { status: 'ready', cash };
+}
+
+/**
+ * Quotes a reviewed exit's shares again at a newer snapshot. The shares stay the reviewed ones.
+ * Their value, the buffer, the cash and whether they leave dust come from the newer snapshot.
+ */
+export function requoteWithdrawal(quote: WithdrawalQuote, snapshot: WithdrawalSnapshot): WithdrawalQuote {
+  return quoteFor(quote.kind, quote.shares, snapshot);
 }
