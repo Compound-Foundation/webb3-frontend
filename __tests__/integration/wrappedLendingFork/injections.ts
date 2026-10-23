@@ -1,5 +1,5 @@
 // Fork-only changes to market state, for the failure scenarios. Each one acts on the local anvil
-// fork alone. Most are ordinary transactions a real account could send, from impersonated accounts:
+// fork alone. Most are ordinary transactions a real account can send, from impersonated accounts:
 // the pause guardian's pause, a borrow of the market's cash, a third party's zero transfer. One is
 // a direct storage write that no transaction can make: the back-dated accrual. None reaches mainnet.
 import { WrappedMarket } from '@constants/wrappedMarkets';
@@ -26,6 +26,9 @@ export async function onSnapshot<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } finally {
+    // Reverting a snapshot resets anvil's clock, not its block interval. Otherwise a scenario that
+    // froze time and failed before it unfroze it leaves every later block at one timestamp.
+    await anvil.unfreezeTime();
     await anvil.revert(snapshot);
     // The transaction manager keeps transactions in local storage, and the blocks they name are gone.
     window.localStorage.clear();
@@ -50,7 +53,7 @@ export async function pauseComet(
   flags: { supply?: boolean; transfer?: boolean; withdraw?: boolean; absorb?: boolean; buy?: boolean }
 ) {
   const pauseGuardian = String((await read(market.cometAddress, COMET, 'pauseGuardian'))[0]);
-  await prepareAccount(pauseGuardian);
+  await prepareAccount(pauseGuardian, { existing: true });
   await sendFrom(pauseGuardian, {
     to: market.cometAddress,
     data: COMET.encodeFunctionData('pause', [
@@ -65,8 +68,8 @@ export async function pauseComet(
 }
 
 /**
- * Borrows the market's base token until Comet holds only `leave`, as a borrower with enough WETH
- * collateral could. The borrower wraps ether it is given on the fork into WETH.
+ * Borrows the market's base token until Comet holds only `leave`, as any borrower with enough WETH
+ * collateral can. The borrower wraps ether it is given on the fork into WETH.
  */
 export async function drainCash(market: WrappedMarket, drainer: string, leave: bigint) {
   await prepareAccount(drainer);

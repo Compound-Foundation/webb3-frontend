@@ -23,10 +23,14 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
   const render = (setup: Partial<SessionSetup> = {}) =>
     renderWrappedApp({ market, symbol, account, cometAddress: market.cometAddress, ...setup });
 
-  /** Expects that nothing was sent since `nonce` and `blockNumber`: no transaction, no block. */
-  async function expectNothingSent(nonce: number, blockNumber: number) {
-    // Give any late continuation of the kept confirmation time to run.
-    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  /**
+   * Expects that nothing was sent since `nonce` and `blockNumber`: no request to the app's wallet,
+   * no transaction and no block. It waits first, so that a late continuation of a kept
+   * confirmation has time to reach the wallet.
+   */
+  async function expectNothingSent(app: WrappedApp | undefined, nonce: number, blockNumber: number) {
+    await act(() => new Promise((resolve) => setTimeout(resolve, 3_000)));
+    if (app !== undefined) expect(app.walletSends()).toBe(0);
     expect(await nonceOf(account)).toBe(nonce);
     expect((await anvil.latestBlock()).number).toBe(blockNumber);
   }
@@ -70,7 +74,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
             await app.changeSession({});
             expect(app.state().phase).toBe('discarded');
             act(() => keptConfirm());
-            await expectNothingSent(nonce, number);
+            await expectNothingSent(app, nonce, number);
           } finally {
             app.unmount();
           }
@@ -126,7 +130,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
           app.unmount();
         }
       }
-      await expectNothingSent(nonce, number);
+      await expectNothingSent(undefined, nonce, number);
     })
   );
 });

@@ -25,6 +25,7 @@ import {
 import {
   COMET,
   ERC20,
+  expectExitPaid,
   forkAccount,
   FORK_MARKETS,
   read,
@@ -265,8 +266,8 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
           readOnly.unmount();
         }
 
-        // One request may not mix a wrapped draft with direct actions, and the dashboard refuses a
-        // direct base supply on this route. Nothing is sent.
+        // The app refuses a request that mixes a wrapped draft with direct actions, and the dashboard
+        // refuses a direct base supply on this route. Nothing is sent.
         const nonce = await nonceOf(account);
         expect(await app.startSupply(units(100))).toBeUndefined();
         const draft = app.draft();
@@ -314,9 +315,13 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
 
         // A wrapped full exit beside the direct borrow pays the wallet and leaves the debt alone.
         expect(await app.startWithdraw({ kind: 'full' })).toBeUndefined();
+        const exitReview = app.draft().withdrawal?.quote;
+        if (exitReview === undefined) throw new Error('The withdrawal draft has no quote.');
         const exited = await receiptEffects(market, account, app.receiptOf(await app.confirmStep()));
         const chainAfterExit = await directOnChain();
         measured.exitPaid = exited.cashDelta;
+        // Every block has one timestamp here, so the exit pays the reviewed quote.
+        expectExitPaid(exited, exitReview);
         expect(exited.after.shares).toBe(0n);
         expect(chainAfterExit).toMatchObject({
           principal: chainBefore.principal,
