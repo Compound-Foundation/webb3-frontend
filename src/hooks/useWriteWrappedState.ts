@@ -3,13 +3,24 @@ import { JsonRpcProvider } from '@ethersproject/providers';
 import { useRef } from 'react';
 
 import { WrappedMarket } from '@constants/wrappedMarkets';
+import CometAbi from '@helpers/abis/Comet';
 import ERC20Abi from '@helpers/abis/ERC20';
 import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { describeWalletError } from '@helpers/walletErrors';
 import { WrappedActionIdentity, WrappedBlockReason, WrappedStep, WrappedStepCheck } from '@helpers/wrappedActions';
-import { BlockWait, DEFAULT_BLOCK_WAIT, waitForBlock } from '@helpers/wrappedPositions';
+import { BlockWait, DEFAULT_BLOCK_WAIT, getRedeemBuffer, waitForBlock } from '@helpers/wrappedPositions';
+import {
+  planWrappedWithdrawal,
+  recheckWithdrawal,
+  WithdrawalPlan,
+  WithdrawalQuote,
+  WithdrawalRecheck,
+  WithdrawalRequest,
+  WithdrawalReview,
+  WithdrawalSnapshot,
+} from '@helpers/wrappedWithdrawals';
 import { SettledTransaction } from '@types';
 
 import type { WrappedActionController } from './useWrappedAction';
@@ -23,6 +34,7 @@ export const WRAPPED_SUPPLY_STEP_IDS = Object.freeze({
 
 const baseTokenInterface = new Interface(ERC20Abi);
 const wrapperInterface = new Interface(WrappedCometAbi);
+const cometInterface = new Interface(CometAbi);
 
 /**
  * Base tokens whose `approve` reverts when it changes one nonzero allowance to another, by chain
@@ -83,8 +95,8 @@ class WrappedReviewError extends Error {
 /** The account's base-token balance and its allowance to the wrapper, read at one block. */
 export type SupplyFunds = { blockNumber: number; walletBalance: bigint; allowance: bigint };
 
-/** The calls a wrapped supply makes to the configured chain's public provider. */
-export type SupplyReadProvider = Pick<JsonRpcProvider, 'call' | 'getBlockNumber'>;
+/** The calls a wrapped supply or withdrawal makes to the configured chain's public provider. */
+export type WrappedReadProvider = Pick<JsonRpcProvider, 'call' | 'getBlockNumber'>;
 
 /**
  * The newest block in which one of the account's wrapper transactions was mined, as the wallet's
@@ -117,7 +129,7 @@ const PROVIDER_BEHIND = "This market's network has not shown your last wrapped t
  * provider's newest block, up to `CALL_RETRIES` times.
  */
 async function readAtBlock<T>(
-  provider: SupplyReadProvider,
+  provider: WrappedReadProvider,
   minBlock: number | undefined,
   wait: BlockWait,
   read: (blockNumber: number) => Promise<T>
@@ -136,7 +148,7 @@ async function readAtBlock<T>(
 
 /** Reads the account's base-token balance and its allowance to the wrapper, both at one block, as `readAtBlock` pins it. */
 function readSupplyFunds(
-  provider: SupplyReadProvider,
+  provider: WrappedReadProvider,
   identity: WrappedActionIdentity,
   minBlock: number | undefined,
   wait: BlockWait = DEFAULT_BLOCK_WAIT
@@ -444,6 +456,331 @@ export async function prepareWrappedSupply({
   return { amount, steps };
 }
 
+/** The id of a wrapped withdrawal's one step. */
+export const WRAPPED_WITHDRAW_STEP_ID = 'withdraw';
+
+/** The account's wrapper position and the market figures an exit is quoted from, at one block. */
+export type WithdrawalRead = { blockNumber: number; snapshot: WithdrawalSnapshot };
+
+/**
+ * Reads, at one block as `readAtBlock` pins it, what `unwrapAndWithdraw` prices an exit from: the
+ * account's shares, the wrapper's `totalSupply`, its Comet balance, which is its `totalAssets()`,
+ * and Comet's stored supply index. It also reads Comet's withdraw pause and the base token Comet
+ * holds, which decide whether Comet can pay the exit.
+ */
+function readWithdrawalSnapshot(
+  provider: WrappedReadProvider,
+  identity: WrappedActionIdentity,
+  baseDecimals: number,
+  minBlock: number | undefined,
+  wait: BlockWait
+): Promise<WithdrawalRead> {
+  return readAtBlock(provider, minBlock, wait, async (blockNumber) => {
+    const read = (to: string, contract: Interface, method: string, args: readonly unknown[] = []) =>
+      provider
+        .call({ to, data: contract.encodeFunctionData(method, args) }, blockNumber)
+        .then((result) => contract.decodeFunctionResult(method, result));
+    const [shares, totalSupply, totalAssets, totalsBasic, withdrawPause, cometCash] = await Promise.all([
+      read(identity.wrapperAddress, wrapperInterface, 'balanceOf', [identity.account]),
+      read(identity.wrapperAddress, wrapperInterface, 'totalSupply'),
+      read(identity.cometAddress, cometInterface, 'balanceOf', [identity.wrapperAddress]),
+      read(identity.cometAddress, cometInterface, 'totalsBasic'),
+      read(identity.cometAddress, cometInterface, 'isWithdrawPaused'),
+      read(identity.baseTokenAddress, baseTokenInterface, 'balanceOf', [identity.cometAddress]),
+    ]);
+    const [isWithdrawPaused] = withdrawPause;
+    if (typeof isWithdrawPaused !== 'boolean') throw new Error('Comet returned no withdraw pause state.');
+    return {
+      blockNumber,
+      snapshot: {
+        shares: BigInt(shares[0].toString()),
+        totalSupply: BigInt(totalSupply[0].toString()),
+        totalAssets: BigInt(totalAssets[0].toString()),
+        baseSupplyIndex: BigInt(totalsBasic[0].baseSupplyIndex.toString()),
+        baseDecimals,
+        cometCash: BigInt(cometCash[0].toString()),
+        isWithdrawPaused,
+      },
+    };
+  });
+}
+
+/** The reads a wrapped withdrawal makes through the configured chain's public provider. */
+export type WrappedWithdrawalReads = {
+  /** The position and market figures at a block no older than the account's last settled wrapper transaction. */
+  readSnapshot: () => Promise<WithdrawalRead>;
+  /** An `eth_call` at a block. */
+  call: (request: { from: string; to: string; data: string }, blockNumber: number) => Promise<string>;
+  /** How long to wait before a call that failed without revert data is made again. */
+  retryIntervalMs: number;
+};
+
+/** The name of the wrapper's, OpenZeppelin's or Comet's error that `data` encodes, if it is one of theirs. */
+function exitErrorName(data: string): string | undefined {
+  for (const contract of [wrapperInterface, cometInterface]) {
+    try {
+      return contract.parseError(data).name;
+    } catch {
+      // Not one of this contract's errors.
+    }
+  }
+  return undefined;
+}
+
+/** What an exit's revert means, and what the user can do about it. */
+function describeExitRevert(data: string, symbol: string): string {
+  if (data.slice(0, 10).toLowerCase() === ERROR_STRING_SELECTOR) {
+    const reason = describeRevertData(data);
+    return /exceeds balance/i.test(reason)
+      ? `the market does not hold enough ${symbol} to pay it now (${reason}). Withdraw a smaller amount, or try again later`
+      : reason;
+  }
+  switch (exitErrorName(data)) {
+    case 'ZeroAssetsTransferred':
+      return "these shares are worth no more than the wrapper's rounding buffer, so the wrapper refuses to withdraw them (ZeroAssetsTransferred). Withdraw a larger amount, or choose Everything";
+    case 'ExcessiveAssetsDebited':
+      return 'Comet would take more from the wrapper than these shares cover, and the wrapper refuses that so that its other holders do not pay for it (ExcessiveAssetsDebited). Try again in a few minutes, or with a different amount';
+    case 'ZeroSharesBurned':
+      return 'the withdrawal burns no shares (ZeroSharesBurned)';
+    case 'ERC20InsufficientBalance':
+      return 'your account holds fewer wrapped shares than this withdrawal burns (ERC20InsufficientBalance). Review the withdrawal again';
+    case 'Paused':
+      return "withdrawals from this market are paused (Comet's Paused). Nothing can be withdrawn until they resume";
+    case 'TransferOutFailed':
+      return `the market could not pay out the ${symbol} (TransferOutFailed). It may not hold enough cash now. Withdraw a smaller amount, or try again later`;
+    default:
+      return describeRevertData(data);
+  }
+}
+
+/**
+ * Why an exit's simulation failed. A revert is explained by its error. A revert without data is
+ * what a USDT transfer the market cannot pay gives. Any other failure did not run the exit.
+ */
+function describeExitFailure(error: unknown, symbol: string): string {
+  const data = revertData(error);
+  if (data !== undefined) return describeExitRevert(data, symbol);
+  if (isRevert(error)) {
+    return `it reverted without a reason (${describeCallFailure(
+      error
+    )}). The market may not hold enough ${symbol} to pay it now. Withdraw a smaller amount, or try again later`;
+  }
+  return `it could not be run (${describeCallFailure(error)}). Try again in a moment`;
+}
+
+/**
+ * Simulates `unwrapAndWithdraw(shares)` from the account with an `eth_call` at `blockNumber`, just
+ * before the wallet is asked to sign it. The call must pay `expectedCash`, which the quote of the
+ * same block pays. Ethers returns a revert's data as the call's result, so the result is decoded
+ * rather than trusted. A failed simulation refuses the step. Nothing else is tried in its place,
+ * and never Comet's own `withdraw`, which opens a borrow when the account has too little supplied.
+ */
+async function simulateUnwrapAndWithdraw(
+  reads: SimulationReads,
+  identity: WrappedActionIdentity,
+  shares: bigint,
+  blockNumber: number,
+  expectedCash: bigint,
+  formatAmount: (value: bigint) => string,
+  symbol: string
+): Promise<WrappedStepCheck> {
+  const refuse = (detail: string): WrappedStepCheck => ({
+    ok: false,
+    message: `Simulating the withdrawal from your account failed: ${detail}. Your wallet was not asked to sign it.`,
+  });
+  const request = {
+    from: identity.account,
+    to: identity.wrapperAddress,
+    data: wrapperInterface.encodeFunctionData('unwrapAndWithdraw', [shares]),
+  };
+  let result: string;
+  try {
+    result = await simulateAtBlock(reads, request, blockNumber);
+  } catch (error) {
+    return refuse(describeExitFailure(error, symbol));
+  }
+  let paidCash: bigint;
+  try {
+    paidCash = BigInt(wrapperInterface.decodeFunctionResult('unwrapAndWithdraw', result)[0].toString());
+  } catch (error) {
+    return refuse(describeExitFailure(error, symbol));
+  }
+  if (paidCash !== expectedCash) {
+    return refuse(
+      `it pays ${formatAmount(paidCash)}, not the ${formatAmount(
+        expectedCash
+      )} this page worked out from the same block. Review the withdrawal again`
+    );
+  }
+  return { ok: true };
+}
+
+/** Why an exit cannot be reviewed as asked, and what the user can ask for instead. It never lowers the amount itself. */
+function revisionMessage(
+  plan: Extract<WithdrawalPlan, { status: 'needs-revision' }>,
+  request: WithdrawalRequest,
+  snapshot: WithdrawalSnapshot,
+  formatAmount: (value: bigint) => string,
+  symbol: string
+): string {
+  const { limits } = plan;
+  switch (plan.reason) {
+    case 'no-shares':
+      return `You hold no wrapped ${symbol} to withdraw.`;
+    case 'paused':
+      return 'Withdrawals from this market are paused, so nothing can be withdrawn now. Try again once they resume.';
+    case 'dust':
+      return `Your wrapped position is worth no more than the wrapper's rounding buffer of ${formatAmount(
+        getRedeemBuffer(snapshot.baseSupplyIndex)
+      )}, so the wrapper refuses to withdraw it (ZeroAssetsTransferred).`;
+    case 'no-amount':
+      return 'Enter an amount greater than 0.';
+    case 'exceeds-position': {
+      const fullExit = limits.canExitFully
+        ? ` Or choose Everything to withdraw your whole position, about ${formatAmount(limits.fullExitCash)}.`
+        : '';
+      const asked = request.kind === 'partial' ? formatAmount(request.cash) : formatAmount(limits.fullExitCash);
+      return `You asked for ${asked}, more than your wrapped position pays now. Enter at most ${formatAmount(
+        limits.maxPartialCash
+      )}.${fullExit}`;
+    }
+    case 'exceeds-liquidity':
+      return request.kind === 'full'
+        ? `A full exit pays about ${formatAmount(limits.fullExitCash)}, but the market holds only ${formatAmount(
+            snapshot.cometCash
+          )} now. Withdraw at most ${formatAmount(limits.maxPartialCash)} as an amount, or try again later.`
+        : `The market holds only ${formatAmount(snapshot.cometCash)} now, so it cannot pay ${formatAmount(
+            request.cash
+          )}. Enter at most ${formatAmount(limits.maxPartialCash)}, or try again later.`;
+  }
+}
+
+/** Why a reviewed exit stopped before its signature, and what the user can do. */
+function changeMessage(
+  recheck: Extract<WithdrawalRecheck, { status: 'changed' }>,
+  quote: WithdrawalQuote,
+  snapshot: WithdrawalSnapshot,
+  formatAmount: (value: bigint) => string
+): string {
+  switch (recheck.reason) {
+    case 'shares-changed':
+      return quote.kind === 'full'
+        ? 'Your wrapped balance changed since the review, so this full exit no longer burns exactly all your shares. Review the withdrawal again.'
+        : 'Your wrapped balance is now below the shares this withdrawal burns. Review the withdrawal again.';
+    case 'paused':
+      return 'Withdrawals from this market are now paused. Nothing can be withdrawn until they resume.';
+    case 'dust':
+      return "These shares are now worth no more than the wrapper's rounding buffer, so the wrapper would refuse the withdrawal (ZeroAssetsTransferred). Review the withdrawal again.";
+    case 'cash-fell':
+      return `This withdrawal now pays about ${formatAmount(recheck.cash)}, less than the ${formatAmount(
+        quote.cash
+      )} you reviewed. Review it again.`;
+    case 'exceeds-liquidity':
+      return `The market now holds only ${formatAmount(snapshot.cometCash)}, less than the ${formatAmount(
+        recheck.cash
+      )} this withdrawal pays. Review a smaller amount, or try again later.`;
+  }
+}
+
+export type PrepareWrappedWithdrawalInput = {
+  identity: WrappedActionIdentity;
+  market: WrappedMarket;
+  request: WithdrawalRequest;
+  /** The full-exit cash the page showed before the review, which the review shows next to the new quote. */
+  shownCash: bigint | undefined;
+  symbol: string;
+  reads: WrappedWithdrawalReads;
+};
+
+/**
+ * Reads the account's position and the market again, at the newest block that shows the account's
+ * last settled wrapper transaction, and quotes a wrapped exit through `unwrapAndWithdraw(shares)`.
+ * A full exit burns every share read. A partial exit burns the fewest shares that pay the requested
+ * cash. An exit that cannot pay what was asked is refused with what the user can ask for instead:
+ * an amount the position and the market can pay, or the full exit. It is never lowered here.
+ *
+ * Before the signature, the step reads again and stops when the share balance, the pause, the
+ * cash the shares pay or the market's cash no longer allows the reviewed exit. It then simulates
+ * the exit from the account at that block. The method has no minimum amount and no deadline, and
+ * the simulation enforces neither: the wrapper computes the cash when the transaction runs.
+ */
+export async function prepareWrappedWithdrawal({
+  identity,
+  market,
+  request,
+  shownCash,
+  symbol,
+  reads,
+}: PrepareWrappedWithdrawalInput): Promise<{ amount: bigint; steps: WrappedStep[]; withdrawal: WithdrawalReview }> {
+  if (identity.type !== 'withdraw' || !isMarketOf(market, identity)) {
+    throw new WrappedReviewError('The wrapper for this market changed. Review the withdrawal again.');
+  }
+  if (request.kind === 'partial' && request.cash <= 0n) throw new WrappedReviewError('Enter an amount greater than 0.');
+
+  const formatAmount = (value: bigint) => `${formatExactUnits(value, market.baseDecimals)} ${symbol}`;
+  let read: WithdrawalRead;
+  try {
+    read = await reads.readSnapshot();
+  } catch (error) {
+    if (error instanceof WrappedReviewError) throw new WrappedReviewError(`${error.message} Try again in a moment.`);
+    throw new WrappedReviewError(
+      `Your wrapped position could not be read (${describeCallFailure(error)}). Try again in a moment.`
+    );
+  }
+  const plan = planWrappedWithdrawal(request, read.snapshot);
+  if (plan.status === 'needs-revision') {
+    throw new WrappedReviewError(revisionMessage(plan, request, read.snapshot, formatAmount, symbol));
+  }
+  const { quote } = plan;
+
+  const checkBeforeExit = async (): Promise<WrappedStepCheck> => {
+    let latest: WithdrawalRead;
+    try {
+      latest = await reads.readSnapshot();
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof WrappedReviewError
+            ? `${error.message} Review the withdrawal again in a moment.`
+            : `Your wrapped position could not be read again (${describeCallFailure(error)}).`,
+      };
+    }
+    const recheck = recheckWithdrawal(quote, latest.snapshot);
+    if (recheck.status === 'changed') {
+      return { ok: false, message: changeMessage(recheck, quote, latest.snapshot, formatAmount) };
+    }
+    return simulateUnwrapAndWithdraw(
+      reads,
+      identity,
+      quote.shares,
+      latest.blockNumber,
+      recheck.cash,
+      formatAmount,
+      symbol
+    );
+  };
+
+  const step: WrappedStep = {
+    id: WRAPPED_WITHDRAW_STEP_ID,
+    kind: 'unwrap-and-withdraw',
+    description:
+      quote.kind === 'full'
+        ? `Withdraw all your wrapped ${symbol}, about ${formatAmount(quote.cash)}`
+        : `Withdraw ${formatAmount(quote.cash)} from the wrapper`,
+    request: {
+      to: identity.wrapperAddress,
+      data: wrapperInterface.encodeFunctionData('unwrapAndWithdraw', [quote.shares]),
+    },
+    check: checkBeforeExit,
+  };
+  return {
+    amount: quote.shares,
+    steps: [step],
+    withdrawal: { request, quote, shownCash, blockNumber: read.blockNumber },
+  };
+}
+
 export type WriteWrappedState = {
   /**
    * Starts a fresh review of a wrapped supply of `amount`, in raw base-token units. Returns why it
@@ -451,26 +788,35 @@ export type WriteWrappedState = {
    * is signed only after its own confirmation, through the wrapper action lifecycle.
    */
   supply: (amount: bigint) => WrappedBlockReason | undefined;
+  /**
+   * Starts a fresh review of a wrapped withdrawal: an amount of base-token cash, or the whole
+   * position. Returns why it was refused, if it was. The review reads the position again and quotes
+   * the exit. `shownCash` is the full-exit cash the page showed, which the review compares with the
+   * new quote.
+   */
+  withdraw: (request: WithdrawalRequest, shownCash?: bigint) => WrappedBlockReason | undefined;
 };
 
 /** The wrapped writes outside the wrapped route. */
 export const IDLE_WRITE_WRAPPED_STATE: WriteWrappedState = Object.freeze<WriteWrappedState>({
   supply: () => 'not-wrapped',
+  withdraw: () => 'not-wrapped',
 });
 
 export type UseWriteWrappedStateOptions = {
   action: Pick<WrappedActionController, 'start' | 'recovered'>;
   route: LendingRoute;
   /** The configured chain's public provider. The supply's reads and simulation go through it. */
-  readProvider: SupplyReadProvider | undefined;
+  readProvider: WrappedReadProvider | undefined;
   /** The selected market's base asset symbol, for the steps' descriptions. */
   baseSymbol: string | undefined;
   blockWait?: BlockWait;
 };
 
 /**
- * The wrapped route's writes: a wrapped supply through `supplyAndWrap`, straight from the wallet.
- * It never uses the standard queue, the Bulker, Permit2, a permit or a Comet manager permission.
+ * The wrapped route's writes, straight from the wallet: a wrapped supply through `supplyAndWrap`,
+ * and a wrapped withdrawal through `unwrapAndWithdraw`. They never use the standard queue, the
+ * Bulker, Permit2, a permit, a Comet manager permission or Comet's own `withdraw`.
  */
 export function useWriteWrappedState({
   action,
@@ -516,5 +862,39 @@ export function useWriteWrappedState({
     });
   };
 
-  return { supply };
+  const withdraw = (request: WithdrawalRequest, shownCash?: bigint): WrappedBlockReason | undefined => {
+    const current = live.current;
+    if (current.route.kind !== 'wrapped' || current.route.market === undefined) return 'not-wrapped';
+    const { market } = current.route;
+    const provider = current.readProvider;
+    const symbol = current.baseSymbol ?? 'base token';
+    return current.action.start('withdraw', async (identity) => {
+      if (provider === undefined) {
+        throw new WrappedReviewError("This market's network cannot be read right now. Try again in a moment.");
+      }
+      return prepareWrappedWithdrawal({
+        identity,
+        market,
+        request,
+        shownCash,
+        symbol,
+        reads: {
+          // Each read waits for the provider to show this account's newest settled wrapper
+          // transaction, such as an exit that just confirmed.
+          readSnapshot: () =>
+            readWithdrawalSnapshot(
+              provider,
+              identity,
+              market.baseDecimals,
+              newestReceiptBlock(live.current.action.recovered.settled),
+              live.current.blockWait
+            ),
+          call: (callRequest, blockNumber) => provider.call(callRequest, blockNumber),
+          retryIntervalMs: live.current.blockWait.intervalMs,
+        },
+      });
+    });
+  };
+
+  return { supply, withdraw };
 }
