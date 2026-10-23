@@ -12,6 +12,7 @@ import {
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { LendingSession, resolveLendingRoute, ValidationStatus, wrappedRouteKey } from '@helpers/lendingRoute';
 import { NotSentError, SendWithdrawnError, SessionProbeResult } from '@helpers/walletErrors';
+import * as wrappedActions from '@helpers/wrappedActions';
 import { MarketRestriction, WrappedActionIdentity, WrappedSession, WrappedStep } from '@helpers/wrappedActions';
 import {
   SendResult,
@@ -630,6 +631,33 @@ describe('useWrappedAction', () => {
       await waitFor(() =>
         expect(result.current.state).toMatchObject({ phase: 'read-failed', message: 'Allowance read failed' })
       );
+    });
+
+    it('reports a draft check that throws as a failed read, so the review never keeps reading', async () => {
+      const { manager } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      // The guard threw this in the browser, where ethers' ES2015 build is bundled.
+      const check = jest.spyOn(wrappedActions, 'checkWrappedDraft').mockImplementation(() => {
+        throw new TypeError('fragment.format is not a function');
+      });
+
+      try {
+        act(() => {
+          result.current.start('supply', prepareSupply);
+        });
+
+        expect(result.current.state).toMatchObject({ phase: 'reading' });
+        await waitFor(() =>
+          expect(result.current.state).toMatchObject({
+            phase: 'read-failed',
+            message: 'The prepared transactions could not be checked (fragment.format is not a function).',
+          })
+        );
+        expect(check).toHaveBeenCalledTimes(1);
+      } finally {
+        check.mockRestore();
+      }
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
 
     it("refuses a step that does not call the reviewed market's own contracts", async () => {
