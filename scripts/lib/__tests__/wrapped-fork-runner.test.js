@@ -22,6 +22,7 @@ import {
   failedToStartOnUpstream,
   finalVerdict,
   heldToJest,
+  isBlockHeader,
   isKeyLike,
   isRetryable,
   MATRIX_CELLS,
@@ -89,7 +90,10 @@ function echoForms(key) {
     'form-encoded': new URLSearchParams({ key }).toString().slice('key='.length),
     'encoded twice': encodeURIComponent(encodeURIComponent(key)),
     'JSON-escaped': [...key].map((character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`).join(''),
+    'with JSON escapes for /': key.replaceAll('/', '\\/'),
     'partly encoded': key.replace('+', '%2b').replace('F', '%46'),
+    'in upper case': key.toUpperCase(),
+    'in lower case': key.toLowerCase(),
   };
 }
 
@@ -189,6 +193,22 @@ describe('redaction', () => {
     lines.write(Buffer.from(FAKE_KEY.slice(5)));
     lines.end();
     assert.equal(output, 'anvil: <redacted> failed\nnext <redacted>');
+  });
+
+  test("redacts a key whose character a pipe splits between two chunks, in the middle of the character's bytes", () => {
+    const key = 'FAKE_KEY_ÄÖÜ_0123456789';
+    const { lineRedactor } = createRedactor(
+      upstreamEndpoints({ WRAPPED_FORK_RPC_URL: `https://rpc.example.test/v2/${encodeURIComponent(key)}` })[0]
+        .secretPatterns
+    );
+    let output = '';
+    const lines = lineRedactor((text) => (output += text));
+    const bytes = Buffer.from(`anvil: ${key} failed\n`);
+    const middleOfA = bytes.indexOf(Buffer.from('Ä')) + 1;
+    lines.write(bytes.subarray(0, middleOfA));
+    lines.write(bytes.subarray(middleOfA));
+    lines.end();
+    assert.equal(output, 'anvil: <redacted> failed\n');
   });
 
   test('redacts before it cuts a line to 200 printable characters, so no prefix of a key stays', () => {
@@ -354,6 +374,45 @@ describe('the upstream proxy for a private endpoint', () => {
         });
         assert.equal(proxy.stats.errorAnswers, 1);
         assert.equal(proxy.stats.firstError, 'a JSON-RPC error with code 15');
+      }
+    ));
+
+  test("relays anvil's backoff hint, data.rate.backoff_seconds, and no other data", () =>
+    withProxy(
+      ({ id }) => ({
+        body: {
+          jsonrpc: '2.0',
+          id,
+          error: {
+            code: -32005,
+            message: `project ID request rate exceeded for ${FAKE_KEY}`,
+            data: { rate: { backoff_seconds: 3, key: FAKE_KEY }, see: FAKE_KEY },
+          },
+        },
+      }),
+      async (proxy) => {
+        const response = await post(proxy.url, call('eth_getBalance', ['0x1', '0x1']));
+        assert.deepEqual((await response.json()).error, {
+          code: -32005,
+          message: "rate exceeded (the rest of the private upstream's message is withheld)",
+          data: { rate: { backoff_seconds: 3 } },
+        });
+      }
+    ));
+
+  test('relays a bare error payload as one, with its code and the phrases of the retry rule', () =>
+    // anvil reads an answer of the shape `{ code, message }` as an error, and retries it by its code.
+    withProxy(
+      () => ({ body: { code: -32005, message: `rate limit exceeded for ${FAKE_KEY}` } }),
+      async (proxy) => {
+        const response = await post(proxy.url, call('eth_getBalance', ['0x1', '0x1']));
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), {
+          code: -32005,
+          message: "rate limit (the rest of the private upstream's message is withheld)",
+        });
+        assert.equal(proxy.stats.errorAnswers, 1);
+        assert.equal(proxy.stats.firstError, 'a JSON-RPC error with code -32005');
       }
     ));
 
@@ -605,6 +664,19 @@ describe('the upstream proxy', () => {
     }
   });
 
+  test("counts a public endpoint's bare error payload as a call answered with an error", async () => {
+    const payload = { code: -32005, message: 'rate limit exceeded' };
+    await startProxy(() => ({ body: payload }));
+    try {
+      const response = await post(proxy.url, call('eth_getBalance', ['0x0', '0x1']));
+      assert.deepEqual(await response.json(), payload);
+      assert.equal(proxy.stats.errorAnswers, 1);
+      assert.equal(proxy.stats.firstError, 'rate limit exceeded');
+    } finally {
+      await stopProxy();
+    }
+  });
+
   test('answers 502 when the upstream gives no answer, and counts the failure', async () => {
     const down = http.createServer();
     await listening(down);
@@ -817,6 +889,28 @@ describe('a fork that could not start', () => {
     );
     assert.equal(failedToStartOnUpstream({ stats: upstreamFailed, output: '' }), false);
   });
+
+  test('failed on the upstream when anvil was still retrying it at the deadline', () => {
+    // anvil prints its fetch error only when it gives up, and a slow upstream outlasts the deadline.
+    assert.equal(failedToStartOnUpstream({ stats: upstreamFailed, output: '', isTimedOut: true }), true);
+    assert.equal(
+      failedToStartOnUpstream({ stats: { failures: 0, errorAnswers: 0 }, output: '', isTimedOut: true }),
+      false
+    );
+  });
+});
+
+describe('the fork block an upstream reports', () => {
+  test('needs a 32-byte hash and a hex timestamp, because the runner prints both', () => {
+    const hash = `0x${'ab'.repeat(32)}`;
+    assert.equal(isBlockHeader({ hash, timestamp: '0x6717fb4f' }), true);
+    assert.equal(isBlockHeader({ hash: `invalid key ${FAKE_KEY}`, timestamp: '0x1' }), false);
+    assert.equal(isBlockHeader({ hash: `${hash}00`, timestamp: '0x1' }), false);
+    assert.equal(isBlockHeader({ hash, timestamp: `invalid key ${FAKE_KEY}` }), false);
+    assert.equal(isBlockHeader({ hash }), false);
+    assert.equal(isBlockHeader(null), false);
+    assert.equal(isBlockHeader(`invalid key ${FAKE_KEY}`), false);
+  });
 });
 
 describe('the matrix', () => {
@@ -928,14 +1022,14 @@ function fakeAnvil(directory, behaviour) {
 }
 
 /**
- * Runs the runner at the pinned block against `privateUrl`, with the fake anvil. Returns the runner's
- * exit code, its console output, and each file in its log directory by name.
+ * Runs the runner at `block`, the pinned block by default, against `privateUrl`, with the fake anvil.
+ * Returns the runner's exit code, its console output, and each file in its log directory by name.
  */
-async function runRunner({ privateUrl, anvil }) {
+async function runRunner({ privateUrl, anvil, block = 'pinned' }) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-fork-runner-test-'));
   const logDir = path.join(directory, 'logs');
   try {
-    const child = spawn(process.execPath, [RUNNER, '--block', 'pinned', '--log-dir', logDir], {
+    const child = spawn(process.execPath, [RUNNER, '--block', block, '--log-dir', logDir], {
       cwd: ROOT,
       env: {
         PATH: process.env.PATH,
@@ -1014,6 +1108,26 @@ describe('the runner, end to end, with a private upstream that echoes its key', 
     assert.equal(run.code, 1);
     assertKeyNeverWritten(run, PLUS_KEY, 'Invalid API key');
     assert.match(run.output, /pinned block: eth_chainId: HTTP 200, a JSON-RPC error with code -32000/);
+  });
+
+  test('never prints a block hash in which the upstream echoes the key, at a block that is not pinned', async () => {
+    // Only the pinned block's hash is known in advance. The runner prints another block's hash in its header.
+    answers = ({ id, method }, requestPath) => ({
+      body: {
+        jsonrpc: '2.0',
+        id,
+        result:
+          method === 'eth_chainId'
+            ? '0x1'
+            : method === 'eth_getBlockByNumber'
+            ? { number: '0x1000', hash: `invalid key ${requestPath.split('/').pop()}`, timestamp: '0x1' }
+            : '0x0',
+      },
+    });
+    const run = await runRunner({ privateUrl: `${stub.url}/v2/${FAKE_KEY}`, anvil: 'wrong-fork', block: '4096' });
+    assert.equal(run.code, 1);
+    assertKeyNeverWritten(run, FAKE_KEY);
+    assert.match(run.output, /4096 block: block 4096 has no valid hash or timestamp/);
   });
 
   test("never passes a private upstream's error text to anvil, so anvil's log holds none of it", async () => {
