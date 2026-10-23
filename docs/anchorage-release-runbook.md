@@ -126,6 +126,7 @@ Close every item before Stage 1, except those marked for Stage 2. Items 1 and 10
    - an acknowledgment of the debt warning before the first signature (#65)
    - a dialog closed in the middle of a supply, which stops the supply (#65)
    - up to three mobile approvals for a USDT supply (#65)
+   - the Anchorage extension's pending timeout of about 4 minutes 47 seconds, shorter than a realistic custody approval. A request approved after the timeout lands as a transaction the app does not see, and new wrapped actions wait until the holder presses "Stop waiting" (#64, [COM-290 finding 1](anchorage-porto-validation.md#findings-for-anchorage))
    - routing the wrapped dialogs and the panel to the security review in CODEOWNERS (#66)
    - a contract variant whose exit takes a minimum amount or a deadline (#66), which is out of this release's scope
 6. **For Stage 2: close the Extensions page's path.** #64 asks to stop the Extensions page's direct `eth_sendTransaction` for Anchorage sessions before wrapped deposits are released.
@@ -175,7 +176,7 @@ Preconditions: preflight items 1 and 10, and Adam's and Leo's signoff of Stage 0
 The controls are as committed: both off on every market. Release the stack's merge commit with steps 8 to 11 of [Ship a release-control change](#ship-a-release-control-change). Verify the [standard checks](#verify-after-each-release), and check the Anchorage session on each market:
 
 - The wrapped panel shows the holdings.
-- The supply control reads "Wrapped deposits are not open yet.", and the withdraw control "Wrapped withdrawals are not open yet." (`src/pages/home/components/WrappedPositionPanel.tsx:90-92`).
+- The supply control reads "Wrapped deposits are not open yet.", and the withdraw control "Wrapped withdrawals are not open yet." (`src/pages/home/components/WrappedPositionPanel.tsx:92-94`).
 - The direct Supply button is absent.
 
 ### Stage 1: exits on, deposits off
@@ -290,6 +291,7 @@ Limitations:
 - **Excessive debit:** the call reverts with `ExcessiveAssetsDebited(uint256,uint256)`, selector `0x79a1ccf6`, when Comet's accrual makes the debit exceed the shares. On the fork the revert depended on the block's timestamp, and in a later block the same shares paid.
 - **Fees:** the holder pays the gas, and a reverted call costs gas too. On the fork a partial exit used 135,844 to 139,769 gas. The wrapper also holds back the buffer on every exit.
 - **No minimum amount and no deadline:** the wrapper computes the payout when the transaction runs. A long custody approval lets the market move, so the payout can differ from the simulation, or the call can revert.
+- **Pending timeout:** the Anchorage extension answers `-32005` about 4 minutes 47 seconds after a request that waits for approval on mobile, and the request stays open there. Check mobile and the extension before you send the call again. Otherwise both requests can be approved, and the second exit reverts and still costs gas.
 
 Steps, from a shell with Foundry's `cast` and `ETH_RPC_URL` set as above:
 
