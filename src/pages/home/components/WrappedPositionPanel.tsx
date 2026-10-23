@@ -17,6 +17,8 @@ type WrappedPositionPanelProps = {
   earnAPR: bigint;
   /** The wallet session's check. An unusable session stops every write until reload or reconnect. */
   session?: WalletSessionHealth;
+  /** The wallet said it still holds an interrupted request, so the notice says how to answer it there. */
+  isRecoveredRequestPendingInWallet?: boolean;
   /** An interrupted wallet request holds back new wrapped actions, and the user can stop waiting. */
   canDismissRecovered?: boolean;
   onDismissRecovered?: () => void;
@@ -89,6 +91,7 @@ const WrappedPositionPanel = ({
   baseAsset,
   earnAPR,
   session = { status: 'not-applicable' },
+  isRecoveredRequestPendingInWallet = false,
   canDismissRecovered = false,
   onDismissRecovered = () => undefined,
   onRetry,
@@ -200,11 +203,22 @@ const WrappedPositionPanel = ({
       )}
       {canDismissRecovered && (
         <div className="wrapped-position-panel__notice">
-          <p className="L3 meta text-color--2">
-            A wallet request for an earlier wrapped transaction from this account was left open, and this page cannot
-            follow it. New wrapped deposits and withdrawals wait for it. Stop waiting only after checking your wallet:
-            the request can still go through.
-          </p>
+          {isRecoveredRequestPendingInWallet ? (
+            <p className="L3 meta text-color--2">
+              Your wallet reported that it still has a request open for an earlier wrapped transaction from this
+              account. Approve or reject it in the Anchorage app on your phone. Approving it still sends the
+              transaction, but this page cannot follow that transaction. New wrapped deposits and withdrawals wait for
+              it. Once your wallet shows the request done, reload this page to see the result here. Stop waiting only
+              after checking your wallet: the request can still go through. A new review then starts from the new
+              balances.
+            </p>
+          ) : (
+            <p className="L3 meta text-color--2">
+              A wallet request for an earlier wrapped transaction from this account was left open, and this page cannot
+              follow it. New wrapped deposits and withdrawals wait for it. Stop waiting only after checking your wallet:
+              the request can still go through.
+            </p>
+          )}
           <button className="button button--small" onClick={onDismissRecovered}>
             Stop waiting
           </button>

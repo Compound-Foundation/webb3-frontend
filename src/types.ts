@@ -579,6 +579,11 @@ export type AwaitingConfirmationTransaction = BaseTransaction & {
    * answered with an ambiguous error. The wallet can still send it.
    */
   isInterrupted?: boolean;
+  /**
+   * The wallet answered that it still holds the request (`pending-in-wallet` in
+   * `@helpers/walletErrors`). Only the wording of the interrupted request reads it.
+   */
+  isPendingInWallet?: boolean;
 };
 export type PendingTransaction = BaseTransaction & {
   state: TransactionState.Pending;

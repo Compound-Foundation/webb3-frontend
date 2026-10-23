@@ -549,6 +549,14 @@ describe('Home submission guards', () => {
     expect(dismissRecovered).toHaveBeenCalledTimes(1);
   });
 
+  it('tells the panel which earlier wrapped request the wallet still holds', () => {
+    const lending = wrappedLending({ status: 'usable' });
+    const action = { ...lending.action, canDismissRecovered: true, isRecoveredRequestPendingInWallet: true };
+    render(homeElement({ queue: actionQueue([]), lending: { ...lending, action } }));
+
+    expect(mockLastProps.WrappedPositionPanel.isRecoveredRequestPendingInWallet).toBe(true);
+  });
+
   it("stops the dialog's operator approval once the wallet session is unusable", () => {
     const queue = actionQueue([BORROW, SUPPLY_COMP]);
     const usable = wrappedLending({ status: 'usable' });

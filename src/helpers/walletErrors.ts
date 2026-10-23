@@ -8,15 +8,24 @@
  *   `Cannot read properties of undefined (reading 'sendMessage')`. Only these messages count: any
  *   other JavaScript error, such as a failed fetch, is a provider failure. A read through the
  *   wallet (`probeWalletSession`) catches a provider broken some other way.
+ * - `pending-in-wallet`: the wallet answered with an error but still holds the request. The user
+ *   can still approve the request there, and the wallet then sends it. The Anchorage Digital
+ *   extension 1.1.16 answers this way about 4 minutes 47 seconds after a request that waits for
+ *   approval on a phone, with code `-32005` and "This request is still pending and can still
+ *   complete after this message. …". Only code `-32005`, as a number or a string, and a message
+ *   with "still pending" count. Callers handle it as a `provider-failure` and only describe it
+ *   differently.
  * - `provider-failure`: anything else, an unknown outcome. Anchorage reports a refusal as a bare
  *   `-32603 Internal error`, which does not show whether the user declined or whether the request
  *   reached the chain.
  */
-export type WalletErrorKind = 'rejected' | 'session-broken' | 'provider-failure';
+export type WalletErrorKind = 'rejected' | 'session-broken' | 'pending-in-wallet' | 'provider-failure';
 
 const USER_REJECTED_REQUEST = 4001;
 const BROKEN_EXTENSION_MESSAGE =
   /sendMessage|extension context invalidated|disconnected port|receiving end does not exist/i;
+const REQUEST_STILL_PENDING = -32005;
+const STILL_PENDING_MESSAGE = /still pending/i;
 
 type ErrorFields = { code?: unknown; name?: unknown; message?: unknown; error?: unknown; cause?: unknown };
 
@@ -42,10 +51,20 @@ function isBrokenProvider({ message }: ErrorFields): boolean {
   return typeof message === 'string' && BROKEN_EXTENSION_MESSAGE.test(message);
 }
 
+function isStillPending({ code, message }: ErrorFields): boolean {
+  return (
+    code === REQUEST_STILL_PENDING ||
+    code === String(REQUEST_STILL_PENDING) ||
+    (typeof message === 'string' && STILL_PENDING_MESSAGE.test(message))
+  );
+}
+
 export function classifyWalletError(error: unknown): WalletErrorKind {
   const chain = errorChain(error);
   if (chain.some(isRejection)) return 'rejected';
   if (chain.some(isBrokenProvider)) return 'session-broken';
+  // Checked after the kinds above, so it can only take the place of `provider-failure`.
+  if (chain.some(isStillPending)) return 'pending-in-wallet';
   return 'provider-failure';
 }
 
