@@ -14,13 +14,17 @@ import { CurrencyContextProvider } from '@contexts/CurrencyContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { initializeContext, getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { useWeb3Context } from '@contexts/Web3Context';
+import { WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { useEthersProvider } from '@helpers/ethersAdapter';
 import { estimateGasForActions, getKeyForActions, initialEstimatedGasMap } from '@helpers/gasEstimator';
 import { useActionQueue } from '@hooks/useActionQueue';
 import { useCometState } from '@hooks/useCometState';
+import { useLendingRoute } from '@hooks/useLendingRoute';
 import { useRewardsState } from '@hooks/useRewardsState';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
 import { useThemeManager } from '@hooks/useThemeManager';
 import { useTransactionManager } from '@hooks/useTransactionManager';
+import { useWrappedPosition } from '@hooks/useWrappedPosition';
 import { Action, MarketDataLoaded, StateType } from '@types';
 
 import { allExtensions } from './pages/extensions/helpers/list';
@@ -79,6 +83,19 @@ function App({ Component, pageProps }: any) {
 
   const cometState = useCometState(web3, selectedMarketState.selectedMarket, transactions, rewardsState);
   initializeContext(selectedMarketState);
+
+  const lendingRoute = useLendingRoute(selectedMarketState.selectedMarket[1]);
+  const wrappedChainProvider = useEthersProvider({
+    chainId: lendingRoute.kind === 'wrapped' ? lendingRoute.chainId : undefined,
+  });
+  const wrappedPosition = useWrappedPosition({
+    route: lendingRoute,
+    account: web3.write.account,
+    provider: wrappedChainProvider,
+    // Read again whenever a transaction is added or settles.
+    refreshToken: transactions.length,
+  });
+  const wrappedLending = { route: lendingRoute, position: wrappedPosition.state, retry: wrappedPosition.retry };
 
   const handleRequestNetworkSwitch = (fromChainId: number, toChainId: number, description?: string) => {
     setNetworkSwitchState({
@@ -198,24 +215,26 @@ function App({ Component, pageProps }: any) {
               />
               <NetworkSwitchModal state={networkSwitchState} onSwitchNetwork={handleSwitchNetwork} />
               <div className="app-content">
-                <Component
-                  transactions={transactions}
-                  web3={web3}
-                  addTransaction={addTransaction}
-                  theme={theme}
-                  cometState={cometState}
-                  setShowConnectWalletModal={setShowConnectWalletModal}
-                  switchWriteNetwork={(chainId: number, description?: string) => {
-                    if (web3.write.chainId) {
-                      handleRequestNetworkSwitch(web3.write.chainId, chainId, description);
-                      return;
-                    }
+                <WrappedLendingContext.Provider value={wrappedLending}>
+                  <Component
+                    transactions={transactions}
+                    web3={web3}
+                    addTransaction={addTransaction}
+                    theme={theme}
+                    cometState={cometState}
+                    setShowConnectWalletModal={setShowConnectWalletModal}
+                    switchWriteNetwork={(chainId: number, description?: string) => {
+                      if (web3.write.chainId) {
+                        handleRequestNetworkSwitch(web3.write.chainId, chainId, description);
+                        return;
+                      }
 
-                    web3.switchWriteNetwork(chainId);
-                  }}
-                  estimatedGasMap={estimatedGasMap}
-                  {...pageProps}
-                />
+                      web3.switchWriteNetwork(chainId);
+                    }}
+                    estimatedGasMap={estimatedGasMap}
+                    {...pageProps}
+                  />
+                </WrappedLendingContext.Provider>
                 <ScreeningErrorOverlay screeningStatus={web3.screeningStatus} />
               </div>
               <Footer theme={theme} setTheme={setTheme} />

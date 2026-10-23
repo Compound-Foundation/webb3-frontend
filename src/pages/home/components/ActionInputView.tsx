@@ -2,6 +2,7 @@ import { ChangeEventHandler, ChangeEvent, Dispatch, useEffect, useRef, useState 
 
 import { isUnwrappedCollateralAsset } from '@constants/chains';
 import {
+  ActionRules,
   calculateUpdatedBalances,
   getActionFromPendingAction,
   isSameAction,
@@ -38,6 +39,8 @@ type ActionInputViewProps = {
   onCancel: () => void;
   onConfirm: (amount: bigint, description: string) => void;
   setPendingActionAmount: (amount?: bigint) => void;
+  /** Extra rules the amount must meet, such as blocking direct supply on the wrapped route. */
+  actionRules?: ActionRules;
 };
 
 const ActionInputView = ({
@@ -50,6 +53,7 @@ const ActionInputView = ({
   onCancel,
   setPendingActionAmount,
   onConfirm,
+  actionRules,
 }: ActionInputViewProps) => {
   const [initialValueString, initialMaxClicked] = initialValue === undefined ? ['', false] : initialValue;
   const inputEl = useRef<HTMLInputElement>(null);
@@ -105,7 +109,8 @@ const ActionInputView = ({
     isUnwrappedCollateralAsset(market.chainInformation, pendingAction[1].address),
     setMaxClicked,
     setPendingActionAmount,
-    onConfirm
+    onConfirm,
+    actionRules
   );
 
   return (
@@ -198,7 +203,8 @@ function getContent(
   unwrappedCollateralAsset: boolean,
   setMaxClicked: Dispatch<boolean>,
   setPendingActionAmount: (amount?: bigint) => void,
-  onConfirm: (amount: bigint, description: string) => void
+  onConfirm: (amount: bigint, description: string) => void,
+  actionRules?: ActionRules
 ): Content {
   const [actionType, asset] = pendingAction;
   let title: string;
@@ -228,7 +234,8 @@ function getContent(
       baseAssetPre,
       collateralAssets,
       actionsToUse,
-      getActionFromPendingAction(pendingAction, amount)
+      getActionFromPendingAction(pendingAction, amount),
+      actionRules
     );
 
     if (isValid !== 'ok') {

@@ -1,4 +1,4 @@
-import { validateAddingAction } from '@helpers/actions';
+import { addsDirectBaseSupply, validateAddingAction } from '@helpers/actions';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { Action, ActionType, BaseAssetWithAccountState, TokenWithAccountState } from '@types';
 
@@ -300,5 +300,106 @@ describe('validateAddingAction', () => {
       expect(result[0]).toBe(false);
       expect(result[1]).toBe('Borrow Balance Will Exceed Capacity');
     });
+  });
+});
+
+describe('validateAddingAction with direct base supply blocked', () => {
+  const rules = { blockDirectBaseSupply: true };
+  const collateralAssetsPre = () => [mockEthCollateralAsset()];
+
+  it('rejects a base supply, which would go to Comet instead of the wrapper', () => {
+    const result = validateAddingAction(
+      mockBaseAsset(),
+      collateralAssetsPre(),
+      [],
+      mockBaseAction({ actionType: ActionType.Supply }),
+      rules
+    );
+    expect(result).toEqual([false, 'Direct Supply Unavailable With This Wallet']);
+  });
+
+  it('rejects a repay above the debt, whose excess would become a direct supply', () => {
+    const result = validateAddingAction(
+      mockBaseAsset({ balance: -10000000000n }),
+      collateralAssetsPre(),
+      [],
+      mockBaseAction({ actionType: ActionType.Repay, amount: 10000000001n }),
+      rules
+    );
+    expect(result).toEqual([false, 'Amount Exceeds Borrow Balance']);
+  });
+
+  it('measures the debt after the actions already queued', () => {
+    const queuedRepay = mockBaseAction({ actionType: ActionType.Repay, amount: 4000000000n });
+    const result = validateAddingAction(
+      mockBaseAsset({ balance: -10000000000n }),
+      collateralAssetsPre(),
+      [queuedRepay],
+      mockBaseAction({ actionType: ActionType.Repay, amount: 6000000001n }),
+      rules
+    );
+    expect(result).toEqual([false, 'Amount Exceeds Borrow Balance']);
+  });
+
+  it('allows repaying exactly the debt, or all of it', () => {
+    const baseAssetPre = mockBaseAsset({ balance: -10000000000n });
+    const exact = mockBaseAction({ actionType: ActionType.Repay, amount: 10000000000n });
+    const full = mockBaseAction({ actionType: ActionType.Repay, amount: MAX_UINT256 });
+
+    expect(validateAddingAction(baseAssetPre, collateralAssetsPre(), [], exact, rules)).toBe('ok');
+    expect(validateAddingAction(baseAssetPre, collateralAssetsPre(), [], full, rules)).toBe('ok');
+  });
+
+  it('leaves borrowing and collateral actions unchanged', () => {
+    const borrow = mockBaseAction({ actionType: ActionType.Borrow });
+    const supplyCollateral = mockCollateralAction({ actionType: ActionType.SupplyCollateral });
+
+    expect(validateAddingAction(mockBaseAsset(), collateralAssetsPre(), [], borrow, rules)).toBe('ok');
+    expect(validateAddingAction(mockBaseAsset(), collateralAssetsPre(), [], supplyCollateral, rules)).toBe('ok');
+  });
+
+  it('changes nothing when the rule is off', () => {
+    const supply = mockBaseAction({ actionType: ActionType.Supply });
+    const overRepay = mockBaseAction({ actionType: ActionType.Repay, amount: 10000000001n });
+
+    expect(validateAddingAction(mockBaseAsset(), collateralAssetsPre(), [], supply)).toBe('ok');
+    expect(
+      validateAddingAction(mockBaseAsset({ balance: -10000000000n }), collateralAssetsPre(), [], overRepay, {
+        blockDirectBaseSupply: false,
+      })
+    ).toBe('ok');
+  });
+});
+
+describe('addsDirectBaseSupply', () => {
+  const collateralAssetsPre = () => [mockEthCollateralAsset()];
+
+  it('finds a base supply anywhere in the queue', () => {
+    const actions = [
+      mockCollateralAction({ actionType: ActionType.SupplyCollateral }),
+      mockBaseAction({ actionType: ActionType.Supply }),
+    ];
+    expect(addsDirectBaseSupply(mockBaseAsset(), collateralAssetsPre(), actions)).toBe(true);
+  });
+
+  it('finds a repay larger than the debt left by the actions before it', () => {
+    const actions = [
+      mockBaseAction({ actionType: ActionType.Repay, amount: 4000000000n }),
+      mockBaseAction({ actionType: ActionType.Repay, amount: 6000000001n }),
+    ];
+    expect(addsDirectBaseSupply(mockBaseAsset({ balance: -10000000000n }), collateralAssetsPre(), actions)).toBe(true);
+  });
+
+  it('finds a base supply even when it is invalid for another reason', () => {
+    const actions = [mockBaseAction({ actionType: ActionType.Supply, amount: 10n ** 30n })];
+    expect(addsDirectBaseSupply(mockBaseAsset(), collateralAssetsPre(), actions)).toBe(true);
+  });
+
+  it('accepts a queue of borrowing, repaying in full and collateral actions', () => {
+    const actions = [
+      mockCollateralAction({ actionType: ActionType.SupplyCollateral }),
+      mockBaseAction({ actionType: ActionType.Repay, amount: MAX_UINT256 }),
+    ];
+    expect(addsDirectBaseSupply(mockBaseAsset({ balance: -10000000000n }), collateralAssetsPre(), actions)).toBe(false);
   });
 });
