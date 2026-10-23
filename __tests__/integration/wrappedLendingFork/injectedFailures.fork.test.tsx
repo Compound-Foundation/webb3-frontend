@@ -181,13 +181,19 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
       measured.onChainSupplyRevert = revertName(await revertDataOf(account, supply));
       expect(measured.onChainSupplyRevert).toBe('Paused');
 
-      // Once the guardian lifts the pause, a fresh exit review signs and pays again.
+      // Once the guardian lifts the pause, a fresh exit review signs and pays exactly its check's quote.
       await pauseComet(market, {});
       await withApp(async (app) => {
         expect(await app.startWithdraw({ kind: 'partial', cash: units(100) })).toBeUndefined();
+        await anvil.setNextBlockTimestamp((await anvil.latestBlock()).timestamp);
         const step = await app.confirmStep();
         measured.afterUnpause = step.status;
         expect(step.status).toBe('confirmed');
+        const effects = await receiptEffects(market, account, app.receiptOf(step));
+        const rechecked = app.rechecked();
+        if (rechecked === undefined) throw new Error('The check returned no quote.');
+        measured.afterUnpausePaid = effects.cashDelta;
+        expectExitPaid(effects, rechecked.quote);
       });
     })
   );
@@ -244,7 +250,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
       await setUp();
       let injected = await backdateAccrual(market);
       if (injected === undefined) {
-        // The market's rate is too low to reach the lag after the epoch. Borrowing nearly all its
+        // The market's rate is too low to reach the lag after the epoch. A borrow of nearly all its
         // cash raises the rate, and the cash left still pays these exits.
         const drain = await drainCash(market, forkAccount('borrower', forkMarket), units(1_000));
         measured.rateRaisedByBorrowing = drain.borrowed;
@@ -301,8 +307,8 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
       await setUp();
       const donor = await prepareAccount(forkAccount('donor', forkMarket));
       await withApp(async (app) => {
-        // A partial exit whose shares pay more than 0.1% above the reviewed cash, after a donation to
-        // the wrapper, stops for a fresh review, which burns fewer shares for the amount.
+        // After a donation to the wrapper, a partial exit's shares pay more than 0.1% above the
+        // reviewed cash. The exit stops for a fresh review, which burns fewer shares for the amount.
         expect(await app.startWithdraw({ kind: 'partial', cash: units(500) })).toBeUndefined();
         const stale = app.draft().withdrawal?.quote;
         if (stale === undefined) throw new Error('The withdrawal draft has no quote.');

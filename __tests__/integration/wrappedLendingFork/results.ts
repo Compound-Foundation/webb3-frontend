@@ -13,6 +13,12 @@ export type ScenarioResult = {
 
 const resultsFile = process.env.WRAPPED_FORK_RESULTS;
 
+/**
+ * Thrown by a scenario that the fork's state does not let it exercise, such as a market with no
+ * supply rate. `scenario` records the cell as not exercised, with the message as the reason.
+ */
+export class NotExercisedOnThisFork extends Error {}
+
 function append(result: ScenarioResult) {
   if (resultsFile === undefined || resultsFile === '') return;
   const existing: ScenarioResult[] = fs.existsSync(resultsFile) ? JSON.parse(fs.readFileSync(resultsFile, 'utf8')) : [];
@@ -30,7 +36,8 @@ function serialize(measurements: Measurements): ScenarioResult['measurements'] {
 
 /**
  * A Jest test that is also a cell of the matrix. The cell passes when the test passes, and fails
- * with the test's error otherwise. The test still fails or passes as usual.
+ * with the test's error otherwise. The test still fails or passes as usual. A scenario that throws
+ * `NotExercisedOnThisFork` passes as a test, and its cell is recorded as not exercised.
  */
 export function scenario(name: string, market: string, run: (measurements: Measurements) => Promise<void>) {
   test(`${name} (${market})`, async () => {
@@ -38,6 +45,16 @@ export function scenario(name: string, market: string, run: (measurements: Measu
     try {
       await run(measurements);
     } catch (error) {
+      if (error instanceof NotExercisedOnThisFork) {
+        append({
+          scenario: name,
+          market,
+          status: 'not-exercised',
+          reason: error.message,
+          measurements: serialize(measurements),
+        });
+        return;
+      }
       append({
         scenario: name,
         market,

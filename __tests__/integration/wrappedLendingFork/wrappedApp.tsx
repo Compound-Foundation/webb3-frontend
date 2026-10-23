@@ -33,8 +33,8 @@ export type SessionSetup = {
 };
 
 /**
- * The session as `useLendingRoute` builds it for a connected wallet, with the wrapper validated
- * on the fork by the app's own `validateWrappedMarket` through the configured chain's provider.
+ * The session as `useLendingRoute` builds it for a connected wallet. The app's own
+ * `validateWrappedMarket` validates the wrapper on the fork, through the configured chain's provider.
  */
 async function sessionFor(wallet: object, readProvider: JsonRpcProvider, setup: SessionSetup): Promise<WrappedSession> {
   const registry = setup.registry ?? FORK_REGISTRY;
@@ -107,13 +107,13 @@ const SETTLED: readonly WrappedStepState['status'][] = [
 
 export type WrappedApp<T = undefined> = Awaited<ReturnType<typeof renderWrappedApp<T>>>;
 
-/** More of App's hooks to render beside the wrapped route, sharing its transaction manager. */
+/** More of App's hooks to render beside the wrapped route, with the same transaction manager. */
 export type ExtraHooks<T> = (context: { manager: TransactionManager; web3: Web3 }) => T;
 
 /**
  * The wrapped route as App wires it: the transaction manager, the wrapper action lifecycle, the
  * wrapped writes and the position read, against the local fork. The wallet's provider is an ethers
- * provider for the fork, and anvil signs for the impersonated account, so every check, gas estimate
+ * provider for the fork, and anvil signs for the impersonated account. So every check, gas estimate
  * and request is the app's own, up to the signature. `useExtra` renders more of App's hooks, such
  * as the direct Comet state and writes, with the same transaction manager.
  */
