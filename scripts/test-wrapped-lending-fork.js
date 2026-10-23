@@ -34,7 +34,10 @@
 // other endpoints first. If the last run fails only that way too, its failed cells are recorded as
 // not exercised, and the run fails.
 //
-// Two risks remain, and neither exposes the URL or real funds:
+// Three risks remain. In none of them do the fork or the proxy give out the URL, and no real funds
+// are at stake:
+// - Any local process can call the fork and the proxy on 127.0.0.1 during a run. It can change the
+//   fork's state, and so a run's results, and it can make the reads that the proxy forwards.
 // - anvil checks no Host header, so a web page open during a run can reach the fork through DNS
 //   rebinding. Such a page can change the fork's state and so a run's results, but anvil holds no
 //   key and the proxy forwards only reads. Run the suite with no untrusted page open.
@@ -304,13 +307,14 @@ function errorsIn(answer) {
  * URL. It listens on 127.0.0.1, and it refuses these requests:
  * - a request with an Origin header, which a web page sends
  * - a method other than POST
- * - a body that is not JSON
- * - a request, or a batch, that calls a method outside `UPSTREAM_METHODS`
+ * - a content type other than JSON, or a body that is not JSON
+ * - a body over 10 MB
+ * - an empty batch, or a request or batch that calls a method outside `UPSTREAM_METHODS`
  *
  * It sends anvil no text of its own errors, which can name the upstream URL. The upstream's answers
- * reach anvil unchanged, and the runner redacts every output. It counts the methods it
- * forwards, the methods it refuses, the requests that the upstream failed and the calls it answered
- * with an error. It keeps the first such error, for the summary.
+ * reach anvil unchanged, and the runner redacts every output. It counts the methods it forwards and
+ * each refusal, by its method or reason. It also counts the requests that the upstream failed and
+ * the calls it answered with an error. It keeps the first such error for the summary.
  */
 function startUpstreamProxy(upstreamUrl) {
   const stats = {
@@ -322,43 +326,52 @@ function startUpstreamProxy(upstreamUrl) {
     refused: new Map(),
   };
   const server = http.createServer((request, response) => {
-    const refuse = (status) => {
+    const refuse = (status, reason) => {
+      if (reason !== undefined) countIn(stats.refused, reason);
       response.writeHead(status, { 'content-type': 'text/plain' });
       response.end();
     };
-    if (request.headers.origin !== undefined) return refuse(403);
-    if (request.method !== 'POST') return refuse(405);
-    if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) return refuse(415);
+    if (request.headers.origin !== undefined) return refuse(403, '<an Origin header>');
+    if (request.method !== 'POST') return refuse(405, '<a method other than POST>');
+    if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) {
+      return refuse(415, '<a content type other than JSON>');
+    }
     const chunks = [];
     let size = 0;
     request.on('data', (chunk) => {
       size += chunk.length;
-      if (size > MAX_PROXY_BODY_BYTES) request.destroy();
-      else chunks.push(chunk);
+      if (size <= MAX_PROXY_BODY_BYTES) chunks.push(chunk);
+      else if (!request.destroyed) {
+        countIn(stats.refused, '<a body over 10 MB>');
+        request.destroy();
+      }
     });
     request.on('end', async () => {
       let parsed;
       try {
         parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       } catch {
-        return refuse(400);
+        return refuse(400, '<a body that is not JSON>');
       }
       const calls = Array.isArray(parsed) ? parsed : [parsed];
       const methods = calls.map((call) => methodName(call?.method));
-      const refused = methods.filter((method) => !UPSTREAM_METHODS.has(method));
-      if (methods.length === 0 || refused.length > 0) {
-        for (const method of refused) countIn(stats.refused, method);
+      if (methods.length === 0) return refuse(403, '<an empty batch>');
+      const outside = methods.filter((method) => !UPSTREAM_METHODS.has(method));
+      if (outside.length > 0) {
+        for (const method of outside) countIn(stats.refused, method);
         return refuse(403);
       }
+      // The calls the proxy checked, rebuilt from their four JSON-RPC members. A raw body can name a
+      // method twice, or under a key in another case, such as `Method`. An upstream can read that name
+      // instead of the one that the proxy checked.
+      const checked = calls.map(({ jsonrpc, id, method, params }) => ({ jsonrpc, id, method, params }));
       for (const method of methods) countIn(stats.methods, method);
       stats.requests += 1;
       try {
         const upstream = await fetch(upstreamUrl, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          // The calls the proxy checked, serialized again. A raw body can name a method twice, and
-          // an upstream that reads the first name runs a method that the check never saw.
-          body: JSON.stringify(parsed),
+          body: JSON.stringify(Array.isArray(parsed) ? checked : checked[0]),
           signal: AbortSignal.timeout(60_000),
         });
         const answer = Buffer.from(await upstream.arrayBuffer());
@@ -565,7 +578,7 @@ function runJest(options, fork, target, files, log) {
     child.on('close', (code, signal) => {
       fork.child.off('exit', onAnvilExit);
       if (anvilExited) console.error('\nanvil exited while the suite ran, so the run fails.');
-      resolve(anvilExited ? 1 : code ?? (signal ? 1 : 0));
+      resolve({ exitCode: anvilExited ? 1 : code ?? (signal ? 1 : 0), anvilExited });
     })
   );
 }
@@ -611,6 +624,7 @@ function failedOnUpstreamOnly(run) {
   const failed = run.results.filter((result) => result.status === 'fail');
   return (
     run.exitCode !== 0 &&
+    !run.anvilExited &&
     failed.length > 0 &&
     run.jest !== undefined &&
     run.jest.numRuntimeErrorTestSuites === 0 &&
@@ -747,6 +761,7 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
   const jestLog = fs.createWriteStream(path.join(logDir, files.jest));
 
   let exitCode = 1;
+  let anvilExited = false;
   let fork;
   let header;
   try {
@@ -774,7 +789,7 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
     console.log(header);
     const { clientVersion } = await verifyFork(fork, target);
     console.log(`  verified:      ${clientVersion} on 127.0.0.1, chain ID 1, fork block and hash match the upstream\n`);
-    exitCode = await runJest(options, fork, target, written, jestLog);
+    ({ exitCode, anvilExited } = await runJest(options, fork, target, written, jestLog));
   } finally {
     if (fork !== undefined) await stopped(fork.child);
     await Promise.all([anvilLog, jestLog].map((log) => new Promise((resolve) => log.end(resolve))));
@@ -784,7 +799,7 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
   const jest = readRedacted(written.jestReport, undefined);
   const results = heldToJest(readRedacted(written.results, []), jest);
   fs.writeFileSync(path.join(logDir, files.results), JSON.stringify(results, null, 2));
-  return { endpoint, target, header, exitCode, files, jest, results, stats: proxy.stats };
+  return { endpoint, target, header, exitCode, anvilExited, files, jest, results, stats: proxy.stats };
 }
 
 async function main() {
@@ -875,7 +890,16 @@ async function main() {
     `## Not exercised (${notExercised.length})`,
     ...notExercised.map((result) => `- ${result.market}, ${result.scenario}: ${result.reason}`),
     '',
-    ...(verdict === 'FAIL' && failed.length === 0
+    ...(final.anvilExited
+      ? [
+          'anvil exited while the suite ran, so the run fails. Whatever answered on its port afterwards was not the fork that the runner verified. See the anvil log.',
+          '',
+        ]
+      : []),
+    ...(verdict === 'FAIL' && results.length === 0 && !final.anvilExited
+      ? ['The run recorded no matrix cell. Check the --test pattern, and see the Jest log.', '']
+      : []),
+    ...(verdict === 'FAIL' && failed.length === 0 && results.length > 0 && !final.anvilExited
       ? [
           'No matrix cell failed, but the run did. A test outside the matrix failed, such as the network guard, or an error came after a cell passed. See the Jest log.',
           '',
