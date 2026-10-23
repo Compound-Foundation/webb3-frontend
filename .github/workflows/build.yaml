@@ -19,7 +19,10 @@ jobs:
         id: deployment
         with:
           token: '${{ github.token }}'
-          environment: production
+          # Only main builds are production candidates. Branch builds are
+          # previews and stay out of the Production environment, whose
+          # deployment branch policy allows main only.
+          environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
 
       - name: Checkout repository
         uses: actions/checkout@v2
