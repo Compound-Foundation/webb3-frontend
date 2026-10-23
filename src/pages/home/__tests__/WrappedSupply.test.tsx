@@ -178,6 +178,7 @@ function controller(
     state,
     session: { status: 'usable' },
     recovered: { pending: [], settled: [] },
+    isRecoveredRequestPendingInWallet: false,
     canDismissRecovered: false,
     hasUnansweredWalletRequest: false,
     blockedReason: () => blockedReason,
