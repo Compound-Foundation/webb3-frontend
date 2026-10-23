@@ -1177,6 +1177,25 @@ describe('useWriteWrappedState', () => {
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
     });
 
+    it("signs nothing when the market's provider stops answering for its newest block", async () => {
+      const chain = chainFor(USDC_MARKET, { allowance: 0n });
+      const { result, wallet, readProvider } = renderSupply(chain, { blockWait: { attempts: 3, intervalMs: 5 } });
+      await startSupply(result, AMOUNT);
+      await confirmStep(result);
+
+      readProvider.getBlockNumber.mockImplementation(() => new Promise<number>(() => undefined));
+      await confirmStep(result);
+
+      expect(result.current.action.state).toMatchObject({
+        phase: 'stopped',
+        steps: [
+          { status: 'confirmed' },
+          { status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/has not shown/) },
+        ],
+      });
+      expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
+    });
+
     const CHANGES: [string, (wallet: Wallet) => WrappedSession][] = [
       ['account', (wallet) => sessionFor(wallet, { account: OTHER_ACCOUNT })],
       ['route: the wrapper check fails', (wallet) => sessionFor(wallet, { validation: 'not-canonical' })],

@@ -58,28 +58,52 @@ export type WrappedPosition = {
   snapshot: WrappedPositionSnapshot;
 };
 
-/** How a read waits for the configured chain's provider to reach a block: how many times it asks again, and how often. */
+/**
+ * How a read waits for the configured chain's provider to reach a block: how many times it asks
+ * again, and how often. `attempts × intervalMs` also bounds the wait's elapsed time, including
+ * time spent waiting for the provider to answer.
+ */
 export type BlockWait = { attempts: number; intervalMs: number };
 
-/** About half a minute: a few Ethereum blocks. */
+/** At most half a minute: a few Ethereum blocks. */
 export const DEFAULT_BLOCK_WAIT: BlockWait = Object.freeze({ attempts: 20, intervalMs: 1_500 });
 
 /**
  * The provider's newest block, once it is at least `minBlock`. The transaction manager learns of a
  * receipt from the wallet's node, and the configured chain's provider can trail that node, so a
  * read made just after a transaction settles waits for the provider to reach the transaction's
- * block. Undefined when the provider has not reached it after `wait.attempts` more tries.
+ * block. Undefined when the provider has not reached it after `wait.attempts` more tries, or within
+ * `wait.attempts × wait.intervalMs` of the first request, whichever comes first. A request still
+ * unanswered at that time counts as not reaching the block.
  */
 export async function waitForBlock(
   provider: Pick<JsonRpcProvider, 'getBlockNumber'>,
   minBlock: number | undefined,
   wait: BlockWait = DEFAULT_BLOCK_WAIT
 ): Promise<number | undefined> {
-  let blockNumber = await provider.getBlockNumber();
-  for (let attempt = 1; minBlock !== undefined && blockNumber < minBlock; attempt++) {
+  if (minBlock === undefined) return provider.getBlockNumber();
+  const deadline = Date.now() + wait.attempts * wait.intervalMs;
+  // Settles as `pending` does, or with undefined at the deadline if `pending` has not settled by then.
+  const beforeDeadline = <T>(pending: Promise<T>) =>
+    new Promise<T | undefined>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now()));
+      pending.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+
+  let blockNumber = await beforeDeadline(provider.getBlockNumber());
+  for (let attempt = 1; blockNumber !== undefined && blockNumber < minBlock; attempt++) {
     if (attempt > wait.attempts) return undefined;
-    await new Promise((resolve) => setTimeout(resolve, wait.intervalMs));
-    blockNumber = await provider.getBlockNumber();
+    await beforeDeadline(new Promise((resolve) => setTimeout(resolve, wait.intervalMs)));
+    blockNumber = await beforeDeadline(provider.getBlockNumber());
   }
   return blockNumber;
 }
