@@ -471,6 +471,9 @@ export function startUpstreamProxy(endpoint, { printable, timeoutMs = 40_000 }) 
     failures: 0,
     errorAnswers: 0,
     firstError: undefined,
+    // The requests to the upstream that have not settled, and the time of its last failure or error.
+    pending: 0,
+    lastFailureAt: undefined,
     methods: new Map(),
     refused: new Map(),
   };
@@ -516,6 +519,7 @@ export function startUpstreamProxy(endpoint, { printable, timeoutMs = 40_000 }) 
       const checked = calls.map(({ jsonrpc, id, method, params }) => ({ jsonrpc, id, method, params }));
       for (const method of methods) countIn(stats.methods, method);
       stats.requests += 1;
+      stats.pending += 1;
       try {
         const upstream = await fetch(endpoint.url, {
           method: 'POST',
@@ -532,12 +536,16 @@ export function startUpstreamProxy(endpoint, { printable, timeoutMs = 40_000 }) 
         }
         stats.errorAnswers += relay.errors.length;
         stats.firstError ??= relay.errors[0];
+        if (relay.failure !== undefined || relay.errors.length > 0) stats.lastFailureAt = Date.now();
         response.writeHead(relay.status, { 'content-type': relay.contentType });
         response.end(relay.body);
       } catch {
         stats.failures += 1;
         stats.firstError ??= `no answer within ${timeoutMs / 1000} s, or no connection`;
+        stats.lastFailureAt = Date.now();
         refuse(502);
+      } finally {
+        stats.pending -= 1;
       }
     });
   });
@@ -613,22 +621,34 @@ export function failedOnUpstreamOnly(run) {
 
 /**
  * Whether anvil could not start the fork only because the upstream failed to serve what anvil reads
- * at start-up. The proxy must have seen the upstream fail a request or answer a call with an error.
- * Also, anvil's `output` must name a failed fetch, or the runner stopped anvil at its deadline
- * (`isTimedOut`). anvil names a failed fetch only when it gives up, and an upstream that fails slowly
- * keeps anvil retrying past the deadline. A refusal by the proxy is not an upstream failure, and an
- * error of anvil's own, such as a port in use, names no fetch.
+ * at start-up. The proxy must have seen the upstream fail a request or answer a call with an error,
+ * and one of these must hold:
+ * - anvil's `output` names a failed fetch. A refusal by the proxy is not an upstream failure, and an
+ *   error of anvil's own, such as a port in use, names no fetch.
+ * - The runner stopped anvil at its deadline (`isTimedOut`) while the upstream was failing it. anvil
+ *   names a failed fetch only when it gives up, and an upstream that fails slowly keeps anvil
+ *   retrying past the deadline. So at the deadline, a request to the upstream must still be open,
+ *   or the upstream must have failed within the last 45 s, the time anvil waits for an answer.
+ *   An upstream failure long before the deadline points to anvil, such as output the runner does
+ *   not read as ready.
  */
-export const failedToStartOnUpstream = ({ stats, output, isTimedOut = false }) =>
-  stats.failures + stats.errorAnswers > 0 && (isTimedOut || FORK_STARTUP_FETCH_ERROR.test(output));
+export const failedToStartOnUpstream = ({ stats, output, isTimedOut = false, now = Date.now() }) =>
+  stats.failures + stats.errorAnswers > 0 &&
+  (FORK_STARTUP_FETCH_ERROR.test(output) ||
+    (isTimedOut && (stats.pending > 0 || now - (stats.lastFailureAt ?? -Infinity) <= 45_000)));
+
+/** The last second that a JavaScript date can hold: 8.64e15 ms after 1970. */
+const LAST_DATE_SECONDS = 8.64e12;
 
 /**
- * Whether the block `header` that an upstream reports has a 32-byte hash and a hex timestamp. The
- * runner prints both in its header. Otherwise a private upstream's text can reach the console in
- * them, and a timestamp that is not a number stops the run after anvil started.
+ * Whether the block `header` that an upstream reports has a 32-byte hash and a hex timestamp that a
+ * date can hold. The runner prints both in its header. Otherwise a private upstream's text can reach
+ * the console in them, and a timestamp that is not a date stops the run after anvil started.
  */
 export const isBlockHeader = (header) =>
-  /^0x[0-9a-fA-F]{64}$/.test(header?.hash ?? '') && /^0x[0-9a-fA-F]{1,16}$/.test(header?.timestamp ?? '');
+  /^0x[0-9a-fA-F]{64}$/.test(header?.hash ?? '') &&
+  /^0x[0-9a-fA-F]{1,16}$/.test(header?.timestamp ?? '') &&
+  Number(header.timestamp) <= LAST_DATE_SECONDS;
 
 /**
  * Whether the runner runs the suite once more after `run`: anvil could not start the fork on the
