@@ -83,10 +83,12 @@ const MARKET_COLUMNS = ['USDC', 'USDT', 'institutional USDC', 'factory'];
  */
 const FORK_FETCH_ERROR = /failed to get (?:account for|storage for|block hash for|full block for|transaction) /;
 /**
- * A refusal by the chain itself: a revert, or a gas estimate that a revert stopped. A cell that
- * failed on one failed in the app or the test, whatever the upstream did.
+ * A refusal by the chain itself: anvil's revert error, ethers' decoded revert of an `eth_call`, or a
+ * gas estimate that a revert stopped. A cell that failed on one failed in the app or the test,
+ * whatever the upstream did. A fetch failure in an `eth_call` reaches ethers as `missing revert
+ * data in call exception`, which this does not match, with anvil's fetch error inside.
  */
-const CHAIN_REFUSAL = /execution reverted|UNPREDICTABLE_GAS_LIMIT/;
+const CHAIN_REFUSAL = /execution reverted|call revert exception|UNPREDICTABLE_GAS_LIMIT/;
 /** The largest JSON-RPC body the proxy forwards: far above anything anvil sends. */
 const MAX_PROXY_BODY_BYTES = 10 * 1024 * 1024;
 /**
@@ -284,9 +286,12 @@ const methodName = (method) =>
 
 const countIn = (counts, key) => counts.set(key, (counts.get(key) ?? 0) + 1);
 
-/** `text` as one line of printable ASCII, at most 200 characters, for the summary. */
+/**
+ * `text`, redacted, as one line of printable ASCII of at most 200 characters, for the summary. The
+ * redaction comes first, so the cut cannot split a secret that the redaction then misses.
+ */
 const printable = (text) =>
-  String(text)
+  redact(String(text))
     .replace(/[^\x20-\x7e]/g, ' ')
     .slice(0, 200);
 
