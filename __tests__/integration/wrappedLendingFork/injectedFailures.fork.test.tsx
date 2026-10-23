@@ -21,6 +21,7 @@ import {
 import { anvil, assertLocalFork } from './fork';
 import {
   backdateAccrual,
+  donateToWrapper,
   drainCash,
   fundedAccount,
   nonceOf,
@@ -286,6 +287,57 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         const sent = await sendFrom(account, exitOf(found.shares), false);
         measured.sentOutsideAppStatus = sent.receipt.status ?? -1;
         expect(sent.receipt.status).toBe(0);
+      });
+    })
+  );
+
+  scenario('estimate-rose', label, (measured) =>
+    onSnapshot(async () => {
+      await setUp();
+      const donor = await fundedAccount(market, forkAccount('donor', forkMarket), units(10_000));
+      await withApp(async (app) => {
+        // A partial exit whose shares pay more than 0.1% above the reviewed cash, after a donation to
+        // the wrapper, stops for a fresh review, which burns fewer shares for the amount.
+        expect(await app.startWithdraw({ kind: 'partial', cash: units(500) })).toBeUndefined();
+        const stale = app.draft().withdrawal?.quote;
+        if (stale === undefined) throw new Error('The withdrawal draft has no quote.');
+        await donateToWrapper(market, donor, units(100));
+        measured.partialStop = blockedMessage(await expectStoppedBeforeSignature(app));
+        expect(measured.partialStop).toMatch(/more than 0\.1% above the 500\.000000 .* you reviewed/);
+        expect(await app.startWithdraw({ kind: 'partial', cash: units(500) })).toBeUndefined();
+        const fresh = app.draft().withdrawal?.quote;
+        if (fresh === undefined) throw new Error('The withdrawal draft has no quote.');
+        await anvil.setNextBlockTimestamp((await anvil.latestBlock()).timestamp);
+        const partial = await receiptEffects(market, account, app.receiptOf(await app.confirmStep()));
+        Object.assign(measured, {
+          staleShares: stale.shares,
+          freshShares: fresh.shares,
+          freshQuotedCash: fresh.cash,
+          freshPaidCash: partial.cashDelta,
+        });
+        expect(fresh.shares).toBeLessThan(stale.shares);
+        expect(partial.cashDelta).toBe(fresh.cash);
+
+        // A full exit goes on however much its shares come to pay. It pays what the check quoted at
+        // the signature's block, which the dialog then shows.
+        expect(await app.startWithdraw({ kind: 'full' })).toBeUndefined();
+        const reviewed = app.draft().withdrawal?.quote;
+        if (reviewed === undefined) throw new Error('The withdrawal draft has no quote.');
+        await donateToWrapper(market, donor, units(100));
+        await anvil.setNextBlockTimestamp((await anvil.latestBlock()).timestamp);
+        const full = await receiptEffects(market, account, app.receiptOf(await app.confirmStep()));
+        const rechecked = app.rechecked();
+        if (rechecked === undefined) throw new Error('The check returned no quote.');
+        Object.assign(measured, {
+          fullReviewedCash: reviewed.cash,
+          fullRecheckedCash: rechecked.quote.cash,
+          fullPaidCash: full.cashDelta,
+          fullRecheckedDescription: rechecked.description,
+        });
+        expect(rechecked.quote.shares).toBe(reviewed.shares);
+        expect(rechecked.quote.cash).toBeGreaterThan(reviewed.cash);
+        expect(full.cashDelta).toBe(rechecked.quote.cash);
+        expect(full.after.shares).toBe(0n);
       });
     })
   );
