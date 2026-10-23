@@ -19,6 +19,8 @@ import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
+import { SendWithdrawnError } from '@helpers/walletErrors';
+import { isDirectExecution } from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
   isSubmissionRefused,
@@ -88,12 +90,10 @@ const Home = ({
   }, [selectedMarket[0], selectedMarket[1]?.baseAsset?.symbol]);
 
   const rewards = useContext(RewardsStateContext);
-  const writeState = useWriteCometState(web3, addTransaction);
   const { addOrUpdateAction, clearActions, getActions, getPendingAction, removeAction, setPendingAction } = useContext(
     getActionQueueContext()
   );
 
-  const [actionModalState, setActionModalState] = useState<ActionModalState>(undefined);
   const [compare, setCompare] = useState(false);
   const [cometState] = state;
 
@@ -129,6 +129,73 @@ const Home = ({
     selectedMarket: selectedMarketIdentity,
     comet: cometStateMarket.current,
   };
+  // Review dialogs and writes belong to a visit: the account, connector, connection status, wallet
+  // network and market they were made for. A change of any of them starts a new visit in the same
+  // render, so a reconnect with the same account and connector does too. A callback kept from an
+  // earlier visit, even one to the same account and market, starts no write. It can open or close
+  // only a dialog of its own visit, which is never shown.
+  const visitIdentity = [
+    web3.write.account?.toLowerCase() ?? '',
+    web3.write.connector?.uid ?? '',
+    web3.write.status,
+    web3.write.chainId ?? '',
+    selectedMarketIdentity === undefined
+      ? ''
+      : `${selectedMarketIdentity.chainId}:${selectedMarketIdentity.cometAddress.toLowerCase()}`,
+  ].join('|');
+  const visit = useRef({ identity: visitIdentity, count: 0 });
+  if (visit.current.identity !== visitIdentity) {
+    visit.current = { identity: visitIdentity, count: visit.current.count + 1 };
+  }
+  const visitKey = `${visitIdentity}#${visit.current.count}`;
+  const liveVisitKey = useRef(visitKey);
+  liveVisitKey.current = visitKey;
+  // Dialogs and the position card keep the callbacks of the render that made them.
+  const isFromEarlierVisit = () => liveVisitKey.current !== visitKey;
+  // On the wrapped route, a wallet session found unusable stops direct writes as well.
+  const liveWalletUnusable = useRef(false);
+  liveWalletUnusable.current = wrappedLending.action.session.status === 'unusable';
+  // App writes each new gas estimate into a new map, for example once the Bulker approval settles,
+  // so a kept callback reads the map through this ref. App keeps the estimates for the same
+  // account, connector, connection status, wallet network and market as a visit, so the map of the
+  // callback's own visit is the live one.
+  const liveEstimatedGasMap = useRef(estimatedGasMap);
+  liveEstimatedGasMap.current = estimatedGasMap;
+
+  // The manager reads the network and nonce, and can estimate gas, before it asks the wallet. If
+  // the write's visit ends or the session is found unusable in that time, the write is withdrawn.
+  // Otherwise the wallet is asked to sign for a session or market the user has left.
+  const addTransactionWhileCurrent: AddTransaction = (
+    key,
+    description,
+    trxFn,
+    estimatedGas,
+    trxEstimateGasFn,
+    fnArgs,
+    value,
+    callback
+  ) => {
+    const visitKeyBefore = liveVisitKey.current;
+    const sendWhileCurrent: typeof trxFn = (...args) =>
+      liveVisitKey.current === visitKeyBefore && !liveWalletUnusable.current
+        ? trxFn(...args)
+        : Promise.reject(new SendWithdrawnError());
+    return addTransaction(key, description, sendWhileCurrent, estimatedGas, trxEstimateGasFn, fnArgs, value, callback);
+  };
+  const writeState = useWriteCometState(web3, addTransactionWhileCurrent);
+
+  const [openDialog, setOpenDialog] = useState<{ key: string; state: ActionModalState }>();
+  const actionModalState = openDialog?.key === visitKey ? openDialog.state : undefined;
+  const setActionModalState = (dialog: ActionModalState) =>
+    setOpenDialog((current) => {
+      if (dialog !== undefined) return { key: visitKey, state: dialog };
+      return current?.key === visitKey ? undefined : current;
+    });
+  // A dialog from an earlier visit is hidden in the render above and cleared here, so it does not
+  // return with the session.
+  useEffect(() => {
+    if (openDialog !== undefined && openDialog.key !== visitKey) setOpenDialog(undefined);
+  }, [openDialog, visitKey]);
 
   let assetRows: ReactNode[];
   let otherAssetRows: ReactNode[] = [];
@@ -198,7 +265,11 @@ const Home = ({
       earnRewardsAPR: supplyRewardsAPR,
       isInstitutional,
     });
+    // Dialogs keep the callbacks below, so they check the session when they run.
     const isBlockedOnLiveRoute = (actionsToSubmit: Action[]) =>
+      liveWalletUnusable.current ||
+      // A queue holding a wrapper action is refused whole, never submitted without it.
+      !isDirectExecution(actionsToSubmit) ||
       isSubmissionRefused(
         liveSession.current,
         { chainId: market.chainInformation.chainId, cometAddress: market.marketAddress },
@@ -211,13 +282,19 @@ const Home = ({
     const pendingAction = getPendingAction(updatedDataPostActions.baseAsset, updatedDataPostActions.collateralAssets);
 
     const onRequestClose = () => setActionModalState(undefined);
+    // The approval dialog keeps this, so it checks the session when the user clicks.
+    const allowOperatorWhileCurrent: WriteCometState['allowOperator'] = async (...args) => {
+      if (isFromEarlierVisit() || liveWalletUnusable.current) return;
+      return writeState.allowOperator(...args);
+    };
     const submitBulkerAction = () => {
+      if (isFromEarlierVisit()) return;
       if (isBlockedOnLiveRoute(actions)) {
         setActionModalState(undefined);
         return;
       }
       const description = `${actions.length} Action${actions.length > 1 ? 's' : ''}`;
-      const estimatedGasLimit = estimatedGasMap.get(getKeyForActions(actions)) || 0;
+      const estimatedGasLimit = liveEstimatedGasMap.current.get(getKeyForActions(actions)) || 0;
       writeState.invokeBulker(market, actions, baseAsset, collateralAssets, description, estimatedGasLimit, () => {
         setPendingAction(undefined);
         clearActions();
@@ -229,6 +306,7 @@ const Home = ({
     };
 
     const submitSingleAction = (singleAction: Action) => {
+      if (isFromEarlierVisit()) return;
       if (isBlockedOnLiveRoute([singleAction])) {
         setActionModalState(undefined);
         return;
@@ -241,7 +319,7 @@ const Home = ({
         setActionModalState(undefined);
       };
 
-      const estimatedGasLimit = estimatedGasMap.get(getKeyForActions([singleAction])) || 0;
+      const estimatedGasLimit = liveEstimatedGasMap.current.get(getKeyForActions([singleAction])) || 0;
 
       switch (actionType) {
         case ActionType.Repay:
@@ -397,6 +475,7 @@ const Home = ({
           removeAction(action);
         },
         onDripClicked: () => {
+          if (isFromEarlierVisit()) return;
           writeState.drip(market, baseAsset.address);
         },
         onSelectAction: (action: Action) => {
@@ -406,6 +485,9 @@ const Home = ({
           setPendingAction(undefined);
         },
         onPendingActionConfirm: (amount: bigint) => {
+          // The amount form keeps this callback. One from an earlier visit asks for no approval or
+          // network switch, and queues nothing.
+          if (isFromEarlierVisit()) return;
           if (pendingAction !== undefined) {
             const action = getActionFromPendingAction(pendingAction, amount);
             // The form already refuses a base supply on the wrapped route. Refusing it here as well
@@ -431,7 +513,8 @@ const Home = ({
                 if (isStETH(asset.symbol) && isUnwrappedCollateralAsset(market.chainInformation, assetAddress)) {
                   spender = market.bulkerAddress;
                 }
-                const approveGasLimit = estimatedGasMap.get(PreEstimatedAction.Approve) || 0;
+                if (liveWalletUnusable.current) return;
+                const approveGasLimit = liveEstimatedGasMap.current.get(PreEstimatedAction.Approve) || 0;
                 writeState.approve(spender, assetAddress, `Enable ${asset.symbol}`, approveGasLimit);
                 confirmAction();
               }
@@ -446,6 +529,7 @@ const Home = ({
           }
         },
         onSubmitClicked: () => {
+          if (isFromEarlierVisit()) return;
           setPendingAction(undefined);
           if (isBlockedOnLiveRoute(actions)) return;
 
@@ -466,7 +550,7 @@ const Home = ({
                     market,
                     state[1],
                     transactions,
-                    writeState,
+                    { ...writeState, allowOperator: allowOperatorWhileCurrent },
                     estimatedGasMap,
                     onRequestClose,
                     submitBulkerAction
@@ -526,6 +610,7 @@ const Home = ({
               transaction: blockingTransaction,
               unwrappedAssetSupplyAction: stEthWrapSupplyAction,
               onDripClicked: () => {
+                if (isFromEarlierVisit()) return;
                 writeState.drip(market, token.address);
               },
               onCancelClicked: () => {
@@ -636,6 +721,10 @@ const Home = ({
           }
         }
         earnAPR={cometForRoute?.earnAPR ?? 0n}
+        session={wrappedLending.action.session}
+        isRecoveredRequestPendingInWallet={wrappedLending.action.isRecoveredRequestPendingInWallet}
+        canDismissRecovered={wrappedLending.action.canDismissRecovered}
+        onDismissRecovered={wrappedLending.action.dismissRecovered}
         onRetry={wrappedLending.retry}
       />
     );

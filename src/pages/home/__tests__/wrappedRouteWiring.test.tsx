@@ -8,6 +8,7 @@ import { LendingRoute } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { Theme } from '@hooks/useThemeManager';
+import { IDLE_WRAPPED_ACTION } from '@hooks/useWrappedAction';
 import {
   Action,
   ActionQueue,
@@ -70,7 +71,7 @@ function wrappedLending(cometAddress = USDC_COMET): WrappedLending {
     deposit: { isEligible: false, reason: 'deposits-disabled' },
     exit: { isEligible: false, reason: 'exits-disabled' },
   };
-  return { route, position: { status: 'loading' }, retry: jest.fn() };
+  return { route, position: { status: 'loading' }, retry: jest.fn(), action: IDLE_WRAPPED_ACTION };
 }
 
 const LOADED: WrappedLending['position'] = {
@@ -93,6 +94,7 @@ const STANDARD: WrappedLending = {
   route: { kind: 'standard', writes: { isEligible: true } },
   position: { status: 'not-applicable' },
   retry: jest.fn(),
+  action: IDLE_WRAPPED_ACTION,
 };
 
 function cometState(baseAsset: BaseAssetWithAccountState): CometState {

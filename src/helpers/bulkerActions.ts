@@ -9,6 +9,7 @@ import { Action, ActionType, BaseAssetWithAccountState, MarketDataLoaded, TokenW
 import { sanitizedAmountForAction } from './actions';
 import { MAX_UINT256 } from './numbers';
 import { isStETH } from './steth';
+import { assertDirectActions } from './wrappedActions';
 
 enum BulkerActions {
   ACTION_SUPPLY_ASSET = 'ACTION_SUPPLY_ASSET',
@@ -36,6 +37,9 @@ export function getBulkerTrxData(
   collateralAssetsPre: TokenWithAccountState[],
   actions: Action[]
 ): BulkerTrxData {
+  // A wrapper action is submitted to its wrapper on its own. Refuse one here, before anything is
+  // optimized or encoded, rather than send part of the request.
+  assertDirectActions(actions);
   const signer = provider.getSigner(sender).connectUnchecked();
 
   const bulker = new Contract(market.bulkerAddress, MainnetBulker, signer);
