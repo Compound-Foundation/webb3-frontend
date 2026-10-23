@@ -78,6 +78,8 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     const credited = BigInt(effects.deposit?.args.assets.toString() ?? '-1');
     Object.assign(measured, {
       supplyBlock: receipt.blockNumber,
+      supplyGasLimit: effects.gasLimit,
+      supplyGasUsed: effects.gasUsed,
       amount,
       walletDelta: effects.cashDelta,
       shareDelta: effects.shareDelta,
@@ -236,8 +238,11 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     await anvil.setNextBlockTimestamp(quoteBlock.timestamp);
     const receipt = app.receiptOf(await app.confirmStep());
     const effects = await receiptEffects(market, account, receipt);
+    const rechecked = app.rechecked();
     Object.assign(measured, {
       quoteBlock: review.blockNumber,
+      checkBlock: rechecked?.blockNumber ?? -1,
+      recheckedCash: rechecked?.quote.cash ?? -1n,
       exitBlock: receipt.blockNumber,
       requested,
       quotedShares: review.quote.shares,
@@ -250,8 +255,12 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
       eventDebited: BigInt(effects.withdraw?.args.assets.toString() ?? '-1'),
       cashMinusQuote: effects.cashDelta - review.quote.cash,
       cashPaidByTransfer: effects.cashPaidToAccount,
+      exitGasLimit: effects.gasLimit,
+      exitGasUsed: effects.gasUsed,
     });
     expect(review.quote.cash).toBeGreaterThanOrEqual(requested);
+    // The check read the review's own block, so its quote of the same shares is the reviewed one.
+    expect(rechecked?.quote).toEqual(review.quote);
     expect(effects.cashDelta).toBe(review.quote.cash);
     expect(effects.cashPaidToAccount).toBe(review.quote.cash);
     expect(-effects.shareDelta).toBe(review.quote.shares);
@@ -295,6 +304,84 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     withdrawn += effects.cashDelta;
   });
 
+  /**
+   * Reviews a partial exit, leaves the review open for `seconds`, as a user who confirms later does,
+   * and confirms it. Returns the review, the check's quote at the confirmation's block and the step.
+   */
+  async function confirmAfter(requested: bigint, seconds: number) {
+    expect(await app.startWithdraw({ kind: 'partial', cash: requested })).toBeUndefined();
+    const review = app.draft().withdrawal;
+    if (review === undefined) throw new Error('The withdrawal draft has no quote.');
+    const utilization = await readBigInt(market.cometAddress, COMET, 'getUtilization');
+    const supplyRate = await readBigInt(market.cometAddress, COMET, 'getSupplyRate', [utilization]);
+    await anvil.increaseTime(seconds);
+    await anvil.mine();
+    const checkBlock = await anvil.latestBlock();
+    // A signed exit is mined at the check's own timestamp, so it pays what the check quoted.
+    await anvil.setNextBlockTimestamp(checkBlock.timestamp);
+    const nonce = await app.wallet.getTransactionCount(account, 'latest');
+    const step = await app.confirmStep();
+    return { review, step, checkBlock, supplyRate, nonce };
+  }
+
+  scenario('partial-exit-held-open', label, async (measured) => {
+    // A day of interest raises the payout of the reviewed shares by far less than the 0.1% bound.
+    const { review, step, checkBlock, supplyRate } = await confirmAfter(units(300), 24 * 60 * 60);
+    const effects = await receiptEffects(market, account, app.receiptOf(step));
+    const rechecked = app.rechecked();
+    if (rechecked === undefined) throw new Error('The check returned no quote.');
+    // The rise in basis points (hundredths of a percent), to three decimals.
+    const riseBasisPoints =
+      Number(((rechecked.quote.cash - review.quote.cash) * 10_000_000n) / review.quote.cash) / 1_000;
+    Object.assign(measured, {
+      secondsOpen: 24 * 60 * 60,
+      quotedShares: review.quote.shares,
+      quotedCash: review.quote.cash,
+      recheckedCash: rechecked.quote.cash,
+      riseBasisPoints,
+      checkBlock: rechecked.blockNumber,
+      paidCash: effects.cashDelta,
+      burnedShares: -effects.shareDelta,
+      cashMinusRecheck: effects.cashDelta - rechecked.quote.cash,
+      // How long interest alone takes, at this rate, to raise a payout by the 0.1% bound.
+      daysOfInterestToBound: Number((10n ** 15n * 10_000n) / (supplyRate * 86_400n)) / 10_000,
+    });
+    expect(rechecked.blockNumber).toBe(checkBlock.number);
+    expect(rechecked.quote.shares).toBe(review.quote.shares);
+    expect(rechecked.quote.cash).toBeGreaterThan(review.quote.cash);
+    expect(-effects.shareDelta).toBe(review.quote.shares);
+    expect(effects.cashDelta).toBe(rechecked.quote.cash);
+    await app.positionShowing(effects.after.shares);
+    withdrawn += effects.cashDelta;
+  });
+
+  scenario('partial-exit-held-too-long', label, async (measured) => {
+    // 30 days of interest raise the payout by more than the 0.1% bound, so the exit stops.
+    const { review, step, nonce } = await confirmAfter(units(300), THIRTY_DAYS);
+    measured.secondsOpen = THIRTY_DAYS;
+    measured.quotedCash = review.quote.cash;
+    measured.stop = step.status === 'blocked' ? step.message ?? step.reason : step.status;
+    expect(step).toMatchObject({ status: 'blocked', reason: 'step-check-failed' });
+    expect(measured.stop).toMatch(/more than 0\.1% above the 300\.000000 .* you reviewed/);
+    expect(await app.wallet.getTransactionCount(account, 'latest')).toBe(nonce);
+    // A fresh review of the same amount burns fewer shares, and pays exactly its quote.
+    expect(await app.startWithdraw({ kind: 'partial', cash: units(300) })).toBeUndefined();
+    const fresh = app.draft().withdrawal;
+    if (fresh === undefined) throw new Error('The withdrawal draft has no quote.');
+    await anvil.setNextBlockTimestamp((await anvil.latestBlock()).timestamp);
+    const effects = await receiptEffects(market, account, app.receiptOf(await app.confirmStep()));
+    Object.assign(measured, {
+      staleShares: review.quote.shares,
+      freshShares: fresh.quote.shares,
+      freshQuotedCash: fresh.quote.cash,
+      freshPaidCash: effects.cashDelta,
+    });
+    expect(fresh.quote.shares).toBeLessThan(review.quote.shares);
+    expect(effects.cashDelta).toBe(fresh.quote.cash);
+    await app.positionShowing(effects.after.shares);
+    withdrawn += effects.cashDelta;
+  });
+
   scenario('full-exit', label, async (measured) => {
     const panel = await app.refreshPosition();
     expect(await app.startWithdraw({ kind: 'full' }, panel.fullExitCash)).toBeUndefined();
@@ -312,6 +399,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     Object.assign(measured, {
       quotedShares: review.quote.shares,
       quotedCash: review.quote.cash,
+      recheckedCash: app.rechecked()?.quote.cash ?? -1n,
       panelShownCash: panel.fullExitCash,
       paidCash: effects.cashDelta,
       burnedShares: -effects.shareDelta,
