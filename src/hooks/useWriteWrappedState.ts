@@ -642,7 +642,9 @@ function revisionMessage(
       const fullExit = limits.canExitFully
         ? ` Or choose Everything to withdraw your whole position, about ${formatAmount(limits.fullExitCash)}.`
         : '';
-      return `The amount is more than your wrapped position pays now. Enter at most ${formatAmount(
+      // Only an amount the user entered can be more than the position pays. A full exit asks for its value.
+      const asked = request.kind === 'partial' ? formatAmount(request.cash) : 'This amount';
+      return `${asked} is more than your wrapped position pays now. Enter at most ${formatAmount(
         limits.maxPartialCash
       )}.${fullExit}`;
     }

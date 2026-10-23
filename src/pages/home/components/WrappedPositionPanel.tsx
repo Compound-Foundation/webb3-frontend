@@ -192,8 +192,8 @@ const WrappedSupplyForm = ({
 };
 
 /**
- * What the withdrawal form says about a choice the position or the market cannot pay now, with
- * the most they can pay and, when it can pay, the full exit. Undefined for an empty amount.
+ * What the withdrawal form says about a choice the position or the market cannot pay now. It gives
+ * the most they can pay, and the full exit when that can pay. Undefined for an empty amount.
  */
 function revisionText(
   plan: Extract<WithdrawalPlan, { status: 'needs-revision' }>,
@@ -397,8 +397,8 @@ const WrappedPositionPanel = ({
   onRetry,
 }: WrappedPositionPanelProps) => {
   const { symbol } = baseAsset;
-  // The open form belongs to the route key it was opened for, so a change of session or market
-  // closes it, and it stays closed if the key returns. One form is open at a time.
+  // The open form belongs to the route key it was opened for. A change of session or market closes
+  // it, and it stays closed if the key returns. One form is open at a time.
   const [openForm, setOpenForm] = useState<{ kind: 'supply' | 'withdraw'; routeKey: string } | undefined>(undefined);
   useEffect(() => {
     setOpenForm((current) => (current?.routeKey === route.validationKey ? current : undefined));
@@ -518,8 +518,8 @@ const WrappedPositionPanel = ({
     };
   }
 
-  // A wrapped withdrawal can start when the route allows exits, the lifecycle allows a new review,
-  // and the position, with the figures the form quotes from, is loaded and has something to pay.
+  // A wrapped withdrawal can start when the route allows exits and the lifecycle allows a new
+  // review. The position must also be loaded, since the form quotes from it, and have something to pay.
   const withdrawBlock = !route.exit.isEligible ? route.exit.reason : withdraw?.blockedReason;
   let withdrawForm:
     | {

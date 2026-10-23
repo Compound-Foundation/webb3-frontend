@@ -199,8 +199,8 @@ export function planWrappedWithdrawal(request: WithdrawalRequest, snapshot: With
     if (shares > snapshot.shares) return revise('exceeds-position');
     quote = quoteFor('partial', shares, snapshot);
     // The wrapper's rounding-down conversion checks the rounded-up shares: they pay the amount,
-    // and one share fewer does not. Let G = cash + buffer, S = totalSupply + 10^(18 − d) and
-    // A = totalAssets + 1. Then floor(s × A ÷ S) ≥ G holds exactly when s ≥ ceil(G × S ÷ A), so
+    // and one share fewer does not. Let G = cash + buffer, S = totalSupply + 10^(18 − baseDecimals)
+    // and A = totalAssets + 1. Then floor(s × A ÷ S) ≥ G holds exactly when s ≥ ceil(G × S ÷ A), so
     // this check cannot fail. It keeps a quote from review if a later change breaks the rounding.
     if (quote.cash < request.cash || getExitCash(shares - 1n, snapshot) >= request.cash) {
       throw new WithdrawalQuoteError(

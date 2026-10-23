@@ -582,7 +582,7 @@ describe('WrappedWithdraw', () => {
       // The shares in their base units, as a wallet can show them.
       expect(dialog).toHaveTextContent('99950027886106918655');
 
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw 100.000000 USDC' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw About 100.000000 USDC' }));
       expect(onConfirm).toHaveBeenCalledTimes(1);
     });
 

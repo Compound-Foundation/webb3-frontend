@@ -252,7 +252,7 @@ const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: W
               Cancel
             </button>
             <button className="button button--x-large button--supply" onClick={onConfirm}>
-              {quote.kind === 'full' ? 'Withdraw Everything' : `Withdraw ${cash}`}
+              {quote.kind === 'full' ? 'Withdraw Everything' : `Withdraw About ${cash}`}
             </button>
           </>
         );
