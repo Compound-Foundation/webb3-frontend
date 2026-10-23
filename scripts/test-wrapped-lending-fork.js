@@ -29,7 +29,8 @@
 //
 // The runner retries a run once, and only when the upstream failed to serve the fork's state:
 // - At least one cell failed, and every failed cell carries anvil's own fetch error and no revert.
-// - Jest reported its results, failed no other test, and ran every suite. anvil did not exit.
+// - Jest reported its results and failed no other test. No suite failed outside its tests, as one
+//   does when it fails to load or its afterAll hook throws. anvil did not exit.
 // - The proxy saw the upstream fail a request or answer a call with an error.
 // A recent-block run retries from a fresh recent block. A run at the pinned block, or at a given
 // block, retries at the same block. It tries the other endpoints first and the failed one last. If
@@ -612,8 +613,9 @@ function cellOf(title) {
 /**
  * The cells, each held to Jest's own result for its test. A scenario records its cell when its body
  * settles, which can come after Jest failed the test, for example on a timeout. Such a cell fails.
- * A test that Jest failed before its scenario ran, for example in a `beforeAll` hook, recorded no
- * cell. It gets a failed cell, with Jest's failure as the reason.
+ * A test that Jest failed can also have recorded no cell. Its `beforeAll` or `beforeEach` hook
+ * failed, or its scenario never settled before Jest timed it out. It gets a failed cell, with Jest's
+ * failure as the reason.
  */
 function heldToJest(results, jest) {
   const failures = new Map(
@@ -632,7 +634,11 @@ function heldToJest(results, jest) {
   for (const [title, failure] of failures) {
     const cell = cellOf(title);
     if (cell === undefined || recorded.has(title)) continue;
-    held.push({ ...cell, status: 'fail', reason: `Jest failed this test before its scenario ran: ${failure}` });
+    held.push({
+      ...cell,
+      status: 'fail',
+      reason: `Jest failed this test, and its scenario recorded no cell: ${failure}`,
+    });
   }
   return held;
 }
@@ -640,8 +646,9 @@ function heldToJest(results, jest) {
 /**
  * Whether `run` failed only because the upstream failed to serve the fork's state. At least one
  * cell must have failed, and every failed cell must carry anvil's fetch error and no refusal by the
- * chain. Jest must have reported its results, failed no other test and run every suite, and anvil
- * must not have exited. The proxy must have seen the upstream fail or answer with an error.
+ * chain. Jest must have reported its results and failed no other test. No suite must have failed
+ * outside its tests, as one does when it fails to load or its `afterAll` hook throws. anvil must not
+ * have exited. The proxy must have seen the upstream fail or answer with an error.
  */
 function failedOnUpstreamOnly(run) {
   const failed = run.results.filter((result) => result.status === 'fail');
@@ -774,7 +781,6 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
   const { endpoint, target } = choice;
   const suffix = number === 1 ? '' : `-${number}`;
   const logFiles = { anvil: `anvil${suffix}.log`, jest: `jest${suffix}.log`, results: `results${suffix}.json` };
-  fs.rmSync(path.join(logDir, logFiles.results), { force: true });
   // The tests write their results into a directory that only this user can read. The runner writes
   // them to the log directory, redacted, when Jest ends. So no unredacted file stays there, even
   // after Ctrl-C.
@@ -835,9 +841,10 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const logDir = options.logDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-lending-fork-logs-'));
   fs.mkdirSync(logDir, { recursive: true });
-  for (const file of ['anvil-2.log', 'jest-2.log', 'results-2.json', 'summary.md']) {
-    fs.rmSync(path.join(logDir, file), { force: true });
-  }
+  // A reused log directory keeps no file from an earlier invocation, even if this one stops before
+  // its first run starts.
+  const runFiles = ['anvil.log', 'jest.log', 'results.json', 'anvil-2.log', 'jest-2.log', 'results-2.json'];
+  for (const file of [...runFiles, 'summary.md']) fs.rmSync(path.join(logDir, file), { force: true });
   const endpoints = upstreamEndpoints();
   secretsToRedact = [...new Set(endpoints.flatMap((endpoint) => endpoint.secrets))].sort((a, b) => b.length - a.length);
 
