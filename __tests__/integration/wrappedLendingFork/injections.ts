@@ -135,6 +135,22 @@ export async function backdateAccrual(market: WrappedMarket) {
 }
 
 /**
+ * A third party's supply of base tokens to Comet on the wrapper's behalf, `comet.supplyTo(wrapper,
+ * baseToken, amount)`. Comet lets any account credit any other, so this raises what every wrapper
+ * share is worth.
+ */
+export async function donateToWrapper(market: WrappedMarket, donor: string, amount: bigint) {
+  await sendFrom(donor, {
+    to: market.baseTokenAddress,
+    data: ERC20.encodeFunctionData('approve', [market.cometAddress, amount]),
+  });
+  return sendFrom(donor, {
+    to: market.cometAddress,
+    data: COMET.encodeFunctionData('supplyTo', [market.wrapperAddress, market.baseTokenAddress, amount]),
+  });
+}
+
+/**
  * A third party's `comet.transfer(wrapper, 0)`. Comet works out the receiver's principal again
  * from its balance, rounding down, so each such call can take a unit of principal from the wrapper.
  */
