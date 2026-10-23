@@ -19,12 +19,19 @@ import {
   cellOf,
   createRedactor,
   failedOnUpstreamOnly,
+  failedToStartOnUpstream,
+  finalVerdict,
   heldToJest,
   isKeyLike,
+  isRetryable,
+  MATRIX_CELLS,
+  notExercisedCells,
   PINNED_BLOCK,
   PINNED_HASH,
   PUBLIC_ENDPOINTS,
+  retryFork,
   rpc,
+  SCENARIO_ORDER,
   startUpstreamProxy,
   upstreamEndpoints,
   UPSTREAM_METHODS,
@@ -610,9 +617,26 @@ describe('the upstream proxy', () => {
     try {
       assert.equal((await post(unreachable.url, call('eth_chainId'))).status, 502);
       assert.equal(unreachable.stats.failures, 1);
-      assert.equal(unreachable.stats.firstError, 'no answer within 60 s, or no connection');
+      assert.equal(unreachable.stats.firstError, 'no answer within 40 s, or no connection');
     } finally {
       await closed(unreachable.server);
+    }
+  });
+
+  test('gives up on an upstream that never answers, and counts the failure, before anvil gives up', async () => {
+    const silent = http.createServer(() => undefined);
+    await listening(silent);
+    const hanging = await startUpstreamProxy(
+      { url: `http://127.0.0.1:${silent.address().port}`, isPrivate: true },
+      { printable: createRedactor([]).printable, timeoutMs: 300 }
+    );
+    try {
+      assert.equal((await post(hanging.url, call('eth_getBalance', ['0x1', '0x1']))).status, 502);
+      assert.equal(hanging.stats.failures, 1);
+      assert.equal(hanging.stats.firstError, 'no answer within 0.3 s, or no connection');
+    } finally {
+      await closed(hanging.server);
+      await closed(silent);
     }
   });
 });
@@ -743,6 +767,155 @@ describe('the retry rule', () => {
     const [first, second, third] = [{ label: 'a' }, { label: 'b' }, { label: 'c' }];
     assert.deepEqual(withLast([first, second, third], first), [second, third, first]);
     assert.deepEqual(withLast([first], first), [first]);
+  });
+
+  test('retries a run that could not start the fork on the upstream, or that failed only on it', () => {
+    assert.equal(isRetryable({ startupFailure: 'the upstream failed', results: [], stats: {} }), true);
+    assert.equal(isRetryable(upstreamOnly()), true);
+    assert.equal(isRetryable({ ...upstreamOnly(), anvilExited: true }), false);
+  });
+
+  test('retries the pinned block, or a given one, at the same block, and a recent block at a fresh one', () => {
+    const endpoints = [{ label: 'a' }, { label: 'b' }, { label: 'c' }];
+    const failedRun = (mode, number) => ({ endpoint: endpoints[0], target: { mode, number } });
+    const sameBlock = { block: String(PINNED_BLOCK), endpoints: [endpoints[1], endpoints[2], endpoints[0]] };
+    assert.deepEqual(retryFork('pinned', failedRun('pinned', PINNED_BLOCK), endpoints), sameBlock);
+    assert.deepEqual(retryFork('auto', failedRun('pinned', PINNED_BLOCK), endpoints), sameBlock);
+    assert.deepEqual(retryFork('123', failedRun('recent', 123), endpoints), { ...sameBlock, block: '123' });
+    assert.deepEqual(retryFork('recent', failedRun('recent', 456), endpoints), { block: 'recent', endpoints });
+    assert.deepEqual(retryFork('auto', failedRun('recent', 456), endpoints), { block: 'recent', endpoints });
+  });
+});
+
+describe('a fork that could not start', () => {
+  // anvil's own output when the upstream answered its genesis read with HTTP 429, in a recorded run.
+  const genesisFailure = [
+    'Error: failed to create genesis',
+    '',
+    'Context:',
+    '- failed to get account for 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC: Max retries exceeded HTTP error 429 with empty body',
+  ].join('\n');
+  const upstreamFailed = { failures: 6, errorAnswers: 0 };
+
+  test('failed on the upstream when the proxy saw it fail and anvil names a failed fetch', () => {
+    assert.equal(failedToStartOnUpstream({ stats: upstreamFailed, output: genesisFailure }), true);
+    for (const output of [
+      'Error: failed to fetch network chain ID',
+      'Error: failed to get fork block number',
+      'Error: Failed to get block for block number: 26244888',
+    ]) {
+      assert.equal(failedToStartOnUpstream({ stats: { failures: 0, errorAnswers: 1 }, output }), true, output);
+    }
+  });
+
+  test('did not fail on the upstream when the proxy saw no upstream failure, or anvil names no fetch', () => {
+    // A refusal by the proxy, such as a method outside the allowlist, counts as no upstream failure.
+    assert.equal(failedToStartOnUpstream({ stats: { failures: 0, errorAnswers: 0 }, output: genesisFailure }), false);
+    assert.equal(
+      failedToStartOnUpstream({ stats: upstreamFailed, output: 'Error: Address already in use (os error 48)' }),
+      false
+    );
+    assert.equal(failedToStartOnUpstream({ stats: upstreamFailed, output: '' }), false);
+  });
+});
+
+describe('the matrix', () => {
+  test('lists every scenario that the fork suites declare, on each wrapped market, and the factory build', () => {
+    const suites = path.join(ROOT, '__tests__/integration/wrappedLendingFork');
+    const declared = new Set();
+    const onFactory = new Set();
+    for (const file of fs.readdirSync(suites).filter((name) => /\.fork\.test\.tsx?$/.test(name))) {
+      const source = fs.readFileSync(path.join(suites, file), 'utf8');
+      for (const [, name, market] of source.matchAll(/\b(?:scenario|notExercised)\(\s*'([a-z-]+)',\s*('factory')?/g)) {
+        declared.add(name);
+        if (market !== undefined) onFactory.add(name);
+      }
+    }
+    assert.deepEqual([...declared].sort(), [...SCENARIO_ORDER].sort());
+    assert.deepEqual([...onFactory], ['source-build']);
+    assert.equal(MATRIX_CELLS.length, SCENARIO_ORDER.length * 3 + 1);
+    assert.deepEqual(
+      MATRIX_CELLS.filter((cell) => cell.scenario === 'source-build').map((cell) => cell.market),
+      ['USDC', 'USDT', 'institutional USDC', 'factory']
+    );
+  });
+
+  test('records every cell as not exercised, with the reason', () => {
+    const cells = notExercisedCells('the upstream failed');
+    assert.equal(cells.length, 64);
+    assert.ok(cells.every((cell) => cell.status === 'not-exercised' && cell.reason === 'the upstream failed'));
+  });
+});
+
+describe('the verdict', () => {
+  const cell = (scenario, market, status, reason) => ({ scenario, market, status, ...(reason ? { reason } : {}) });
+  const fetchError = 'failed to get account for 0x1: HTTP error 429';
+  const suiteRun = (number, exitCode, results, stats = { failures: 0, errorAnswers: 0 }) => ({
+    number,
+    exitCode,
+    anvilExited: false,
+    results,
+    jest: { numFailedTests: results.filter((result) => result.status === 'fail').length, numRuntimeErrorTestSuites: 0 },
+    stats,
+  });
+  const startupRun = (number) => ({
+    number,
+    startupFailure: 'anvil could not start the fork',
+    exitCode: 1,
+    anvilExited: false,
+    results: notExercisedCells('anvil could not start the fork'),
+    stats: { failures: 1, errorAnswers: 0 },
+  });
+
+  test('passes only a run whose Jest passed, which recorded cells, and none of which failed', () => {
+    assert.equal(finalVerdict([suiteRun(1, 0, [cell('dust', 'USDC', 'pass')])]).verdict, 'PASS');
+    // A cell that recorded a pass after Jest failed its test fails, so Jest's exit code alone is not enough.
+    const timedOut = finalVerdict([suiteRun(1, 0, [cell('dust', 'USDC', 'fail', 'Jest failed this test after ...')])]);
+    assert.deepEqual([timedOut.verdict, timedOut.exitCode], ['FAIL', 1]);
+    const empty = finalVerdict([suiteRun(1, 0, [])]);
+    assert.deepEqual([empty.verdict, empty.exitCode], ['FAIL', 1]);
+  });
+
+  test("records a run's cells that failed only on the upstream as not exercised", () => {
+    const run = suiteRun(1, 1, [cell('dust', 'USDC', 'pass'), cell('pause', 'USDT', 'fail', fetchError)], {
+      failures: 2,
+      errorAnswers: 0,
+    });
+    const { verdict, exitCode, results } = finalVerdict([run]);
+    assert.deepEqual([verdict, exitCode], ['NOT EXERCISED', 1]);
+    assert.deepEqual(
+      results.map((result) => result.status),
+      ['pass', 'not-exercised']
+    );
+  });
+
+  test('records every cell as not exercised when no run started the fork', () => {
+    for (const runs of [[startupRun(1)], [startupRun(1), startupRun(2)]]) {
+      const { final, verdict, exitCode, results } = finalVerdict(runs);
+      assert.equal(final, runs[runs.length - 1]);
+      assert.deepEqual([verdict, exitCode, results.length], ['NOT EXERCISED', 1, 64]);
+      assert.ok(results.every((result) => result.status === 'not-exercised'));
+    }
+  });
+
+  test('keeps the last run that ran the suite when the retry could not start the fork', () => {
+    const run1 = suiteRun(1, 1, [cell('dust', 'USDC', 'pass'), cell('pause', 'USDT', 'fail', fetchError)], {
+      failures: 1,
+      errorAnswers: 0,
+    });
+    const { final, verdict, results } = finalVerdict([run1, startupRun(2)]);
+    assert.equal(final, run1);
+    assert.equal(verdict, 'NOT EXERCISED');
+    assert.deepEqual(
+      results.map((result) => result.status),
+      ['pass', 'not-exercised']
+    );
+  });
+
+  test('judges a retry that started after a start-up failure by its own cells', () => {
+    assert.equal(finalVerdict([startupRun(1), suiteRun(2, 0, [cell('dust', 'USDC', 'pass')])]).verdict, 'PASS');
+    const failed = finalVerdict([startupRun(1), suiteRun(2, 1, [cell('dust', 'USDC', 'fail', 'execution reverted')])]);
+    assert.deepEqual([failed.verdict, failed.exitCode], ['FAIL', 1]);
   });
 });
 
@@ -876,5 +1049,70 @@ describe('the runner, end to end, with a private upstream that echoes its key', 
     assert.equal(run.code, 1);
     assertKeyNeverWritten(run, PLUS_KEY);
     assert.match(run.files['anvil.log'], /deserialization error: invalid value, text: .*no balance for <redacted>/);
+  });
+});
+
+describe('the runner, end to end, when anvil cannot start the fork', { timeout: 120_000 }, () => {
+  let stub;
+  let answers;
+  before(async () => {
+    stub = await startStubUpstream((parsed, requestPath) => answers(parsed, requestPath));
+  });
+  after(() => stub.close());
+
+  test("retries once at the pinned block, then records every cell as not exercised, and keeps run 1's log", async () => {
+    // The review's recorded failure: the upstream answers anvil's genesis read with HTTP 429.
+    answers = pinnedBlockUpstream(({ id }) => ({
+      status: 429,
+      body: { jsonrpc: '2.0', id, error: { code: 15, message: 'You reached Public endpoint rate limit' } },
+    }));
+    const run = await runRunner({ privateUrl: `${stub.url}/api/${FAKE_KEY}`, anvil: 'genesis' });
+    assert.equal(run.code, 1);
+    assert.match(run.output, /Running once more/);
+    assert.deepEqual(Object.keys(run.files).sort(), [
+      'anvil-2.log',
+      'anvil.log',
+      'results-2.json',
+      'results.json',
+      'summary.md',
+    ]);
+    for (const log of ['anvil.log', 'anvil-2.log']) {
+      assert.match(run.files[log], /failed to create genesis[\s\S]*failed to get account for .*HTTP error 429/);
+    }
+    for (const results of ['results.json', 'results-2.json']) {
+      const cells = JSON.parse(run.files[results]);
+      assert.equal(cells.length, 64);
+      assert.ok(cells.every((cell) => cell.status === 'not-exercised' && /could not start the fork/.test(cell.reason)));
+    }
+    const summary = run.files['summary.md'];
+    assert.match(summary, new RegExp(`fork block: +${PINNED_BLOCK} \\(the registry's pinned block\\)`));
+    assert.match(summary, /local fork: +not started/);
+    assert.match(summary, /upstream use: +1 request forwarded, 1 failed upstream/);
+    assert.match(summary, /first error: +HTTP 429/);
+    assert.match(summary, /## Run 1, which could not start the fork because the upstream failed/);
+    assert.match(summary, /\| deployment \| not exercised \| not exercised \| not exercised \| - \|/);
+    assert.match(summary, /\| source-build \| not exercised \| not exercised \| not exercised \| not exercised \|/);
+    assert.match(summary, /## Failed \(0\)/);
+    assert.match(summary, /## Not exercised \(64\)/);
+    assert.match(summary, /Result: NOT EXERCISED\./);
+    assert.ok(run.output.includes(summary.trim()));
+  });
+
+  test('neither retries nor records a matrix when anvil fails for its own reason', async () => {
+    answers = pinnedBlockUpstream(({ id }) => ({ body: { jsonrpc: '2.0', id, result: '0x0' } }));
+    const run = await runRunner({ privateUrl: `${stub.url}/api/${FAKE_KEY}`, anvil: 'address-in-use' });
+    assert.equal(run.code, 1);
+    assert.match(run.output, /anvil exited before it was ready\. See anvil\.log\./);
+    assert.doesNotMatch(run.output, /Running once more/);
+    assert.ok(!('summary.md' in run.files) && !('anvil-2.log' in run.files) && !('results.json' in run.files));
+  });
+
+  test('neither retries nor records a matrix when the fork reports other metadata', async () => {
+    answers = pinnedBlockUpstream(({ id }) => ({ body: { jsonrpc: '2.0', id, result: '0x0' } }));
+    const run = await runRunner({ privateUrl: `${stub.url}/api/${FAKE_KEY}`, anvil: 'wrong-fork' });
+    assert.equal(run.code, 1);
+    assert.match(run.output, /The local node is not the expected fork: another fork block hash/);
+    assert.doesNotMatch(run.output, /Running once more/);
+    assert.ok(!('summary.md' in run.files) && !('anvil-2.log' in run.files) && !('results.json' in run.files));
   });
 });

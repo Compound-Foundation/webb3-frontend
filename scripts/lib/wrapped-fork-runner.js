@@ -3,7 +3,8 @@
 // - the upstream endpoints, and the redaction of the private URL
 // - the proxy that holds the URL, and its read-only method allowlist
 // - each matrix cell held to Jest's own result for its test
-// - the retry rule
+// - the retry rule, for a fork that could not start and for a suite that failed on the upstream
+// - the verdict
 import http from 'http';
 
 /** The block docs/anchorage-wrapper-registry.md records its deployment reads at, and its hash. */
@@ -25,6 +26,14 @@ export const MARKET_COLUMNS = ['USDC', 'USDT', 'institutional USDC', 'factory'];
  * anvil's answer on.
  */
 export const FORK_FETCH_ERROR = /failed to get (?:account for|storage for|block hash for|full block for|transaction) /;
+/**
+ * anvil's own error when it cannot fetch what it reads from the upstream to start the fork: the
+ * chain ID, the fork block, or a genesis account's state. anvil 1.2.3 words the last as `failed to
+ * create genesis`, over `failed to get account for <address>: <the upstream's error>`.
+ */
+export const FORK_STARTUP_FETCH_ERROR = new RegExp(
+  `${FORK_FETCH_ERROR.source}|failed to fetch network chain ID|failed to get fork block|[Ff]ailed to get block for block number`
+);
 /**
  * A refusal by the chain itself: anvil's revert error, ethers' decoded revert of an `eth_call`, or a
  * gas estimate that a revert stopped. A cell that failed on one failed in the app or the test,
@@ -409,8 +418,13 @@ function relayed(status, contentType, answer, { isPrivate, printable }) {
  * text (see `relayed`), and the runner redacts every output. The proxy counts the methods it forwards
  * and each refusal, by its method or reason. It also counts the requests that the upstream failed
  * and the calls it answered with an error. It keeps the first such error for the summary.
+ *
+ * The proxy waits `timeoutMs` for the upstream's answer, 40 s by default. The runner starts anvil
+ * with `--timeout 45000`, so anvil waits 45 s for the proxy. The proxy gives up 5 s sooner, answers
+ * anvil with 502, and counts the upstream's failure before anvil reports its own. Otherwise an
+ * upstream that never answers leaves the retry rule with no upstream failure to see.
  */
-export function startUpstreamProxy(endpoint, { printable }) {
+export function startUpstreamProxy(endpoint, { printable, timeoutMs = 40_000 }) {
   const stats = {
     requests: 0,
     failures: 0,
@@ -466,7 +480,7 @@ export function startUpstreamProxy(endpoint, { printable }) {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(Array.isArray(parsed) ? checked : checked[0]),
-          signal: AbortSignal.timeout(60_000),
+          signal: AbortSignal.timeout(timeoutMs),
         });
         const answer = Buffer.from(await upstream.arrayBuffer());
         const contentType = upstream.headers.get('content-type') ?? 'application/json';
@@ -481,7 +495,7 @@ export function startUpstreamProxy(endpoint, { printable }) {
         response.end(relay.body);
       } catch {
         stats.failures += 1;
-        stats.firstError ??= 'no answer within 60 s, or no connection';
+        stats.firstError ??= `no answer within ${timeoutMs / 1000} s, or no connection`;
         refuse(502);
       }
     });
@@ -556,5 +570,106 @@ export function failedOnUpstreamOnly(run) {
   );
 }
 
+/**
+ * Whether anvil could not start the fork only because the upstream failed to serve what anvil reads
+ * at start-up. The proxy must have seen the upstream fail a request or answer a call with an error,
+ * and anvil's `output` must name a failed fetch. A refusal by the proxy is not an upstream failure,
+ * and an error of anvil's own, such as a port in use, names no fetch.
+ */
+export const failedToStartOnUpstream = ({ stats, output }) =>
+  stats.failures + stats.errorAnswers > 0 && FORK_STARTUP_FETCH_ERROR.test(output);
+
+/**
+ * Whether the runner runs the suite once more after `run`: anvil could not start the fork on the
+ * upstream, or the suite failed only on the upstream. The runner runs the suite at most twice.
+ */
+export const isRetryable = (run) => run.startupFailure !== undefined || failedOnUpstreamOnly(run);
+
 /** `endpoints` with `last` moved to the end, so that a retry tries the other endpoints first. */
 export const withLast = (endpoints, last) => [...endpoints.filter((endpoint) => endpoint !== last), last];
+
+/**
+ * The block and the endpoints that the retry after `failedRun` forks from. A recent block can leave
+ * the endpoint's window of recent state during a run, so a recent-block run retries from a fresh
+ * recent block. The pinned block, or a given one, stays, so that the retry tests the same state. It
+ * tries the other endpoints first and the failed one last.
+ */
+export function retryFork(blockOption, failedRun, endpoints) {
+  const isRecentBlockRun = blockOption === 'recent' || (blockOption === 'auto' && failedRun.target.mode === 'recent');
+  return isRecentBlockRun
+    ? { block: 'recent', endpoints }
+    : { block: String(failedRun.target.number), endpoints: withLast(endpoints, failedRun.endpoint) };
+}
+
+/**
+ * The matrix's scenarios, in the order a reader follows them. When no run starts the fork, the
+ * runner records each of them as not exercised. A scenario not listed here comes last in the matrix.
+ */
+export const SCENARIO_ORDER = [
+  'deployment',
+  'source-build',
+  'supply-zero-allowance',
+  'supply-sufficient-allowance',
+  'supply-insufficient-allowance',
+  'accrued-value',
+  'partial-exit',
+  'partial-exit-delayed',
+  'partial-exit-held-open',
+  'partial-exit-held-too-long',
+  'full-exit',
+  'dust',
+  'pause',
+  'insufficient-liquidity',
+  'excessive-debit',
+  'estimate-rose',
+  'stale-state',
+  'session-races',
+  'other-connectors-and-watch-only',
+  'direct-alongside',
+  'standard-route-lending',
+];
+
+/**
+ * Every cell of the full matrix: each scenario on each wrapped market, and the factory's
+ * `source-build`, the one scenario that the suite runs on the factory.
+ */
+export const MATRIX_CELLS = SCENARIO_ORDER.flatMap((scenario) =>
+  MARKET_COLUMNS.filter((market) => market !== 'factory' || scenario === 'source-build').map((market) => ({
+    scenario,
+    market,
+  }))
+);
+
+/** Every cell of the full matrix, not exercised, with `reason`. */
+export const notExercisedCells = (reason) => MATRIX_CELLS.map((cell) => ({ ...cell, status: 'not-exercised', reason }));
+
+/**
+ * The verdict on `runs`. It comes from the final run: the last run that ran the suite, or the last
+ * run when none did.
+ * - When no run started the fork, every cell was not exercised, and the result is NOT EXERCISED.
+ * - A cell that failed only because the upstream failed to serve the fork's state was not
+ *   exercised, and the result is NOT EXERCISED.
+ * - The result is PASS only when Jest passed, and the run recorded cells, none of which failed.
+ *   Otherwise it is FAIL.
+ */
+export function finalVerdict(runs) {
+  const final = runs.findLast((run) => run.startupFailure === undefined) ?? runs[runs.length - 1];
+  if (final.startupFailure !== undefined) {
+    return { final, results: final.results, exitCode: 1, verdict: 'NOT EXERCISED' };
+  }
+  const isUpstreamOnly = failedOnUpstreamOnly(final);
+  const results = isUpstreamOnly
+    ? final.results.map((result) =>
+        result.status === 'fail'
+          ? {
+              ...result,
+              status: 'not-exercised',
+              reason: `the upstream failed to serve the fork's state: ${result.reason}`,
+            }
+          : result
+      )
+    : final.results;
+  const hasFailed = results.length === 0 || results.some((result) => result.status === 'fail');
+  const exitCode = final.exitCode === 0 && hasFailed ? 1 : final.exitCode;
+  return { final, results, exitCode, verdict: exitCode === 0 ? 'PASS' : isUpstreamOnly ? 'NOT EXERCISED' : 'FAIL' };
+}

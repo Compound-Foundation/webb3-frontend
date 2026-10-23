@@ -30,15 +30,20 @@
 // on any error. The tests sign with impersonated accounts on the fork. Nothing is signed with a real
 // key, and nothing is sent to mainnet.
 //
-// The runner retries a run once, and only when the upstream failed to serve the fork's state:
+// The runner retries a run once, and only when the upstream failed to serve the fork's state. The
+// proxy must have seen the upstream fail a request or answer a call with an error, and one of these
+// must hold:
+// - anvil could not start the fork, and its output names a failed fetch, such as `failed to get
+//   account for <address>` under `failed to create genesis`.
 // - At least one cell failed, and every failed cell carries anvil's own fetch error and no revert.
-// - Jest reported its results and failed no other test. No suite failed outside its tests, as one
+//   Jest reported its results and failed no other test. No suite failed outside its tests, as one
 //   does when it fails to load or its afterAll hook throws. anvil did not exit.
-// - The proxy saw the upstream fail a request or answer a call with an error.
 // A recent-block run retries from a fresh recent block. A run at the pinned block, or at a given
 // block, retries at the same block. It tries the other endpoints first and the failed one last. If
 // the last run fails only that way too, its failed cells are recorded as not exercised, and the run
-// fails.
+// fails. When no run started the fork, every cell of the matrix is recorded as not exercised. A
+// configuration error, a fork with other metadata, and a failure in the app or a test are never
+// retried.
 //
 // Three risks remain. In none of them do the fork or the proxy give out the URL, and no real funds
 // are at stake:
@@ -61,15 +66,19 @@ import { fileURLToPath } from 'url';
 
 import {
   createRedactor,
-  failedOnUpstreamOnly,
+  failedToStartOnUpstream,
+  finalVerdict,
   heldToJest,
+  isRetryable,
   MARKET_COLUMNS,
+  notExercisedCells,
   PINNED_BLOCK,
   PINNED_HASH,
+  retryFork,
   rpc,
+  SCENARIO_ORDER,
   startUpstreamProxy,
   upstreamEndpoints,
-  withLast,
 } from './lib/wrapped-fork-runner.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -224,12 +233,21 @@ function stopped(child, timeoutMs = 5_000) {
   });
 }
 
+/** anvil's failure to start the fork, with anvil's output until it stopped, redacted. */
+class ForkStartError extends Error {
+  constructor(message, output) {
+    super(message);
+    this.output = output;
+  }
+}
+
 /**
  * Starts anvil on 127.0.0.1, forked from `target` through the proxy at `upstreamUrl`. With port 0,
  * anvil binds a free port itself, and the runner reads the port from anvil's own output. So no
- * other process can take the port between its choice and the bind.
+ * other process can take the port between its choice and the bind. If anvil exits or is not ready
+ * within 120 s, it throws a `ForkStartError` that names `logName`. It stops anvil first.
  */
-async function startFork(anvilCommand, upstreamUrl, target, port, log) {
+async function startFork(anvilCommand, upstreamUrl, target, port, log, logName) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-lending-fork-'));
   temporaryDirectories.add(directory);
   const args = [
@@ -263,21 +281,34 @@ async function startFork(anvilCommand, upstreamUrl, target, port, log) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   children.add(child);
+  // 'close' comes after anvil's output streams have ended, so its last lines have been read.
+  const closed = new Promise((resolve) => child.once('close', resolve));
   let boundPort;
-  const stdout = redaction.lineRedactor((text) => {
+  // anvil's output until it is ready, for the runner to tell an upstream failure from another one.
+  let startupOutput = '';
+  const write = (text) => {
     log.write(text);
+    if (boundPort === undefined && startupOutput.length < 1_000_000) startupOutput += text;
+  };
+  const stdout = redaction.lineRedactor((text) => {
+    write(text);
     const listening = /Listening on 127\.0\.0\.1:(\d+)/.exec(text);
     if (listening !== null) boundPort = Number(listening[1]);
   });
-  const stderr = redaction.lineRedactor((text) => log.write(text));
+  const stderr = redaction.lineRedactor(write);
   child.stdout.on('data', stdout.write);
   child.stdout.on('end', stdout.end);
   child.stderr.on('data', stderr.write);
   child.stderr.on('end', stderr.end);
+  const failed = async (message) => {
+    await stopped(child);
+    await Promise.race([closed, new Promise((resolve) => setTimeout(resolve, 5_000))]);
+    return new ForkStartError(message, startupOutput);
+  };
   const deadline = Date.now() + 120_000;
   while (boundPort === undefined) {
-    if (hasExited(child)) throw new Error('anvil exited before it was ready. See anvil.log.');
-    if (Date.now() > deadline) throw new Error('anvil was not ready within 120 s. See anvil.log.');
+    if (hasExited(child)) throw await failed(`anvil exited before it was ready. See ${logName}.`);
+    if (Date.now() > deadline) throw await failed(`anvil was not ready within 120 s. See ${logName}.`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return { child, localUrl: `http://127.0.0.1:${boundPort}`, port: boundPort };
@@ -373,31 +404,6 @@ function readRedacted(file, missing) {
   }
 }
 
-/** The matrix's rows, in the order a reader follows them. A scenario not listed here comes last. */
-const SCENARIO_ORDER = [
-  'deployment',
-  'source-build',
-  'supply-zero-allowance',
-  'supply-sufficient-allowance',
-  'supply-insufficient-allowance',
-  'accrued-value',
-  'partial-exit',
-  'partial-exit-delayed',
-  'partial-exit-held-open',
-  'partial-exit-held-too-long',
-  'full-exit',
-  'dust',
-  'pause',
-  'insufficient-liquidity',
-  'excessive-debit',
-  'estimate-rose',
-  'stale-state',
-  'session-races',
-  'other-connectors-and-watch-only',
-  'direct-alongside',
-  'standard-route-lending',
-];
-
 /** The scenario matrix as a Markdown table: one row per scenario, one column per market. */
 function matrix(results) {
   const rank = (scenario) =>
@@ -466,22 +472,60 @@ function upstreamUse(stats) {
   ];
 }
 
-/** The summary's section on run 1, when the upstream's failure made the runner run once more. */
-function firstRunSection(run) {
+/** `names`, joined as a list in a sentence: `a`, `a and b`, or `a, b and c`. */
+const inSentence = (names) =>
+  names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
+/**
+ * The summary's section on a run that the verdict does not come from, because the upstream's
+ * failure made the runner run once more after it, or the retry could not start the fork.
+ */
+function runSection(run) {
   const failed = run.results.filter((result) => result.status === 'fail');
   return [
-    "## Run 1, which failed only because the upstream failed to serve the fork's state",
+    run.startupFailure !== undefined
+      ? `## Run ${run.number}, which could not start the fork because the upstream failed`
+      : `## Run ${run.number}, which failed only because the upstream failed to serve the fork's state`,
     `- fork block ${run.target.number}, hash ${run.target.hash}, from ${run.endpoint.label}`,
     ...upstreamUse(run.stats).map((line) => `- ${line.trim()}`),
-    `- logs: ${run.logFiles.anvil}, ${run.logFiles.jest} and ${run.logFiles.results}`,
+    ...(run.startupFailure !== undefined ? [`- ${run.startupFailure}`] : []),
+    `- logs: ${inSentence(Object.values(run.logFiles))}`,
     ...failed.map((result) => `- failed: ${result.market}, ${result.scenario}: ${result.reason}`),
     '',
   ];
 }
 
+/** The summary's header on one run: its upstream, its fork, its tools and where its logs are. */
+function runHeader({ number, endpoint, target, fork, startupFailure, environment, options, logDir }) {
+  return [
+    number === 1
+      ? 'Wrapped lending fork run'
+      : `Wrapped lending fork run ${number}, after run 1 failed on the upstream`,
+    `  upstream:      ${endpoint.label}, through a proxy on 127.0.0.1`,
+    `  fork block:    ${target.number} (${
+      target.mode === 'pinned' ? "the registry's pinned block" : 'a recent block, not the pinned one'
+    })`,
+    `  block hash:    ${target.hash}`,
+    `  block time:    ${new Date(target.timestamp * 1000).toISOString()}`,
+    fork !== undefined
+      ? `  local fork:    ${fork.localUrl}, chain ID 1, ${HARDFORK} rules, no CORS`
+      : `  local fork:    not started. ${startupFailure}`,
+    `  tools:         node ${environment.node}, ${environment.anvil}, jest ${environment.jest}`,
+    `  commit:        ${environment.commit}`,
+    `  solc output:   ${options.solcOutput === undefined ? 'not given' : `sha256 ${environment.solcOutputSha256}`}`,
+    "  signers:       accounts impersonated with anvil_impersonateAccount: Comet's pause guardian,",
+    '                 and fresh addresses funded with anvil_setBalance and, for base tokens,',
+    '                 anvil_setStorageAt on the balance slot. No private key is used, and nothing',
+    '                 is sent to mainnet.',
+    `  logs:          ${logDir}`,
+  ].join('\n');
+}
+
 /**
  * Runs the suite once, on a fork of `choice`, and returns what the summary needs. Run 2's logs and
- * results carry `-2` in their file names.
+ * results carry `-2` in their file names. If anvil could not start the fork because the upstream
+ * failed, the run records every cell as not exercised, and the runner can run once more. Any other
+ * failure to start the fork, or to verify it, throws, and the runner never retries it.
  */
 async function runSuite({ choice, options, anvil, environment, logDir, number }) {
   const { endpoint, target } = choice;
@@ -499,48 +543,62 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
   const proxy = await startUpstreamProxy(endpoint, { printable: redaction.printable });
   servers.add(proxy.server);
   const anvilLog = fs.createWriteStream(path.join(logDir, logFiles.anvil));
-  const jestLog = fs.createWriteStream(path.join(logDir, logFiles.jest));
+  let jestLog;
 
   let exitCode = 1;
   let anvilExited = false;
   let fork;
+  let startupFailure;
   let header;
   try {
-    fork = await startFork(anvil.command, proxy.url, target, options.port, anvilLog);
-    header = [
-      number === 1
-        ? 'Wrapped lending fork run'
-        : `Wrapped lending fork run ${number}, after run 1 failed on the upstream`,
-      `  upstream:      ${endpoint.label}, through a proxy on 127.0.0.1`,
-      `  fork block:    ${target.number} (${
-        target.mode === 'pinned' ? "the registry's pinned block" : 'a recent block, not the pinned one'
-      })`,
-      `  block hash:    ${target.hash}`,
-      `  block time:    ${new Date(target.timestamp * 1000).toISOString()}`,
-      `  local fork:    ${fork.localUrl}, chain ID 1, ${HARDFORK} rules, no CORS`,
-      `  tools:         node ${environment.node}, ${environment.anvil}, jest ${environment.jest}`,
-      `  commit:        ${environment.commit}`,
-      `  solc output:   ${options.solcOutput === undefined ? 'not given' : `sha256 ${environment.solcOutputSha256}`}`,
-      "  signers:       accounts impersonated with anvil_impersonateAccount: Comet's pause guardian,",
-      '                 and fresh addresses funded with anvil_setBalance and, for base tokens,',
-      '                 anvil_setStorageAt on the balance slot. No private key is used, and nothing',
-      '                 is sent to mainnet.',
-      `  logs:          ${logDir}`,
-    ].join('\n');
+    try {
+      fork = await startFork(anvil.command, proxy.url, target, options.port, anvilLog, logFiles.anvil);
+    } catch (error) {
+      if (!(error instanceof ForkStartError)) throw error;
+      if (!failedToStartOnUpstream({ stats: proxy.stats, output: error.output })) throw error;
+      startupFailure = `anvil could not start the fork, because the upstream failed to serve what anvil reads at start-up. See ${logFiles.anvil}.`;
+    }
+    header = runHeader({ number, endpoint, target, fork, startupFailure, environment, options, logDir });
     console.log(header);
-    const { clientVersion } = await verifyFork(fork, target);
-    console.log(`  verified:      ${clientVersion} on 127.0.0.1, chain ID 1, fork block and hash match the upstream\n`);
-    ({ exitCode, anvilExited } = await runJest(options, fork, target, privateFiles, jestLog));
+    if (fork !== undefined) {
+      const { clientVersion } = await verifyFork(fork, target);
+      console.log(
+        `  verified:      ${clientVersion} on 127.0.0.1, chain ID 1, fork block and hash match the upstream\n`
+      );
+      jestLog = fs.createWriteStream(path.join(logDir, logFiles.jest));
+      ({ exitCode, anvilExited } = await runJest(options, fork, target, privateFiles, jestLog));
+    }
   } finally {
     if (fork !== undefined) await stopped(fork.child);
-    await Promise.all([anvilLog, jestLog].map((log) => new Promise((resolve) => log.end(resolve))));
+    const logs = jestLog === undefined ? [anvilLog] : [anvilLog, jestLog];
+    await Promise.all(logs.map((log) => new Promise((resolve) => log.end(resolve))));
     proxy.server.close();
+    proxy.server.closeAllConnections();
     servers.delete(proxy.server);
+  }
+  if (startupFailure !== undefined) {
+    const results = notExercisedCells(
+      'the upstream failed to serve what anvil reads at start-up, so anvil could not start the fork'
+    );
+    fs.writeFileSync(path.join(logDir, logFiles.results), JSON.stringify(results, null, 2));
+    return {
+      number,
+      endpoint,
+      target,
+      header,
+      startupFailure,
+      exitCode,
+      anvilExited,
+      logFiles: { anvil: logFiles.anvil, results: logFiles.results },
+      jest: undefined,
+      results,
+      stats: proxy.stats,
+    };
   }
   const jest = readRedacted(privateFiles.jestReport, undefined);
   const results = heldToJest(readRedacted(privateFiles.results, []), jest);
   fs.writeFileSync(path.join(logDir, logFiles.results), JSON.stringify(results, null, 2));
-  return { endpoint, target, header, exitCode, anvilExited, logFiles, jest, results, stats: proxy.stats };
+  return { number, endpoint, target, header, exitCode, anvilExited, logFiles, jest, results, stats: proxy.stats };
 }
 
 async function main() {
@@ -581,50 +639,33 @@ async function main() {
       retryProblem = redaction.redact(error?.message ?? error);
       break;
     }
-    if (runs.length === 2 || !failedOnUpstreamOnly(runs[0])) break;
-    // A recent block can leave the endpoint's window of recent state during a run, so the retry
-    // forks a fresh one. The pinned block, or a given one, stays, so the retry tests the same state.
     const failedRun = runs[0];
-    const isRecentBlockRun =
-      options.block === 'recent' || (options.block === 'auto' && failedRun.target.mode === 'recent');
-    console.log("\nRun 1 failed only because the upstream failed to serve the fork's state. Running once more.\n");
+    if (runs.length === 2 || !isRetryable(failedRun)) break;
+    console.log(
+      failedRun.startupFailure !== undefined
+        ? '\nRun 1 could not start the fork, because the upstream failed to serve what anvil reads at start-up. Running once more.\n'
+        : "\nRun 1 failed only because the upstream failed to serve the fork's state. Running once more.\n"
+    );
+    const retry = retryFork(options.block, failedRun, endpoints);
     try {
-      choice = isRecentBlockRun
-        ? await chooseFork(endpoints, 'recent')
-        : await chooseFork(withLast(endpoints, failedRun.endpoint), String(failedRun.target.number));
+      choice = await chooseFork(retry.endpoints, retry.block);
     } catch (error) {
       retryProblem = redaction.redact(error?.message ?? error);
       break;
     }
   }
 
-  const final = runs[runs.length - 1];
-  const isUpstreamOnly = failedOnUpstreamOnly(final);
-  // A cell that failed only because the upstream failed to serve the fork's state was not exercised.
-  const results = isUpstreamOnly
-    ? final.results.map((result) =>
-        result.status === 'fail'
-          ? {
-              ...result,
-              status: 'not-exercised',
-              reason: `the upstream failed to serve the fork's state: ${result.reason}`,
-            }
-          : result
-      )
-    : final.results;
+  const { final, results, exitCode, verdict } = finalVerdict(runs);
   const notExercised = results.filter((result) => result.status === 'not-exercised');
   const failed = results.filter((result) => result.status === 'fail');
-  let exitCode = final.exitCode;
-  if (exitCode === 0 && (results.length === 0 || failed.length > 0)) exitCode = 1;
-  const verdict = exitCode === 0 ? 'PASS' : isUpstreamOnly ? 'NOT EXERCISED' : 'FAIL';
-  // The last run's results file says what the summary says.
+  // The final run's results file says what the summary says.
   fs.writeFileSync(path.join(logDir, final.logFiles.results), JSON.stringify(results, null, 2));
   const { stats } = final;
   const report = [
     final.header,
     ...upstreamUse(stats),
     '',
-    ...(runs.length > 1 ? firstRunSection(runs[0]) : []),
+    ...runs.filter((run) => run !== final).flatMap(runSection),
     ...(retryProblem !== undefined ? [`The runner could not start a second run: ${retryProblem}`, ''] : []),
     '## Scenario matrix',
     matrix(results),

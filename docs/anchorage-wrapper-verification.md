@@ -52,16 +52,24 @@ Only the runner's own process holds the URL:
 
 Without `WRAPPED_FORK_RPC_URL`, the runner tries these public endpoints in order: `eth.drpc.org`, `mainnet.gateway.tenderly.co`, `eth-mainnet.public.blastapi.io`, `rpc.mevblocker.io` and `ethereum-rpc.publicnode.com`. The first four served state at the pinned block during these runs. `ethereum-rpc.publicnode.com` refuses state outside its recent window. An endpoint serves the pinned block only if its block 26244888 has the hash the registry records, `0x440c51a6…883839`, and a balance read at that block succeeds.
 
-Under `--block auto`, the runner falls back to a recent block when no endpoint serves the pinned block, and it labels the run as a recent-block fork. If no endpoint serves a fork, the runner exits with an error and records no result.
+Under `--block auto`, the runner falls back to a recent block when no endpoint serves the pinned block, and it labels the run as a recent-block fork. If no endpoint serves a fork at the start, the runner exits with an error and records no result.
 
-The runner runs the suite a second time only when the upstream failed to serve the fork's state, and then only once. All of these must hold:
+The runner runs the suite a second time only when the upstream failed to serve the fork's state, and then only once. In both of the cases below, the proxy must have seen the upstream fail a request or answer a call with an error.
 
-- At least one cell failed, and every failed cell carries anvil's own fetch error, such as `failed to get account for <address>: …` or `failed to get transaction <hash>: …`. No failed cell carries a revert: `execution reverted`, `call revert exception` or `UNPREDICTABLE_GAS_LIMIT`.
-- Jest reported its results, failed no other test, and ran every suite. A test that Jest failed before its scenario ran, for example in a `beforeAll` hook, counts as a failed cell, with Jest's failure as its reason.
-- anvil did not exit during the run.
-- The proxy saw the upstream fail a request or answer a call with an error.
+- anvil could not start the fork, and its output names a failed fetch from the upstream. anvil 1.2.3 words one as `failed to fetch network chain ID`, `failed to get fork block …` or `failed to get block for block number`. For a genesis account, it words one as `failed to get account for <address>` under `failed to create genesis`. A refusal by the proxy is not an upstream failure. An error of anvil's own, such as a port in use, names no fetch.
+- The suite ran and failed only on the upstream. All of these must hold:
+  - At least one cell failed, and every failed cell carries anvil's own fetch error, such as `failed to get account for <address>: …` or `failed to get transaction <hash>: …`. No failed cell carries a revert: `execution reverted`, `call revert exception` or `UNPREDICTABLE_GAS_LIMIT`.
+  - Jest reported its results, failed no other test, and ran every suite. A test that Jest failed before its scenario ran, for example in a `beforeAll` hook, counts as a failed cell, with Jest's failure as its reason.
+  - anvil did not exit during the run.
 
-A recent-block run retries from the latest block less 8 at the time of the retry. A run at the pinned block, or at a given block, retries at the same block. It tries the other endpoints first and the failed one last, so with `WRAPPED_FORK_RPC_URL` it retries on the same endpoint. The summary then lists run 1's block, its upstream errors and its failed cells, and run 2's files carry `-2` in their names. If the last run also failed only on the upstream, its failed cells are recorded as not exercised, with the upstream's error. The result is then `NOT EXERCISED`, with exit code 1. A failure of any other kind is never retried, and it fails the run. When a failed run's upstream failed requests, the summary says so.
+A recent-block run retries from the latest block less 8 at the time of the retry. A run at the pinned block, or at a given block, retries at the same block. It tries the other endpoints first and the failed one last, so with `WRAPPED_FORK_RPC_URL` it retries on the same endpoint. The summary then lists run 1's block, its upstream use, and its failed cells or the fork it could not start. Run 2's files carry `-2` in their names, and run 1's files stay.
+
+The verdict comes from the last run that ran the suite, or from the last run when none did:
+
+- If that run also failed only on the upstream, its failed cells are recorded as not exercised, with the upstream's error.
+- If no run started the fork, each of the full matrix's 64 cells is recorded as not exercised, in `summary.md` and in each run's results file. The summary keeps the proxy's use of the upstream in each run.
+
+In both cases the result is `NOT EXERCISED`, with exit code 1. Any other failure is never retried, and it fails the run. Such failures include a configuration error, a fork that reports other metadata than the runner chose, and a failure in the app or a test. When a failed run's upstream failed requests, the summary says so.
 
 ### What the runner does
 
@@ -94,6 +102,8 @@ The suite also refuses connections to other hosts. `forkSetup.ts` replaces the r
 - the proxy's address, its read-only method allowlist, the calls it rebuilds, and each request it refuses
 - each matrix cell held to Jest's own result for its test, a timeout included
 - the retry rule, against each failure that it must not retry
+- a fork that anvil could not start: one retry at the pinned block, then every cell not exercised, with run 1's log kept, and no retry for an error of anvil's own or a fork with other metadata
+- the verdict over one or two runs, and the full matrix against the scenarios that the fork suites declare
 
 ### Build the solc output for the bytecode comparison
 
