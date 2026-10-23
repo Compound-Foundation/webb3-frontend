@@ -531,6 +531,24 @@ describe('WrappedSupply', () => {
       if (value === '42.500002') expect(screen.getByText(/exceeds your wallet balance/i)).toBeInTheDocument();
     });
 
+    it.each(['0', '0.0', '00', '.0', '0.000000'])('says why it refuses %p, an amount of zero', (value) => {
+      const onReview = renderPanel(lendingWith(controller()));
+
+      fireEvent.click(supplyButton());
+      const input = screen.getByRole('textbox', { name: /amount of usdc to supply/i });
+      fireEvent.change(input, { target: { value } });
+
+      expect(screen.getByText('Enter an amount greater than 0')).toBeInTheDocument();
+      expect(input).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByRole('button', { name: 'Review' })).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Review' }));
+      expect(onReview).not.toHaveBeenCalled();
+
+      fireEvent.change(input, { target: { value: '' } });
+      expect(screen.queryByText('Enter an amount greater than 0')).not.toBeInTheDocument();
+      expect(input).toHaveAttribute('aria-invalid', 'false');
+    });
+
     it.each<[WrappedBlockReason, RegExp]>([
       ['transaction-pending', /earlier wrapped transaction/i],
       ['action-in-progress', /already in review/i],

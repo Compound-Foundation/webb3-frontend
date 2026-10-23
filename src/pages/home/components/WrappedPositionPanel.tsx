@@ -117,6 +117,8 @@ const WrappedSupplyForm = ({
   const reviewedAmount = amount !== undefined && amount > 0n && !isAboveBalance ? amount : undefined;
   const inputError = isMalformed
     ? `Use digits and one point, with up to ${decimals} decimals`
+    : amount === 0n
+    ? 'Enter an amount greater than 0'
     : isAboveBalance
     ? 'Exceeds your wallet balance'
     : undefined;
