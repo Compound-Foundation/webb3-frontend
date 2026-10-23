@@ -204,6 +204,7 @@ function controller(state: WrappedActionState = { phase: 'idle' }): Controller {
     session: { status: 'usable' },
     recovered: { pending: [], settled: [] },
     canDismissRecovered: false,
+    hasUnansweredWalletRequest: false,
     blockedReason: () => undefined,
     start: jest.fn(),
     confirm: jest.fn(),
@@ -835,6 +836,25 @@ describe('WrappedWithdraw', () => {
       expect(dialog).toHaveTextContent(/so this withdrawal was closed/i);
       expect(dialog).toHaveTextContent(/not cancelled/i);
       expect(explorerLinks()).toEqual([EXPLORER_LINK]);
+    });
+
+    it('says how to stop waiting for a request still open in the wallet, not to start a new review', () => {
+      renderModal({
+        phase: 'discarded',
+        reason: 'cleared',
+        type: 'withdraw',
+        chainId: 1,
+        submittedHashes: [],
+        isWalletRequestOpen: true,
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/approving it there still sends it/i);
+      expect(dialog).toHaveTextContent(/new withdrawals from this account wait until your wallet answers the request/i);
+      expect(dialog).toHaveTextContent(/look for the request in your wallet app/i);
+      expect(dialog).toHaveTextContent(/if it is not there, reload the page and reconnect your wallet/i);
+      expect(dialog).toHaveTextContent(/you can then stop waiting for it/i);
+      expect(dialog).not.toHaveTextContent(/start a new review/i);
     });
 
     it('Home shows the withdrawal dialog for a withdrawal only, and closes it through the wrapper lifecycle', () => {

@@ -128,6 +128,12 @@ export type WrappedActionController = {
   recovered: { pending: readonly Transaction[]; settled: readonly SettledTransaction[] };
   /** Whether an interrupted wallet request holds back a fresh review, with no draft in progress. */
   canDismissRecovered: boolean;
+  /**
+   * Whether a wallet request that has had no answer holds back a fresh review, with no draft in
+   * progress. A wallet can drop a request without answering. Then only a reload lets the user stop
+   * waiting for the request, because the reload marks it interrupted.
+   */
+  hasUnansweredWalletRequest: boolean;
   /** Why `start(type)` refuses now, or undefined if it starts. */
   blockedReason: (type: WrappedActionType) => WrappedBlockReason | undefined;
   /** Starts a fresh review. Returns why it was refused, if it was. */
@@ -154,6 +160,7 @@ export const IDLE_WRAPPED_ACTION: WrappedActionController = Object.freeze<Wrappe
   session: { status: 'not-applicable' },
   recovered: { pending: [], settled: [] },
   canDismissRecovered: false,
+  hasUnansweredWalletRequest: false,
   blockedReason: () => 'not-wrapped',
   start: () => 'not-wrapped',
   confirm: () => undefined,
@@ -200,6 +207,11 @@ function identityOf(state: WrappedActionState): WrappedActionIdentity | undefine
 /** A wallet request whose result nothing can follow: it has no hash to look up. */
 function isInterrupted(transaction: Transaction): boolean {
   return transaction.state === TransactionState.AwaitingConfirmation && transaction.isInterrupted === true;
+}
+
+/** A wallet request this session sent that the wallet has answered with neither a hash nor an error. */
+function isUnanswered(transaction: Transaction): boolean {
+  return transaction.state === TransactionState.AwaitingConfirmation && transaction.isInterrupted !== true;
 }
 
 function isInProgress(state: WrappedActionState): boolean {
@@ -745,6 +757,7 @@ export function useWrappedAction({
     session: health,
     recovered,
     canDismissRecovered: recovered.pending.some(isInterrupted) && !isInProgress(state),
+    hasUnansweredWalletRequest: recovered.pending.some(isUnanswered) && !isInProgress(state),
     blockedReason,
     start,
     confirm,

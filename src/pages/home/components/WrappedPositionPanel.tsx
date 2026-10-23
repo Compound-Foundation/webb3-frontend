@@ -32,6 +32,11 @@ type WrappedPositionPanelProps = {
   /** An interrupted wallet request holds back new wrapped actions, and the user can stop waiting. */
   canDismissRecovered?: boolean;
   onDismissRecovered?: () => void;
+  /**
+   * A wallet request that has had no answer holds back new wrapped actions. The user can stop
+   * waiting for the request only after a reload.
+   */
+  hasUnansweredWalletRequest?: boolean;
   /** The wrapped supply entry. Without it, the deposit control stays disabled. */
   supply?: {
     /** Why a wrapped supply cannot start now, as the wrapper action lifecycle reports it. */
@@ -392,6 +397,7 @@ const WrappedPositionPanel = ({
   session = { status: 'not-applicable' },
   canDismissRecovered = false,
   onDismissRecovered = () => undefined,
+  hasUnansweredWalletRequest = false,
   supply,
   withdraw,
   onRetry,
@@ -569,6 +575,15 @@ const WrappedPositionPanel = ({
           <button className="button button--small" onClick={() => window.location.reload()}>
             Reload
           </button>
+        </div>
+      )}
+      {hasUnansweredWalletRequest && (
+        <div className="wrapped-position-panel__notice">
+          <p className="L3 meta text-color--2">
+            Your wallet has not answered a request for an earlier wrapped transaction from this account. New wrapped
+            deposits and withdrawals wait for that answer. Look for the request in your wallet app. If it is not there,
+            reload the page and reconnect your wallet. You can then stop waiting for it.
+          </p>
         </div>
       )}
       {canDismissRecovered && (
