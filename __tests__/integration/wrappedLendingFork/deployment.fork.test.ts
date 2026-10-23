@@ -1,3 +1,4 @@
+import dns from 'dns';
 import fs from 'fs';
 import net from 'net';
 import path from 'path';
@@ -10,7 +11,7 @@ import WrappedCometFactoryAbi from '@helpers/abis/WrappedCometERC4626Factory';
 import { validateWrappedMarket } from '@hooks/useLendingRoute';
 
 import { COMET, ERC20, FORK_MARKETS, read, WRAPPER } from './fixtures';
-import { assertLocalFork, forkProvider, FORK_RUN } from './fork';
+import { assertLocalFork, forkProvider, FORK_RUN, LOCAL_FORK_URL } from './fork';
 import { notExercised, scenario } from './results';
 
 const FACTORY = WRAPPER_FACTORY_BY_CHAIN_ID[1];
@@ -51,6 +52,13 @@ test('the suite reaches the local fork it was started for, and no other host', a
   });
   // A raw TCP connection, which every library makes through `net`, is refused too.
   expect(() => net.connect(443, 'ethereum-rpc.publicnode.com')).toThrow(/only connects to the local fork/);
+  // The fork's port does not let through a pipe, or a lookup that can resolve the host to another address.
+  const forkPort = Number(new URL(LOCAL_FORK_URL).port);
+  const pipe = { port: forkPort, host: '127.0.0.1', path: path.join(__dirname, 'no.sock') };
+  expect(() => net.connect(pipe as unknown as net.NetConnectOpts)).toThrow(/only connects to the local fork/);
+  expect(() => net.connect({ port: forkPort, host: 'localhost', lookup: dns.lookup })).toThrow(
+    /only connects to the local fork/
+  );
   expect((await provider.getNetwork()).chainId).toBe(1);
 });
 

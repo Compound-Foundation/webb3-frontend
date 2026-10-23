@@ -15,14 +15,24 @@
 //
 // The upstream RPC comes from WRAPPED_FORK_RPC_URL, a private variable for an archive-capable
 // mainnet RPC. Never use a VITE_ variable for it, because Vite embeds those in the public bundle.
-// Without it, the runner uses public endpoints. Only this process holds the URL. anvil reaches the
-// upstream through a proxy this process runs on 127.0.0.1, so anvil's arguments, logs, errors and
-// JSON-RPC methods carry only the proxy's address. The runner also redacts the URL from every
-// output it writes, and never passes it to the tests.
+// Put the key in the URL's path or query. The runner refuses a URL with a user name or password.
+// Without the variable, the runner uses public endpoints. Only this process holds the URL. anvil
+// reaches the upstream through a proxy this process runs on 127.0.0.1, so anvil's arguments, logs,
+// errors and JSON-RPC methods carry only the proxy's address. The proxy forwards only the reads
+// anvil makes to fork mainnet state. The runner redacts the URL, and each key-like part of it, from
+// every output it writes. The tests get none of the runner's environment except the variables
+// they need, so they never see the URL.
 //
 // The fork listens on 127.0.0.1 only, sends no CORS headers, and is stopped on exit, on Ctrl-C and
 // on any error. The tests sign with impersonated accounts on the fork. Nothing is signed with a real
 // key, and nothing is sent to mainnet.
+//
+// Two risks remain, and neither exposes the URL or real funds:
+// - anvil checks no Host header, so a web page open during a run can reach the fork through DNS
+//   rebinding. Such a page can change the fork's state and so a run's results, but anvil holds no
+//   key and the proxy forwards only reads. Run the suite with no untrusted page open.
+// - If the runner is killed with SIGKILL, it cannot stop anvil. The orphaned anvil holds no key, and
+//   its upstream is gone. Stop it with `pkill -f 'anvil --fork-url http://127.0.0.1'`.
 import { spawn, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import fs from 'fs';
@@ -52,14 +62,27 @@ const PUBLIC_ENDPOINTS = [
   'https://ethereum-rpc.publicnode.com',
 ];
 const MARKET_COLUMNS = ['USDC', 'USDT', 'institutional USDC', 'factory'];
-/**
- * A failed test's reason that an upstream failure gives: the fork failed to fetch state or to answer.
- * A failure of any other kind is a test's own, and the runner never retries it.
- */
-const UPSTREAM_REASON =
-  /missing response|SERVER_ERROR|TIMEOUT|timeout exceeded|socket hang up|ECONNRESET|ECONNREFUSED|failed to get|error sending request|header not found/i;
 /** The largest JSON-RPC body the proxy forwards: far above anything anvil sends. */
 const MAX_PROXY_BODY_BYTES = 10 * 1024 * 1024;
+/**
+ * The JSON-RPC methods the proxy forwards: the reads anvil makes to fork mainnet state, and the gas
+ * price anvil reads once at start-up. The proxy refuses every other method. Otherwise any local
+ * process can send a transaction to mainnet, or a costly call, through the proxy and the key behind it.
+ */
+const UPSTREAM_METHODS = new Set([
+  'eth_chainId',
+  'eth_blockNumber',
+  'eth_gasPrice',
+  'eth_getBlockByNumber',
+  'eth_getBlockByHash',
+  'eth_getBalance',
+  'eth_getCode',
+  'eth_getStorageAt',
+  'eth_getTransactionCount',
+  'eth_getTransactionByHash',
+  'eth_getTransactionReceipt',
+  'eth_getLogs',
+]);
 
 function parseArgs(argv) {
   const options = { block: 'auto', solcOutput: undefined, logDir: undefined, port: 0, test: undefined };
@@ -109,9 +132,15 @@ function parseArgs(argv) {
 }
 
 /**
- * The upstream endpoints to try. A private URL is labelled, and every part of it that can carry a
- * key is redacted from every output: the whole URL, its host, its path and each path segment, its
- * query and each query value, and its user name and password.
+ * A part of the private URL that can be a key: 16 characters or more, and not only digits. A
+ * shorter part, such as `v2`, `eth` or a port, also occurs in ordinary text and figures. Redacting it
+ * corrupts them.
+ */
+const isKeyLike = (part) => part.length >= 16 && !/^\d+$/.test(part);
+
+/**
+ * The upstream endpoints to try. A private URL is labelled. The runner redacts from every output
+ * the whole URL, and each key-like part of it: its host, each path segment and each query value.
  */
 function upstreamEndpoints() {
   const privateUrl = process.env.WRAPPED_FORK_RPC_URL;
@@ -120,29 +149,31 @@ function upstreamEndpoints() {
     if (url.protocol !== 'https:' && url.protocol !== 'http:') {
       throw new Error('WRAPPED_FORK_RPC_URL must be an HTTP(S) URL.');
     }
-    const secrets = [
-      privateUrl,
-      url.href,
-      url.host,
-      url.pathname,
-      ...url.pathname.split('/'),
-      url.search,
-      ...[...url.searchParams.values()],
-      url.username,
-      url.password,
-    ];
+    // fetch refuses a URL with credentials, and its error quotes the URL.
+    if (url.username !== '' || url.password !== '') {
+      throw new Error('WRAPPED_FORK_RPC_URL must not carry a user name or password. Put the key in its path or query.');
+    }
+    const parts = [url.host, ...url.pathname.split('/'), ...url.searchParams.values()];
+    const secrets = [privateUrl, url.href, ...parts.filter(isKeyLike)];
     return [{ label: 'WRAPPED_FORK_RPC_URL (private, not printed)', url: privateUrl, secrets }];
   }
   return PUBLIC_ENDPOINTS.map((url) => ({ label: `${url} (public)`, url, secrets: [] }));
 }
 
+/** The secrets to redact, the longest first, so that a part never splits a longer secret first. */
 let secretsToRedact = [];
 const redact = (text) =>
-  secretsToRedact
-    .filter((secret) => secret.length >= 4)
-    // The longest first, so a part never splits a longer secret before that secret is replaced.
-    .sort((a, b) => b.length - a.length)
-    .reduce((result, secret) => result.split(secret).join('<redacted>'), String(text));
+  secretsToRedact.reduce((result, secret) => result.split(secret).join('<redacted>'), String(text));
+
+/** `value` with each string in it redacted. Redacting a JSON text instead can break its syntax. */
+function redactStrings(value) {
+  if (typeof value === 'string') return redact(value);
+  if (Array.isArray(value)) return value.map(redactStrings);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactStrings(entry)]));
+  }
+  return value;
+}
 
 /**
  * Writes a child's output to `write` a whole line at a time, each line redacted. A pipe can split a
@@ -223,14 +254,22 @@ async function chooseFork(endpoints, option) {
   throw new Error(`No upstream endpoint can serve the fork:\n  ${problems.join('\n  ')}`);
 }
 
+/** `method` if it is a JSON-RPC method name, so that a request cannot write other text into the summary. */
+const methodName = (method) =>
+  typeof method === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(method) ? method : '<invalid>';
+
+const countIn = (counts, key) => counts.set(key, (counts.get(key) ?? 0) + 1);
+
 /**
  * Forwards anvil's JSON-RPC requests to the upstream, so that only this process holds the upstream
  * URL. It listens on 127.0.0.1 and refuses what a web page can send: a request with an Origin
- * header, a method other than POST, and a body that is not JSON. It never forwards an error's text,
- * which can name the upstream URL. It counts the requests the upstream failed.
+ * header, a method other than POST, and a body that is not JSON. It refuses a request, or a batch,
+ * that calls any method outside `UPSTREAM_METHODS`. It never forwards an error's text, which can
+ * name the upstream URL. It counts the methods it forwards, the methods it refuses and the requests
+ * the upstream failed.
  */
 function startUpstreamProxy(upstreamUrl) {
-  const stats = { requests: 0, failures: 0 };
+  const stats = { requests: 0, failures: 0, methods: new Map(), refused: new Map() };
   const server = http.createServer((request, response) => {
     const refuse = (status) => {
       response.writeHead(status, { 'content-type': 'text/plain' });
@@ -247,20 +286,35 @@ function startUpstreamProxy(upstreamUrl) {
       else chunks.push(chunk);
     });
     request.on('end', async () => {
+      const body = Buffer.concat(chunks);
+      let calls;
+      try {
+        const parsed = JSON.parse(body.toString('utf8'));
+        calls = Array.isArray(parsed) ? parsed : [parsed];
+      } catch {
+        return refuse(400);
+      }
+      const methods = calls.map((call) => methodName(call?.method));
+      const refused = methods.filter((method) => !UPSTREAM_METHODS.has(method));
+      if (methods.length === 0 || refused.length > 0) {
+        for (const method of refused) countIn(stats.refused, method);
+        return refuse(403);
+      }
+      for (const method of methods) countIn(stats.methods, method);
       stats.requests += 1;
       try {
         const upstream = await fetch(upstreamUrl, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: Buffer.concat(chunks),
+          body,
           signal: AbortSignal.timeout(60_000),
         });
-        const body = Buffer.from(await upstream.arrayBuffer());
+        const answer = Buffer.from(await upstream.arrayBuffer());
         if (upstream.status >= 400) stats.failures += 1;
         response.writeHead(upstream.status, {
           'content-type': upstream.headers.get('content-type') ?? 'application/json',
         });
-        response.end(body);
+        response.end(answer);
       } catch {
         stats.failures += 1;
         refuse(502);
@@ -398,12 +452,20 @@ async function verifyFork(fork, target) {
 }
 
 /**
+ * The variables the suite inherits from the runner's environment. The suite gets no other variable,
+ * so no key in the runner's environment reaches the tests.
+ */
+const INHERITED_VARIABLES = ['PATH', 'HOME', 'TMPDIR', 'CI', 'NODE_OPTIONS'];
+
+/**
  * Runs the fork suite. If anvil exits while the suite runs, the suite is stopped and the run
  * fails, because whatever answers on the port afterwards is not the fork the runner verified.
  */
 function runJest(options, fork, target, resultsPath, log) {
   const env = {
-    ...process.env,
+    ...Object.fromEntries(
+      INHERITED_VARIABLES.filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]])
+    ),
     TZ: 'UTC',
     WRAPPED_FORK_LOCAL_RPC_URL: fork.localUrl,
     WRAPPED_FORK_BLOCK: String(target.number),
@@ -412,9 +474,6 @@ function runJest(options, fork, target, resultsPath, log) {
     WRAPPED_FORK_RESULTS: resultsPath,
     WRAPPED_FORK_SOLC_OUTPUT: options.solcOutput ?? '',
   };
-  // The tests talk to the local fork only.
-  delete env.WRAPPED_FORK_RPC_URL;
-  delete env.ETH_RPC_URL;
   const args = [path.join(ROOT, 'node_modules/jest/bin/jest.js'), '--config', JEST_CONFIG, '--runInBand'];
   if (options.test !== undefined) args.push(options.test);
   const child = spawn(process.execPath, args, { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -446,12 +505,22 @@ function runJest(options, fork, target, resultsPath, log) {
   );
 }
 
+/**
+ * The suite's results, with each string redacted in the file as well. The tests write failure
+ * messages into the file, and an upstream error can fill a message.
+ */
 function readResults(resultsPath) {
   if (!fs.existsSync(resultsPath)) return [];
-  // The tests write failure messages, which an upstream error can fill, into the results file.
-  const text = redact(fs.readFileSync(resultsPath, 'utf8'));
-  fs.writeFileSync(resultsPath, text);
-  return JSON.parse(text);
+  const text = fs.readFileSync(resultsPath, 'utf8');
+  let results;
+  try {
+    results = redactStrings(JSON.parse(text));
+  } catch {
+    fs.writeFileSync(resultsPath, redact(text));
+    throw new Error(`${resultsPath} is not valid JSON, so the run has no results.`);
+  }
+  fs.writeFileSync(resultsPath, JSON.stringify(results, null, 2));
+  return results;
 }
 
 /** The matrix's rows, in the order a reader follows them. A scenario not listed here comes last. */
@@ -516,7 +585,7 @@ function deltas(results) {
       } | ${m.paidCash} | ${heldTo} | ${difference} | ${tolerance} |`;
     });
   return [
-    "| Market | Scenario | Quoted shares | Burned shares | Reviewed cash | Check's cash | Paid cash | Held to | Paid less that quote | Tolerance |",
+    "| Market | Scenario | Quoted shares | Burned shares | Reviewed cash | Check's cash | Paid cash | Held to | Paid minus that quote | Tolerance |",
     '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...rows,
   ].join('\n');
@@ -527,7 +596,7 @@ async function main() {
   const logDir = options.logDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-lending-fork-logs-'));
   fs.mkdirSync(logDir, { recursive: true });
   const endpoints = upstreamEndpoints();
-  secretsToRedact = endpoints.flatMap((endpoint) => endpoint.secrets);
+  secretsToRedact = [...new Set(endpoints.flatMap((endpoint) => endpoint.secrets))].sort((a, b) => b.length - a.length);
 
   const anvil = findAnvil();
   const environment = {
@@ -545,82 +614,64 @@ async function main() {
         : createHash('sha256').update(fs.readFileSync(options.solcOutput)).digest('hex'),
   };
 
-  let runs = 0;
+  const { endpoint, target } = await chooseFork(endpoints, options.block);
+  const proxy = await startUpstreamProxy(endpoint.url);
+  servers.add(proxy.server);
+  const anvilLog = fs.createWriteStream(path.join(logDir, 'anvil.log'));
+  const jestLog = fs.createWriteStream(path.join(logDir, 'jest.log'));
+  const resultsPath = path.join(logDir, 'results.json');
+  fs.rmSync(resultsPath, { force: true });
+
   let exitCode = 1;
-  let summary;
-  const earlierFailures = [];
-  for (;;) {
-    runs += 1;
-    // A retry chooses again: the same endpoint and pinned block if it serves them, or a fresh recent block.
-    const { endpoint, target } = await chooseFork(endpoints, options.block);
-    const proxy = await startUpstreamProxy(endpoint.url);
-    servers.add(proxy.server);
-    const anvilLog = fs.createWriteStream(path.join(logDir, runs === 1 ? 'anvil.log' : `anvil-${runs}.log`));
-    const jestLog = fs.createWriteStream(path.join(logDir, runs === 1 ? 'jest.log' : `jest-${runs}.log`));
-    const resultsPath = path.join(logDir, runs === 1 ? 'results.json' : `results-${runs}.json`);
-    fs.rmSync(resultsPath, { force: true });
-
-    let fork;
-    let header;
-    try {
-      fork = await startFork(anvil.command, proxy.url, target, options.port, anvilLog);
-      header = [
-        `Wrapped lending fork run ${runs}`,
-        `  upstream:      ${endpoint.label}, through a proxy on 127.0.0.1`,
-        `  fork block:    ${target.number} (${
-          target.mode === 'pinned' ? "the registry's pinned block" : 'a recent block, not the pinned one'
-        })`,
-        `  block hash:    ${target.hash}`,
-        `  block time:    ${new Date(target.timestamp * 1000).toISOString()}`,
-        `  local fork:    ${fork.localUrl}, chain ID 1, ${HARDFORK} rules, no CORS`,
-        `  tools:         node ${environment.node}, ${environment.anvil}, jest ${environment.jest}`,
-        `  commit:        ${environment.commit}`,
-        `  solc output:   ${options.solcOutput === undefined ? 'not given' : `sha256 ${environment.solcOutputSha256}`}`,
-        '  signers:       fresh addresses impersonated with anvil_impersonateAccount, 100 ETH from',
-        '                 anvil_setBalance, base tokens from anvil_setStorageAt on the balance slot.',
-        '                 No private key is used and nothing is sent to mainnet.',
-        `  logs:          ${logDir}`,
-      ].join('\n');
-      console.log(header);
-      const { clientVersion } = await verifyFork(fork, target);
-      console.log(
-        `  verified:      ${clientVersion} on 127.0.0.1, chain ID 1, fork block and hash match the upstream\n`
-      );
-      exitCode = await runJest(options, fork, target, resultsPath, jestLog);
-    } finally {
-      if (fork !== undefined) await stopped(fork.child);
-      await Promise.all([anvilLog, jestLog].map((log) => new Promise((resolve) => log.end(resolve))));
-      proxy.server.close();
-      servers.delete(proxy.server);
-    }
-
-    const results = readResults(resultsPath);
-    const failed = results.filter((result) => result.status === 'fail');
-    const upstream = `${proxy.stats.requests} upstream requests through the proxy, ${proxy.stats.failures} failed`;
-    console.log(`\n${upstream}.`);
-    summary = { header: `${header}\n  upstream use:  ${upstream}`, target, endpoint: endpoint.label, results, runs };
-    // Retry once, and only when the upstream failed requests and every failed test failed for that.
-    const isUpstreamFailure =
-      exitCode !== 0 &&
-      proxy.stats.failures > 0 &&
-      failed.length > 0 &&
-      failed.every((result) => UPSTREAM_REASON.test(String(result.reason)));
-    if (isUpstreamFailure && runs < 2) {
-      earlierFailures.push(
-        ...failed.map((result) => `- run ${runs}: ${result.market}, ${result.scenario}: ${result.reason}`)
-      );
-      console.log('\nEvery failure in this run came from the upstream. Retrying once from a fresh fork.\n');
-      continue;
-    }
-    if (exitCode === 0 && (results.length === 0 || failed.length > 0)) exitCode = 1;
-    break;
+  let fork;
+  let header;
+  try {
+    fork = await startFork(anvil.command, proxy.url, target, options.port, anvilLog);
+    header = [
+      'Wrapped lending fork run',
+      `  upstream:      ${endpoint.label}, through a proxy on 127.0.0.1`,
+      `  fork block:    ${target.number} (${
+        target.mode === 'pinned' ? "the registry's pinned block" : 'a recent block, not the pinned one'
+      })`,
+      `  block hash:    ${target.hash}`,
+      `  block time:    ${new Date(target.timestamp * 1000).toISOString()}`,
+      `  local fork:    ${fork.localUrl}, chain ID 1, ${HARDFORK} rules, no CORS`,
+      `  tools:         node ${environment.node}, ${environment.anvil}, jest ${environment.jest}`,
+      `  commit:        ${environment.commit}`,
+      `  solc output:   ${options.solcOutput === undefined ? 'not given' : `sha256 ${environment.solcOutputSha256}`}`,
+      '  signers:       fresh addresses impersonated with anvil_impersonateAccount, 100 ETH from',
+      '                 anvil_setBalance, base tokens from anvil_setStorageAt on the balance slot.',
+      '                 No private key is used and nothing is sent to mainnet.',
+      `  logs:          ${logDir}`,
+    ].join('\n');
+    console.log(header);
+    const { clientVersion } = await verifyFork(fork, target);
+    console.log(`  verified:      ${clientVersion} on 127.0.0.1, chain ID 1, fork block and hash match the upstream\n`);
+    exitCode = await runJest(options, fork, target, resultsPath, jestLog);
+  } finally {
+    if (fork !== undefined) await stopped(fork.child);
+    await Promise.all([anvilLog, jestLog].map((log) => new Promise((resolve) => log.end(resolve))));
+    proxy.server.close();
+    servers.delete(proxy.server);
   }
 
-  const { results } = summary;
+  // The runner never retries. A retry can hide a failure of the app's own behind an upstream error.
+  const results = readResults(resultsPath);
   const notExercised = results.filter((result) => result.status === 'not-exercised');
   const failed = results.filter((result) => result.status === 'fail');
+  if (exitCode === 0 && (results.length === 0 || failed.length > 0)) exitCode = 1;
+  const { stats } = proxy;
+  const listed = (counts) =>
+    [...counts]
+      .sort((a, b) => b[1] - a[1])
+      .map(([method, count]) => `${method} ${count}`)
+      .join(', ');
+  const refusedCount = [...stats.refused.values()].reduce((total, count) => total + count, 0);
   const report = [
-    summary.header,
+    header,
+    `  upstream use:  ${stats.requests} requests forwarded, ${stats.failures} failed upstream, ${refusedCount} refused`,
+    `  forwarded:     ${listed(stats.methods) || 'none'}`,
+    ...(refusedCount > 0 ? [`  refused:       ${listed(stats.refused)}`] : []),
     '',
     '## Scenario matrix',
     matrix(results),
@@ -634,10 +685,15 @@ async function main() {
     `## Not exercised (${notExercised.length})`,
     ...notExercised.map((result) => `- ${result.market}, ${result.scenario}: ${result.reason}`),
     '',
-    ...(summary.runs > 1
+    ...(exitCode !== 0 && failed.length === 0
       ? [
-          `This report is from run ${summary.runs}. Run 1 failed only on upstream errors, listed below. Its logs are anvil.log, jest.log and results.json.`,
-          ...earlierFailures,
+          'No matrix cell failed, but the run did. A test outside the matrix failed, such as the network guard, or an error came after a cell passed. See jest.log.',
+          '',
+        ]
+      : []),
+    ...(exitCode !== 0 && stats.failures > 0
+      ? [
+          `The upstream failed ${stats.failures} requests, so a failure above can come from the upstream, not the app. Run the suite again to tell them apart.`,
           '',
         ]
       : []),
