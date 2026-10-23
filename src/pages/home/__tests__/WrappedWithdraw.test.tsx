@@ -203,6 +203,7 @@ function controller(state: WrappedActionState = { phase: 'idle' }): Controller {
     state,
     session: { status: 'usable' },
     recovered: { pending: [], settled: [] },
+    isRecoveredRequestPendingInWallet: false,
     canDismissRecovered: false,
     hasUnansweredWalletRequest: false,
     blockedReason: () => undefined,
