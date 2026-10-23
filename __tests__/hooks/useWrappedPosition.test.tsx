@@ -38,15 +38,17 @@ function wrappedRoute(key: string, cometAddress = USDC_COMET, reads: Eligibility
 const STANDARD_ROUTE: LendingRoute = { kind: 'standard', writes: ELIGIBLE };
 
 function position(shares: bigint): WrappedPosition {
+  const grossAssets = shares / 10n ** 12n;
   return {
     shares,
     shareDecimals: 18,
-    grossAssets: shares / 10n ** 12n,
+    grossAssets,
     baseDecimals: 6,
     baseWalletBalance: 0n,
     wrapperAllowance: 0n,
     redeemBuffer: 3n,
-    fullExitCash: shares / 10n ** 12n - 3n,
+    // The wrapper refuses an exit worth no more than its redeem buffer, so such a position pays nothing.
+    fullExitCash: grossAssets > 3n ? grossAssets - 3n : 0n,
     isWithdrawPaused: false,
     snapshot: { totalSupply: 0n, totalAssets: 0n, baseSupplyIndex: 0n },
   };
@@ -138,6 +140,64 @@ describe('useWrappedPosition', () => {
 
     rerender({ route: STANDARD_ROUTE, account: OTHER_ACCOUNT });
     expect(result.current.state).toEqual({ status: 'not-applicable' });
+  });
+
+  describe('on a return to an earlier key', () => {
+    // Key A's route during a new wrapper check. `useLendingRoute` checks the wrapper again after every key change.
+    const VALIDATING_ROUTE = wrappedRoute('key-a', USDC_COMET, { isEligible: false, reason: 'validation-pending' });
+
+    it('shows loading, not the old empty position, after the standard route', async () => {
+      const { read, pending } = deferredReader();
+      const route = wrappedRoute('key-a');
+      const { result, rerender } = renderPosition(read, { route, account: ACCOUNT });
+      await act(async () => pending[0].resolve(position(0n)));
+      expect(result.current.state).toEqual({ status: 'loaded', position: position(0n) });
+
+      rerender({ route: STANDARD_ROUTE, account: ACCOUNT });
+      expect(result.current.state).toEqual({ status: 'not-applicable' });
+      rerender({ route: VALIDATING_ROUTE, account: ACCOUNT });
+      expect(result.current.state).toEqual({ status: 'loading' });
+
+      rerender({ route, account: ACCOUNT });
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(result.current.state).toEqual({ status: 'loading' });
+      await act(async () => pending[1].resolve(position(100n * 10n ** 18n)));
+      expect(result.current.state).toEqual({ status: 'loaded', position: position(100n * 10n ** 18n) });
+    });
+
+    it('shows loading, not the old position, after another account whose read is still running', async () => {
+      const { read, pending } = deferredReader();
+      const route = wrappedRoute('key-a');
+      const { result, rerender } = renderPosition(read, { route, account: ACCOUNT });
+      await act(async () => pending[0].resolve(position(100n * 10n ** 18n)));
+
+      rerender({ route: wrappedRoute('key-b'), account: OTHER_ACCOUNT });
+      expect(result.current.state).toEqual({ status: 'loading' });
+
+      rerender({ route, account: ACCOUNT });
+      expect(read).toHaveBeenCalledTimes(3);
+      expect(result.current.state).toEqual({ status: 'loading' });
+      await act(async () => pending[2].resolve(position(0n)));
+      expect(result.current.state).toEqual({ status: 'loaded', position: position(0n) });
+    });
+
+    it('shows loading, not the old empty position, after another market', async () => {
+      const { read, pending } = deferredReader();
+      const route = wrappedRoute('key-a');
+      const { result, rerender } = renderPosition(read, { route, account: ACCOUNT });
+      await act(async () => pending[0].resolve(position(0n)));
+
+      rerender({ route: wrappedRoute('key-b', USDT_COMET), account: ACCOUNT });
+      expect(result.current.state).toEqual({ status: 'loading' });
+      rerender({ route: VALIDATING_ROUTE, account: ACCOUNT });
+      expect(result.current.state).toEqual({ status: 'loading' });
+
+      rerender({ route, account: ACCOUNT });
+      expect(read).toHaveBeenCalledTimes(3);
+      expect(result.current.state).toEqual({ status: 'loading' });
+      await act(async () => pending[2].resolve(position(10n ** 18n)));
+      expect(result.current.state).toEqual({ status: 'loaded', position: position(10n ** 18n) });
+    });
   });
 
   it('reports a failed read with a retry that reads again', async () => {
