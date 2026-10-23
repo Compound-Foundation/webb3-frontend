@@ -87,6 +87,23 @@ function blockedReasonText(reason: WrappedBlockReason, message: string | undefin
   }
 }
 
+/**
+ * What a step means when the wallet answered that it still holds the request. The Anchorage
+ * extension answers so after a request waits for approval on a phone for about 4 minutes 47
+ * seconds. If the user approves the request later, the wallet sends it, and this page never
+ * receives its hash. `message` is the wallet's own answer, which ends with its code.
+ */
+function pendingInWalletText(message: string): string {
+  return (
+    'Your wallet still has this request open. Approve or reject it in the Anchorage app on your phone. ' +
+    'Approving it still sends the transaction, but this page cannot follow that transaction. ' +
+    'The request may still go through, so check your wallet before you try again. ' +
+    'Once your wallet shows the request done, reload this page. The panel then shows the result. ' +
+    'After you press Stop waiting there, a new review starts from the new balances. ' +
+    `(Your wallet reported: ${message})`
+  );
+}
+
 /** What a step's state means for the user. Each state reads differently from every other. */
 function stepStatusText(step: WrappedStepState, isNext: boolean, isStopped: boolean): string {
   switch (step.status) {
@@ -110,6 +127,7 @@ function stepStatusText(step: WrappedStepState, isNext: boolean, isStopped: bool
     case 'rejected':
       return 'You rejected the request in your wallet. Nothing was sent.';
     case 'provider-failure':
+      if (step.isPendingInWallet === true) return pendingInWalletText(step.message);
       return `Your wallet reported an error (${step.message}). The request may still go through, so check your wallet before you try again.`;
     case 'blocked':
       return `Stopped before your wallet was asked, so nothing was sent: ${blockedReasonText(
