@@ -304,7 +304,10 @@ export function checkWrappedStep(draft: WrappedActionDraft, step: WrappedStep): 
     return 'malformed-call';
   }
   if (call.name !== method) return 'wrong-method';
-  if (calls.encodeFunctionData(call.functionFragment, call.args) !== step.request.data.toLowerCase()) {
+  // Encoded by signature, never from `call.functionFragment`. That fragment is a copy ethers makes
+  // with `for...in`, and in ethers' ES2015 build, which the app is bundled with, the copy has no
+  // methods, so encoding from it throws.
+  if (calls.encodeFunctionData(call.signature, call.args) !== step.request.data.toLowerCase()) {
     return 'malformed-call';
   }
   if (step.kind === 'approve') {
