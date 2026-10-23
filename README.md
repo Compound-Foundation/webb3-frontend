@@ -18,6 +18,41 @@ You can start editing the page by modifying `src/Home.tsx`. The page auto-update
 
 [API routes](https://reactrouter.com/) can be accessed on [http://localhost:5173/markets](http://localhost:5173/markets). This endpoint can be edited in `src/Markets.tsx`.
 
+## Manual IPFS previews
+
+Maintainers with repository write access can preview an open PR, including one
+from a fork, without merging it or copying its branch into this repository.
+Once the workflow is merged into main:
+
+1. Open **Actions → Preview PR → Run workflow**.
+2. Select **main** and enter the PR number, for example **42**.
+3. Run the workflow. The IPFS and Pinata links appear in the run summary and in
+   the PR's existing preview comment (or a new comment if none exists).
+
+The equivalent CLI command is:
+
+```sh
+gh workflow run preview-pr.yaml --repo Compound-Foundation/webb3-frontend --ref main -f pr_number=42
+```
+
+The workflow builds the PR's exact head commit captured at the start of the run.
+Run it again to preview subsequent changes. If the PR changes or closes before
+publishing finishes, links remain in the run summary and the PR comment is not
+updated. A failed build does not replace the previous preview.
+
+Fork code runs on a separate runner with read-only repository permissions and
+the same public browser configuration used by the normal build (the six
+Vite settings in that workflow, stored as repository secrets). Those values
+are embedded in the frontend bundle; private credentials must not be added to
+this job. Preview origins must be allowed by the backend and wallet screening
+services for full functionality.
+
+Publishing uses the upload script and dependencies from the main commit that
+started the workflow. Only static files cross from the build job; the publishing
+job does not execute them or share dependency caches. Pinata credentials are
+available only to the upload step. This creates a preview without changing the
+production release.
+
 ## Development Environment
 
 Developers contributing to this repo are highly encouraged to use [VS Code](https://code.visualstudio.com).

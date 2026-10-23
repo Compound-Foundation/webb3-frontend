@@ -1,0 +1,39 @@
+# The paths between the security-sensitive markers get a security review from the
+# dev-fleet PR-agent service as well as the code review every PR gets. They name no
+# owners, so GitHub requests no reviewers for them.
+#
+# The last matching rule wins. If a default owner such as `*` is added above the
+# block, repeat it on every block line, or those paths lose their owner.
+
+# security-sensitive: begin
+# Transaction building and signing: contract addresses and ABIs, actions, the
+# hooks that write to Comet and the Governor, the approval spender on the home
+# page, and the action queue.
+/src/helpers/
+/src/contexts/
+/src/constants/
+/src/hooks/
+/src/pages/home/index.tsx
+# Wallet connection, Safe App framing and the screening gate. main.tsx sets the
+# allowed Safe domains and turns off Wagmi's own reconnect.
+/src/main.tsx
+/src/components/ConnectWalletModal.tsx
+/src/components/SafeAutoConnect.tsx
+/src/components/ScreeningErrorOverlay.tsx
+# Extensions run third-party apps in frames, exchange messages with them and
+# grant them operator rights.
+/src/pages/extensions/
+# Build-time configuration embedded in the bundle, and the HTML entry points.
+/.env*
+/envVars.ts
+/src/init.ts
+/vite.config.js
+/*.html
+/*/index.html
+/*/ipfs-404.html
+# Dependencies, CI, and the IPFS build, preview and release scripts.
+/package.json
+/yarn.lock
+/.github/
+/scripts/
+# security-sensitive: end

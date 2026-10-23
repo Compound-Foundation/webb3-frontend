@@ -1,0 +1,207 @@
+// Standalone "Compound.finance is now Compound.xyz" interstitial. Rendered outside the
+// App shell, so it carries its own background, fonts, and colours rather than the theme
+// tokens.
+
+$redirect-bg: #01090a;
+$redirect-card-border: rgba(13, 48, 48, 0.5);
+$redirect-cream: #d9f0d7;
+$redirect-mint: #c7ebdc;
+$redirect-green: #00d395;
+$redirect-ink: #09090b;
+
+$redirect-font-heading: 'Rethink Sans', 'Haas Grot Disp R', sans-serif;
+$redirect-font-body: 'Asta Sans', 'Haas Grot Text R', sans-serif;
+
+.redirect-page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem 1.25rem;
+  overflow-y: auto;
+  background: $redirect-bg;
+  color: $redirect-cream;
+  box-sizing: border-box;
+
+  &__card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 26px;
+    width: 100%;
+    max-width: 561px;
+    padding: 32px 40px 40px;
+    border: 1px solid $redirect-card-border;
+    border-radius: 16px;
+    background: linear-gradient(180deg, #021012 21.19%, rgba(1, 9, 10, 0.8) 40.62%);
+    box-shadow: 0 20px 28px rgba(0, 0, 0, 0.85);
+    box-sizing: border-box;
+  }
+
+  &__logo {
+    width: 141px;
+    height: auto;
+    flex-shrink: 0;
+
+    .svg__path {
+      fill: #ffffff;
+    }
+  }
+
+  &__title {
+    margin: 0;
+    width: 100%;
+    font-family: $redirect-font-heading;
+    font-size: 36px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
+    text-align: center;
+    color: $redirect-cream;
+  }
+
+  &__title-accent {
+    color: $redirect-green;
+  }
+
+  &__preview {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1.6;
+    overflow: hidden;
+    border: 1px solid rgba(0, 211, 149, 0.2);
+    border-radius: 16px;
+    background: #020b0c;
+    box-shadow: 0 11px 31px -20px rgba(0, 212, 148, 0.34);
+  }
+
+  &__preview-image {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: block;
+    width: calc(100% + 1px);
+    height: auto;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+    animation: redirect-page-appear 600ms ease-out both;
+  }
+
+  &__note {
+    margin: 0;
+    font-family: $redirect-font-body;
+    font-size: 18px;
+    font-weight: 400;
+    line-height: 1.4;
+    text-align: center;
+    color: $redirect-cream;
+  }
+
+  &__actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+  }
+
+  &__button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 50px;
+    padding: 14px 20px;
+    border-radius: 48px;
+    background: $redirect-cream;
+    font-family: $redirect-font-heading;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 23px;
+    color: $redirect-ink;
+    text-shadow: 0 1px 0 #ffffff;
+    text-decoration: none;
+    cursor: pointer;
+    transition: opacity 150ms ease, transform 150ms ease;
+    box-sizing: border-box;
+
+    &:hover {
+      opacity: 0.92;
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+
+  &__countdown {
+    margin: 0;
+    font-family: $redirect-font-body;
+    font-size: 16px;
+    font-weight: 300;
+    line-height: 1.4;
+    text-align: center;
+    color: $redirect-mint;
+    opacity: 0.6;
+  }
+
+  @media (max-width: 1199px) {
+    &__title {
+      font-size: 29px;
+    }
+
+    &__note {
+      font-size: 16px;
+    }
+
+    &__countdown {
+      font-size: 14px;
+    }
+  }
+
+  @media (max-width: 809px) {
+    &__title {
+      font-size: 24px;
+    }
+  }
+
+  @media (max-width: 699px) {
+    padding: 0;
+
+    &__card {
+      flex: 1 0 auto;
+      max-width: none;
+      border-radius: 0;
+      border-left: 0;
+      border-right: 0;
+      justify-content: center;
+      padding: 20px;
+    }
+  }
+
+  @media (max-width: 639px) {
+    &__note {
+      font-size: 14px;
+    }
+  }
+}
+
+@keyframes redirect-page-appear {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .redirect-page__preview-image {
+    animation: none;
+  }
+}

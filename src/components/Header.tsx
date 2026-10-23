@@ -17,6 +17,7 @@ import { Dashboard, Extensions, ExternalLink, Markets, Vote, Rewards } from './I
 import { LoadSpinnerNew } from './LoadSpinner';
 import Logo, { Mark } from './Logo';
 import MarketSelector from './MarketSelector';
+import RewardsButton from './RewardsButton';
 import { SimpleLink } from './SimpleLink';
 import WalletButton, { TRX_HISTORY_ROUTE } from './WalletButton';
 import { WalletTrxHistoryLoadingRow, WalletTrxHistoryRow } from './WalletTrxHistory';
@@ -105,6 +106,7 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
           <div className="header__content__right">
             <div className="header__buttons">
               {!hideMarketSelector && <MarketSelector />}
+              <RewardsButton web3={web3} />
               <WalletButton
                 transactions={transactions}
                 clearTransactions={clearTransactions}
@@ -252,6 +254,14 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
           )}
 
           <div className="header__wallet-menu__buttons">
+            <label className="label L2 text-color--2 header__wallet-menu__buttons__label">COMP Distribution</label>
+            <RewardsButton
+              mobile
+              web3={web3}
+              onClaimClicked={() => {
+                setMobileWalletActive(false);
+              }}
+            />
             <div className="header__wallet-menu__buttons__wrapper">
               <button
                 className="button button--x-large"

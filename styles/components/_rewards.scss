@@ -92,6 +92,11 @@
             opacity: 0;
           }
         }
+
+        &__claim-button {
+          background: linear-gradient(90deg, #00CB8F 0%, #422DA7 100%);
+          color: $neutral--00;
+        }
       }
 
       .button {

@@ -3,7 +3,6 @@ export * from './ArrowLeft';
 export * from './ArrowRight';
 export * from './ArrowRightNoDash';
 export * from './ArrowUp';
-export * from './Bolt';
 export * from './CaretDown';
 export * from './CheckMark';
 export * from './CircleCheckmark';
@@ -30,4 +29,4 @@ export * from './SwitchToggle';
 export * from './TailSpin';
 export * from './V2';
 export * from './Wallet';
-export * from './Nav/Rewards'
+export * from './Nav/Rewards';

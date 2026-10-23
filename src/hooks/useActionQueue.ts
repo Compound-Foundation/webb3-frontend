@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 
 import { isSameAction, isSameToken } from '@helpers/actions';
 import { filterMap } from '@helpers/functions';
+import { getRewardsForMarket } from '@helpers/rewards';
 import {
   Action,
   ActionType,
@@ -9,6 +10,7 @@ import {
   BaseAssetWithAccountState,
   MarketDataState,
   PendingAction,
+  RewardsState,
   TokenWithAccountState,
 } from '@types';
 
@@ -103,6 +105,7 @@ export function useActionQueue(
   const getActions = (
     baseAsset: BaseAssetWithAccountState,
     collateralAssets: TokenWithAccountState[],
+    rewardsState: RewardsState
   ): Action[] => {
     return filterMap<Action, Action>(actions, (action) => {
       switch (action[0]) {
@@ -116,6 +119,11 @@ export function useActionQueue(
           const asset =
             collateralAssets.find((collateralAsset) => isSameToken(collateralAsset, action[1])) || action[1];
           return [action[0], asset, action[2]];
+        }
+        case ActionType.ClaimRewards: {
+          const rewards = getRewardsForMarket(rewardsState, action[3]);
+          if (rewards === undefined) return undefined;
+          return [action[0], rewards.rewardAsset, rewards.amountOwed, rewards];
         }
       }
     });

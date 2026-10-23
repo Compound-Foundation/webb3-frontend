@@ -1,0 +1,5 @@
+{
+  "name": "Compound III",
+  "description": "A full featured dashboard to interface with the Compound III protocol directly. Earn interest, borrow against your assets, and participate in community governance.",
+  "iconPath": "compound-192.png"
+}

@@ -223,6 +223,16 @@
     }
   }
 
+  &__apr-container {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+
+    &-icon {
+      margin-top: -0.125rem;
+    }
+  }
+
   &__dropdown-button {
     background-color: transparent;
     border: none;
@@ -317,4 +327,4 @@
       --institutional-row-base: #e0e4e9;
     }
   }
-}
+};

@@ -37,7 +37,7 @@ const LoadingView = () => {
         StateType.Loading,
         {
           graphConfig: {
-            height: 132,
+            height: 136,
             width: 400,
             graphMinX: 6,
             graphMaxX: 394,
@@ -61,7 +61,7 @@ const LoadingView = () => {
               </h4>
             </div>
             <div className="market-rate-model__rates-section__labels-holder market-rate-model__rates-section__labels-holder--loading">
-              <label className="label text-color--2">Earn APR</label>
+              <label className="label text-color--2">Supply APR</label>
               <h4>
                 <span className="placeholder-content" style={{ width: '4rem' }}></span>
               </h4>
@@ -88,7 +88,7 @@ const RateModelPanelView = ({ borrowRates, supplyRates, borrowAPR, supplyAPR, ut
           supplyAPR,
           utilization,
           graphConfig: {
-            height: 132,
+            height: 136,
             width: 400,
             graphMinX: 6,
             graphMaxX: 394,
@@ -104,8 +104,8 @@ const RateModelPanelView = ({ borrowRates, supplyRates, borrowAPR, supplyAPR, ut
     />
   );
 
-  const shownBorrowAPR = hoveredRate ? formatPercentage(hoveredRate.borrowRate) : formatRateFactor(borrowAPR);
-  const shownSupplyAPR = hoveredRate ? formatPercentage(hoveredRate.supplyRate) : formatRateFactor(supplyAPR);
+  const shownBorrowAPR = formatRateFactor(hoveredRate ? hoveredRate.borrowRate : borrowAPR);
+  const shownSupplyAPR = formatRateFactor(hoveredRate ? hoveredRate.supplyRate : supplyAPR);
 
   return (
     <PanelWithHeader header="Interest Rate Model" className="grid-column--6">
@@ -116,7 +116,7 @@ const RateModelPanelView = ({ borrowRates, supplyRates, borrowAPR, supplyAPR, ut
             <h4 className="text-color--1 heading heading--emphasized L4">{shownBorrowAPR}</h4>
           </div>
           <div className="market-rate-model__rates-section__labels-holder">
-            <label className="label text-color--2">Earn APR</label>
+            <label className="label text-color--2">Supply APR</label>
             <h4 className="text-color--1 heading heading--emphasized L4">{shownSupplyAPR}</h4>
           </div>
         </div>
