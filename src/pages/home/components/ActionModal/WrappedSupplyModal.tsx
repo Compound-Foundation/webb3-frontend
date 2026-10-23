@@ -249,9 +249,17 @@ const WrappedSupplyModal = ({
           {state.isWalletRequestOpen && (
             <p className="body">A request is still open in your wallet. Approving it there still sends it.</p>
           )}
-          <p className="L4 meta text-color--2">
-            Nothing more is sent from this review. Start a new review to continue.
-          </p>
+          {state.isWalletRequestOpen ? (
+            <p className="L4 meta text-color--2">
+              Nothing more is sent from this review. New supplies from this account wait until your wallet answers the
+              request. Look for the request in your wallet app. If it is not there, reload the page and reconnect your
+              wallet. You can then stop waiting for it.
+            </p>
+          ) : (
+            <p className="L4 meta text-color--2">
+              Nothing more is sent from this review. Start a new review to continue.
+            </p>
+          )}
         </>
       );
       actions = closeButton('Close');
