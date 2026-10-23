@@ -13,6 +13,7 @@ import { SendWithdrawnError } from '@helpers/walletErrors';
 import { Theme } from '@hooks/useThemeManager';
 import type { AddTransaction } from '@hooks/useTransactionManager';
 import { IDLE_WRAPPED_ACTION, WalletSessionHealth } from '@hooks/useWrappedAction';
+import { IDLE_WRITE_WRAPPED_STATE } from '@hooks/useWriteWrappedState';
 import {
   Action,
   ActionQueue,
@@ -135,6 +136,7 @@ const STANDARD: WrappedLending = {
   position: { status: 'not-applicable' },
   retry: jest.fn(),
   action: IDLE_WRAPPED_ACTION,
+  write: IDLE_WRITE_WRAPPED_STATE,
 };
 
 function wrappedLending(session: WalletSessionHealth): WrappedLending {
@@ -155,6 +157,7 @@ function wrappedLending(session: WalletSessionHealth): WrappedLending {
     position: { status: 'loading' },
     retry: jest.fn(),
     action: { ...IDLE_WRAPPED_ACTION, session },
+    write: IDLE_WRITE_WRAPPED_STATE,
   };
 }
 
