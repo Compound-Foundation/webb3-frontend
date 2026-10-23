@@ -107,9 +107,14 @@ export function signingLabel(step: WrappedStepState): string {
   }
 }
 
+/** The plural of each action's noun. */
+const PLURAL_NOUNS = { supply: 'supplies', withdrawal: 'withdrawals' } as const;
+
 /**
  * What a closed review leaves behind: why it closed, the transactions it already sent, which are
  * not cancelled, and a wallet request still open. `noun` names the action: "supply" or "withdrawal".
+ * New actions of the account wait for an open request's answer, so the notice then says how to stop
+ * waiting for it, not to start a new review.
  */
 export function DiscardedContent({
   reason,
@@ -122,7 +127,7 @@ export function DiscardedContent({
   chainId: number;
   submittedHashes: readonly string[];
   isWalletRequestOpen: boolean;
-  noun: string;
+  noun: keyof typeof PLURAL_NOUNS;
 }) {
   const why =
     reason === 'identity-changed'
@@ -148,7 +153,15 @@ export function DiscardedContent({
       {isWalletRequestOpen && (
         <p className="body">A request is still open in your wallet. Approving it there still sends it.</p>
       )}
-      <p className="L4 meta text-color--2">Nothing more is sent from this review. Start a new review to continue.</p>
+      {isWalletRequestOpen ? (
+        <p className="L4 meta text-color--2">
+          Nothing more is sent from this review. New {PLURAL_NOUNS[noun]} from this account wait until your wallet
+          answers the request. Look for the request in your wallet app. If it is not there, reload the page and
+          reconnect your wallet. You can then stop waiting for it.
+        </p>
+      ) : (
+        <p className="L4 meta text-color--2">Nothing more is sent from this review. Start a new review to continue.</p>
+      )}
     </>
   );
 }
