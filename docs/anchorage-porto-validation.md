@@ -70,7 +70,16 @@ Rules for the run:
 1. Earlier approvals do not carry over. Leo's approval of onboarding and access, and COM-284's withdrawal of 1 USDC, authorize no wrapper transaction.
 2. Keep the test wallet's direct position: a direct cUSDCv3 supply of about 3.9992 USDC after COM-284, which grows with interest. Do not withdraw, reset, migrate or liquidate it to make an empty account. An empty-account run needs a separately authorized account.
 3. Keep out of the run the production organisation wallets that the same Porto login lists (COM-284).
-4. Reject a request on mobile and stop the run if its preview shows another sender, network, target, function, argument or value than its row. An approval's spender is an argument. Reject and stop as well if a preview cannot show an approval's spender.
+4. Before you approve a request on mobile, compare its preview with its row. Compare the sender, the network, the target, the function, each argument and the value. An approval's spender is an argument. Reject the request on mobile and stop the run in each of these cases:
+
+   - A field on the preview differs from the row.
+   - The preview leaves out a field, such as an approval's spender.
+   - The preview cannot decode the function or an argument.
+   - The preview shortens an address or rounds an amount, and no screen of the preview shows that field in full.
+   - You cannot compare a field with the row for another reason.
+
+   This checklist does not accept a comparison of the raw calldata in place of a decoded field. If you approve a request in one of these cases, the wallet can sign a call that its row does not authorize.
+
 5. If the next request takes the run over a budget above, stop the run.
 6. Sign only in a Chrome profile that holds the Anchorage Digital extension alone. Add the second wallet for S9 after the last signing row.
 
@@ -173,7 +182,7 @@ It showed the amount raw, for example `1000000` for 1 USDC. The app's dialogs pr
 | USDT               | `0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840` | `0xD7c9F42a35C8d13b71D4c0B024AE9eb0e77b9cFf` |
 | Institutional USDC | `0x207158a267CBD2598BB3d611D8CBdEE2709F2F8C` | `0xc7Eb9aA5B9ae154C1bAb08872E90fC44e522E463` |
 
-Record a finding for Anchorage when a preview cannot decode the call, or values the shares or the base token wrongly. A preview that leaves out an approval's spender, or shows another contract, function, argument or value than its row, also stops the run under rule 4. Use the [findings table](#findings-for-anchorage) for each.
+Rule 4 applies to the first six fields of the preview table. A preview that cannot decode the call fails rule 4, so reject the request on mobile and stop the run. Record a finding for Anchorage in the [findings table](#findings-for-anchorage) for each preview that fails rule 4. Record a finding as well for a preview that values the shares or the base token wrongly.
 
 ## Per-market run
 
