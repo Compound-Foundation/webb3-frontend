@@ -1,6 +1,6 @@
 import { ReactNode, useContext, useEffect, useState } from 'react';
 
-import { isUnwrappedCollateralAsset } from '@constants/chains';
+import { INACTIVE_CHAIN_IDS, isUnwrappedCollateralAsset } from '@constants/chains';
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
@@ -278,6 +278,7 @@ const Home = ({
         earnRewardsAPR: supplyRewardsAPR,
         isInstitutional: isInstitutional ?? false,
         institutionalWhitelistStatus: whitelistStatus,
+        isDeprecatedMarket: INACTIVE_CHAIN_IDS.has(market.chainInformation.chainId),
         liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
         pendingAction,

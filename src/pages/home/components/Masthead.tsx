@@ -1,4 +1,4 @@
-import { Dispatch, ReactNode, useRef, useState } from 'react';
+import { Dispatch, ReactElement, ReactNode, useRef, useState } from 'react';
 
 import DetailSheet from '@components/DetailSheet';
 import { Compare, HoverUnder } from '@components/Icons';
@@ -57,6 +57,7 @@ type MastheadHydrated = [
     earnAPR: bigint;
     earnRewardsAPR?: bigint;
     institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
+    isDeprecatedMarket?: boolean;
     liquidationCapacity: bigint;
     liquidationCapacityPost: bigint;
     pendingAction?: PendingAction;
@@ -227,6 +228,7 @@ function getContent(state: MastheadState): Content {
     earnAPR,
     earnRewardsAPR,
     institutionalWhitelistStatus,
+    isDeprecatedMarket,
     liquidationCapacity,
     liquidationCapacityPost,
     pendingAction,
@@ -241,6 +243,19 @@ function getContent(state: MastheadState): Content {
   const {
     baseAsset: { symbol },
   } = state[1];
+
+  // Wraps a disabled action button so the deprecation notice still shows on
+  // hover (disabled buttons swallow mouse events, so the wrapper is the
+  // tooltip trigger)
+  const deprecatedMarketTooltip = (button: ReactElement) => (
+    <Tooltip
+      content={<p className="body meta L4 text-color--2">This market has been deprecated</p>}
+      mini={true}
+      width={200}
+    >
+      <span className="masthead__action-buttons__tooltip-wrapper">{button}</span>
+    </Tooltip>
+  );
 
   const hasActions = actions.length > 0;
   const [baseAssetToUse, collateralValueToUse, liquidationCapacityToUse] = compare
@@ -713,16 +728,20 @@ function getContent(state: MastheadState): Content {
         </button>
       );
     } else if (baseAssetToUse.balance === 0n && !pendingSupplyAction && supplyActionIndex === -1) {
-      repayBorrowOrWithdrawButton = (
+      // The account has no borrow position, so borrowing is closed off in a
+      // deprecated market
+      const borrowClosed = isDeprecatedMarket === true;
+      const borrowButton = (
         <button
           className="button button--large button--borrow"
-          disabled={transaction !== undefined || baseAssetToUse.borrowCapacity === 0n}
+          disabled={transaction !== undefined || baseAssetToUse.borrowCapacity === 0n || borrowClosed}
           onClick={() => onWithdrawAction([ActionType.Borrow, baseAssetPost, undefined])}
         >
           {iconForActionType(ActionType.Borrow)}
           <label className="label">Borrow {baseAssetToUse.symbol}</label>
         </button>
       );
+      repayBorrowOrWithdrawButton = borrowClosed ? deprecatedMarketTooltip(borrowButton) : borrowButton;
     } else if (
       (baseAssetToUse.balance > 0n &&
         withdrawActionIndex === -1 &&
@@ -793,16 +812,20 @@ function getContent(state: MastheadState): Content {
       );
     } else if (supplyActionIndex === -1) {
       if (borrowActionIndex === -1 && !pendingBorrowAction) {
-        buttons = (
+        // Supplying stays open for accounts with an existing supply balance,
+        // but is closed off to new suppliers in a deprecated market
+        const supplyClosed = isDeprecatedMarket === true && baseAssetToUse.balance === 0n;
+        const supplyButton = (
           <button
             className="button button--large button--supply"
-            disabled={transaction !== undefined || baseAssetToUse.walletBalance === 0n}
+            disabled={transaction !== undefined || baseAssetToUse.walletBalance === 0n || supplyClosed}
             onClick={() => onSupplyAction([ActionType.Supply, baseAssetPost, undefined])}
           >
             {iconForActionType(ActionType.Supply)}
             <label className="label">Supply {baseAssetToUse.symbol}</label>
           </button>
         );
+        buttons = supplyClosed ? deprecatedMarketTooltip(supplyButton) : supplyButton;
       }
     } else {
       const supplyAction = actions[supplyActionIndex];
