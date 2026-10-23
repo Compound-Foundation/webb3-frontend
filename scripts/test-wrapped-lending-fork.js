@@ -2,9 +2,9 @@
 //
 //   node scripts/test-wrapped-lending-fork.js [options]
 //
-//   --block auto|pinned|recent|<number>  The fork block. `auto`, the default, forks the pinned block
-//                                        26244888 when the upstream serves its state, and otherwise
-//                                        a recent block: the latest less 8.
+//   --block auto|pinned|recent|<number>  The fork block. The default, `auto`, forks the pinned block
+//                                        26244888 when the upstream serves its state. Otherwise it
+//                                        forks a recent block, the latest less 8.
 //   --solc-output <path>                 solc's standard-JSON output for the wrappers' build input,
 //                                        for the deployed bytecode comparison. Without it, that check
 //                                        is recorded as not exercised.
@@ -17,8 +17,8 @@
 // mainnet RPC. Never use a VITE_ variable for it, because Vite embeds those in the public bundle.
 // Put the key in the URL's path or query. The runner refuses a URL with a user name or password.
 // Without the variable, the runner uses public endpoints. Only this process holds the URL. anvil
-// reaches the upstream through a proxy this process runs on 127.0.0.1, so anvil's arguments, logs,
-// errors and JSON-RPC methods carry only the proxy's address. The proxy forwards only the reads
+// reaches the upstream through a proxy that this process runs on 127.0.0.1. So anvil's arguments,
+// logs, errors and JSON-RPC methods carry only the proxy's address. The proxy forwards only the reads
 // anvil makes to fork mainnet state. The runner redacts the URL, and each key-like part of it, from
 // every output it writes. The tests get none of the runner's environment except the variables
 // they need, so they never see the URL.
@@ -49,8 +49,11 @@ const PINNED_HASH = '0x440c51a6a6953b880568c1b60e4ad59044f3fa783e340e34d66793e46
 /** A recent fork stays this many blocks behind the endpoint's latest, so that every node behind it has the block. */
 const RECENT_BLOCK_LAG = 8;
 /**
- * The EVM rules the fork runs. anvil 1.2.3 knows no later mainnet hardfork, and its default for a
- * fork is Cancun. The wrappers and Comet behave the same under both. Gas prices calldata differently.
+ * The EVM rules the fork runs: Prague, the latest that anvil 1.2.3 knows. Its default for a fork is
+ * Cancun. Mainnet runs at least Osaka's rules at these blocks, so the fork trails mainnet. Osaka adds
+ * the CLZ opcode and a P-256 precompile, reprices MODEXP and caps a transaction's gas at 2^24. The
+ * wrappers and Comet use none of the three, and each suite transaction stays far below the cap. So
+ * only the gas figures can differ from mainnet's.
  */
 const HARDFORK = 'prague';
 /** Public endpoints, in order of preference. Some of them serve old state, and some only recent state. */
@@ -133,8 +136,8 @@ function parseArgs(argv) {
 
 /**
  * A part of the private URL that can be a key: 16 characters or more, and not only digits. A
- * shorter part, such as `v2`, `eth` or a port, also occurs in ordinary text and figures. Redacting it
- * corrupts them.
+ * shorter part, such as `v2`, `eth` or a port, also occurs in ordinary text and figures, and a
+ * redaction of it corrupts them.
  */
 const isKeyLike = (part) => part.length >= 16 && !/^\d+$/.test(part);
 
@@ -165,7 +168,7 @@ let secretsToRedact = [];
 const redact = (text) =>
   secretsToRedact.reduce((result, secret) => result.split(secret).join('<redacted>'), String(text));
 
-/** `value` with each string in it redacted. Redacting a JSON text instead can break its syntax. */
+/** `value` with each string in it redacted. A redaction of the JSON text instead can break its syntax. */
 function redactStrings(value) {
   if (typeof value === 'string') return redact(value);
   if (Array.isArray(value)) return value.map(redactStrings);
@@ -213,8 +216,8 @@ const hex = (value) => `0x${Number(value).toString(16)}`;
 
 /**
  * The block and hash to fork from on `endpoint`, or undefined when it cannot serve them. The pinned
- * block must have the hash the registry records, and its state must be readable: a balance read at
- * that block fails on a node that keeps only recent state.
+ * block must have the hash that the registry records. Its state must also be readable. A balance
+ * read at that block fails on a node that keeps only recent state.
  */
 async function forkTarget(endpoint, block) {
   if ((await rpc(endpoint.url, 'eth_chainId')) !== '0x1') throw new Error('the endpoint is not Ethereum mainnet');
@@ -236,7 +239,7 @@ async function forkTarget(endpoint, block) {
   return { number: latest - RECENT_BLOCK_LAG, hash: header.hash, timestamp: Number(header.timestamp), mode: 'recent' };
 }
 
-/** The first endpoint and block the option allows, trying the pinned block first under `auto`. */
+/** The first endpoint and block that the option allows. Under `auto`, the pinned block comes first. */
 async function chooseFork(endpoints, option) {
   const attempts = option === 'auto' ? ['pinned', 'recent'] : [option];
   const problems = [];
@@ -262,11 +265,14 @@ const countIn = (counts, key) => counts.set(key, (counts.get(key) ?? 0) + 1);
 
 /**
  * Forwards anvil's JSON-RPC requests to the upstream, so that only this process holds the upstream
- * URL. It listens on 127.0.0.1 and refuses what a web page can send: a request with an Origin
- * header, a method other than POST, and a body that is not JSON. It refuses a request, or a batch,
- * that calls any method outside `UPSTREAM_METHODS`. It never forwards an error's text, which can
- * name the upstream URL. It counts the methods it forwards, the methods it refuses and the requests
- * the upstream failed.
+ * URL. It listens on 127.0.0.1, and it refuses these requests:
+ * - a request with an Origin header, which a web page sends
+ * - a method other than POST
+ * - a body that is not JSON
+ * - a request, or a batch, that calls a method outside `UPSTREAM_METHODS`
+ *
+ * It never forwards an error's text, which can name the upstream URL. It counts the methods it
+ * forwards, the methods it refuses and the requests that the upstream failed.
  */
 function startUpstreamProxy(upstreamUrl) {
   const stats = { requests: 0, failures: 0, methods: new Map(), refused: new Map() };
@@ -321,6 +327,10 @@ function startUpstreamProxy(upstreamUrl) {
       }
     });
   });
+  // anvil's HTTP client keeps an idle connection open for up to 90 s. By default, Node's server
+  // closes an idle connection after 5 s. A request that anvil sends as the proxy closes the
+  // connection fails before the proxy reads it. So the proxy never closes an idle connection.
+  server.keepAliveTimeout = 0;
   return new Promise((resolve, reject) => {
     server.on('error', reject);
     server.listen(0, '127.0.0.1', () => resolve({ server, stats, url: `http://127.0.0.1:${server.address().port}/` }));
@@ -357,7 +367,7 @@ function cleanUp() {
 
 const hasExited = (child) => child.exitCode !== null || child.signalCode !== null;
 
-/** Waits for `child` to exit, killing it if it outlives `timeoutMs`. */
+/** Stops `child` with SIGTERM and waits for it to exit. If it outlives `timeoutMs`, kills it with SIGKILL. */
 function stopped(child, timeoutMs = 5_000) {
   if (hasExited(child)) return Promise.resolve();
   return new Promise((resolve) => {
@@ -372,8 +382,8 @@ function stopped(child, timeoutMs = 5_000) {
 
 /**
  * Starts anvil on 127.0.0.1, forked from `target` through the proxy at `upstreamUrl`. With port 0,
- * anvil binds a free port itself and the runner reads it from anvil's own output, so no other
- * process can take the port between its choice and the bind.
+ * anvil binds a free port itself, and the runner reads the port from anvil's own output. So no
+ * other process can take the port between its choice and the bind.
  */
 async function startFork(anvilCommand, upstreamUrl, target, port, log) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-lending-fork-'));
@@ -458,8 +468,8 @@ async function verifyFork(fork, target) {
 const INHERITED_VARIABLES = ['PATH', 'HOME', 'TMPDIR', 'CI', 'NODE_OPTIONS'];
 
 /**
- * Runs the fork suite. If anvil exits while the suite runs, the suite is stopped and the run
- * fails, because whatever answers on the port afterwards is not the fork the runner verified.
+ * Runs the fork suite. If anvil exits while the suite runs, the runner stops the suite and the run
+ * fails. Whatever answers on the port afterwards is not the fork that the runner verified.
  */
 function runJest(options, fork, target, resultsPath, log) {
   const env = {
@@ -569,9 +579,11 @@ function matrix(results) {
 }
 
 /**
- * Each signed exit against its receipt, in raw base units and shares. An exit is held to the quote
- * of the check before its signature when the suite recorded one (`cashMinusRecheck`), and to its
- * review's quote otherwise. An exit mined later than the quote's block has an upper bound.
+ * The exits of each market's supply-and-exit sequence against their receipts, in raw base units and
+ * shares: the partial, one-slot, held-open and full exits. Each other signed exit records no
+ * figures here, and its own scenario holds it to its quote. An exit is held to the quote of the
+ * check before its signature when the suite recorded one (`cashMinusRecheck`), and to its review's
+ * quote otherwise. An exit mined later than the quote's block has an upper bound.
  */
 function deltas(results) {
   const rows = results
@@ -639,9 +651,10 @@ async function main() {
       `  tools:         node ${environment.node}, ${environment.anvil}, jest ${environment.jest}`,
       `  commit:        ${environment.commit}`,
       `  solc output:   ${options.solcOutput === undefined ? 'not given' : `sha256 ${environment.solcOutputSha256}`}`,
-      '  signers:       fresh addresses impersonated with anvil_impersonateAccount, 100 ETH from',
-      '                 anvil_setBalance, base tokens from anvil_setStorageAt on the balance slot.',
-      '                 No private key is used and nothing is sent to mainnet.',
+      "  signers:       accounts impersonated with anvil_impersonateAccount: Comet's pause guardian,",
+      '                 and fresh addresses funded with anvil_setBalance and, for base tokens,',
+      '                 anvil_setStorageAt on the balance slot. No private key is used, and nothing',
+      '                 is sent to mainnet.',
       `  logs:          ${logDir}`,
     ].join('\n');
     console.log(header);
@@ -676,7 +689,7 @@ async function main() {
     '## Scenario matrix',
     matrix(results),
     '',
-    '## Signed exits against their quotes (raw base units, shares in share units)',
+    "## The supply-and-exit sequence's exits against their quotes (raw base units, shares in share units)",
     deltas(results),
     '',
     `## Failed (${failed.length})`,

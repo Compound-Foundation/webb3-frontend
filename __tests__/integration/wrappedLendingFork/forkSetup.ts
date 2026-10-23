@@ -79,8 +79,8 @@ net.Socket.prototype.connect = function (this: net.Socket, ...args: unknown[]) {
 } as typeof net.Socket.prototype.connect;
 
 // Each market's scenarios run in order as one session of the app, so the rendered hooks must outlive
-// a test. Each suite unmounts them itself, after its last scenario. Testing Library reads this when
-// a suite first imports it.
+// a test. Each suite unmounts them itself, after its last scenario. `@testing-library/react` reads
+// this flag when a suite first imports it.
 process.env.RTL_SKIP_AUTO_CLEANUP = 'true';
 
 // The hooks settle from network callbacks, outside `act`, which React reports on every update.

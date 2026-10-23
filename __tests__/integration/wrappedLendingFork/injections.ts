@@ -1,7 +1,8 @@
 // Fork-only changes to market state, for the failure scenarios. Each one acts on the local anvil
-// fork alone. Most are ordinary transactions a real account can send, from impersonated accounts:
-// the pause guardian's pause, a borrow of the market's cash, a third party's zero transfer. One is
-// a direct storage write that no transaction can make: the back-dated accrual. None reaches mainnet.
+// fork alone. Most are ordinary transactions that a real account can send, from impersonated
+// accounts. Examples are the pause guardian's pause, a borrow of the market's cash and a third
+// party's zero transfer. One is a direct storage write that no transaction can make: the
+// back-dated accrual. None reaches mainnet.
 import { WrappedMarket } from '@constants/wrappedMarkets';
 
 import {
@@ -26,7 +27,7 @@ export async function onSnapshot<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } finally {
-    // Reverting a snapshot resets anvil's clock, not its block interval. Otherwise a scenario that
+    // A snapshot's revert resets anvil's clock, not its block interval. Otherwise a scenario that
     // froze time and failed before it unfroze it leaves every later block at one timestamp.
     await anvil.unfreezeTime();
     await anvil.revert(snapshot);
@@ -104,13 +105,13 @@ const TOTALS_SLOT = '0x1';
 const LAST_ACCRUAL_SHIFT = 208n;
 
 /**
- * Moves Comet's last accrual back in time with a storage write, so that the supply index Comet
- * accrues to when it next runs is at least two whole units (2e15) above the stored index that
- * `totalsBasic()` reports and the wrapper's buffer uses. A real market accrues on every
- * interaction, so its stored index trails by far less. Fork-only: no transaction can do this.
+ * Moves Comet's last accrual back in time with a storage write. When Comet next accrues, its supply
+ * index then rises at least two whole units (2e15) above the stored index. `totalsBasic()` reports
+ * the stored index, and the wrapper's buffer uses it. A real market accrues on every interaction,
+ * so its stored index trails by far less. Fork-only: no transaction can do this.
  *
- * Returns undefined, and writes nothing, when the market's supply rate is too low to reach that lag
- * after the epoch: the caller can raise the rate first.
+ * Returns undefined, and writes nothing, when the market's supply rate is too low for that lag
+ * after the epoch. The caller can raise the rate first.
  */
 export async function backdateAccrual(market: WrappedMarket) {
   const slot = await anvil.getStorageAt(market.cometAddress, TOTALS_SLOT);
@@ -155,7 +156,8 @@ export async function donateToWrapper(market: WrappedMarket, donor: string, amou
 
 /**
  * A third party's `comet.transfer(wrapper, 0)`. Comet works out the receiver's principal again
- * from its balance, rounding down, so each such call can take a unit of principal from the wrapper.
+ * from its balance and rounds it down. So each such call can take a unit of principal from the
+ * wrapper.
  */
 export async function zeroTransferTo(market: WrappedMarket, sender: string) {
   return sendFrom(sender, {

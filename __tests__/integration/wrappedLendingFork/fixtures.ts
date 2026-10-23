@@ -105,8 +105,8 @@ export async function readBigInt(
 const balanceSlots = new Map<string, number>();
 
 /**
- * Sets `holder`'s balance of `token` on the fork, as Foundry's `deal` does: it finds the balance
- * mapping's slot by writing a candidate slot and reading `balanceOf` back, and restores any slot it
+ * Sets `holder`'s balance of `token` on the fork, as Foundry's `deal` does. It finds the balance
+ * mapping's slot: it writes a candidate slot and reads `balanceOf` back. It restores each slot it
  * tried that was not the balance. Fork-only, so no real holder is touched.
  */
 export async function dealToken(token: string, holder: string, amount: bigint): Promise<void> {
@@ -170,8 +170,8 @@ export async function sendFrom(
     },
   ]);
   // Anvil mines at once, but can answer with the hash a moment before the receipt is stored. Ethers'
-  // own wait listens for new block numbers, and after a fork snapshot is reverted the next blocks
-  // reuse lower numbers that it ignores, so the receipt is polled for directly.
+  // own wait listens for new block numbers. After a fork snapshot is reverted, the next blocks reuse
+  // lower numbers, which ethers ignores. So the suite polls for the receipt directly.
   const receipt = await receiptFor(hash);
   if (expectSuccess && receipt.status !== 1)
     throw new Error(`The set-up transaction ${hash} to ${request.to} reverted.`);
@@ -259,8 +259,11 @@ export async function readAccount(
 }
 
 /**
- * What a mined transaction did to the account, read from the chain: its figures in the parent block
- * and in the transaction's own block, its gas, and the wrapper and base-token events in its receipt.
+ * What a mined transaction did to the account, read from the chain:
+ * - the account's figures in the parent block and in the transaction's own block
+ * - the transaction's gas
+ * - the wrapper's and the base token's events in its receipt
+ *
  * The block must hold this transaction alone, so that the parent block is the state just before it.
  */
 export async function receiptEffects(market: WrappedMarket, account: string, receipt: TransactionReceipt) {
@@ -304,9 +307,9 @@ export async function receiptEffects(market: WrappedMarket, account: string, rec
 type ExitEffects = Awaited<ReturnType<typeof receiptEffects>>;
 
 /**
- * Checks a mined exit against the quote it is held to: it burned exactly `shares` from the account,
- * its `Withdraw` event names those shares, and the account's wallet received exactly `cash`, all of
- * it in base-token transfers to the account.
+ * Checks a mined exit against the quote it is held to. The exit burned exactly `shares` from the
+ * account, and its `Withdraw` event names those shares. The account's wallet received exactly
+ * `cash`, all of it in base-token transfers to the account.
  */
 export function expectExitPaid(effects: ExitEffects, quote: { shares: bigint; cash: bigint }) {
   expect(-effects.shareDelta).toBe(quote.shares);

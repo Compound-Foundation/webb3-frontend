@@ -19,7 +19,7 @@ import {
   WRAPPER,
 } from './fixtures';
 import { anvil, assertLocalFork } from './fork';
-import { scenario } from './results';
+import { NotExercisedOnThisFork, scenario } from './results';
 import { renderWrappedApp, WrappedApp } from './wrappedApp';
 
 /** One Ethereum slot: how long a mainnet transaction waits at least after the block it was quoted at. */
@@ -202,7 +202,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     await anvil.mine();
     const endBlock = await anvil.latestBlock();
     const after = await app.refreshPosition();
-    // The wrapper's own public conversion of the same shares at the same block, rounding down.
+    // The wrapper's own public conversion of the same shares at the same block, which rounds down.
     const onChainValue = await readBigInt(market.wrapperAddress, FORK_ONLY, 'convertToAssets', [after.shares]);
     Object.assign(measured, {
       seconds: endBlock.timestamp - startBlock.timestamp,
@@ -274,9 +274,9 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     if (review === undefined) throw new Error('The withdrawal draft has no quote.');
     const quoteBlock = await anvil.latestBlock();
     expect(quoteBlock.number).toBe(review.blockNumber);
-    // The bound comes from the chain, not from the app's arithmetic: what the wrapper's own
+    // The bound comes from the chain, not from the app's arithmetic. It is what the wrapper's own
     // `convertToAssets` says the shares are worth, times Comet's supply rate for one slot, rounded
-    // up. The payout and the quote each round down, which differs by at most 1 unit, and Comet's
+    // up. The payout and the quote each round down, so they differ by at most 1 unit. Comet's
     // rounding of the wrapper's balance adds less than 1 unit more to the shares' value. No other
     // transaction touches Comet between the quote and the exit.
     const worth = await readBigInt(market.wrapperAddress, FORK_ONLY, 'convertToAssets', [review.quote.shares]);
@@ -312,11 +312,18 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
    * review, the check's quote at the confirmation's block and the step.
    */
   async function confirmAfter(requested: bigint, secondsFor: (secondsToBound: number) => number) {
+    // The review reads the same block as these reads, because no block is mined between them.
+    const utilization = await readBigInt(market.cometAddress, COMET, 'getUtilization');
+    const supplyRate = await readBigInt(market.cometAddress, COMET, 'getSupplyRate', [utilization]);
+    if (supplyRate === 0n) {
+      const block = await anvil.latestBlock();
+      throw new NotExercisedOnThisFork(
+        `Comet's supply rate is 0 at block ${block.number}, so interest cannot raise the payout.`
+      );
+    }
     expect(await app.startWithdraw({ kind: 'partial', cash: requested })).toBeUndefined();
     const review = app.draft().withdrawal;
     if (review === undefined) throw new Error('The withdrawal draft has no quote.');
-    const utilization = await readBigInt(market.cometAddress, COMET, 'getUtilization');
-    const supplyRate = await readBigInt(market.cometAddress, COMET, 'getSupplyRate', [utilization]);
     // Interest at this rate raises a payout by 0.1% in 10^15 ÷ supplyRate seconds.
     const secondsToBound = Number(10n ** 15n / supplyRate);
     const seconds = secondsFor(secondsToBound);

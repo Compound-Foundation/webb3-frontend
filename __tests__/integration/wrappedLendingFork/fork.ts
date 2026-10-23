@@ -70,9 +70,9 @@ type AnvilMetadata = {
 };
 
 /**
- * Fails unless the suite is talking to the anvil fork the runner started: an anvil node, chain 1,
- * forked from the block and hash the runner recorded. `anvil_metadata` carries no upstream URL,
- * unlike `anvil_nodeInfo`, which the suite never calls.
+ * Fails unless the suite is talking to the anvil fork that the runner started. That fork is an anvil
+ * node on chain 1, forked from the block and hash that the runner recorded. `anvil_metadata` carries
+ * no upstream URL, unlike `anvil_nodeInfo`, which the suite never calls.
  */
 export async function assertLocalFork(): Promise<void> {
   const metadata = (await rpc.send('anvil_metadata', [])) as AnvilMetadata;

@@ -70,7 +70,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
             expect(changed).toMatchObject({ phase: 'discarded', reason: 'identity-changed' });
             act(() => keptConfirm());
 
-            // Returning to the reviewed session does not bring the draft back.
+            // A return to the reviewed session does not bring the draft back.
             await app.changeSession({});
             expect(app.state().phase).toBe('discarded');
             act(() => keptConfirm());
