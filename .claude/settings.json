@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "dev-fleet": {
+      "source": {
+        "source": "github",
+        "repo": "Compound-Foundation/dev-fleet"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "cf-core@dev-fleet": true
+  }
+}
