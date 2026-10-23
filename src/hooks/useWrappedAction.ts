@@ -74,8 +74,11 @@ export type WrappedStepState =
   | { status: 'unresolved'; hash: string }
   /** Declined in the wallet: EIP-1193 code 4001 or its equivalents only. */
   | { status: 'rejected' }
-  /** The wallet reported another error. Whether it reached the chain is unknown. */
-  | { status: 'provider-failure'; message: string }
+  /**
+   * The wallet reported another error. Whether it reached the chain is unknown. `isPendingInWallet`
+   * marks the wallet's answer that it still holds the request. Only the step's wording reads it.
+   */
+  | { status: 'provider-failure'; message: string; isPendingInWallet?: boolean }
   /** A check refused it before the wallet was asked. Nothing was sent. */
   | { status: 'blocked'; reason: WrappedBlockReason; message?: string };
 
@@ -126,6 +129,11 @@ export type WrappedActionController = {
   session: WalletSessionHealth;
   /** This account's wrapper transactions on this chain: still pending, and settled this session. */
   recovered: { pending: readonly Transaction[]; settled: readonly SettledTransaction[] };
+  /**
+   * Whether the wallet answered an interrupted request in `recovered.pending` by saying it still
+   * holds it, so the user can still approve or reject it there. Only the notice's wording reads it.
+   */
+  isRecoveredRequestPendingInWallet: boolean;
   /** Whether an interrupted wallet request holds back a fresh review, with no draft in progress. */
   canDismissRecovered: boolean;
   /**
@@ -159,6 +167,7 @@ export const IDLE_WRAPPED_ACTION: WrappedActionController = Object.freeze<Wrappe
   state: { phase: 'idle' },
   session: { status: 'not-applicable' },
   recovered: { pending: [], settled: [] },
+  isRecoveredRequestPendingInWallet: false,
   canDismissRecovered: false,
   hasUnansweredWalletRequest: false,
   blockedReason: () => 'not-wrapped',
@@ -212,6 +221,15 @@ function isInterrupted(transaction: Transaction): boolean {
 /** A wallet request this session sent that the wallet has answered with neither a hash nor an error. */
 function isUnanswered(transaction: Transaction): boolean {
   return transaction.state === TransactionState.AwaitingConfirmation && transaction.isInterrupted !== true;
+}
+
+/** An interrupted wallet request that the wallet said it still holds. */
+function isInterruptedPendingInWallet(transaction: Transaction): boolean {
+  return (
+    transaction.state === TransactionState.AwaitingConfirmation &&
+    transaction.isInterrupted === true &&
+    transaction.isPendingInWallet === true
+  );
 }
 
 function isInProgress(state: WrappedActionState): boolean {
@@ -719,6 +737,13 @@ export function useWrappedAction({
       case 'session-broken':
         dispatch({ type: 'step', index, step: { status: 'provider-failure', message: result.message } });
         break;
+      case 'pending-in-wallet':
+        dispatch({
+          type: 'step',
+          index,
+          step: { status: 'provider-failure', message: result.message, isPendingInWallet: true },
+        });
+        break;
       case 'session-changed':
         block(withdrawnBecause ?? 'identity-changed');
         break;
@@ -764,6 +789,7 @@ export function useWrappedAction({
     state,
     session: health,
     recovered,
+    isRecoveredRequestPendingInWallet: recovered.pending.some(isInterruptedPendingInWallet),
     canDismissRecovered: recovered.pending.some(isInterrupted) && !isInProgress(state),
     hasUnansweredWalletRequest: recovered.pending.some(isUnanswered) && !isInProgress(state),
     blockedReason,

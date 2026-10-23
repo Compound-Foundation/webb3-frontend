@@ -178,6 +178,7 @@ function controller(
     state,
     session: { status: 'usable' },
     recovered: { pending: [], settled: [] },
+    isRecoveredRequestPendingInWallet: false,
     canDismissRecovered: false,
     hasUnansweredWalletRequest: false,
     blockedReason: () => blockedReason,
@@ -759,6 +760,52 @@ describe('WrappedSupply', () => {
       expect(dialog).toHaveTextContent(/nothing was sent/i);
       expect(dialog).toHaveTextContent(text);
       expect(dialog).toHaveTextContent('Not sent.');
+    });
+
+    it('says a wallet error may still go through, and to check the wallet', () => {
+      renderModal({
+        ...inReview(),
+        phase: 'stopped',
+        steps: [{ status: 'provider-failure', message: 'Internal error (-32603)' }, { status: 'waiting' }],
+      });
+
+      expect(
+        screen.getByText(
+          'Your wallet reported an error (Internal error (-32603)). The request may still go through, so check your ' +
+            'wallet before you try again.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByRole('dialog')).not.toHaveTextContent(/Anchorage app/);
+    });
+
+    it('says how to answer a request the wallet still holds, and that this page cannot follow it', () => {
+      const message =
+        'This request is still pending and can still complete after this message. Check its status in the ' +
+        'Anchorage extension before you try again. (-32005)';
+      renderModal({
+        ...inReview(),
+        phase: 'stopped',
+        steps: [{ status: 'provider-failure', message, isPendingInWallet: true }, { status: 'waiting' }],
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent('Supply Stopped');
+      expect(
+        within(dialog).getByText(
+          'Your wallet still has this request open. Approve or reject it in the Anchorage app on your phone. ' +
+            'Approving it still sends the transaction, but this page cannot follow that transaction. ' +
+            'The request may still go through, so check your wallet before you try again. ' +
+            'Once your wallet shows the request done, reload this page. The panel then shows the result. ' +
+            'After you press Stop waiting there, a new review starts from the new balances. ' +
+            `(Your wallet reported: ${message})`
+        )
+      ).toBeInTheDocument();
+      expect(dialog).not.toHaveTextContent(/your wallet reported an error/i);
+      // The supply still stops there: nothing more is sent, and there is nothing to confirm.
+      expect(dialog).toHaveTextContent('Not sent.');
+      expect(dialog).toHaveTextContent('This supply stopped, and nothing more is sent from it.');
+      expect(within(dialog).queryByRole('button', { name: /approve|supply 1,000/i })).not.toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: 'Close' })).toBeEnabled();
     });
 
     it('lists what was already sent when an identity change closed the supply', () => {

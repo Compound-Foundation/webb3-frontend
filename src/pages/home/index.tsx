@@ -736,6 +736,7 @@ const Home = ({
         }
         earnAPR={cometForRoute?.earnAPR ?? 0n}
         session={wrappedAction.session}
+        isRecoveredRequestPendingInWallet={wrappedAction.isRecoveredRequestPendingInWallet}
         canDismissRecovered={wrappedAction.canDismissRecovered}
         onDismissRecovered={wrappedAction.dismissRecovered}
         hasUnansweredWalletRequest={wrappedAction.hasUnansweredWalletRequest}
