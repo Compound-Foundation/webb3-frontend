@@ -22,7 +22,10 @@ const option = (name) => args[args.indexOf(name) + 1];
 const forkUrl = option('--fork-url');
 const forkBlock = Number(option('--fork-block-number'));
 
-/** anvil's error for a failed genesis read, as anvil 1.2.3 words it. */
+/**
+ * anvil's error for a failed genesis read, as anvil 1.2.3 words it. alloy adds a JSON-RPC error's
+ * data after its message.
+ */
 function genesisError(status, body) {
   let answer;
   try {
@@ -34,7 +37,9 @@ function genesisError(status, body) {
     status !== 200
       ? `Max retries exceeded HTTP error ${status} with ${body === '' ? 'empty body' : `body: ${body}`}`
       : answer?.error !== undefined
-      ? `server returned an error response: error code ${answer.error.code}: ${answer.error.message}`
+      ? `server returned an error response: error code ${answer.error.code}: ${answer.error.message}${
+          answer.error.data === undefined ? '' : `, data: ${JSON.stringify(answer.error.data)}`
+        }`
       : `deserialization error: invalid value, text: ${body}`;
   return `Error: failed to create genesis\n\nContext:\n- failed to get account for ${GENESIS_ACCOUNT}: ${cause}\n`;
 }

@@ -64,11 +64,11 @@ export const UPSTREAM_METHODS = new Set([
 ]);
 
 /**
- * A part of the private URL that can be a key: 16 characters or more, and not only digits. A
+ * A part of the private URL that can be a key: 16 characters or more, digits only included. A
  * shorter part, such as `v2`, `eth` or a port, also occurs in ordinary text and figures, and a
  * redaction of it corrupts them.
  */
-export const isKeyLike = (part) => part.length >= 16 && !/^\d+$/.test(part);
+export const isKeyLike = (part) => part.length >= 16;
 
 /** `text` with each character that a regular expression reads specially escaped. */
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -263,12 +263,22 @@ export function createRedactor(secretPatterns) {
   return { redact, redactStrings, lineRedactor, printable };
 }
 
-/** A JSON-RPC error's code, or undefined when it has no integer code. */
-const errorCode = (error) => (Number.isInteger(error?.code) ? error.code : undefined);
+/**
+ * A private upstream's JSON-RPC error code, or undefined when it has no integer code of at most five
+ * digits. JSON-RPC's codes and the upstreams' own, such as -32000, -32012, 429 or 15, have at most
+ * five. An upstream can echo a numeric key as the code, and the redaction misses a code of more than
+ * 15 digits, which loses digits when parsed. So the runner neither prints nor relays a longer code.
+ */
+const errorCode = (error) => (Number.isInteger(error?.code) && Math.abs(error.code) <= 99_999 ? error.code : undefined);
 
-/** A JSON-RPC error named by its code alone, so that none of the upstream's text goes with it. */
-const describedError = (error) =>
-  errorCode(error) === undefined ? 'a JSON-RPC error' : `a JSON-RPC error with code ${errorCode(error)}`;
+/** A private upstream's JSON-RPC error named by its code alone, so that none of the upstream's text goes with it. */
+function describedError(error) {
+  if (!Number.isInteger(error?.code)) return 'a JSON-RPC error';
+  const code = errorCode(error);
+  return code === undefined
+    ? 'a JSON-RPC error with a code of more than five digits, withheld'
+    : `a JSON-RPC error with code ${code}`;
+}
 
 /** Why `fetch` got no answer, by the cause's code alone. A cause's message can name the host. */
 function noAnswer(error, timeoutMs) {
@@ -368,15 +378,21 @@ const isBareError = (parsed) =>
   typeof parsed.message === 'string' &&
   !isResponse(parsed);
 
-/** anvil's backoff hint in a JSON-RPC error's data, `data.rate.backoff_seconds`, as Infura sends it, or undefined. */
+/**
+ * anvil's backoff hint in a JSON-RPC error's data, `data.rate.backoff_seconds`, as Infura sends it,
+ * rounded up to whole seconds, or undefined. anvil prints an error's data in its log, so a hint of
+ * more than five digits, or its digits after the point, could carry a numeric key, as a code can
+ * (see `errorCode`). A hint of a day, 86400 s, has five.
+ */
 function backoffSeconds(error) {
   const seconds = error?.data?.rate?.backoff_seconds;
-  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+  return typeof seconds === 'number' && seconds >= 0 && seconds <= 99_999 ? Math.ceil(seconds) : undefined;
 }
 
 /**
  * A private upstream's JSON-RPC error without its text: its code, `withheldMessage`, and anvil's
- * backoff hint if it has one. An error with no integer code gets -32603, the internal error.
+ * backoff hint if it has one. An error with no code that `errorCode` keeps gets -32603, the internal
+ * error. anvil's retry rule reads only codes of at most five digits, so it retries as it would have.
  */
 function withheldError(error) {
   const seconds = backoffSeconds(error);
@@ -438,7 +454,8 @@ function relayed(status, contentType, answer, { isPrivate, printable }) {
   if (errors.length === 0) return { status, contentType, body: answer, errors };
   const relayedEntries = entries.map((entry) =>
     hasError(entry)
-      ? { jsonrpc: '2.0', id: Number.isInteger(entry.id) ? entry.id : null, error: withheldError(entry.error) }
+      ? // An id above 2^53 loses digits when parsed, as a code does (see `errorCode`).
+        { jsonrpc: '2.0', id: Number.isSafeInteger(entry.id) ? entry.id : null, error: withheldError(entry.error) }
       : entry
   );
   const body = Buffer.from(JSON.stringify(Array.isArray(parsed) ? relayedEntries : relayedEntries[0]));
@@ -639,6 +656,13 @@ export const failedToStartOnUpstream = ({ stats, output, isTimedOut = false, now
 
 /** The last second that a JavaScript date can hold: 8.64e15 ms after 1970. */
 const LAST_DATE_SECONDS = 8.64e12;
+
+/**
+ * Whether `answer`, an upstream's latest block number, is a hex number below 2^32. The runner
+ * prints the block it forks, and a longer number can be a numeric key that no redaction matches
+ * once the runner subtracts its lag from it.
+ */
+export const isBlockNumber = (answer) => typeof answer === 'string' && /^0x[0-9a-fA-F]{1,8}$/.test(answer);
 
 /**
  * Whether the block `header` that an upstream reports has a 32-byte hash and a hex timestamp that a

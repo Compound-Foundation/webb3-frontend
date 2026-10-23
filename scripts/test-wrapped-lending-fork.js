@@ -23,10 +23,10 @@
 // key, from every output it writes, in each form an upstream can echo it: as written, decoded,
 // re-encoded, JSON-escaped or in another case. An upstream's error text can echo the key, so the
 // runner prints no error text of a private upstream's. It names a failure by its HTTP status and a
-// reason, and the proxy passes anvil a private upstream's error codes without their text. A
-// successful answer reaches anvil unchanged, so only the redaction covers text inside a result. The
-// tests get none of the runner's environment except the variables they need, so they never see the
-// URL.
+// reason, and the proxy passes anvil a private upstream's error codes of at most five digits
+// without their text. A successful answer reaches anvil unchanged, so only the redaction covers text
+// inside a result. The tests get none of the runner's environment except the variables they need, so
+// they never see the URL.
 //
 // The fork listens on 127.0.0.1 only, sends no CORS headers, and is stopped on exit, on Ctrl-C and
 // on any error. The tests sign with impersonated accounts on the fork. Nothing is signed with a real
@@ -73,6 +73,7 @@ import {
   finalVerdict,
   heldToJest,
   isBlockHeader,
+  isBlockNumber,
   isRetryable,
   MARKET_COLUMNS,
   notExercisedCells,
@@ -173,7 +174,9 @@ async function forkTarget(endpoint, block) {
       mode: number === PINNED_BLOCK ? 'pinned' : 'recent',
     };
   }
-  const latest = Number(await call('eth_blockNumber'));
+  const answer = await call('eth_blockNumber');
+  if (!isBlockNumber(answer)) throw new Error('eth_blockNumber: an answer that is not a block number');
+  const latest = Number(answer);
   const header = await call('eth_getBlockByNumber', [hex(latest - RECENT_BLOCK_LAG), false]);
   if (!isBlockHeader(header)) throw new Error(`block ${latest - RECENT_BLOCK_LAG} has no valid hash or timestamp`);
   return { number: latest - RECENT_BLOCK_LAG, hash: header.hash, timestamp: Number(header.timestamp), mode: 'recent' };
