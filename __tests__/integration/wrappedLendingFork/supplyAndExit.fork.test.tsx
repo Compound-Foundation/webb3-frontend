@@ -291,9 +291,9 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     expect(quoteBlock.number).toBe(review.blockNumber);
     // The bound comes from the chain, not from the app's arithmetic. It is what the wrapper's own
     // `convertToAssets` says the shares are worth, times Comet's supply rate for one slot, rounded
-    // up. The payout and the quote each round down, so they differ by at most 1 unit. Comet's
-    // rounding of the wrapper's balance adds less than 1 unit more to the shares' value. No other
-    // transaction touches Comet between the quote and the exit.
+    // up. The payout and the quote each round down, so they differ by at most 1 unit more than the
+    // interest. Comet's rounding of the wrapper's balance adds less than 1 unit more to the shares'
+    // value. No other transaction touches Comet between the quote and the exit.
     const worth = await readBigInt(market.wrapperAddress, FORK_ONLY, 'convertToAssets', [review.quote.shares]);
     const utilization = await readBigInt(market.cometAddress, COMET, 'getUtilization');
     const supplyRate = await readBigInt(market.cometAddress, COMET, 'getSupplyRate', [utilization]);
