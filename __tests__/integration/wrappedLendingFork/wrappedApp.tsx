@@ -19,7 +19,7 @@ import { forkProvider } from './fork';
 
 /** Reads that wait for a block try again quickly: the fork answers at once. */
 const FORK_BLOCK_WAIT: BlockWait = { attempts: 200, intervalMs: 25 };
-/** How long a step may take on the fork, from confirmation to its receipt. */
+/** How long a step can take on the fork, from confirmation to its receipt. */
 const STEP_TIMEOUT_MS = 120_000;
 
 export type SessionSetup = {
@@ -122,6 +122,13 @@ export async function renderWrappedApp<T = undefined>(
   useExtra?: ExtraHooks<T>
 ) {
   const wallet = forkProvider();
+  // Every request the app's wallet sends for signature, counted where the app's signer makes it.
+  let walletSendCount = 0;
+  const send = wallet.send.bind(wallet);
+  wallet.send = (method: string, params: unknown[]) => {
+    if (method === 'eth_sendTransaction') walletSendCount += 1;
+    return send(method, params);
+  };
   const readProvider = forkProvider();
   const initialSession = await sessionFor(wallet, readProvider, setup);
   const hook = renderHook(
@@ -157,7 +164,7 @@ export async function renderWrappedApp<T = undefined>(
     return 'steps' in current ? current.steps : [];
   };
 
-  /** Waits until the lifecycle would start a review of `type`: no other review or transaction is in progress. */
+  /** Waits until `blockedReason(type)` allows a review of `type`: no other review or transaction is in progress. */
   const waitUntilReady = async (type: WrappedActionType) => {
     await waitFor(() => expect(result.current.action.blockedReason(type)).toBeUndefined(), {
       timeout: STEP_TIMEOUT_MS,
@@ -181,6 +188,8 @@ export async function renderWrappedApp<T = undefined>(
   return {
     ...hook,
     wallet,
+    /** How many transactions the app's wallet was asked to send. */
+    walletSends: () => walletSendCount,
     readProvider,
     state,
     steps,
@@ -206,7 +215,7 @@ export async function renderWrappedApp<T = undefined>(
       const current = state();
       return 'rechecked' in current ? current.rechecked : undefined;
     },
-    /** Why the review could not be read, when it could not. */
+    /** The message of a review that failed to read, if it failed. */
     readFailure: () => {
       const current = state();
       return current.phase === 'read-failed' ? current.message : undefined;

@@ -66,8 +66,16 @@ export function forkAccount(role: string, market: ForkMarket): string {
 
 const provider = forkProvider();
 
-/** Makes `account` signable on the fork through `eth_sendTransaction`, with ether for gas. */
-export async function prepareAccount(account: string): Promise<string> {
+/**
+ * Makes `account` signable on the fork through `eth_sendTransaction`, with ether for gas. A test
+ * account must be fresh: no code and no transactions, as `forkAccount` promises. An existing
+ * account, such as Comet's pause guardian, is impersonated as it is.
+ */
+export async function prepareAccount(account: string, { existing = false } = {}): Promise<string> {
+  if (!existing) {
+    const [code, nonce] = await Promise.all([provider.getCode(account), provider.getTransactionCount(account)]);
+    if (code !== '0x' || nonce !== 0) throw new Error(`The test account ${account} is not fresh.`);
+  }
   await anvil.impersonate(account);
   await anvil.setBalance(account, 100n * 10n ** 18n);
   return account;
@@ -170,7 +178,11 @@ export async function sendFrom(
   return { hash, receipt };
 }
 
-/** The revert data of `request` from `from` at `blockTag`, or undefined when the call succeeds. */
+/**
+ * The revert data of `request` from `from` at `blockTag`, `0x` for a revert without data, or
+ * undefined when the call succeeds. Any other failure, such as a failed fetch from the upstream,
+ * is thrown: it says nothing about the contract.
+ */
 export async function revertDataOf(
   from: string,
   request: { to: string; data: string },
@@ -183,9 +195,11 @@ export async function revertDataOf(
     ]);
     return undefined;
   } catch (error) {
-    const data =
-      (error as { error?: { data?: unknown }; data?: unknown }).error?.data ?? (error as { data?: unknown }).data;
-    return typeof data === 'string' ? data : '0x';
+    // Ethers keeps the node's JSON-RPC error in `error`. anvil reports a revert with code 3.
+    const nodeError = (error as { error?: { code?: unknown; message?: unknown; data?: unknown } }).error;
+    const isRevert = nodeError?.code === 3 || /revert/i.test(String(nodeError?.message));
+    if (!isRevert) throw error;
+    return typeof nodeError?.data === 'string' ? nodeError.data : '0x';
   }
 }
 
@@ -246,10 +260,14 @@ export async function readAccount(
 
 /**
  * What a mined transaction did to the account, read from the chain: its figures in the parent block
- * and in the transaction's own block, its gas, and the wrapper and base-token events in its receipt. Anvil
- * mines one transaction per block here, so the parent block is the state just before it.
+ * and in the transaction's own block, its gas, and the wrapper and base-token events in its receipt.
+ * The block must hold this transaction alone, so that the parent block is the state just before it.
  */
 export async function receiptEffects(market: WrappedMarket, account: string, receipt: TransactionReceipt) {
+  const block = await provider.getBlock(receipt.blockNumber);
+  if (block.transactions.length !== 1) {
+    throw new Error(`Block ${receipt.blockNumber} holds ${block.transactions.length} transactions, not one.`);
+  }
   const before = await readAccount(market, account, receipt.blockNumber - 1);
   const after = await readAccount(market, account, receipt.blockNumber);
   const events = receipt.logs.flatMap((log) => {
@@ -281,4 +299,18 @@ export async function receiptEffects(market: WrappedMarket, account: string, rec
       .filter((event) => toAccount(event.args.to))
       .reduce((sum, event) => sum + BigInt(event.args.value.toString()), 0n),
   };
+}
+
+type ExitEffects = Awaited<ReturnType<typeof receiptEffects>>;
+
+/**
+ * Checks a mined exit against the quote it is held to: it burned exactly `shares` from the account,
+ * its `Withdraw` event names those shares, and the account's wallet received exactly `cash`, all of
+ * it in base-token transfers to the account.
+ */
+export function expectExitPaid(effects: ExitEffects, quote: { shares: bigint; cash: bigint }) {
+  expect(-effects.shareDelta).toBe(quote.shares);
+  expect(BigInt(effects.withdraw?.args.shares.toString() ?? '-1')).toBe(quote.shares);
+  expect(effects.cashDelta).toBe(quote.cash);
+  expect(effects.cashPaidToAccount).toBe(quote.cash);
 }

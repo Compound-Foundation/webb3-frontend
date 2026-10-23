@@ -36,7 +36,7 @@ const JEST_CONFIG = path.join(ROOT, '__tests__/integration/wrappedLendingFork/je
 /** The block docs/anchorage-wrapper-registry.md records its deployment reads at, and its hash. */
 const PINNED_BLOCK = 26244888;
 const PINNED_HASH = '0x440c51a6a6953b880568c1b60e4ad59044f3fa783e340e34d66793e466883839';
-/** A recent fork stays this many blocks behind the latest, so it is final on any endpoint. */
+/** A recent fork stays this many blocks behind the endpoint's latest, so that every node behind it has the block. */
 const RECENT_BLOCK_LAG = 8;
 /**
  * The EVM rules the fork runs. anvil 1.2.3 knows no later mainnet hardfork, and its default for a
@@ -52,14 +52,26 @@ const PUBLIC_ENDPOINTS = [
   'https://ethereum-rpc.publicnode.com',
 ];
 const MARKET_COLUMNS = ['USDC', 'USDT', 'institutional USDC', 'factory'];
+/**
+ * A failed test's reason that an upstream failure gives: the fork failed to fetch state or to answer.
+ * A failure of any other kind is a test's own, and the runner never retries it.
+ */
+const UPSTREAM_REASON =
+  /missing response|SERVER_ERROR|TIMEOUT|timeout exceeded|socket hang up|ECONNRESET|ECONNREFUSED|failed to get|error sending request|header not found/i;
 /** The largest JSON-RPC body the proxy forwards: far above anything anvil sends. */
 const MAX_PROXY_BODY_BYTES = 10 * 1024 * 1024;
 
 function parseArgs(argv) {
   const options = { block: 'auto', solcOutput: undefined, logDir: undefined, port: 0, test: undefined };
   for (let index = 0; index < argv.length; index++) {
-    const [flag, inline] = argv[index].split('=', 2);
-    const value = () => inline ?? argv[++index];
+    const equals = argv[index].indexOf('=');
+    const flag = equals === -1 ? argv[index] : argv[index].slice(0, equals);
+    const inline = equals === -1 ? undefined : argv[index].slice(equals + 1);
+    const value = () => {
+      const next = inline ?? argv[++index];
+      if (next === undefined || next === '') throw new Error(`${flag} takes a value.`);
+      return next;
+    };
     switch (flag) {
       case '--block':
         options.block = value();
@@ -179,7 +191,7 @@ async function forkTarget(endpoint, block) {
     const number = block === 'pinned' ? PINNED_BLOCK : Number(block);
     const header = await rpc(endpoint.url, 'eth_getBlockByNumber', [hex(number), false]);
     if (header === null) return undefined;
-    if (block === 'pinned' && header.hash !== PINNED_HASH) throw new Error(`block ${number} has another hash`);
+    if (number === PINNED_BLOCK && header.hash !== PINNED_HASH) throw new Error(`block ${number} has another hash`);
     await rpc(endpoint.url, 'eth_getBalance', ['0x0000000000000000000000000000000000000000', hex(number)]);
     return {
       number,
@@ -194,15 +206,14 @@ async function forkTarget(endpoint, block) {
 }
 
 /** The first endpoint and block the option allows, trying the pinned block first under `auto`. */
-async function chooseFork(endpoints, option, skip = new Set()) {
+async function chooseFork(endpoints, option) {
   const attempts = option === 'auto' ? ['pinned', 'recent'] : [option];
   const problems = [];
   for (const attempt of attempts) {
     for (const endpoint of endpoints) {
-      if (skip.has(`${endpoint.url}|${attempt}`)) continue;
       try {
         const target = await forkTarget(endpoint, attempt);
-        if (target !== undefined) return { endpoint, target, attempt };
+        if (target !== undefined) return { endpoint, target };
         problems.push(`${endpoint.label}: no block for ${attempt}`);
       } catch (error) {
         problems.push(`${endpoint.label}, ${attempt} block: ${redact(error.message)}`);
@@ -214,7 +225,7 @@ async function chooseFork(endpoints, option, skip = new Set()) {
 
 /**
  * Forwards anvil's JSON-RPC requests to the upstream, so that only this process holds the upstream
- * URL. It listens on 127.0.0.1 and refuses what a web page could send: a request with an Origin
+ * URL. It listens on 127.0.0.1 and refuses what a web page can send: a request with an Origin
  * header, a method other than POST, and a body that is not JSON. It never forwards an error's text,
  * which can name the upstream URL. It counts the requests the upstream failed.
  */
@@ -425,8 +436,9 @@ function runJest(options, fork, target, resultsPath, log) {
     if (!hasExited(child)) child.kill('SIGTERM');
   };
   fork.child.once('exit', onAnvilExit);
+  // 'close', not 'exit': it comes after the child's output streams have ended.
   return new Promise((resolve) =>
-    child.on('exit', (code, signal) => {
+    child.on('close', (code, signal) => {
       fork.child.off('exit', onAnvilExit);
       if (anvilExited) console.error('\nanvil exited while the suite ran, so the run fails.');
       resolve(anvilExited ? 1 : code ?? (signal ? 1 : 0));
@@ -533,14 +545,14 @@ async function main() {
         : createHash('sha256').update(fs.readFileSync(options.solcOutput)).digest('hex'),
   };
 
-  const tried = new Set();
   let runs = 0;
   let exitCode = 1;
   let summary;
+  const earlierFailures = [];
   for (;;) {
     runs += 1;
-    const { endpoint, target, attempt } = await chooseFork(endpoints, options.block, tried);
-    tried.add(`${endpoint.url}|${attempt}`);
+    // A retry chooses again: the same endpoint and pinned block if it serves them, or a fresh recent block.
+    const { endpoint, target } = await chooseFork(endpoints, options.block);
     const proxy = await startUpstreamProxy(endpoint.url);
     servers.add(proxy.server);
     const anvilLog = fs.createWriteStream(path.join(logDir, runs === 1 ? 'anvil.log' : `anvil-${runs}.log`));
@@ -587,8 +599,17 @@ async function main() {
     const upstream = `${proxy.stats.requests} upstream requests through the proxy, ${proxy.stats.failures} failed`;
     console.log(`\n${upstream}.`);
     summary = { header: `${header}\n  upstream use:  ${upstream}`, target, endpoint: endpoint.label, results, runs };
-    if (exitCode !== 0 && proxy.stats.failures > 0 && runs < 2) {
-      console.log('\nThe upstream failed during the run. Retrying once from a fresh fork.\n');
+    // Retry once, and only when the upstream failed requests and every failed test failed for that.
+    const isUpstreamFailure =
+      exitCode !== 0 &&
+      proxy.stats.failures > 0 &&
+      failed.length > 0 &&
+      failed.every((result) => UPSTREAM_REASON.test(String(result.reason)));
+    if (isUpstreamFailure && runs < 2) {
+      earlierFailures.push(
+        ...failed.map((result) => `- run ${runs}: ${result.market}, ${result.scenario}: ${result.reason}`)
+      );
+      console.log('\nEvery failure in this run came from the upstream. Retrying once from a fresh fork.\n');
       continue;
     }
     if (exitCode === 0 && (results.length === 0 || failed.length > 0)) exitCode = 1;
@@ -615,7 +636,8 @@ async function main() {
     '',
     ...(summary.runs > 1
       ? [
-          `This report is from run ${summary.runs}. Run 1 failed while the upstream failed requests. Its logs are anvil.log and jest.log.`,
+          `This report is from run ${summary.runs}. Run 1 failed only on upstream errors, listed below. Its logs are anvil.log, jest.log and results.json.`,
+          ...earlierFailures,
           '',
         ]
       : []),

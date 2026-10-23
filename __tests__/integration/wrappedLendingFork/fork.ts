@@ -42,7 +42,7 @@ export const anvil = {
   send: (method: string, params: unknown[] = []) => rpc.send(method, params),
   snapshot: (): Promise<string> => rpc.send('evm_snapshot', []),
   revert: async (id: string) => {
-    if ((await rpc.send('evm_revert', [id])) !== true) throw new Error(`The fork could not revert to snapshot ${id}.`);
+    if ((await rpc.send('evm_revert', [id])) !== true) throw new Error(`The fork did not revert to snapshot ${id}.`);
   },
   impersonate: (account: string) => rpc.send('anvil_impersonateAccount', [account]),
   setBalance: (account: string, wei: bigint) => rpc.send('anvil_setBalance', [account, `0x${wei.toString(16)}`]),

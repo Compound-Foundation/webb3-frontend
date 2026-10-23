@@ -49,7 +49,7 @@ test('the suite reaches the local fork it was started for, and no other host', a
   await expect(upstream.send('eth_blockNumber', [])).rejects.toMatchObject({
     serverError: expect.objectContaining({ message: expect.stringMatching(/only talks to the local fork/) }),
   });
-  // A raw TCP connection, which any library would make through `net`, is refused too.
+  // A raw TCP connection, which every library makes through `net`, is refused too.
   expect(() => net.connect(443, 'ethereum-rpc.publicnode.com')).toThrow(/only connects to the local fork/);
   expect((await provider.getNetwork()).chainId).toBe(1);
 });

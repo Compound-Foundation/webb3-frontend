@@ -6,7 +6,9 @@ import { parseExactUnits } from '@hooks/useWriteWrappedState';
 
 import {
   COMET,
+  dealToken,
   ERC20,
+  expectExitPaid,
   forkAccount,
   FORK_MARKETS,
   prepareAccount,
@@ -135,7 +137,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
           leavesDustFlag: review.quote.leavesDust,
           leftoverShares: effects.after.shares,
         });
-        expect(effects.cashDelta).toBe(review.quote.cash);
+        expectExitPaid(effects, review.quote);
         expect(review.quote.leavesDust).toBe(effects.after.shares > 0n);
         expect(effects.after.shares).toBeGreaterThan(0n);
         expect(await app.startWithdraw({ kind: 'full' })).toBeUndefined();
@@ -227,10 +229,13 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
           maxPartialPaid: effects.cashDelta,
           cashLeftAfter: effects.after.cometCash,
         });
-        expect(effects.cashDelta).toBe(review.quote.cash);
+        expectExitPaid(effects, review.quote);
       });
+      // Comet's transfer of more base token than it holds: USDC reverts with its reason, USDT without data.
       measured.onChainFullExitRevert = revertName(await revertDataOf(account, exitOf(await sharesOf(account))));
-      expect(measured.onChainFullExitRevert).not.toBe('no revert');
+      expect(measured.onChainFullExitRevert).toBe(
+        symbol === 'USDT' ? 'revert without data' : 'Error(ERC20: transfer amount exceeds balance)'
+      );
     })
   );
 
@@ -245,7 +250,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         measured.rateRaisedByBorrowing = drain.borrowed;
         injected = await backdateAccrual(market);
       }
-      if (injected === undefined) throw new Error('The accrual could not be back-dated far enough.');
+      if (injected === undefined) throw new Error('The accrual cannot be back-dated far enough on this market.');
       Object.assign(measured, {
         storedIndex: injected.storedIndex,
         backdatedSeconds: injected.elapsedSeconds,
@@ -294,14 +299,19 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
   scenario('estimate-rose', label, (measured) =>
     onSnapshot(async () => {
       await setUp();
-      const donor = await fundedAccount(market, forkAccount('donor', forkMarket), units(10_000));
+      const donor = await prepareAccount(forkAccount('donor', forkMarket));
       await withApp(async (app) => {
         // A partial exit whose shares pay more than 0.1% above the reviewed cash, after a donation to
         // the wrapper, stops for a fresh review, which burns fewer shares for the amount.
         expect(await app.startWithdraw({ kind: 'partial', cash: units(500) })).toBeUndefined();
         const stale = app.draft().withdrawal?.quote;
         if (stale === undefined) throw new Error('The withdrawal draft has no quote.');
-        await donateToWrapper(market, donor, units(100));
+        // At least 0.5% of the wrapper's assets, so that each share's value rises well past 0.1%.
+        const wrapperAssets = await readBigInt(market.cometAddress, COMET, 'balanceOf', [market.wrapperAddress]);
+        const donation = wrapperAssets / 200n > units(100) ? wrapperAssets / 200n : units(100);
+        measured.donation = donation;
+        await dealToken(market.baseTokenAddress, donor, 2n * donation);
+        await donateToWrapper(market, donor, donation);
         measured.partialStop = blockedMessage(await expectStoppedBeforeSignature(app));
         expect(measured.partialStop).toMatch(/more than 0\.1% above the 500\.000000 .* you reviewed/);
         expect(await app.startWithdraw({ kind: 'partial', cash: units(500) })).toBeUndefined();
@@ -316,14 +326,14 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
           freshPaidCash: partial.cashDelta,
         });
         expect(fresh.shares).toBeLessThan(stale.shares);
-        expect(partial.cashDelta).toBe(fresh.cash);
+        expectExitPaid(partial, fresh);
 
         // A full exit goes on however much its shares come to pay. It pays what the check quoted at
         // the signature's block, which the dialog then shows.
         expect(await app.startWithdraw({ kind: 'full' })).toBeUndefined();
         const reviewed = app.draft().withdrawal?.quote;
         if (reviewed === undefined) throw new Error('The withdrawal draft has no quote.');
-        await donateToWrapper(market, donor, units(100));
+        await donateToWrapper(market, donor, donation);
         await anvil.setNextBlockTimestamp((await anvil.latestBlock()).timestamp);
         const full = await receiptEffects(market, account, app.receiptOf(await app.confirmStep()));
         const rechecked = app.rechecked();
@@ -336,7 +346,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         });
         expect(rechecked.quote.shares).toBe(reviewed.shares);
         expect(rechecked.quote.cash).toBeGreaterThan(reviewed.cash);
-        expect(full.cashDelta).toBe(rechecked.quote.cash);
+        expectExitPaid(full, rechecked.quote);
         expect(full.after.shares).toBe(0n);
       });
     })
