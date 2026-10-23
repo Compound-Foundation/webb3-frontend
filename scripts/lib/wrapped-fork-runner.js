@@ -60,9 +60,91 @@ export const UPSTREAM_METHODS = new Set([
  */
 export const isKeyLike = (part) => part.length >= 16 && !/^\d+$/.test(part);
 
+/** `text` with each character that a regular expression reads specially escaped. */
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** A pattern for the hex digits `hex` in either case. */
+const eitherCase = (hex) =>
+  [...hex].map((digit) => (/[a-f]/.test(digit) ? `[${digit}${digit.toUpperCase()}]` : digit)).join('');
+
+/**
+ * A pattern for `character` in each form that an echo of a URL can give it: the character itself,
+ * percent-encoded once or twice with hex digits in either case, or a JSON `\u` escape. A `+` and a
+ * space each also match the other, because a form-encoded query writes a space as `+`.
+ */
+function characterPattern(character) {
+  const forms = (character === '+' || character === ' ' ? ['+', ' '] : [character]).flatMap((each) => {
+    const bytes = [...Buffer.from(each, 'utf8')].map((byte) => eitherCase(byte.toString(16).padStart(2, '0')));
+    const units = [...Array(each.length).keys()].map((index) =>
+      eitherCase(each.charCodeAt(index).toString(16).padStart(4, '0'))
+    );
+    return [
+      escapeRegExp(each),
+      bytes.map((byte) => `%${byte}`).join(''),
+      bytes.map((byte) => `%25${byte}`).join(''),
+      units.map((unit) => `\\\\u${unit}`).join(''),
+    ];
+  });
+  return `(?:${forms.join('|')})`;
+}
+
+/** `text` percent-decoded, or undefined when its percent-encoding is malformed. */
+function decoded(text) {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The parts of a private URL that can each carry a key, both as the URL is written and as the URL
+ * parser reads it: the host and each of its labels, each path segment, the query, each query field
+ * with its name and value, and the fragment.
+ */
+function urlParts(privateUrl, url) {
+  // RFC 3986, appendix B: the URL's parts as written, before the parser normalizes them.
+  const [, authority = '', pathname = '', query = '', fragment = ''] =
+    /^(?:[^:/?#]+:)?(?:\/\/([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/s.exec(privateUrl);
+  const fields = (text) =>
+    text.split(/[&;]/).flatMap((field) => {
+      const equals = field.indexOf('=');
+      return equals === -1 ? [field] : [field, field.slice(0, equals), field.slice(equals + 1)];
+    });
+  return [
+    authority,
+    ...authority.split(/[.:@]/),
+    url.host,
+    ...url.hostname.split('.'),
+    ...pathname.split('/'),
+    ...url.pathname.split('/'),
+    query,
+    ...fields(query),
+    ...fields(url.search.slice(1)),
+    ...[...url.searchParams].flat(),
+    fragment,
+    url.hash.slice(1),
+  ];
+}
+
+/**
+ * The patterns of the secrets in a private URL: the whole URL, and each key-like part of it, as
+ * written and decoded. A part's decoded form is never longer than the part, so the part decides
+ * whether it is key-like. Each pattern matches its secret in any mix of the forms that
+ * `characterPattern` lists. So an upstream's echo of a key, encoded, decoded or escaped, matches it.
+ */
+function secretPatternsOf(privateUrl, url) {
+  const parts = urlParts(privateUrl, url).flatMap((part) =>
+    isKeyLike(part) ? [part, decoded(part)].filter((form) => form !== undefined) : []
+  );
+  return [...new Set([privateUrl, url.href, ...parts])].map((secret) => [...secret].map(characterPattern).join(''));
+}
+
 /**
  * The upstream endpoints to try. A private URL is labelled. The runner redacts from every output
- * the whole URL, and each key-like part of it: its host, each path segment and each query value.
+ * the whole URL, and each part of it that can carry a key, in each form an upstream can echo it.
+ * For a private endpoint, the runner also prints no text of the upstream's (see `rpc` and
+ * `startUpstreamProxy`).
  */
 export function upstreamEndpoints(env = process.env) {
   const privateUrl = env.WRAPPED_FORK_RPC_URL;
@@ -75,20 +157,51 @@ export function upstreamEndpoints(env = process.env) {
     if (url.username !== '' || url.password !== '') {
       throw new Error('WRAPPED_FORK_RPC_URL must not carry a user name or password. Put the key in its path or query.');
     }
-    const parts = [url.host, ...url.pathname.split('/'), ...url.searchParams.values()];
-    const secrets = [privateUrl, url.href, ...parts.filter(isKeyLike)];
-    return [{ label: 'WRAPPED_FORK_RPC_URL (private, not printed)', url: privateUrl, secrets }];
+    return [
+      {
+        label: 'WRAPPED_FORK_RPC_URL (private, not printed)',
+        url: privateUrl,
+        isPrivate: true,
+        secretPatterns: secretPatternsOf(privateUrl, url),
+      },
+    ];
   }
-  return PUBLIC_ENDPOINTS.map((url) => ({ label: `${url} (public)`, url, secrets: [] }));
+  return PUBLIC_ENDPOINTS.map((url) => ({ label: `${url} (public)`, url, isPrivate: false, secretPatterns: [] }));
 }
 
 /**
- * The redaction of `secrets` from the runner's outputs. It redacts the longest secret first, so that
- * a part never splits a longer secret first.
+ * The redaction of the secrets that `secretPatterns` match from the runner's outputs. It replaces
+ * each stretch of text that one or more patterns match with `<redacted>`. Two matches that overlap
+ * or touch become one stretch, so no part of either secret stays.
  */
-export function createRedactor(secrets) {
-  const ordered = [...new Set(secrets)].sort((a, b) => b.length - a.length);
-  const redact = (text) => ordered.reduce((result, secret) => result.split(secret).join('<redacted>'), String(text));
+export function createRedactor(secretPatterns) {
+  const expressions = [...new Set(secretPatterns)].map((source) => new RegExp(source, 'g'));
+  const redact = (value) => {
+    const text = String(value);
+    const matches = [];
+    for (const expression of expressions) {
+      expression.lastIndex = 0;
+      for (let match = expression.exec(text); match !== null; match = expression.exec(text)) {
+        if (match[0] !== '') matches.push([match.index, match.index + match[0].length]);
+        // The next search starts one character on, so that it also finds an overlapping match.
+        expression.lastIndex = match.index + 1;
+      }
+    }
+    matches.sort(([startA], [startB]) => startA - startB);
+    const stretches = [];
+    for (const [start, end] of matches) {
+      const last = stretches[stretches.length - 1];
+      if (last !== undefined && start <= last[1]) last[1] = Math.max(last[1], end);
+      else stretches.push([start, end]);
+    }
+    let redacted = '';
+    let position = 0;
+    for (const [start, end] of stretches) {
+      redacted += `${text.slice(position, start)}<redacted>`;
+      position = end;
+    }
+    return redacted + text.slice(position);
+  };
 
   /** `value` with each string in it redacted. A redaction of the JSON text instead can break its syntax. */
   function redactStrings(value) {
@@ -133,40 +246,171 @@ export function createRedactor(secrets) {
   return { redact, redactStrings, lineRedactor, printable };
 }
 
+/** A JSON-RPC error's code, or undefined when it has no integer code. */
+const errorCode = (error) => (Number.isInteger(error?.code) ? error.code : undefined);
+
+/** A JSON-RPC error named by its code alone, so that none of the upstream's text goes with it. */
+const describedError = (error) =>
+  errorCode(error) === undefined ? 'a JSON-RPC error' : `a JSON-RPC error with code ${errorCode(error)}`;
+
+/** Why `fetch` got no answer, by the cause's code alone. A cause's message can name the host. */
+function noAnswer(error, timeoutMs) {
+  if (error?.name === 'TimeoutError') return `no answer within ${timeoutMs / 1000} s`;
+  const code = error?.cause?.code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]*$/.test(code) ? `no connection (${code})` : 'no connection';
+}
+
+/**
+ * Calls `method` on the JSON-RPC endpoint at `url` and returns the result. A failure throws an
+ * error that names the method, and the HTTP status or the reason there was no answer. For a private
+ * endpoint (`isPrivate`), the error names a JSON-RPC error by its code alone. An upstream's error
+ * text can echo the key, in any encoding, so the runner never prints a private upstream's text.
+ */
+export async function rpc(url, method, params = [], { timeoutMs = 20_000, isPrivate = false } = {}) {
+  let response;
+  let text;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) throw new Error(`${method}: HTTP ${response.status}`);
+    text = await response.text();
+  } catch (error) {
+    if (response !== undefined && !response.ok) throw error;
+    throw new Error(`${method}: ${noAnswer(error, timeoutMs)}`);
+  }
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(`${method}: HTTP ${response.status}, an answer that is not JSON`);
+  }
+  if (body?.error !== undefined && body?.error !== null) {
+    throw new Error(
+      isPrivate
+        ? `${method}: HTTP ${response.status}, ${describedError(body.error)}`
+        : `${method}: ${body.error.message ?? JSON.stringify(body.error)}`
+    );
+  }
+  return body?.result;
+}
+
+/**
+ * The phrases that anvil's retry rule reads in a JSON-RPC error's message: alloy's
+ * `ErrorPayload::is_retry_err`, in the alloy 0.12.6 that anvil 1.2.3 is built with. anvil retries a
+ * call whose error message contains one of them. For `credits`, it also needs the error code
+ * -32012, which the proxy relays. The rule's other phrases, such as `request limit reached` with
+ * -32007, contain one of these.
+ */
+const RETRY_PHRASES = [
+  'rate limit',
+  'rate exceeded',
+  'too many requests',
+  'credits limited',
+  'credits',
+  'request limit',
+];
+/** The messages that anvil's retry rule matches only whole. */
+const RETRY_MESSAGES = ['header not found', 'daily request count exceeded, request rate limited'];
+
+/**
+ * The message that anvil gets in place of a private upstream's JSON-RPC error message: only the
+ * phrases of anvil's retry rule that the message holds. anvil then retries the call as it would
+ * have, and no other text of the upstream's reaches anvil.
+ */
+export function withheldMessage(message) {
+  const text = typeof message === 'string' ? message : '';
+  if (RETRY_MESSAGES.includes(text)) return text;
+  const phrases = RETRY_PHRASES.filter((phrase) => text.includes(phrase));
+  return phrases.length === 0
+    ? "the private upstream's message is withheld"
+    : `${phrases.join('; ')} (the rest of the private upstream's message is withheld)`;
+}
+
 /** `method` if it is a JSON-RPC method name, so that a request cannot write other text into the summary. */
 export const methodName = (method) =>
   typeof method === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(method) ? method : '<invalid>';
 
 export const countIn = (counts, key) => counts.set(key, (counts.get(key) ?? 0) + 1);
 
-/** The error message of each call that a JSON-RPC answer reports as failed, as `printable` gives it. */
-function errorsIn(answer, printable) {
-  try {
-    const parsed = JSON.parse(answer.toString('utf8'));
-    return (Array.isArray(parsed) ? parsed : [parsed])
-      .filter((entry) => entry?.error !== undefined && entry?.error !== null)
-      .map((entry) => printable(entry.error.message ?? JSON.stringify(entry.error)));
-  } catch {
-    return ['an answer that is not JSON'];
+const hasError = (entry) => entry?.error !== undefined && entry?.error !== null;
+const isResponse = (entry) =>
+  entry !== null && typeof entry === 'object' && !Array.isArray(entry) && ('result' in entry || 'error' in entry);
+
+/**
+ * What the proxy relays to anvil for the upstream's answer, and what it records: an HTTP error as a
+ * failure, and each call answered with an error. For a public endpoint, the answer goes to anvil
+ * unchanged, and the record keeps each error's message, as `printable` gives it.
+ *
+ * For a private endpoint, no text of the upstream's reaches anvil. anvil prints the upstream's
+ * answer in its log and in its errors to the tests, and an upstream can echo the key there in any
+ * encoding. So the proxy changes an answer that carries text, and the record names only a status,
+ * an error code or a kind of answer:
+ * - an HTTP error goes on with its status and no body
+ * - each JSON-RPC error goes on with its code and `withheldMessage`, and no data
+ * - an answer that is not JSON, or not a JSON-RPC response, becomes HTTP 502 with no body
+ * - any other answer goes on unchanged
+ */
+function relayed(status, contentType, answer, { isPrivate, printable }) {
+  const withheld = (error) => ({ status: 502, contentType: 'text/plain', body: Buffer.alloc(0), errors: [error] });
+  if (status >= 400) {
+    return isPrivate
+      ? { status, contentType: 'text/plain', body: Buffer.alloc(0), failure: `HTTP ${status}`, errors: [] }
+      : { status, contentType, body: answer, failure: `HTTP ${status}`, errors: [] };
   }
+  let parsed;
+  try {
+    parsed = JSON.parse(answer.toString('utf8'));
+  } catch {
+    return isPrivate
+      ? withheld('an answer that is not JSON')
+      : { status, contentType, body: answer, errors: ['an answer that is not JSON'] };
+  }
+  const entries = Array.isArray(parsed) ? parsed : [parsed];
+  if (!isPrivate) {
+    const errors = entries
+      .filter(hasError)
+      .map((entry) => printable(entry.error.message ?? JSON.stringify(entry.error)));
+    return { status, contentType, body: answer, errors };
+  }
+  if (entries.length === 0 || !entries.every(isResponse)) return withheld('an answer that is not a JSON-RPC response');
+  const errors = entries.filter(hasError).map((entry) => describedError(entry.error));
+  if (errors.length === 0) return { status, contentType, body: answer, errors };
+  const relayedEntries = entries.map((entry) =>
+    hasError(entry)
+      ? {
+          jsonrpc: '2.0',
+          id: Number.isInteger(entry.id) ? entry.id : null,
+          error: {
+            code: errorCode(entry.error) ?? -32603,
+            message: withheldMessage(typeof entry.error === 'object' ? entry.error.message : undefined),
+          },
+        }
+      : entry
+  );
+  const body = Buffer.from(JSON.stringify(Array.isArray(parsed) ? relayedEntries : relayedEntries[0]));
+  return { status, contentType: 'application/json', body, errors };
 }
 
 /**
- * Forwards anvil's JSON-RPC requests to the upstream, so that only this process holds the upstream
- * URL. It listens on 127.0.0.1, and it refuses these requests:
+ * Forwards anvil's JSON-RPC requests to the upstream `endpoint`, so that only this process holds the
+ * upstream URL. It listens on 127.0.0.1, and it refuses these requests:
  * - a request with an Origin header, which a web page sends
  * - a method other than POST
  * - a content type other than JSON, or a body that is not JSON
  * - a body over 10 MB
  * - an empty batch, or a request or batch that calls a method outside `UPSTREAM_METHODS`
  *
- * It sends anvil no text of its own errors, which can name the upstream URL. The upstream's answers
- * reach anvil unchanged, and the runner redacts every output. It counts the methods it forwards and
- * each refusal, by its method or reason. It also counts the requests that the upstream failed and
- * the calls it answered with an error. It keeps the first such error, as `printable` gives it, for
- * the summary.
+ * It sends anvil no text of its own errors, which can name the upstream URL. A public endpoint's
+ * answers reach anvil unchanged. A private endpoint's answers reach anvil without the upstream's
+ * text (see `relayed`), and the runner redacts every output. The proxy counts the methods it forwards
+ * and each refusal, by its method or reason. It also counts the requests that the upstream failed
+ * and the calls it answered with an error. It keeps the first such error for the summary.
  */
-export function startUpstreamProxy(upstreamUrl, { printable }) {
+export function startUpstreamProxy(endpoint, { printable }) {
   const stats = {
     requests: 0,
     failures: 0,
@@ -218,25 +462,23 @@ export function startUpstreamProxy(upstreamUrl, { printable }) {
       for (const method of methods) countIn(stats.methods, method);
       stats.requests += 1;
       try {
-        const upstream = await fetch(upstreamUrl, {
+        const upstream = await fetch(endpoint.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(Array.isArray(parsed) ? checked : checked[0]),
           signal: AbortSignal.timeout(60_000),
         });
         const answer = Buffer.from(await upstream.arrayBuffer());
-        if (upstream.status >= 400) {
+        const contentType = upstream.headers.get('content-type') ?? 'application/json';
+        const relay = relayed(upstream.status, contentType, answer, { isPrivate: endpoint.isPrivate, printable });
+        if (relay.failure !== undefined) {
           stats.failures += 1;
-          stats.firstError ??= `HTTP ${upstream.status}`;
-        } else {
-          const errors = errorsIn(answer, printable);
-          stats.errorAnswers += errors.length;
-          stats.firstError ??= errors[0];
+          stats.firstError ??= relay.failure;
         }
-        response.writeHead(upstream.status, {
-          'content-type': upstream.headers.get('content-type') ?? 'application/json',
-        });
-        response.end(answer);
+        stats.errorAnswers += relay.errors.length;
+        stats.firstError ??= relay.errors[0];
+        response.writeHead(relay.status, { 'content-type': relay.contentType });
+        response.end(relay.body);
       } catch {
         stats.failures += 1;
         stats.firstError ??= 'no answer within 60 s, or no connection';

@@ -19,9 +19,12 @@
 // Without the variable, the runner uses public endpoints. Only this process holds the URL. anvil
 // reaches the upstream through a proxy that this process runs on 127.0.0.1. So anvil's arguments,
 // logs, errors and JSON-RPC methods carry only the proxy's address. The proxy forwards only the reads
-// anvil makes to fork mainnet state. The runner redacts the URL, and each key-like part of it, from
-// every output it writes. The tests get none of the runner's environment except the variables
-// they need, so they never see the URL.
+// anvil makes to fork mainnet state. The runner redacts the URL, and each part of it that can carry a
+// key, from every output it writes, in each form an upstream can echo it: as written, decoded,
+// re-encoded or JSON-escaped. An upstream's error text can echo the key, so the runner prints none
+// of a private upstream's text. It names a failure by its HTTP status and a reason, and the proxy
+// passes anvil a private upstream's error codes without their text. The tests get none of the
+// runner's environment except the variables they need, so they never see the URL.
 //
 // The fork listens on 127.0.0.1 only, sends no CORS headers, and is stopped on exit, on Ctrl-C and
 // on any error. The tests sign with impersonated accounts on the fork. Nothing is signed with a real
@@ -63,6 +66,7 @@ import {
   MARKET_COLUMNS,
   PINNED_BLOCK,
   PINNED_HASH,
+  rpc,
   startUpstreamProxy,
   upstreamEndpoints,
   withLast,
@@ -131,19 +135,6 @@ function parseArgs(argv) {
 /** The redaction of the private URL from every output. `main` sets it once it knows the endpoints. */
 let redaction = createRedactor([]);
 
-async function rpc(url, method, params = [], timeoutMs = 20_000) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!response.ok) throw new Error(`${method}: HTTP ${response.status}`);
-  const body = await response.json();
-  if (body.error !== undefined) throw new Error(`${method}: ${body.error.message ?? JSON.stringify(body.error)}`);
-  return body.result;
-}
-
 const hex = (value) => `0x${Number(value).toString(16)}`;
 
 /**
@@ -152,13 +143,14 @@ const hex = (value) => `0x${Number(value).toString(16)}`;
  * read at that block fails on a node that keeps only recent state.
  */
 async function forkTarget(endpoint, block) {
-  if ((await rpc(endpoint.url, 'eth_chainId')) !== '0x1') throw new Error('the endpoint is not Ethereum mainnet');
+  const call = (method, params) => rpc(endpoint.url, method, params, { isPrivate: endpoint.isPrivate });
+  if ((await call('eth_chainId')) !== '0x1') throw new Error('the endpoint is not Ethereum mainnet');
   if (block === 'pinned' || /^\d+$/.test(block)) {
     const number = block === 'pinned' ? PINNED_BLOCK : Number(block);
-    const header = await rpc(endpoint.url, 'eth_getBlockByNumber', [hex(number), false]);
+    const header = await call('eth_getBlockByNumber', [hex(number), false]);
     if (header === null) return undefined;
     if (number === PINNED_BLOCK && header.hash !== PINNED_HASH) throw new Error(`block ${number} has another hash`);
-    await rpc(endpoint.url, 'eth_getBalance', ['0x0000000000000000000000000000000000000000', hex(number)]);
+    await call('eth_getBalance', ['0x0000000000000000000000000000000000000000', hex(number)]);
     return {
       number,
       hash: header.hash,
@@ -166,8 +158,8 @@ async function forkTarget(endpoint, block) {
       mode: number === PINNED_BLOCK ? 'pinned' : 'recent',
     };
   }
-  const latest = Number(await rpc(endpoint.url, 'eth_blockNumber'));
-  const header = await rpc(endpoint.url, 'eth_getBlockByNumber', [hex(latest - RECENT_BLOCK_LAG), false]);
+  const latest = Number(await call('eth_blockNumber'));
+  const header = await call('eth_getBlockByNumber', [hex(latest - RECENT_BLOCK_LAG), false]);
   return { number: latest - RECENT_BLOCK_LAG, hash: header.hash, timestamp: Number(header.timestamp), mode: 'recent' };
 }
 
@@ -504,7 +496,7 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
     results: path.join(privateDirectory, 'results.json'),
     jestReport: path.join(privateDirectory, 'jest-results.json'),
   };
-  const proxy = await startUpstreamProxy(endpoint.url, { printable: redaction.printable });
+  const proxy = await startUpstreamProxy(endpoint, { printable: redaction.printable });
   servers.add(proxy.server);
   const anvilLog = fs.createWriteStream(path.join(logDir, logFiles.anvil));
   const jestLog = fs.createWriteStream(path.join(logDir, logFiles.jest));
@@ -560,7 +552,7 @@ async function main() {
   const runFiles = ['anvil.log', 'jest.log', 'results.json', 'anvil-2.log', 'jest-2.log', 'results-2.json'];
   for (const file of [...runFiles, 'summary.md']) fs.rmSync(path.join(logDir, file), { force: true });
   const endpoints = upstreamEndpoints();
-  redaction = createRedactor(endpoints.flatMap((endpoint) => endpoint.secrets));
+  redaction = createRedactor(endpoints.flatMap((endpoint) => endpoint.secretPatterns));
 
   const anvil = findAnvil();
   const environment = {
