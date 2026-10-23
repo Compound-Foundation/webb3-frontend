@@ -1379,12 +1379,6 @@ describe('useWrappedAction', () => {
 
   describe('withdrawal drafts', () => {
     const SHARES = 99_950_027_886_106_918_655n;
-    const EXIT: WrappedStep = {
-      id: 'withdraw',
-      kind: 'unwrap-and-withdraw',
-      description: 'Withdraw 100.000000 USDC from the wrapper',
-      request: { to: USDC_WRAPPER, data: CALLS.encodeFunctionData('unwrapAndWithdraw', [SHARES]) },
-    };
     const reviewOf = (shares: bigint): WithdrawalReview => ({
       request: { kind: 'partial', cash: 100_000_000n },
       quote: {
@@ -1398,6 +1392,19 @@ describe('useWrappedAction', () => {
       shownCash: undefined,
       blockNumber: 101,
     });
+    /** The exit as its check found it just before the signature, after interest raised its cash. */
+    const RECHECKED: RecheckedWithdrawal = {
+      quote: { ...reviewOf(SHARES).quote, grossAssets: 100_049_978n, cash: 100_049_975n },
+      blockNumber: 102,
+      description: 'Withdraw about 100.049975 USDC from the wrapper',
+    };
+    const EXIT: WrappedStep = {
+      id: 'withdraw',
+      kind: 'unwrap-and-withdraw',
+      description: 'Withdraw 100.000000 USDC from the wrapper',
+      request: { to: USDC_WRAPPER, data: CALLS.encodeFunctionData('unwrapAndWithdraw', [SHARES]) },
+      check: async () => ({ ok: true, rechecked: RECHECKED }),
+    };
 
     it('keeps the quote a withdrawal was prepared with on its frozen draft', async () => {
       const { manager } = fakeManager(wallet);
@@ -1435,13 +1442,6 @@ describe('useWrappedAction', () => {
       expect(result.current.state).toMatchObject({ message: expect.stringMatching(/quote-mismatch/) });
       expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
-
-    /** The exit as its check found it just before the signature, after interest raised its cash. */
-    const RECHECKED: RecheckedWithdrawal = {
-      quote: { ...reviewOf(SHARES).quote, grossAssets: 100_049_978n, cash: 100_049_975n },
-      blockNumber: 102,
-      description: 'Withdraw about 100.049975 USDC from the wrapper',
-    };
 
     it("describes the wallet's request by the exit its check found, and keeps a frozen copy for the dialog", async () => {
       const { manager, requests } = fakeManager(wallet);
@@ -1502,6 +1502,37 @@ describe('useWrappedAction', () => {
       expect((result.current.state as { rechecked?: unknown }).rechecked).toBeUndefined();
       expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
+
+    /** The exit step with `check` set to any value, as code outside these types can build it. */
+    const exitCheckedBy = (check: unknown) => ({ ...EXIT, check } as unknown as WrappedStep);
+
+    it.each<[string, unknown]>([
+      ['no check', undefined],
+      ['a check that passes without the exit it found', async () => ({ ok: true })],
+      ['a check that passes with null for the exit it found', async () => ({ ok: true, rechecked: null })],
+    ])(
+      "signs nothing for an exit step with %s, rather than describe the wallet's request by the reviewed cash",
+      async (_name, check) => {
+        const { manager } = fakeManager(wallet);
+        const { result } = renderAction({ session: sessionFor(wallet), manager });
+        act(() => {
+          result.current.start('withdraw', async () => ({
+            amount: SHARES,
+            steps: [exitCheckedBy(check)],
+            withdrawal: reviewOf(SHARES),
+          }));
+        });
+        await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+        act(() => result.current.confirm());
+        await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+        expect(result.current.state).toMatchObject({ steps: [{ status: 'blocked', reason: 'missing-recheck' }] });
+        expect((result.current.state as { rechecked?: unknown }).rechecked).toBeUndefined();
+        expect(manager.submitTransaction).not.toHaveBeenCalled();
+        expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+      }
+    );
   });
 });
 

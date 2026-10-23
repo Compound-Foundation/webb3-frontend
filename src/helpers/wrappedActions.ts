@@ -39,24 +39,51 @@ export type RecheckedWithdrawal = {
   description: string;
 };
 
-/**
- * The result of a step's own check. A withdrawal's check that passes gives `rechecked`. The dialog
- * then shows the cash the exit pays at the block the check read, not the reviewed cash.
- */
-export type WrappedStepCheck = { ok: true; rechecked?: RecheckedWithdrawal } | { ok: false; message: string };
+/** A step's own check that refused the step, and why. Nothing is sent. */
+export type WrappedStepRefusal = { ok: false; message: string };
 
-/** One transaction of a wrapper action. COM-287 and COM-288 build these. */
-export type WrappedStep = {
+/** The result of an approval's or a supply's own check. */
+export type WrappedSupplyCheck = { ok: true } | WrappedStepRefusal;
+
+/**
+ * The result of a withdrawal's own check. A check that passes gives `rechecked`, and the lifecycle
+ * stops one that does not. The dialog then shows the cash the exit pays at the block the check
+ * read, not the reviewed cash, and the transaction list describes the request by it.
+ */
+export type WrappedWithdrawalCheck = { ok: true; rechecked: RecheckedWithdrawal } | WrappedStepRefusal;
+
+/** The result of a step's own check, for a step of either kind of action. */
+export type WrappedStepCheck = WrappedSupplyCheck | WrappedWithdrawalCheck;
+
+/** The fields every step has, whatever its kind. */
+type WrappedStepFields = {
   /** Unique within the draft. The transaction manager stores a submitted hash under it. */
   id: string;
-  kind: WrappedStepKind;
   /** Shown in review and in the transaction list. */
   description: string;
   /** The encoded call, which `checkWrappedStep` holds to `kind`. It never carries value. */
   request: { to: string; data: string };
-  /** A check of the step's own, such as a simulation from the sender, made just before signing. */
-  check?: () => Promise<WrappedStepCheck>;
 };
+
+/** An approval or a supply, one transaction of a wrapped supply. */
+export type WrappedSupplyStep = WrappedStepFields & {
+  kind: 'approve' | 'supply-and-wrap';
+  /** A check of the step's own, such as a simulation from the sender, made just before signing. */
+  check?: () => Promise<WrappedSupplyCheck>;
+};
+
+/** The exit, the one transaction of a wrapped withdrawal. */
+export type WrappedWithdrawalStep = WrappedStepFields & {
+  kind: 'unwrap-and-withdraw';
+  /**
+   * The exit's own check, made just before signing, such as a read of the position and a
+   * simulation from the sender. The lifecycle stops an exit step without one.
+   */
+  check: () => Promise<WrappedWithdrawalCheck>;
+};
+
+/** One transaction of a wrapper action. COM-287 and COM-288 build these. */
+export type WrappedStep = WrappedSupplyStep | WrappedWithdrawalStep;
 
 /**
  * What a wrapper draft was reviewed under. The draft applies only while all of it holds.
@@ -289,7 +316,9 @@ export type WrappedStepProblem =
   | 'malformed-call'
   | 'bad-sequence'
   /** A withdrawal has no quote, or its quote is for other shares than its call burns. */
-  | 'quote-mismatch';
+  | 'quote-mismatch'
+  /** A withdrawal's exit step has no check, or its check passed without the exit it found. */
+  | 'missing-recheck';
 
 const BASE_TOKEN_CALLS = new Interface(['function approve(address spender, uint256 amount)']);
 const WRAPPER_CALLS = new Interface([

@@ -164,6 +164,10 @@ function exitStep(review: WithdrawalReview): WrappedStep {
         ? 'Withdraw all your wrapped USDC, about 250.124997 USDC'
         : 'Withdraw about 100.000000 USDC from the wrapper',
     request: { to: USDC_WRAPPER, data: CALLS.encodeFunctionData('unwrapAndWithdraw', [review.quote.shares]) },
+    // The dialog shows the state it is given, and never runs the step's check.
+    check: async () => {
+      throw new Error('The dialog never runs the check.');
+    },
   };
 }
 

@@ -25,6 +25,8 @@ import {
   WrappedBlockReason,
   WrappedSession,
   WrappedStep,
+  WrappedStepCheck,
+  WrappedStepRefusal,
   wrappedActionIdentity,
 } from '@helpers/wrappedActions';
 import type { WithdrawalReview } from '@helpers/wrappedWithdrawals';
@@ -618,15 +620,27 @@ export function useWrappedAction({
     if (!isCurrentRun()) return;
     if (restriction !== undefined) return block(restriction);
 
+    // The wallet's request for an exit is described by the exit its own check found, never by the
+    // reviewed cash. So an exit step without a check, or whose check passes without that exit, stops.
+    const isExitStep = step.kind === 'unwrap-and-withdraw';
     let { description } = step;
-    if (step.check !== undefined) {
-      const stepCheck = await step
-        .check()
-        .catch((error): { ok: false; message: string } => ({ ok: false, message: describeWalletError(error) }));
+    if (step.check === undefined) {
+      if (isExitStep) return block('missing-recheck');
+    } else {
+      // Called as either kind of check. Through the union of the two, TypeScript reduces the result
+      // to the supply's shape, which has no `rechecked`.
+      const check: () => Promise<WrappedStepCheck> = step.check;
+      const stepCheck = await check().catch(
+        (error): WrappedStepRefusal => ({ ok: false, message: describeWalletError(error) })
+      );
       if (!isCurrentRun()) return;
       if (!stepCheck.ok) return block('step-check-failed', stepCheck.message);
-      if (stepCheck.rechecked !== undefined) {
-        const rechecked = frozenRecheck(stepCheck.rechecked);
+      const found = 'rechecked' in stepCheck ? stepCheck.rechecked : undefined;
+      // A check written without these types can give null.
+      if (found === undefined || found === null) {
+        if (isExitStep) return block('missing-recheck');
+      } else {
+        const rechecked = frozenRecheck(found);
         const problem = checkRecheckedWithdrawal(draft, rechecked);
         if (problem !== undefined) return block(problem);
         // The dialog shows the exit as the check found it before the wallet is asked, and the

@@ -95,7 +95,12 @@ function liveSession(setup: SessionSetup = {}, provider: object | undefined = PR
 }
 
 function step(kind: WrappedStep['kind'], to: string, data: string, id: string = kind): WrappedStep {
-  return { id, kind, description: kind, request: { to, data } };
+  if (kind !== 'unwrap-and-withdraw') return { id, kind, description: kind, request: { to, data } };
+  // An exit step needs its own check. These tests check its call, and never run the check.
+  const check = async () => {
+    throw new Error('These tests never run the check.');
+  };
+  return { id, kind, description: kind, request: { to, data }, check };
 }
 
 const approve = (spender = USDC_WRAPPER, amount = 1_000_000n, to = USDC) =>

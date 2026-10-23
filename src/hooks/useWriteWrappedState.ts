@@ -9,7 +9,14 @@ import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { describeWalletError } from '@helpers/walletErrors';
-import { WrappedActionIdentity, WrappedBlockReason, WrappedStep, WrappedStepCheck } from '@helpers/wrappedActions';
+import {
+  WrappedActionIdentity,
+  WrappedBlockReason,
+  WrappedStep,
+  WrappedStepRefusal,
+  WrappedSupplyCheck,
+  WrappedWithdrawalCheck,
+} from '@helpers/wrappedActions';
 import { BlockWait, DEFAULT_BLOCK_WAIT, getRedeemBuffer, waitForBlock } from '@helpers/wrappedPositions';
 import {
   PARTIAL_EXIT_CASH_RISE_TOLERANCE_BPS,
@@ -291,8 +298,8 @@ async function simulateSupplyAndWrap(
   identity: WrappedActionIdentity,
   amount: bigint,
   blockNumber: number
-): Promise<WrappedStepCheck> {
-  const refuse = (detail: string): WrappedStepCheck => ({
+): Promise<WrappedSupplyCheck> {
+  const refuse = (detail: string): WrappedStepRefusal => ({
     ok: false,
     message: `Simulating the supply from your account failed (${detail}), so your wallet was not asked to sign it.`,
   });
@@ -389,7 +396,7 @@ export async function prepareWrappedSupply({
     throw new WrappedReviewError(`The amount is more than the ${formatAmount(funds.walletBalance)} in your wallet.`);
   }
 
-  const checkBefore = (rule: AllowanceRule, shouldSimulate: boolean) => async (): Promise<WrappedStepCheck> => {
+  const checkBefore = (rule: AllowanceRule, shouldSimulate: boolean) => async (): Promise<WrappedSupplyCheck> => {
     let fundsBeforeSigning: SupplyFunds;
     try {
       fundsBeforeSigning = await reads.readFunds();
@@ -588,8 +595,8 @@ async function simulateUnwrapAndWithdraw(
   expectedCash: bigint,
   formatAmount: (value: bigint) => string,
   symbol: string
-): Promise<WrappedStepCheck> {
-  const refuse = (detail: string): WrappedStepCheck => ({
+): Promise<{ ok: true } | WrappedStepRefusal> {
+  const refuse = (detail: string): WrappedStepRefusal => ({
     ok: false,
     message: `Simulating the withdrawal from your account failed: ${detail}. Your wallet was not asked to sign it.`,
   });
@@ -756,7 +763,7 @@ export async function prepareWrappedWithdrawal({
       ? `Withdraw all your wrapped ${symbol}, about ${formatAmount(exitQuote.cash)}`
       : `Withdraw about ${formatAmount(exitQuote.cash)} from the wrapper`;
 
-  const checkBeforeExit = async (): Promise<WrappedStepCheck> => {
+  const checkBeforeExit = async (): Promise<WrappedWithdrawalCheck> => {
     let latest: WithdrawalRead;
     try {
       latest = await reads.readSnapshot();
