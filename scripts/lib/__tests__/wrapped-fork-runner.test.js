@@ -50,6 +50,12 @@ const FAKE_KEY = 'FAKE_RUNNER_TEST_KEY_1234567890';
 const PLUS_KEY = 'FAKE_REVIEW_KEY+12345678901234567890';
 /** A fake key with the characters that separate a URL's parts when they are not encoded. */
 const SEPARATOR_KEY = 'Fake+Key/For=Runner&Tests~0123456789';
+/** The fake numeric key of the review's error-code probe: 16 digits, so below 2^53 and exact as a JSON number. */
+const NUMERIC_KEY = '1234567890123456';
+/** A fake numeric key of 20 digits. As a JSON number it parses to 98765432109876540000, which keeps 16 of its digits. */
+const LONG_NUMERIC_KEY = '98765432109876543210';
+/** How the runner names a private upstream's JSON-RPC error whose code has more than five digits. */
+const WITHHELD_CODE = 'a JSON-RPC error with a code of more than five digits, withheld';
 
 const listening = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
@@ -159,13 +165,30 @@ describe('redaction', () => {
     assert.equal(redact(`key ${FAKE_KEY} and token ${FAKE_KEY}x`), 'key <redacted> and token <redacted>');
   });
 
-  test('leaves a short or all-digit part, so that ordinary text and figures stay whole', () => {
+  test('leaves a short part, so that ordinary text and figures stay whole', () => {
     assert.equal(isKeyLike('v2'), false);
     assert.equal(isKeyLike('eth'), false);
-    assert.equal(isKeyLike('12345678901234567890'), false);
+    assert.equal(isKeyLike('123456789012345'), false);
     assert.equal(isKeyLike(FAKE_KEY), true);
     const { redact } = redactor();
     assert.equal(redact('v2 eth network 12345678901234567890'), 'v2 eth network 12345678901234567890');
+  });
+
+  test('redacts a key of 16 digits or more in the query or the path, and leaves an ordinary error code', () => {
+    assert.equal(isKeyLike(NUMERIC_KEY), true);
+    assert.equal(isKeyLike(LONG_NUMERIC_KEY), true);
+    for (const privateUrl of [
+      `https://rpc.example.test/32000/v2?network=eth&key=${NUMERIC_KEY}`,
+      `https://rpc.example.test/32000/v2/${NUMERIC_KEY}`,
+      `https://rpc.example.test/32000/v2/${LONG_NUMERIC_KEY}`,
+    ]) {
+      const key = privateUrl.endsWith(LONG_NUMERIC_KEY) ? LONG_NUMERIC_KEY : NUMERIC_KEY;
+      const { redact } = createRedactor(upstreamEndpoints({ WRAPPED_FORK_RPC_URL: privateUrl })[0].secretPatterns);
+      assert.equal(redact(`error code ${key}: x`), 'error code <redacted>: x', privateUrl);
+      assert.equal(redact(`error code ${encodeURIComponent(key)}`), 'error code <redacted>', privateUrl);
+      // The URL's short path segment 32000 is no secret, so the code -32000 stays whole.
+      assert.equal(redact('error code -32000: x'), 'error code -32000: x', privateUrl);
+    }
   });
 
   test('redacts each string in a parsed JSON value and keeps the rest of the value', () => {
@@ -283,6 +306,34 @@ describe('a JSON-RPC call to an upstream', () => {
     });
   });
 
+  test("names a private upstream's error code only when it has at most five digits, so a numeric key never shows", async () => {
+    const answer = (code) => `{"jsonrpc":"2.0","id":1,"error":{"code":${code},"message":"authentication failed"}}`;
+    const codes = {
+      eth_chainId: NUMERIC_KEY,
+      eth_blockNumber: LONG_NUMERIC_KEY,
+      eth_gasPrice: '-32000',
+      eth_getCode: '429',
+    };
+    const numeric = await startStubUpstream(({ method }) => ({ body: answer(codes[method]) }));
+    try {
+      const isPrivate = true;
+      await assert.rejects(rpc(numeric.url, 'eth_chainId', [], { isPrivate }), {
+        message: `eth_chainId: HTTP 200, ${WITHHELD_CODE}`,
+      });
+      await assert.rejects(rpc(numeric.url, 'eth_blockNumber', [], { isPrivate }), {
+        message: `eth_blockNumber: HTTP 200, ${WITHHELD_CODE}`,
+      });
+      await assert.rejects(rpc(numeric.url, 'eth_gasPrice', [], { isPrivate }), {
+        message: 'eth_gasPrice: HTTP 200, a JSON-RPC error with code -32000',
+      });
+      await assert.rejects(rpc(numeric.url, 'eth_getCode', [], { isPrivate }), {
+        message: 'eth_getCode: HTTP 200, a JSON-RPC error with code 429',
+      });
+    } finally {
+      await numeric.close();
+    }
+  });
+
   test("keeps a public endpoint's error message, and returns a result", async () => {
     await assert.rejects(rpc(stub.url, 'eth_chainId'), { message: `eth_chainId: Invalid API key ${FAKE_KEY}` });
     assert.equal(await rpc(stub.url, 'eth_getBalance', ['0x0', 'latest'], { isPrivate: true }), '0x2a');
@@ -397,6 +448,24 @@ describe('the upstream proxy for a private endpoint', () => {
           message: "rate exceeded (the rest of the private upstream's message is withheld)",
           data: { rate: { backoff_seconds: 3 } },
         });
+      }
+    ));
+
+  test('relays an error code of more than five digits as -32603, and an id that is not a safe integer as null', () =>
+    // An upstream can echo a numeric key as the code or the id. Above 2^53, a JSON number loses
+    // digits when parsed, so the redaction of the key no longer matches what is left of it.
+    withProxy(
+      () => ({ body: `{"jsonrpc":"2.0","id":${LONG_NUMERIC_KEY},"error":{"code":${LONG_NUMERIC_KEY},"message":"x"}}` }),
+      async (proxy) => {
+        const response = await post(proxy.url, call('eth_getBalance', ['0x1', '0x1']));
+        const text = await response.text();
+        assert.ok(!text.includes(LONG_NUMERIC_KEY.slice(0, 10)), text);
+        assert.deepEqual(JSON.parse(text), {
+          jsonrpc: '2.0',
+          id: null,
+          error: { code: -32603, message: "the private upstream's message is withheld" },
+        });
+        assert.equal(proxy.stats.firstError, WITHHELD_CODE);
       }
     ));
 
@@ -1165,6 +1234,27 @@ describe('the runner, end to end, with a private upstream that echoes its key', 
       run.files['anvil.log'],
       /failed to get account for 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC: .*HTTP error 429/
     );
+  });
+
+  test('never prints a numeric key that the upstream echoes as its error code', async () => {
+    // The review's third probe: the stand-in answers each call with the 16-digit query key as the error's code.
+    answers = ({ id }) => ({
+      body: { jsonrpc: '2.0', id, error: { code: Number(NUMERIC_KEY), message: 'authentication failed' } },
+    });
+    const run = await runRunner({ privateUrl: `${stub.url}/?key=${NUMERIC_KEY}`, anvil: 'genesis' });
+    assert.equal(run.code, 1);
+    assertKeyNeverWritten(run, NUMERIC_KEY);
+    assert.match(run.output, new RegExp(`pinned block: eth_chainId: HTTP 200, ${WITHHELD_CODE}`));
+  });
+
+  test("never passes a numeric key in an error's code to anvil, so anvil's log holds none of it", async () => {
+    answers = pinnedBlockUpstream(({ id }) => ({
+      body: { jsonrpc: '2.0', id, error: { code: Number(NUMERIC_KEY), message: 'authentication failed' } },
+    }));
+    const run = await runRunner({ privateUrl: `${stub.url}/api/${NUMERIC_KEY}`, anvil: 'genesis' });
+    assert.equal(run.code, 1);
+    assertKeyNeverWritten(run, NUMERIC_KEY);
+    assert.match(run.files['anvil.log'], /error code -32603: the private upstream's message is withheld/);
   });
 
   test("redacts a key that an upstream's answer echoes into anvil's log", async () => {
