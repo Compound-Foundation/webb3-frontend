@@ -27,12 +27,14 @@
 // on any error. The tests sign with impersonated accounts on the fork. Nothing is signed with a real
 // key, and nothing is sent to mainnet.
 //
-// The runner retries a run once, and only when the upstream failed to serve the fork's state. Every
-// failed cell must then carry anvil's own fetch error and no revert. Jest must have failed no other
-// test, and the proxy must have seen the upstream fail. A recent-block run retries from a fresh
-// recent block. A run at the pinned block, or at a given block, retries at the same block, on the
-// other endpoints first. If the last run fails only that way too, its failed cells are recorded as
-// not exercised, and the run fails.
+// The runner retries a run once, and only when the upstream failed to serve the fork's state:
+// - At least one cell failed, and every failed cell carries anvil's own fetch error and no revert.
+// - Jest reported its results, failed no other test, and ran every suite. anvil did not exit.
+// - The proxy saw the upstream fail a request or answer a call with an error.
+// A recent-block run retries from a fresh recent block. A run at the pinned block, or at a given
+// block, retries at the same block. It tries the other endpoints first and the failed one last. If
+// the last run fails only that way too, its failed cells are recorded as not exercised, and the run
+// fails.
 //
 // Three risks remain. In none of them do the fork or the proxy give out the URL, and no real funds
 // are at stake:
@@ -543,7 +545,7 @@ const INHERITED_VARIABLES = ['PATH', 'HOME', 'TMPDIR', 'CI', 'NODE_OPTIONS'];
  * Runs the fork suite. If anvil exits while the suite runs, the runner stops the suite and the run
  * fails. Whatever answers on the port afterwards is not the fork that the runner verified.
  */
-function runJest(options, fork, target, files, log) {
+function runJest(options, fork, target, privateFiles, log) {
   const env = {
     ...Object.fromEntries(
       INHERITED_VARIABLES.filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]])
@@ -553,8 +555,8 @@ function runJest(options, fork, target, files, log) {
     WRAPPED_FORK_BLOCK: String(target.number),
     WRAPPED_FORK_BLOCK_HASH: target.hash,
     WRAPPED_FORK_MODE: target.mode,
-    WRAPPED_FORK_RESULTS: files.results,
-    WRAPPED_FORK_JEST_RESULTS: files.jestReport,
+    WRAPPED_FORK_RESULTS: privateFiles.results,
+    WRAPPED_FORK_JEST_RESULTS: privateFiles.jestReport,
     WRAPPED_FORK_SOLC_OUTPUT: options.solcOutput ?? '',
   };
   const args = [path.join(ROOT, 'node_modules/jest/bin/jest.js'), '--config', JEST_CONFIG, '--runInBand'];
@@ -601,15 +603,23 @@ function readRedacted(file, missing) {
   }
 }
 
+/** The scenario and market of a matrix cell's test title, `<scenario> (<market>)`, or undefined. */
+function cellOf(title) {
+  const market = MARKET_COLUMNS.find((column) => title.endsWith(` (${column})`));
+  return market === undefined ? undefined : { scenario: title.slice(0, -(market.length + 3)), market };
+}
+
 /**
  * The cells, each held to Jest's own result for its test. A scenario records its cell when its body
  * settles, which can come after Jest failed the test, for example on a timeout. Such a cell fails.
+ * A test that Jest failed before its scenario ran, for example in a `beforeAll` hook, recorded no
+ * cell. It gets a failed cell, with Jest's failure as the reason.
  */
 function heldToJest(results, jest) {
   const failures = new Map(
     (jest?.tests ?? []).filter((test) => test.status === 'failed').map((test) => [test.title, test.failure])
   );
-  return results.map((result) => {
+  const held = results.map((result) => {
     const failure = failures.get(`${result.scenario} (${result.market})`);
     if (failure === undefined || result.status === 'fail') return result;
     return {
@@ -618,12 +628,20 @@ function heldToJest(results, jest) {
       reason: `Jest failed this test after its scenario recorded ${result.status}: ${failure}`,
     };
   });
+  const recorded = new Set(results.map((result) => `${result.scenario} (${result.market})`));
+  for (const [title, failure] of failures) {
+    const cell = cellOf(title);
+    if (cell === undefined || recorded.has(title)) continue;
+    held.push({ ...cell, status: 'fail', reason: `Jest failed this test before its scenario ran: ${failure}` });
+  }
+  return held;
 }
 
 /**
- * Whether `run` failed only because the upstream failed to serve the fork's state. Every failed
- * cell must carry anvil's fetch error and no refusal by the chain. Jest must have failed no other
- * test, and the proxy must have seen the upstream fail or answer with an error.
+ * Whether `run` failed only because the upstream failed to serve the fork's state. At least one
+ * cell must have failed, and every failed cell must carry anvil's fetch error and no refusal by the
+ * chain. Jest must have reported its results, failed no other test and run every suite, and anvil
+ * must not have exited. The proxy must have seen the upstream fail or answer with an error.
  */
 function failedOnUpstreamOnly(run) {
   const failed = run.results.filter((result) => result.status === 'fail');
@@ -742,7 +760,7 @@ function firstRunSection(run) {
     "## Run 1, which failed only because the upstream failed to serve the fork's state",
     `- fork block ${run.target.number}, hash ${run.target.hash}, from ${run.endpoint.label}`,
     ...upstreamUse(run.stats).map((line) => `- ${line.trim()}`),
-    `- logs: ${run.files.anvil}, ${run.files.jest} and ${run.files.results}`,
+    `- logs: ${run.logFiles.anvil}, ${run.logFiles.jest} and ${run.logFiles.results}`,
     ...failed.map((result) => `- failed: ${result.market}, ${result.scenario}: ${result.reason}`),
     '',
   ];
@@ -755,21 +773,21 @@ function firstRunSection(run) {
 async function runSuite({ choice, options, anvil, environment, logDir, number }) {
   const { endpoint, target } = choice;
   const suffix = number === 1 ? '' : `-${number}`;
-  const files = { anvil: `anvil${suffix}.log`, jest: `jest${suffix}.log`, results: `results${suffix}.json` };
-  fs.rmSync(path.join(logDir, files.results), { force: true });
+  const logFiles = { anvil: `anvil${suffix}.log`, jest: `jest${suffix}.log`, results: `results${suffix}.json` };
+  fs.rmSync(path.join(logDir, logFiles.results), { force: true });
   // The tests write their results into a directory that only this user can read. The runner writes
   // them to the log directory, redacted, when Jest ends. So no unredacted file stays there, even
   // after Ctrl-C.
   const privateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-lending-fork-results-'));
   temporaryDirectories.add(privateDirectory);
-  const written = {
+  const privateFiles = {
     results: path.join(privateDirectory, 'results.json'),
     jestReport: path.join(privateDirectory, 'jest-results.json'),
   };
   const proxy = await startUpstreamProxy(endpoint.url);
   servers.add(proxy.server);
-  const anvilLog = fs.createWriteStream(path.join(logDir, files.anvil));
-  const jestLog = fs.createWriteStream(path.join(logDir, files.jest));
+  const anvilLog = fs.createWriteStream(path.join(logDir, logFiles.anvil));
+  const jestLog = fs.createWriteStream(path.join(logDir, logFiles.jest));
 
   let exitCode = 1;
   let anvilExited = false;
@@ -800,23 +818,26 @@ async function runSuite({ choice, options, anvil, environment, logDir, number })
     console.log(header);
     const { clientVersion } = await verifyFork(fork, target);
     console.log(`  verified:      ${clientVersion} on 127.0.0.1, chain ID 1, fork block and hash match the upstream\n`);
-    ({ exitCode, anvilExited } = await runJest(options, fork, target, written, jestLog));
+    ({ exitCode, anvilExited } = await runJest(options, fork, target, privateFiles, jestLog));
   } finally {
     if (fork !== undefined) await stopped(fork.child);
     await Promise.all([anvilLog, jestLog].map((log) => new Promise((resolve) => log.end(resolve))));
     proxy.server.close();
     servers.delete(proxy.server);
   }
-  const jest = readRedacted(written.jestReport, undefined);
-  const results = heldToJest(readRedacted(written.results, []), jest);
-  fs.writeFileSync(path.join(logDir, files.results), JSON.stringify(results, null, 2));
-  return { endpoint, target, header, exitCode, anvilExited, files, jest, results, stats: proxy.stats };
+  const jest = readRedacted(privateFiles.jestReport, undefined);
+  const results = heldToJest(readRedacted(privateFiles.results, []), jest);
+  fs.writeFileSync(path.join(logDir, logFiles.results), JSON.stringify(results, null, 2));
+  return { endpoint, target, header, exitCode, anvilExited, logFiles, jest, results, stats: proxy.stats };
 }
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const logDir = options.logDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-lending-fork-logs-'));
   fs.mkdirSync(logDir, { recursive: true });
+  for (const file of ['anvil-2.log', 'jest-2.log', 'results-2.json', 'summary.md']) {
+    fs.rmSync(path.join(logDir, file), { force: true });
+  }
   const endpoints = upstreamEndpoints();
   secretsToRedact = [...new Set(endpoints.flatMap((endpoint) => endpoint.secrets))].sort((a, b) => b.length - a.length);
 
@@ -851,10 +872,11 @@ async function main() {
     // A recent block can leave the endpoint's window of recent state during a run, so the retry
     // forks a fresh one. The pinned block, or a given one, stays, so the retry tests the same state.
     const failedRun = runs[0];
-    const freshBlock = options.block === 'recent' || (options.block === 'auto' && failedRun.target.mode === 'recent');
+    const isRecentBlockRun =
+      options.block === 'recent' || (options.block === 'auto' && failedRun.target.mode === 'recent');
     console.log("\nRun 1 failed only because the upstream failed to serve the fork's state. Running once more.\n");
     try {
-      choice = freshBlock
+      choice = isRecentBlockRun
         ? await chooseFork(endpoints, 'recent')
         : await chooseFork(withLast(endpoints, failedRun.endpoint), String(failedRun.target.number));
     } catch (error) {
@@ -864,9 +886,9 @@ async function main() {
   }
 
   const final = runs[runs.length - 1];
-  const upstreamOnly = failedOnUpstreamOnly(final);
+  const isUpstreamOnly = failedOnUpstreamOnly(final);
   // A cell that failed only because the upstream failed to serve the fork's state was not exercised.
-  const results = upstreamOnly
+  const results = isUpstreamOnly
     ? final.results.map((result) =>
         result.status === 'fail'
           ? {
@@ -881,7 +903,9 @@ async function main() {
   const failed = results.filter((result) => result.status === 'fail');
   let exitCode = final.exitCode;
   if (exitCode === 0 && (results.length === 0 || failed.length > 0)) exitCode = 1;
-  const verdict = exitCode === 0 ? 'PASS' : upstreamOnly ? 'NOT EXERCISED' : 'FAIL';
+  const verdict = exitCode === 0 ? 'PASS' : isUpstreamOnly ? 'NOT EXERCISED' : 'FAIL';
+  // The last run's results file says what the summary says.
+  fs.writeFileSync(path.join(logDir, final.logFiles.results), JSON.stringify(results, null, 2));
   const { stats } = final;
   const report = [
     final.header,
