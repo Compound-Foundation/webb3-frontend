@@ -1,5 +1,14 @@
 name: Dependency Audit
-on: push
+# Runs on pull requests, including ones from forks, so the check can be
+# required on main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   audit:
