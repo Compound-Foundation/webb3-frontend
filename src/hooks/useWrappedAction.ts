@@ -75,6 +75,11 @@ export type WrappedStepState =
   /** Declined in the wallet: EIP-1193 code 4001 or its equivalents only. */
   | { status: 'rejected' }
   /**
+   * The wallet refused the request before it handled it, with EIP-1193 code 4100, 4200, 4900 or
+   * 4901. Nothing was sent. `message` is the wallet's answer and names its code.
+   */
+  | { status: 'refused'; message: string }
+  /**
    * The wallet reported another error. Whether it reached the chain is unknown. `isPendingInWallet`
    * marks the wallet's answer that it still holds the request. Only the step's wording reads it.
    */
@@ -142,6 +147,13 @@ export type WrappedActionController = {
    * waiting for the request, because the reload marks it interrupted.
    */
   hasUnansweredWalletRequest: boolean;
+  /**
+   * The wallet's answer when it refused this wallet session's last wrapper request before it
+   * handled it, or undefined. Nothing was sent, and the session can refuse again until the user
+   * reconnects the wallet. The next review that starts clears it. Another wallet provider, account
+   * or chain does not show it.
+   */
+  walletRefusalMessage: string | undefined;
   /** Why `start(type)` refuses now, or undefined if it starts. */
   blockedReason: (type: WrappedActionType) => WrappedBlockReason | undefined;
   /** Starts a fresh review. Returns why it was refused, if it was. */
@@ -170,6 +182,7 @@ export const IDLE_WRAPPED_ACTION: WrappedActionController = Object.freeze<Wrappe
   isRecoveredRequestPendingInWallet: false,
   canDismissRecovered: false,
   hasUnansweredWalletRequest: false,
+  walletRefusalMessage: undefined,
   blockedReason: () => 'not-wrapped',
   start: () => 'not-wrapped',
   confirm: () => undefined,
@@ -418,6 +431,8 @@ function frozenRecheck(rechecked: RecheckedWithdrawal): RecheckedWithdrawal {
 
 type ProbeTarget = { provider: object; key: string; chainId: number };
 type HealthRecord = { provider: object; key: string; result: SessionProbeResult };
+/** The wallet's answer to a wrapper request it refused, and the wallet session it refused it in. */
+type RefusalRecord = { provider: object; key: string; message: string };
 
 /** Whether `record` was read through the wallet session `target`: the same provider, account and chain. */
 function isTarget<T extends { provider: object; key: string }>(
@@ -456,6 +471,7 @@ export function useWrappedAction({
 }: UseWrappedActionOptions): WrappedActionController {
   const [lifecycle, dispatch] = useReducer(lifecycleReducer, { phase: 'idle' });
   const [healthRecord, setHealthRecord] = useState<HealthRecord | undefined>(undefined);
+  const [refusalRecord, setRefusalRecord] = useState<RefusalRecord | undefined>(undefined);
   // Bumped whenever a draft is started, confirmed, discarded or stopped. A continuation of an
   // earlier run changes nothing.
   const runId = useRef(0);
@@ -481,6 +497,9 @@ export function useWrappedAction({
   } else {
     health = { status: 'checking' };
   }
+  // A refusal describes the wallet session that refused, so no other session shows it.
+  const walletRefusalMessage =
+    probeTarget !== undefined && isTarget(refusalRecord, probeTarget) ? refusalRecord.message : undefined;
 
   // A draft whose identity no longer holds is discarded in this render, before the effect below
   // records it, so no render shows it for review. A complete or stopped draft sends nothing more,
@@ -561,6 +580,13 @@ export function useWrappedAction({
     );
   };
 
+  const recordRefusal = (target: ProbeTarget, message: string) => {
+    // Like a session check, a refusal that arrives after the live session changed is dropped.
+    if (isTarget(live.current.probeTarget, target)) {
+      setRefusalRecord({ provider: target.provider, key: target.key, message });
+    }
+  };
+
   useEffect(() => {
     if (probeTarget === undefined) return;
     let isCurrent = true;
@@ -602,6 +628,8 @@ export function useWrappedAction({
     const identity = wrappedActionIdentity(type, live.current.session);
     if (reason !== undefined || identity === undefined) return reason ?? 'no-signer';
     const run = ++runId.current;
+    // The new review is the user's next try, so it clears the last refusal.
+    setRefusalRecord(undefined);
     dispatch({ type: 'reading', identity });
     let reading: ReturnType<PrepareWrappedAction>;
     try {
@@ -725,6 +753,7 @@ export function useWrappedAction({
       },
     });
     if (result.status === 'session-broken') recordProbe(target, { status: 'unusable', reason: 'provider-broken' });
+    if (result.status === 'refused') recordRefusal(target, result.message);
     if (!isCurrentRun()) return;
     switch (result.status) {
       case 'submitted':
@@ -732,6 +761,10 @@ export function useWrappedAction({
         break;
       case 'rejected':
         dispatch({ type: 'step', index, step: { status: 'rejected' } });
+        break;
+      // Like a rejection, the step stops with nothing sent and leaves no record behind.
+      case 'refused':
+        dispatch({ type: 'step', index, step: { status: 'refused', message: result.message } });
         break;
       case 'provider-failure':
       case 'session-broken':
@@ -792,6 +825,7 @@ export function useWrappedAction({
     isRecoveredRequestPendingInWallet: recovered.pending.some(isInterruptedPendingInWallet),
     canDismissRecovered: recovered.pending.some(isInterrupted) && !isInProgress(state),
     hasUnansweredWalletRequest: recovered.pending.some(isUnanswered) && !isInProgress(state),
+    walletRefusalMessage,
     blockedReason,
     start,
     confirm,
