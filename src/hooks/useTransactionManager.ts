@@ -276,8 +276,9 @@ export type AddTransaction = (
  * - `provider-failure`: the wallet reported another error. Whether anything reached the chain is
  *   unknown, so this is never shown as a rejection and never retried automatically.
  * - `pending-in-wallet`: the wallet answered that it still holds the request, as the Anchorage
- *   extension does after a request waits for approval on a phone for about 4 minutes 47 seconds.
- *   Whether anything reaches the chain is unknown, and it is handled as a `provider-failure`.
+ *   extension does after a request waits for approval on a phone for about 4 minutes 47 seconds,
+ *   and, with code 4900, when it stops waiting because the tab's wallet was disconnected. Whether
+ *   anything reaches the chain is unknown, and it is handled as a `provider-failure`.
  * - `session-broken`: the provider itself is broken, as after an extension update.
  * - `session-changed`: the session is gone, or is not the account or chain the caller checked, or
  *   the caller withdrew the request. Nothing was sent.
