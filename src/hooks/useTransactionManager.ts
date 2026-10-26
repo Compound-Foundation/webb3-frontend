@@ -7,7 +7,13 @@ import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { filterMap } from '@helpers/functions';
 import { TRX_REFRESH_INTERVAL } from '@helpers/numbers';
-import { classifyWalletError, describeWalletError, NotSentError, SendWithdrawnError } from '@helpers/walletErrors';
+import {
+  classifyWalletError,
+  describeWalletError,
+  describeWalletRefusal,
+  NotSentError,
+  SendWithdrawnError,
+} from '@helpers/walletErrors';
 import { isWrapperAddress } from '@helpers/wrappedActions';
 import {
   AwaitingConfirmationTransaction,
@@ -264,6 +270,9 @@ export type AddTransaction = (
  * - `submitted`: the wallet returned a hash, so the transaction was broadcast. Until then it shows
  *   as awaiting the wallet, which can take minutes when it is approved on a mobile device.
  * - `rejected`: the user declined, by an explicit rejection only.
+ * - `refused`: the wallet refused the request before it handled it, with EIP-1193 code 4100, 4200,
+ *   4900 or 4901, as the Anchorage extension does after the user logs into it again. Nothing was
+ *   sent. `message` names the refusal's code.
  * - `provider-failure`: the wallet reported another error. Whether anything reached the chain is
  *   unknown, so this is never shown as a rejection and never retried automatically.
  * - `pending-in-wallet`: the wallet answered that it still holds the request, as the Anchorage
@@ -281,6 +290,7 @@ export type AddTransaction = (
 export type SendResult =
   | { status: 'submitted'; id: string; hash: string; response?: TransactionResponse }
   | { status: 'rejected' }
+  | { status: 'refused'; message: string }
   | { status: 'provider-failure'; message: string }
   | { status: 'pending-in-wallet'; message: string }
   | { status: 'session-broken'; message: string }
@@ -573,6 +583,11 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         if (kind === 'rejected') {
           forget();
           return { status: 'rejected' };
+        }
+        // The wallet refused the request before it handled it, so it holds nothing it can send.
+        if (kind === 'refused') {
+          forget();
+          return { status: 'refused', message: describeWalletRefusal(error) };
         }
         // The wallet had the request and can still send it. A wrapper step stays, marked
         // interrupted, so the next review of its action waits until the user dismisses it.

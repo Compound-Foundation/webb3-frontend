@@ -181,6 +181,7 @@ function controller(
     isRecoveredRequestPendingInWallet: false,
     canDismissRecovered: false,
     hasUnansweredWalletRequest: false,
+    walletRefusalMessage: undefined,
     blockedReason: () => blockedReason,
     start: jest.fn(),
     confirm: jest.fn(),
@@ -802,6 +803,30 @@ describe('WrappedSupply', () => {
       ).toBeInTheDocument();
       expect(dialog).not.toHaveTextContent(/your wallet reported an error/i);
       // The supply still stops there: nothing more is sent, and there is nothing to confirm.
+      expect(dialog).toHaveTextContent('Not sent.');
+      expect(dialog).toHaveTextContent('This supply stopped, and nothing more is sent from it.');
+      expect(within(dialog).queryByRole('button', { name: /approve|supply 1,000/i })).not.toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: 'Close' })).toBeEnabled();
+    });
+
+    it('says the wallet refused the request before handling it, names its code, and says to reconnect', () => {
+      renderModal({
+        ...inReview(),
+        phase: 'stopped',
+        steps: [{ status: 'refused', message: 'Unauthorized (4100)' }, { status: 'waiting' }],
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent('Supply Stopped');
+      expect(
+        within(dialog).getByText(
+          'Your wallet refused this request before handling it (Unauthorized (4100)), so nothing was sent. ' +
+            'Disconnect and reconnect your wallet on this page, then start a new review.'
+        )
+      ).toBeInTheDocument();
+      // Nothing was sent, so the dialog does not say that the request may still go through.
+      expect(dialog).not.toHaveTextContent(/may still go through/i);
+      expect(dialog).not.toHaveTextContent(/your wallet reported an error/i);
       expect(dialog).toHaveTextContent('Not sent.');
       expect(dialog).toHaveTextContent('This supply stopped, and nothing more is sent from it.');
       expect(within(dialog).queryByRole('button', { name: /approve|supply 1,000/i })).not.toBeInTheDocument();

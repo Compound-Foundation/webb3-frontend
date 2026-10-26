@@ -15,21 +15,40 @@
  *   complete after this message. …". Only code `-32005`, as a number or a string, and a message
  *   with "still pending" count. Callers handle it as a `provider-failure` and only describe it
  *   differently.
- * - `provider-failure`: anything else, an unknown outcome. Anchorage reports a refusal as a bare
- *   `-32603 Internal error`, which does not show whether the user declined or whether the request
- *   reached the chain.
+ * - `refused`: the wallet refused the request before it handled it, so no transaction and no
+ *   request in the wallet exist. Only the EIP-1193 provider errors 4100 (Unauthorized), 4200
+ *   (Unsupported Method), 4900 (Disconnected) and 4901 (Chain Disconnected) count, as a number or a
+ *   string. The Anchorage Digital extension answers 4100 "Unauthorized" when the tab's session in
+ *   the extension has no wallet, as after the user logs into the extension again while the page
+ *   still shows the account connected. Callers handle it as a `rejected`, since nothing was sent,
+ *   and only describe it differently.
+ * - `provider-failure`: anything else, an unknown outcome. Anchorage reports a request it turns
+ *   down as a bare `-32603 Internal error`, which does not show whether the user declined or
+ *   whether the request reached the chain.
  */
-export type WalletErrorKind = 'rejected' | 'session-broken' | 'pending-in-wallet' | 'provider-failure';
+export type WalletErrorKind = 'rejected' | 'session-broken' | 'pending-in-wallet' | 'refused' | 'provider-failure';
 
 const USER_REJECTED_REQUEST = 4001;
 const BROKEN_EXTENSION_MESSAGE =
   /sendMessage|extension context invalidated|disconnected port|receiving end does not exist/i;
 const REQUEST_STILL_PENDING = -32005;
 const STILL_PENDING_MESSAGE = /still pending/i;
+/** EIP-1193 provider errors for a request the provider refused before it handled it. */
+const REFUSED_BEFORE_HANDLING = [4100, 4200, 4900, 4901];
 
-type ErrorFields = { code?: unknown; name?: unknown; message?: unknown; error?: unknown; cause?: unknown };
+type ErrorFields = {
+  code?: unknown;
+  name?: unknown;
+  message?: unknown;
+  error?: unknown;
+  cause?: unknown;
+  data?: unknown;
+};
 
-/** The error and the errors it wraps: ethers keeps the provider's error in `error`, viem in `cause`. */
+/**
+ * The error and the errors it wraps: ethers keeps the provider's error in `error`, viem in `cause`,
+ * and a JSON-RPC error can carry another error in `data`.
+ */
 function errorChain(error: unknown): ErrorFields[] {
   const chain: ErrorFields[] = [];
   const queue: unknown[] = [error];
@@ -38,7 +57,7 @@ function errorChain(error: unknown): ErrorFields[] {
     if (typeof current !== 'object' || current === null || chain.includes(current as ErrorFields)) continue;
     const fields = current as ErrorFields;
     chain.push(fields);
-    queue.push(fields.error, fields.cause);
+    queue.push(fields.error, fields.cause, fields.data);
   }
   return chain;
 }
@@ -59,20 +78,40 @@ function isStillPending({ code, message }: ErrorFields): boolean {
   );
 }
 
+function isRefusal({ code }: ErrorFields): boolean {
+  return REFUSED_BEFORE_HANDLING.some((refusal) => code === refusal || code === String(refusal));
+}
+
 export function classifyWalletError(error: unknown): WalletErrorKind {
   const chain = errorChain(error);
   if (chain.some(isRejection)) return 'rejected';
   if (chain.some(isBrokenProvider)) return 'session-broken';
   // Checked after the kinds above, so it can only take the place of `provider-failure`.
   if (chain.some(isStillPending)) return 'pending-in-wallet';
+  // Checked last. A refusal drops the request's record, so an error that also shows a broken
+  // provider or a request the wallet still holds keeps its record.
+  if (chain.some(isRefusal)) return 'refused';
   return 'provider-failure';
+}
+
+function describeErrorFields(fields: ErrorFields | undefined): string {
+  const message = typeof fields?.message === 'string' && fields.message !== '' ? fields.message : 'Unknown error';
+  return typeof fields?.code === 'number' || typeof fields?.code === 'string' ? `${message} (${fields.code})` : message;
 }
 
 /** A short description of a wallet error for the UI, without assuming what it means. */
 export function describeWalletError(error: unknown): string {
-  const [first] = errorChain(error);
-  const message = typeof first?.message === 'string' && first.message !== '' ? first.message : 'Unknown error';
-  return typeof first?.code === 'number' || typeof first?.code === 'string' ? `${message} (${first.code})` : message;
+  return describeErrorFields(errorChain(error)[0]);
+}
+
+/**
+ * A short description of a `refused` error for the UI: the message and code of the error that
+ * refused the request. A wrapping error can carry another message and code, so this description
+ * names the refusal's code where `describeWalletError` would not.
+ */
+export function describeWalletRefusal(error: unknown): string {
+  const chain = errorChain(error);
+  return describeErrorFields(chain.find(isRefusal) ?? chain[0]);
 }
 
 /**

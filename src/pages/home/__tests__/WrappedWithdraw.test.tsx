@@ -206,6 +206,7 @@ function controller(state: WrappedActionState = { phase: 'idle' }): Controller {
     isRecoveredRequestPendingInWallet: false,
     canDismissRecovered: false,
     hasUnansweredWalletRequest: false,
+    walletRefusalMessage: undefined,
     blockedReason: () => undefined,
     start: jest.fn(),
     confirm: jest.fn(),

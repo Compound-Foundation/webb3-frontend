@@ -560,6 +560,14 @@ describe('Home submission guards', () => {
     expect(mockLastProps.WrappedPositionPanel.isRecoveredRequestPendingInWallet).toBe(true);
   });
 
+  it("tells the panel the wallet's answer when it refused the last wrapped request", () => {
+    const lending = wrappedLending({ status: 'usable' });
+    const action = { ...lending.action, walletRefusalMessage: 'Unauthorized (4100)' };
+    render(homeElement({ queue: actionQueue([]), lending: { ...lending, action } }));
+
+    expect(mockLastProps.WrappedPositionPanel.walletRefusalMessage).toBe('Unauthorized (4100)');
+  });
+
   it("stops the dialog's operator approval once the wallet session is unusable", () => {
     const queue = actionQueue([BORROW, SUPPLY_COMP]);
     const usable = wrappedLending({ status: 'usable' });
