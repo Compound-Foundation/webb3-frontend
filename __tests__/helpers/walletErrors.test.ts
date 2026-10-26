@@ -16,6 +16,18 @@ const STILL_PENDING = {
   message:
     'This request is still pending and can still complete after this message. Check its status in the Anchorage extension before you try again.',
 };
+const STOPPED_WAITING_MESSAGE =
+  'Stopped waiting because the dApp tab was closed or the wallet was disconnected. The request can still complete, so check its status in the Anchorage extension before you try again.';
+/**
+ * The Anchorage Digital extension's answer (version 1.1.16) to a transaction request it stopped
+ * waiting on because the tab's wallet was disconnected, as when the page disconnects the wallet. The
+ * request stays open in the wallet. The page receives an `Error` with the extension's code and data.
+ */
+const STOPPED_WAITING = Object.assign(new Error(STOPPED_WAITING_MESSAGE), {
+  name: 'API Error',
+  code: 4900,
+  data: { userVisibleMessage: STOPPED_WAITING_MESSAGE, operationID: 'operation-1' },
+});
 /**
  * The Anchorage Digital extension's answer to a transaction request from a tab whose session in the
  * extension had no wallet, after the user logged into the extension again. Nothing reached the wallet.
@@ -67,6 +79,50 @@ describe('classifyWalletError', () => {
     ['a message saying the request is still pending, with another code', { code: -32603, message: 'Still pending' }],
     ['a message saying the request is still pending, with no code', new Error('This request is still pending.')],
     ['-32005 in the data of a JSON-RPC error', { code: -32603, message: 'Internal error', data: STILL_PENDING }],
+    [
+      "the Anchorage extension's -32005 with its data",
+      { ...STILL_PENDING, data: { userVisibleMessage: STILL_PENDING.message, operationID: 'operation-1' } },
+    ],
+    [
+      'a user-visible message in the data saying the request is still pending, with another code',
+      { code: -32603, message: 'Internal error', data: { userVisibleMessage: STILL_PENDING.message } },
+    ],
+    ["the Anchorage extension's 4900 for a request it stopped waiting on", STOPPED_WAITING],
+    ['4900 with a message saying the request can still complete', { code: 4900, message: STOPPED_WAITING_MESSAGE }],
+    ['4900 as a string, with that message', { code: '4900', message: STOPPED_WAITING_MESSAGE }],
+    [
+      '4900 whose cause says the request can still complete',
+      Object.assign(new Error('The Provider is disconnected from all chains.'), {
+        code: 4900,
+        cause: new Error(STOPPED_WAITING_MESSAGE),
+      }),
+    ],
+    [
+      '4900 as a string, whose cause says so',
+      { code: '4900', message: 'Disconnected', cause: { message: STOPPED_WAITING_MESSAGE } },
+    ],
+    [
+      '4900 whose user-visible message in the data says so',
+      { code: 4900, message: 'Disconnected', data: { userVisibleMessage: STOPPED_WAITING_MESSAGE } },
+    ],
+    [
+      '4900 as a string, whose user-visible message in the data says so',
+      { code: '4900', message: 'Disconnected', data: { userVisibleMessage: STOPPED_WAITING_MESSAGE } },
+    ],
+    [
+      "4900 with the ID of the wallet's operation in the data",
+      { code: 4900, message: 'Disconnected', data: { operationID: 'operation-1' } },
+    ],
+    [
+      "4900 as a string, with the ID of the wallet's operation in the data",
+      { code: '4900', message: 'Disconnected', data: { operationID: 'operation-1' } },
+    ],
+    ["the extension's 4900 inside an ethers error", { code: 'UNKNOWN_ERROR', error: STOPPED_WAITING }],
+    [
+      "the extension's 4900 in the data of a JSON-RPC error",
+      { code: -32603, message: 'Internal error', data: STOPPED_WAITING },
+    ],
+    ['a message saying the request can still complete, with no code', new Error('The request can still complete.')],
   ])('treats %s as a request still pending in the wallet', (_name, error) => {
     expect(classifyWalletError(error)).toBe('pending-in-wallet');
   });
@@ -82,6 +138,11 @@ describe('classifyWalletError', () => {
       'a broken extension whose error has code -32005',
       Object.assign(new TypeError(BROKEN_EXTENSION.message), { code: -32005 }),
       'session-broken',
+    ],
+    [
+      'a rejection whose message says the request can still complete',
+      { code: 4001, message: 'The request can still complete.' },
+      'rejected',
     ],
   ])('keeps %s as before', (_name, error, kind) => {
     expect(classifyWalletError(error)).toBe(kind);
@@ -99,6 +160,11 @@ describe('classifyWalletError', () => {
     ['4100 inside an ethers error', { code: 'UNKNOWN_ERROR', error: UNAUTHORIZED }],
     ['4100 as the cause of a viem error', Object.assign(new Error('Request failed'), { cause: { code: 4100 } })],
     ['4100 in the data of a JSON-RPC error', { code: -32603, message: 'Internal error', data: UNAUTHORIZED }],
+    [
+      '4900 whose user-visible message in the data does not say the request can still complete',
+      { code: 4900, message: 'Disconnected', data: { userVisibleMessage: 'The wallet is disconnected.' } },
+    ],
+    ['4900 with revert data', { code: 4900, message: 'Disconnected', data: '0x' }],
   ])('treats %s as a refusal before the wallet handled the request', (_name, error) => {
     expect(classifyWalletError(error)).toBe('refused');
   });
@@ -149,8 +215,49 @@ describe('describeWalletError', () => {
     expect(describeWalletError({ code: -32603, message: 'Internal error' })).toBe('Internal error (-32603)');
     expect(describeWalletError(BROKEN_EXTENSION)).toBe("Cannot read properties of undefined (reading 'sendMessage')");
     expect(describeWalletError(STILL_PENDING)).toBe(`${STILL_PENDING.message} (-32005)`);
+    expect(describeWalletError(STOPPED_WAITING)).toBe(`${STOPPED_WAITING_MESSAGE} (4900)`);
     expect(describeWalletError(UNAUTHORIZED)).toBe('Unauthorized (4100)');
     expect(describeWalletError(undefined)).toBe('Unknown error');
+  });
+
+  it.each<[string, unknown, string]>([
+    [
+      "the extension's 4900 inside an ethers error",
+      { code: 'UNKNOWN_ERROR', message: 'unknown error', error: STOPPED_WAITING },
+      `${STOPPED_WAITING_MESSAGE} (4900)`,
+    ],
+    [
+      "the extension's 4900 in the data of a JSON-RPC error",
+      { code: -32603, message: 'Internal error', data: STOPPED_WAITING },
+      `${STOPPED_WAITING_MESSAGE} (4900)`,
+    ],
+    [
+      '4900 as a string, as the cause of another error',
+      Object.assign(new Error('Request failed'), { cause: { code: '4900', message: STOPPED_WAITING_MESSAGE } }),
+      `${STOPPED_WAITING_MESSAGE} (4900)`,
+    ],
+    [
+      '-32005 in the data of a JSON-RPC error',
+      { code: -32603, message: 'Internal error', data: STILL_PENDING },
+      `${STILL_PENDING.message} (-32005)`,
+    ],
+  ])("names the code of the wallet's answer that it still holds the request, in %s", (_name, error, description) => {
+    expect(describeWalletError(error)).toBe(description);
+  });
+
+  it.each<[string, unknown, string]>([
+    [
+      'a refusal in the data of a JSON-RPC error',
+      { code: -32603, message: 'Internal error', data: { code: 4900, message: 'Disconnected' } },
+      'Internal error (-32603)',
+    ],
+    [
+      '4900 whose cause says the request can still complete, with no code of its own',
+      Object.assign(new Error('Disconnected'), { code: 4900, cause: new Error(STOPPED_WAITING_MESSAGE) }),
+      'Disconnected (4900)',
+    ],
+  ])('describes the outer error of %s', (_name, error, description) => {
+    expect(describeWalletError(error)).toBe(description);
   });
 });
 

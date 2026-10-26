@@ -49,6 +49,14 @@ const STILL_PENDING = {
   message:
     'This request is still pending and can still complete after this message. Check its status in the Anchorage extension before you try again.',
 };
+const STOPPED_WAITING_MESSAGE =
+  'Stopped waiting because the dApp tab was closed or the wallet was disconnected. The request can still complete, so check its status in the Anchorage extension before you try again.';
+/** The Anchorage extension's answer to a request it stopped waiting on because the tab's wallet was disconnected. */
+const STOPPED_WAITING = Object.assign(new Error(STOPPED_WAITING_MESSAGE), {
+  name: 'API Error',
+  code: 4900,
+  data: { userVisibleMessage: STOPPED_WAITING_MESSAGE, operationID: 'operation-1' },
+});
 /** The Anchorage extension's answer to a request from a tab whose session in the extension has no wallet. */
 const UNAUTHORIZED = { code: 4100, message: 'Unauthorized' };
 
@@ -1768,6 +1776,69 @@ describe('useWrappedAction with the transaction manager', () => {
     await reachReview(result);
     expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
     expect(result.current.walletRefusalMessage).toBeUndefined();
+    expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the request open when the wallet stops waiting on it after the page disconnects, until the user stops waiting', async () => {
+    const wallet = Object.assign(walletProvider(), {
+      getNetwork: jest.fn(async () => ({ chainId: 1, name: 'homestead' })),
+      getTransactionReceipt: jest.fn(async () => null),
+      getTransaction: jest.fn(async () => null),
+      getTransactionCount: jest.fn(async () => 5),
+    });
+    let stopWaiting: (error: unknown) => void = () => undefined;
+    wallet.sendUncheckedTransaction.mockImplementation(
+      () => new Promise<string>((_resolve, reject) => (stopWaiting = reject))
+    );
+    const { result, rerender } = renderHook(
+      ({ isConnected }: { isConnected: boolean }) => {
+        const web3 = {
+          ...mockWeb3,
+          write: isConnected
+            ? { ...mockWeb3.write, account: ACCOUNT, chainId: 1, provider: wallet as unknown as JsonRpcProvider }
+            : { ...mockWeb3.write, account: undefined, status: 'disconnected' as const, provider: undefined },
+        };
+        return useWrappedAction({
+          session: isConnected
+            ? sessionFor(wallet)
+            : sessionFor(wallet, { connector: undefined, status: 'disconnected', account: undefined }),
+          manager: useTransactionManager(web3),
+          readProvider: undefined,
+          checkRestriction: async () => undefined,
+        });
+      },
+      { initialProps: { isConnected: true } }
+    );
+    await waitFor(() => expect(result.current.blockedReason('supply')).toBeUndefined());
+    await reachReview(result);
+    act(() => result.current.confirm());
+    await waitFor(() => expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1));
+
+    // The user disconnects the wallet on the page. wagmi asks the extension to revoke the account, and
+    // the extension stops waiting on the open request: it answers 4900, though the request can still
+    // complete.
+    rerender({ isConnected: false });
+    expect(result.current.state).toMatchObject({ phase: 'discarded', isWalletRequestOpen: true });
+    await act(async () => stopWaiting(STOPPED_WAITING));
+
+    // After the user connects again, the request is still open in the wallet, so a new review waits
+    // for it, and no notice says that nothing was sent.
+    rerender({ isConnected: true });
+    await waitFor(() =>
+      expect(result.current.recovered.pending).toEqual([
+        expect.objectContaining({ step: 'approve', isInterrupted: true, isPendingInWallet: true }),
+      ])
+    );
+    expect(result.current.isRecoveredRequestPendingInWallet).toBe(true);
+    expect(result.current.canDismissRecovered).toBe(true);
+    expect(result.current.walletRefusalMessage).toBeUndefined();
+    expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+
+    // The user stops waiting after checking the wallet. A fresh review then starts from its first step.
+    act(() => result.current.dismissRecovered());
+    expect(result.current.blockedReason('supply')).toBeUndefined();
+    await reachReview(result);
+    expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
     expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
   });
 
