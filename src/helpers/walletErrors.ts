@@ -25,9 +25,10 @@
  *   (Unsupported Method), 4900 (Disconnected) and 4901 (Chain Disconnected) count, as a number or a
  *   string, and only when the error does not show a request the wallet still holds, as Anchorage's
  *   4900 above does. The Anchorage Digital extension answers 4100 "Unauthorized" when the tab's
- *   session in the extension has no wallet, as after the user logs into the extension again while
- *   the page still shows the account connected. Callers handle it as a `rejected`, since nothing
- *   was sent, and only describe it differently.
+ *   session in the extension has no wallet. The Porto run saw it once, right after the user had
+ *   logged into the extension again while the page still showed the account connected; what
+ *   emptied the session is not established. Callers handle it as a `rejected`, since nothing was
+ *   sent, and only describe it differently.
  * - `provider-failure`: anything else, an unknown outcome. Anchorage reports a request it turns
  *   down as a bare `-32603 Internal error`, which does not show whether the user declined or
  *   whether the request reached the chain.
