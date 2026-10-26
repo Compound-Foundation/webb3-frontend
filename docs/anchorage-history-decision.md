@@ -64,10 +64,11 @@ From these expectations:
 
 The transaction manager's records name a wrapper transaction as such while it is pending. Expected from code:
 
-- The lifecycle records each request with the wrapper as its key and the step's description (`src/hooks/useWrappedAction.ts:706-711`). The descriptions are "Reset the <symbol> allowance for the wrapper to 0", "Approve <amount> for the wrapper", "Supply <amount> through the wrapper", "Withdraw about <cash> from the wrapper" and "Withdraw all your wrapped <symbol>, about <cash>" (`src/hooks/useWriteWrappedState.ts:447`, `:453`, `:461` and `:762-765`). An exit's record carries the cash of the check before its signature (`:807`).
+- The lifecycle records each request with the wrapper as its key and the step's description (`src/hooks/useWrappedAction.ts:734-739`). The descriptions are "Reset the <symbol> allowance for the wrapper to 0", "Approve <amount> for the wrapper", "Supply <amount> through the wrapper", "Withdraw about <cash> from the wrapper" and "Withdraw all your wrapped <symbol>, about <cash>" (`src/hooks/useWriteWrappedState.ts:447`, `:453`, `:461` and `:762-765`). An exit's record carries the cash of the check before its signature (`:807`).
 - The wallet button counts each record as pending. The Pending list shows a record with a hash, with its description and an explorer link (`src/components/WalletButton.tsx:19-35` and `:132-158`).
-- The manager keeps a pending record in local storage under `webb3-transactions` (`src/helpers/constants.ts:11`, `src/hooks/useTransactionManager.ts:112-129`). A reload restores it for the connected account and chain (#64).
-- When a record settles, the manager deletes it from the list and from storage (`useTransactionManager.ts:372-380`). It keeps the outcome in memory only, for the last 20 settled transactions, and no list shows them (`:239-240`, `:344` and `:378`). A reload loses them.
+- The manager keeps a pending record in local storage under `webb3-transactions` (`src/helpers/constants.ts:11`, `src/hooks/useTransactionManager.ts:118-135`). A reload restores it for the connected account and chain (#64).
+- When a record settles, the manager deletes it from the list and from storage (`useTransactionManager.ts:382-390`). It keeps the outcome in memory only, for the last 20 settled transactions, and no list shows them (`:245-246`, `:354` and `:388`). A reload loses them.
+- When the user rejects a request, or the wallet refuses it before handling it (EIP-1193 code `4100`, `4200`, `4900` or `4901`), the manager deletes its record at once (`useTransactionManager.ts:583-591`). Nothing was sent, so no list shows it.
 
 So a later session shows no local record of a settled wrapper transaction. It shows one only while the transaction is pending, or while an interrupted request waits for "Stop waiting". Local storage belongs to one browser profile and one origin, so another browser or device shows nothing.
 
