@@ -737,6 +737,7 @@ const Home = ({
         isRecoveredRequestPendingInWallet={wrappedLending.action.isRecoveredRequestPendingInWallet}
         canDismissRecovered={wrappedLending.action.canDismissRecovered}
         onDismissRecovered={wrappedLending.action.dismissRecovered}
+        walletRefusalMessage={wrappedLending.action.walletRefusalMessage}
         onRetry={wrappedLending.retry}
       />
     );
