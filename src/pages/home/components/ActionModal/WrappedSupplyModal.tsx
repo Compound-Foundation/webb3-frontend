@@ -366,9 +366,14 @@ const WrappedSupplyModal = ({
     }
   }
 
+  // In the `signing` phase, the page checks a step, the wallet has its request or the network has
+  // its transaction. A click on the backdrop then does nothing, and only the close control and the
+  // Close button close the dialog. Otherwise a stray click stops the supply.
+  const canBackdropClose = state.phase !== 'signing';
+
   return (
     <div className="modal modal--active">
-      <div className="modal__backdrop" onClick={onClose}></div>
+      <div className="modal__backdrop" onClick={canBackdropClose ? onClose : undefined}></div>
       <div className="modal__content L4 wrapped-supply-modal" role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal__content__header">
           <div className="modal__content__header__left"></div>

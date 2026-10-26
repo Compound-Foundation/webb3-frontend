@@ -315,6 +315,13 @@ function renderModal(state: WrappedActionState, directBorrowBalance: bigint | un
 const explorerLinks = () =>
   screen.queryAllByRole('link', { name: /view on explorer/i }).map((link) => link.getAttribute('href'));
 
+/** The dimmed area around the open dialog. It has no role, so the test finds it by its class. */
+function backdrop(): HTMLElement {
+  const backdrops = document.querySelectorAll<HTMLElement>('.modal__backdrop');
+  if (backdrops.length !== 1) throw new Error('exactly one dialog backdrop must be shown');
+  return backdrops[0];
+}
+
 describe('WrappedSupply', () => {
   beforeEach(() => {
     Object.values(mockWriteState).forEach((fn) => fn.mockReset());
@@ -737,6 +744,68 @@ describe('WrappedSupply', () => {
       expect(screen.queryByRole('button', { name: /approve 1,000/i })).not.toBeInTheDocument();
     });
 
+    it.each<[string, WrappedStepState]>([
+      ['checked before the wallet is asked', { status: 'checking' }],
+      ['in the wallet', { status: 'awaiting-signature' }],
+      ['on the network', { status: 'submitted', hash: HASH }],
+    ])(
+      'stays open on a click on the backdrop while a step is %s, and closes with the close control or Close',
+      (_name, step) => {
+        const { onClose } = renderModal({ ...inReview(), phase: 'signing', steps: [step, { status: 'waiting' }] });
+
+        fireEvent.click(backdrop());
+        expect(onClose).not.toHaveBeenCalled();
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+        expect(onClose).toHaveBeenCalledTimes(1);
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        expect(onClose).toHaveBeenCalledTimes(2);
+      }
+    );
+
+    it.each<[string, WrappedActionState]>([
+      ['being read', { phase: 'reading', identity: draftFor([SUPPLY_STEP]).identity }],
+      [
+        'not ready after a failed read',
+        { phase: 'read-failed', identity: draftFor([SUPPLY_STEP]).identity, message: 'The read failed.' },
+      ],
+      ['in review', inReview()],
+      [
+        'in review of its next step',
+        inReview(undefined, 1, [
+          { status: 'confirmed', hash: HASH, receipt: { transactionHash: HASH, status: 1 } as TransactionReceipt },
+          { status: 'waiting' },
+        ]),
+      ],
+      [
+        'confirmed',
+        {
+          ...inReview([SUPPLY_STEP]),
+          phase: 'complete',
+          steps: [
+            { status: 'confirmed', hash: HASH, receipt: { transactionHash: HASH, status: 1 } as TransactionReceipt },
+          ],
+        },
+      ],
+      ['stopped', { ...inReview(), phase: 'stopped', steps: [{ status: 'rejected' }, { status: 'waiting' }] }],
+      [
+        'closed with a request still open in the wallet',
+        {
+          phase: 'discarded',
+          reason: 'cleared',
+          type: 'supply',
+          chainId: 1,
+          submittedHashes: [],
+          isWalletRequestOpen: true,
+        },
+      ],
+    ])('closes on a click on the backdrop while the supply is %s', (_name, state) => {
+      const { onClose } = renderModal(state);
+
+      fireEvent.click(backdrop());
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
     it.each<[WrappedStepState, RegExp]>([
       [{ status: 'blocked', reason: 'identity-changed' }, /your wallet, network or market changed/],
       [{ status: 'blocked', reason: 'session-unusable' }, /your wallet stopped responding/],
@@ -955,6 +1024,20 @@ describe('WrappedSupply', () => {
       fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close dialog' }));
       expect(action.discard).toHaveBeenCalledTimes(2);
       expect(action.confirm).not.toHaveBeenCalled();
+    });
+
+    it('Home keeps the supply on a click on the backdrop while the wallet has its request', () => {
+      const action = controller({
+        ...inReview(),
+        phase: 'signing',
+        steps: [{ status: 'awaiting-signature' }, { status: 'waiting' }],
+      });
+      render(homeElement(lendingWith(action), cometState(BASE_ASSET)));
+
+      fireEvent.click(backdrop());
+      expect(action.discard).not.toHaveBeenCalled();
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close dialog' }));
+      expect(action.discard).toHaveBeenCalledTimes(1);
     });
   });
 });
