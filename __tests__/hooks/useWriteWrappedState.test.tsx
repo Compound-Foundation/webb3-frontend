@@ -1452,6 +1452,7 @@ describe('useWriteWrappedState', () => {
       ['awaiting signature', 'awaiting-signature', /confirm the request in your wallet/i],
       ['pending hash', 'submitted', /broadcast/i],
       ['rejection', 'rejected', /you rejected the request/i],
+      ['refusal before the wallet handled the request', 'refused', /refused this request before handling it/i],
       ['provider failure', 'provider-failure', /your wallet reported an error/i],
       ['revert', 'reverted', /failed on chain/i],
       ['replacement', 'replaced', /replaced or dropped/i],
@@ -1482,6 +1483,9 @@ describe('useWriteWrappedState', () => {
             break;
           case 'rejected':
             requests[0].resolve({ status: 'rejected' });
+            break;
+          case 'refused':
+            requests[0].resolve({ status: 'refused', message: 'Unauthorized (4100)' });
             break;
           case 'provider-failure':
             requests[0].resolve({ status: 'provider-failure', message: 'Internal error (-32603)' });
