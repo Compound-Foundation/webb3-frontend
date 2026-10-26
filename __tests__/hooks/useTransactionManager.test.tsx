@@ -26,6 +26,8 @@ const STILL_PENDING = {
   message:
     'This request is still pending and can still complete after this message. Check its status in the Anchorage extension before you try again.',
 };
+/** The Anchorage extension's answer to a request from a tab whose session in the extension has no wallet. */
+const UNAUTHORIZED = { code: 4100, message: 'Unauthorized' };
 
 /** A transaction hash made from a label, so that the test reads by name. */
 function tx(label: string): string {
@@ -893,6 +895,16 @@ describe('useTransactionManager', () => {
         STILL_PENDING,
         { status: 'pending-in-wallet', message: `${STILL_PENDING.message} (-32005)` },
       ],
+      [
+        "the Anchorage extension's refusal from a session with no wallet (4100)",
+        UNAUTHORIZED,
+        { status: 'refused', message: 'Unauthorized (4100)' },
+      ],
+      [
+        'a refusal inside an ethers error, described by its own code',
+        { code: 'UNKNOWN_ERROR', message: 'unknown error', error: UNAUTHORIZED },
+        { status: 'refused', message: 'Unauthorized (4100)' },
+      ],
     ])('reports %s, and treats only an explicit rejection as one', async (_name, error, expected) => {
       const provider = walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } });
       const { result } = renderManager(web3For(ACCOUNT, provider));
@@ -959,6 +971,36 @@ describe('useTransactionManager', () => {
       // The wallet answered, so its session is not broken.
       expect(result.current.walletFailure).toBeUndefined();
     });
+
+    it.each<[string, unknown, string]>([
+      ["the Anchorage extension's 4100 from a session with no wallet", UNAUTHORIZED, 'Unauthorized (4100)'],
+      ['4100 as a string', { code: '4100', message: 'Unauthorized' }, 'Unauthorized (4100)'],
+      ['4200', { code: 4200, message: 'Unsupported Method' }, 'Unsupported Method (4200)'],
+      ['4900', { code: 4900, message: 'Disconnected' }, 'Disconnected (4900)'],
+      ['4901', { code: 4901, message: 'Chain Disconnected' }, 'Chain Disconnected (4901)'],
+    ])(
+      'drops a wrapper step the wallet refused before handling it, and leaves no interrupted record: %s',
+      async (_name, error, message) => {
+        const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+
+        let submission: SendResult | undefined;
+        await act(async () => {
+          submission = await result.current.submitTransaction({
+            key: WRAPPER,
+            description: 'Approve USDC for the wrapper',
+            step: 'approve',
+            send: async () => Promise.reject(error),
+          });
+        });
+
+        expect(submission).toEqual({ status: 'refused', message });
+        // No transaction and no wallet request exist, so nothing holds back the next review.
+        expect(result.current.transactions).toEqual([]);
+        expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
+        // The wallet answered, so its session is not broken.
+        expect(result.current.walletFailure).toBeUndefined();
+      }
+    );
 
     it('drops a wrapper step the user rejected, or one that failed before the wallet was asked', async () => {
       const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));

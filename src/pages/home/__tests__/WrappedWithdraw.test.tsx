@@ -206,6 +206,7 @@ function controller(state: WrappedActionState = { phase: 'idle' }): Controller {
     isRecoveredRequestPendingInWallet: false,
     canDismissRecovered: false,
     hasUnansweredWalletRequest: false,
+    walletRefusalMessage: undefined,
     blockedReason: () => undefined,
     start: jest.fn(),
     confirm: jest.fn(),
@@ -861,6 +862,28 @@ describe('WrappedWithdraw', () => {
             `(Your wallet reported: ${message})`
         )
       ).toBeInTheDocument();
+      expect(dialog).not.toHaveTextContent(/your wallet reported an error/i);
+      expect(dialog).toHaveTextContent('This withdrawal stopped, and nothing more is sent from it.');
+      expect(within(dialog).getByRole('button', { name: 'Close' })).toBeEnabled();
+    });
+
+    it('says the wallet refused the request before handling it, names its code, and says to reconnect', () => {
+      renderModal({
+        ...inReview(),
+        phase: 'stopped',
+        steps: [{ status: 'refused', message: 'Unauthorized (4100)' }],
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/withdrawal stopped/i);
+      expect(
+        within(dialog).getByText(
+          'Your wallet refused this request before handling it (Unauthorized (4100)), so nothing was sent. ' +
+            'Disconnect and reconnect your wallet on this page, then start a new review.'
+        )
+      ).toBeInTheDocument();
+      // Nothing was sent, so the dialog does not say that the request may still go through.
+      expect(dialog).not.toHaveTextContent(/may still go through/i);
       expect(dialog).not.toHaveTextContent(/your wallet reported an error/i);
       expect(dialog).toHaveTextContent('This withdrawal stopped, and nothing more is sent from it.');
       expect(within(dialog).getByRole('button', { name: 'Close' })).toBeEnabled();

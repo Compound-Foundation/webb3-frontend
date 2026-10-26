@@ -56,6 +56,8 @@ const STILL_PENDING = {
   message:
     'This request is still pending and can still complete after this message. Check its status in the Anchorage extension before you try again.',
 };
+/** The Anchorage extension's answer to a request from a tab whose session in the extension has no wallet. */
+const UNAUTHORIZED = { code: 4100, message: 'Unauthorized' };
 
 const CALLS = new Interface([
   'function approve(address spender, uint256 amount)',
@@ -972,6 +974,11 @@ describe('useWrappedAction', () => {
         { status: 'pending-in-wallet', message: `${STILL_PENDING.message} (-32005)` },
         'provider-failure',
       ],
+      [
+        "the wallet's refusal before it handled the request",
+        { status: 'refused', message: 'Unauthorized (4100)' },
+        'refused',
+      ],
       ['a revert', 'reverted', 'reverted'],
       ['a replacement', 'replaced', 'replaced'],
     ])('stops on %s without retrying or sending the next step', async (_name, outcome, status) => {
@@ -1028,6 +1035,67 @@ describe('useWrappedAction', () => {
         expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
       }
     );
+
+    it('records a refusal before the wallet handled the request, and lets a new review start at once', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      await act(async () => requests[0].resolve({ status: 'refused', message: 'Unauthorized (4100)' }));
+
+      expect(result.current.state).toMatchObject({
+        phase: 'stopped',
+        stepIndex: 0,
+        steps: [{ status: 'refused', message: 'Unauthorized (4100)' }, { status: 'waiting' }],
+      });
+      // The wallet answered, so the session stays usable, and its answer is kept for the panel.
+      expect(result.current.session).toEqual({ status: 'usable' });
+      expect(result.current.walletRefusalMessage).toBe('Unauthorized (4100)');
+      expect(result.current.canDismissRecovered).toBe(false);
+      act(() => result.current.confirm());
+      await act(async () => undefined);
+      expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
+
+      // Nothing was sent, so a new review starts at once, and it clears the refusal.
+      act(() => result.current.discard());
+      expect(result.current.walletRefusalMessage).toBe('Unauthorized (4100)');
+      expect(result.current.blockedReason('supply')).toBeUndefined();
+      await reachReview(result);
+      expect(result.current.walletRefusalMessage).toBeUndefined();
+      expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
+      expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it.each<[string, (wallet: Wallet) => WrappedSession]>([
+      ['a reconnected wallet, with a new wallet provider', () => sessionFor(walletProvider())],
+      ['another account', (wallet) => sessionFor(wallet, { account: OTHER_ACCOUNT })],
+      ['another network', (wallet) => sessionFor(wallet, { chainId: 8453 })],
+    ])('shows a refusal only to the wallet session that refused: %s', async (_name, otherSession) => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+      await act(async () => requests[0].resolve({ status: 'refused', message: 'Unauthorized (4100)' }));
+      expect(result.current.walletRefusalMessage).toBe('Unauthorized (4100)');
+
+      rerender({ session: otherSession(wallet), manager });
+
+      expect(result.current.walletRefusalMessage).toBeUndefined();
+    });
+
+    it('drops a refusal that arrives after the wallet session changed', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      rerender({ session: sessionFor(wallet, { account: OTHER_ACCOUNT }), manager });
+      await act(async () => requests[0].resolve({ status: 'refused', message: 'Unauthorized (4100)' }));
+      rerender({ session: sessionFor(wallet), manager });
+
+      expect(result.current.walletRefusalMessage).toBeUndefined();
+    });
 
     it('keeps an outcome that arrives before the hash it belongs to is recorded', async () => {
       const { manager, requests } = fakeManager(wallet);
@@ -1895,6 +1963,45 @@ describe('useWrappedAction with the transaction manager', () => {
     expect(result.current.isRecoveredRequestPendingInWallet).toBe(false);
     await reachReview(result);
     expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
+    expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops at 4100 from the wallet, leaves no request open, and lets a new review start at once', async () => {
+    const wallet = Object.assign(walletProvider(), {
+      getNetwork: jest.fn(async () => ({ chainId: 1, name: 'homestead' })),
+      getTransactionReceipt: jest.fn(async () => null),
+      getTransaction: jest.fn(async () => null),
+      getTransactionCount: jest.fn(async () => 5),
+    });
+    // As the Anchorage extension answers after the user logged into it again: the tab's session in
+    // the extension has no wallet, so the request never reaches one.
+    wallet.sendUncheckedTransaction.mockRejectedValue(UNAUTHORIZED);
+    const { result } = renderWithManager(wallet);
+    await waitFor(() => expect(result.current.blockedReason('supply')).toBeUndefined());
+
+    await reachReview(result);
+    act(() => result.current.confirm());
+    await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+    expect(result.current.state).toMatchObject({
+      stepIndex: 0,
+      steps: [{ status: 'refused', message: 'Unauthorized (4100)' }, { status: 'waiting' }],
+    });
+    expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
+    expect(result.current.session).toEqual({ status: 'usable' });
+    // Nothing was sent and the wallet holds nothing, so no record is left and nothing waits for one.
+    expect(result.current.recovered.pending).toEqual([]);
+    expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
+    expect(result.current.canDismissRecovered).toBe(false);
+    expect(result.current.isRecoveredRequestPendingInWallet).toBe(false);
+    expect(result.current.walletRefusalMessage).toBe('Unauthorized (4100)');
+
+    // A new review starts at once, from its first step, and sends nothing until it is confirmed.
+    act(() => result.current.discard());
+    expect(result.current.blockedReason('supply')).toBeUndefined();
+    await reachReview(result);
+    expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
+    expect(result.current.walletRefusalMessage).toBeUndefined();
     expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
   });
 

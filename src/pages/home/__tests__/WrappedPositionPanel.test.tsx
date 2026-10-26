@@ -185,6 +185,30 @@ describe('WrappedPositionPanel', () => {
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop waiting' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/refused/)).not.toBeInTheDocument();
+  });
+
+  it('tells the user to reconnect the wallet after it refused a request before handling it', () => {
+    render(
+      <WrappedPositionPanel
+        route={wrappedRoute()}
+        position={{ status: 'loaded', position: POSITION }}
+        baseAsset={BASE_ASSET}
+        earnAPR={0n}
+        walletRefusalMessage="Unauthorized (4100)"
+        onRetry={jest.fn()}
+      />
+    );
+
+    expect(
+      screen.getByText(
+        'Your wallet refused the last wrapped request from this account before handling it (Unauthorized (4100)). ' +
+          'Nothing was sent. Disconnect and reconnect your wallet on this page, then start a new review.'
+      )
+    ).toBeInTheDocument();
+    // Nothing waits for the refused request, so there is nothing to stop waiting for.
+    expect(screen.queryByRole('button', { name: 'Stop waiting' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/was left open/)).not.toBeInTheDocument();
   });
 
   it('lets the user stop waiting for an earlier wrapped transaction', () => {
