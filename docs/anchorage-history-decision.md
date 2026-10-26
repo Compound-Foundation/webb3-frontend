@@ -2,7 +2,7 @@
 
 No decision is recorded. Product's decision owner is Steve, and Leo is the contact. The [Decision](#decision) section holds empty fields for them.
 
-Expected from code: Compound's transaction history will leave out every wrapped supply and its approvals. It will list each wrapped exit as "Withdrew <cash> <symbol>" on the market, the same as a withdrawal from the holder's own Comet position. These are expectations from the frontend, the history backend and the wrapper contract, with the chain part checked on a local fork. Nobody has observed the app's history for a wrapped transaction. COM-290's run provides the observations, and the [Observed](#observed-filled-from-com-290) tables have empty slots for them.
+Expected from code: Compound's transaction history will leave out every wrapped supply and its approvals. It will list each wrapped exit as "Withdrew <cash> <symbol>" on the market, the same as a withdrawal from the holder's own Comet position. These are expectations from the frontend, the history backend and the wrapper contract, with the chain part checked on a local fork. On 2026-10-26, COM-290's runs on mainnet observed the same in Recent Transactions, for USDC and institutional USDC. Each exit's row rounds the cash to four decimals. [Observed](#observed-filled-from-com-290) records the samples, and lists the surfaces and the market that the runs did not capture.
 
 The record follows COM-291. It cites code at these commits:
 
@@ -39,7 +39,7 @@ Facts from a fork: on 2026-10-22 a scratch probe ran these calls on a local anvi
 
 In each exit the cash in Comet's `Withdraw` equalled the base token the holder received. The wrapper's `Withdraw` event carried a gross debit 1 unit higher. The probe applied the backend's filter from fact 4 to the receipts. It did not run the backend.
 
-The same reading of the code accounts for one real observation. COM-284's direct withdrawal of 1 USDC, whose hash the COM-284 comment records, emitted Comet `Withdraw(holder, holder, 1000000)` and a burn `Transfer`. The filter keeps both Comet logs and then drops the burn, and COM-284 saw "Withdrew 1 USDC" in Recent Transactions. Nobody has checked a wrapped transaction against the app this way.
+The same reading of the code accounts for one real observation. COM-284's direct withdrawal of 1 USDC, whose hash the COM-284 comment records, emitted Comet `Withdraw(holder, holder, 1000000)` and a burn `Transfer`. The filter keeps both Comet logs and then drops the burn, and COM-284 saw "Withdrew 1 USDC" in Recent Transactions. On 2026-10-26, COM-290's runs checked wrapped transactions against the app this way ([Observed](#observed-filled-from-com-290)).
 
 ## Expected Compound history, from code
 
@@ -81,37 +81,46 @@ The code cannot predict Porto's activity lists. COM-284 observed that the extens
 
 Do not fill a cell from the expectations above. Each value needs a COM-290 capture.
 
-| Sample    | Market             | Kind                | Hash | Block | Comet log index naming the wallet | Raw shares | Gross Comet assets | Base cash |
-| --------- | ------------------ | ------------------- | ---- | ----- | --------------------------------- | ---------- | ------------------ | --------- |
-| S-USDC-1  | USDC               | exact approval      |      |       |                                   |            |                    |           |
-| S-USDC-2  | USDC               | supply              |      |       |                                   |            |                    |           |
-| S-USDC-3  | USDC               | partial exit        |      |       |                                   |            |                    |           |
-| S-USDC-4  | USDC               | full exit           |      |       |                                   |            |                    |           |
-| S-IUSDC-1 | Institutional USDC | exact approval      |      |       |                                   |            |                    |           |
-| S-IUSDC-2 | Institutional USDC | supply              |      |       |                                   |            |                    |           |
-| S-IUSDC-3 | Institutional USDC | partial exit        |      |       |                                   |            |                    |           |
-| S-IUSDC-4 | Institutional USDC | full exit           |      |       |                                   |            |                    |           |
-| S-USDT-1  | USDT               | approval, then stop |      |       |                                   |            |                    |           |
-| S-USDT-2  | USDT               | allowance reset     |      |       |                                   |            |                    |           |
-| S-USDT-3  | USDT               | exact approval      |      |       |                                   |            |                    |           |
-| S-USDT-4  | USDT               | supply              |      |       |                                   |            |                    |           |
-| S-USDT-5  | USDT               | partial exit        |      |       |                                   |            |                    |           |
-| S-USDT-6  | USDT               | full exit           |      |       |                                   |            |                    |           |
+| Sample    | Market             | Kind                | Hash                                                                 | Block    | Comet log index naming the wallet | Raw shares                | Gross Comet assets | Base cash                         |
+| --------- | ------------------ | ------------------- | -------------------------------------------------------------------- | -------- | --------------------------------- | ------------------------- | ------------------ | --------------------------------- |
+| S-USDC-1  | USDC               | exact approval      | `0xafa7857dbb050fdb9219c437884350caad11818ce072ef7adf1a1a34a9951286` | 26278214 | none                              | none                      | none               | none: a USDC `Approval` of 500000 |
+| S-USDC-2  | USDC               | supply              | `0xc0dabd60d8012be31d16f51e3a201a8619a6d4c66ca6793d423e39236dede691` | 26278276 | none                              | 498376356093481967 minted | 499999             | 500000 from the wallet            |
+| S-USDC-3  | USDC               | partial exit        | `0x1e087a36d57bd7e4ab0b9df92c9912dfd76858ea2649b1b01426236660db3b70` | 26278301 | 1016 (`Withdraw`)                 | 199353902630387816 burned | 200001             | 200000 to the wallet              |
+| S-USDC-4  | USDC               | full exit           | `0x725830803cb4fc5a9e57da89dbdeb3acd9e6c457ded1b6dee51eeb07fb00bd34` | 26278312 | 483 (`Withdraw`)                  | 299022453463094151 burned | 299994             | 299993 to the wallet              |
+| S-USDC-5  | USDC               | exact approval      | `0xed802a86f6b628438e0a8b2965f48270658cdf3741fbcb260486ec6a4b68d482` | 26278575 | none                              | none                      | none               | none: a USDC `Approval` of 490000 |
+| S-USDC-6  | USDC               | supply              | `0xca542d772459bc1a1381dad3dfba484f23a7a984a32706db140f68d2a249bf6a` | 26278589 | none                              | 488406852861299189 minted | 489999             | 490000 from the wallet            |
+| S-USDC-7  | USDC               | full exit           | `0x40e17cbb2c963c880d979ad2dcb024e549340e9564f42593e70cf37c9daf5695` | 26278609 | 1867 (`Withdraw`)                 | 488406852861299189 burned | 489998             | 489996 to the wallet              |
+| S-IUSDC-1 | Institutional USDC | exact approval      | `0xe71db0235b1e401e4701467736b9a27d6da7c05fe2ad49e0da4f3361fa62254f` | 26278519 | none                              | none                      | none               | none: a USDC `Approval` of 500000 |
+| S-IUSDC-2 | Institutional USDC | supply              | `0x94cf243fea62c9b6b5cafac00133020c8e21bde428b88ab5191d80284545d981` | 26278535 | none                              | 498982308830999254 minted | 499999             | 500000 from the wallet            |
+| S-IUSDC-3 | Institutional USDC | partial exit        | not run                                                              |          |                                   |                           |                    |                                   |
+| S-IUSDC-4 | Institutional USDC | full exit           | `0x991bbc906e560540587678c621a75b3f3f0f6a67913e96d5a0587e28fa80190d` | 26278558 | 1727 (`Withdraw`)                 | 498982308830999254 burned | 499997             | 499996 to the wallet              |
+| S-USDT-1  | USDT               | approval, then stop | not run                                                              |          |                                   |                           |                    |                                   |
+| S-USDT-2  | USDT               | allowance reset     | not run                                                              |          |                                   |                           |                    |                                   |
+| S-USDT-3  | USDT               | exact approval      | not run                                                              |          |                                   |                           |                    |                                   |
+| S-USDT-4  | USDT               | supply              | not run                                                              |          |                                   |                           |                    |                                   |
+| S-USDT-5  | USDT               | partial exit        | not run                                                              |          |                                   |                           |                    |                                   |
+| S-USDT-6  | USDT               | full exit           | not run                                                              |          |                                   |                           |                    |                                   |
+
+S-USDC-1 to S-USDC-4 ran on build `95555f6`, and the other samples on `8e7d022` ([COM-290 results](anchorage-porto-validation.md#results)). Log indexes are decimal. Each receipt holds the logs of the fork's table above, in the same order. In each exit, Comet's `Withdraw` carried the cash that the wallet received. The wrapper's `Withdraw` carried a gross debit 1 unit higher, or 2 units higher for S-USDC-7.
 
 For each surface, record what it showed for each kind of transaction, with the sample IDs as evidence. A cell is "as expected", "different" with a description, or "not captured".
 
-| Surface                    | Kind                       | After confirmation | After reload | After reconnect | Later session | Samples |
-| -------------------------- | -------------------------- | ------------------ | ------------ | --------------- | ------------- | ------- |
-| Pending list and button    | approval, reset and supply |                    |              |                 |               |         |
-| Pending list and button    | exit                       |                    |              |                 |               |         |
-| Recent Transactions        | approval, reset and supply |                    |              |                 |               |         |
-| Recent Transactions        | exit                       |                    |              |                 |               |         |
-| `/transactions`            | approval, reset and supply |                    |              |                 |               |         |
-| `/transactions`            | exit                       |                    |              |                 |               |         |
-| Dashboard                  | all                        |                    |              |                 |               |         |
-| Watch-only `/transactions` | all                        |                    |              |                 |               |         |
-| Porto mobile activity      | all                        |                    |              |                 |               |         |
-| Porto extension            | all                        |                    |              |                 |               |         |
+| Surface                    | Kind                       | After confirmation                                                                                                                                                                                                                                                                         | After reload                                                                                       | After reconnect | Later session | Samples                                                      |
+| -------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- | --------------- | ------------- | ------------------------------------------------------------ |
+| Pending list and button    | approval, reset and supply | as expected: no row once settled. The tester opened the wallet menu only after each step settled, so the count and the row while pending were not captured                                                                                                                                 | as expected: after the S3 reload, the button counted S-IUSDC-1 as "1 Pending" until "Stop waiting" | not captured    | not captured  | S-USDC-1, S-USDC-2, S-USDC-5, S-USDC-6, S-IUSDC-1, S-IUSDC-2 |
+| Pending list and button    | exit                       | as expected: no row once settled. The count and the row while pending were not captured                                                                                                                                                                                                    | not captured                                                                                       | not captured    | not captured  | S-USDC-3, S-USDC-4, S-USDC-7, S-IUSDC-4                      |
+| Recent Transactions        | approval, reset and supply | as expected: absent                                                                                                                                                                                                                                                                        | as expected: S-USDC-1 and S-USDC-2 were still absent after the reloads at 17:57 and 17:59 UTC      | not captured    | not captured  | S-USDC-1, S-USDC-2, S-USDC-5, S-USDC-6, S-IUSDC-1, S-IUSDC-2 |
+| Recent Transactions        | exit                       | as expected: "Withdrew 0.2000 USDC", "Withdrew 0.3000 USDC", "Withdrew 0.4900 USDC" and "Withdrew 0.5000 USDC", subtitled with the market and with no "Initiated by". Each amount is the cash rounded to four decimals, such as 0.3000 for 299993 base units. Each row opened its own hash | as expected: S-USDC-3 and S-USDC-4 were still listed after the reloads at 17:57 and 17:59 UTC      | not captured    | not captured  | S-USDC-3, S-USDC-4, S-USDC-7, S-IUSDC-4                      |
+| `/transactions`            | approval, reset and supply | not captured                                                                                                                                                                                                                                                                               | not captured                                                                                       | not captured    | not captured  |                                                              |
+| `/transactions`            | exit                       | not captured                                                                                                                                                                                                                                                                               | not captured                                                                                       | not captured    | not captured  |                                                              |
+| Dashboard                  | all                        | as expected: after each step, the panel showed the new allowance, value and wallet balance ([COM-290 M2 and M4](anchorage-porto-validation.md#results))                                                                                                                                    | as expected: after the S3 reload, the panel showed the S-IUSDC-1 allowance of 0.5000 USDC          | not captured    | not captured  | every sample above                                           |
+| Watch-only `/transactions` | all                        | not captured                                                                                                                                                                                                                                                                               | not captured                                                                                       | not captured    | not captured  |                                                              |
+| Porto mobile activity      | all                        | not captured                                                                                                                                                                                                                                                                               | not captured                                                                                       | not captured    | not captured  |                                                              |
+| Porto extension            | all                        | not captured for activity. The account screen listed no wrapper share token while the wallet held shares ([COM-290 finding 4](anchorage-porto-validation.md#findings-for-anchorage))                                                                                                       | not captured                                                                                       | not captured    | not captured  | S-USDC-6, S-IUSDC-2                                          |
+
+The browser console held "Error fetching transaction history: 500" at least once during the runs of 2026-10-26. The error came from the history endpoint of fact 1. Recent Transactions still rendered, and each exit's row appeared after its confirmation.
+
+So Compound's history matched the expectations above on each surface that the runs captured: the Pending list, Recent Transactions and the dashboard, for USDC and institutional USDC. The runs did not capture the Transactions page, the watch-only view, a reconnect, a later session, Porto's activity or USDT.
 
 ## Options
 
@@ -120,7 +129,7 @@ Holder visibility stays on the Anchorage route only (COM-285). An option that sh
 ### Option A: retain the current behaviour
 
 - Engineering cost: none.
-- Limitations, as expected from code: the absent supplies and approvals, and the exits that read as direct withdrawals, listed above. A holder who only used the wrapper sees withdrawals with no matching supply.
+- Limitations, as expected from code and observed on 2026-10-26: the absent supplies and approvals, and the exits that read as direct withdrawals, listed above. A holder who only used the wrapper sees withdrawals with no matching supply.
 - What remains for the holder: the wrapped panel shows the position. Each wrapped dialog links its transactions on the explorer, and the explorer shows every log.
 
 ### Option B: label or suppress the misleading exits
@@ -160,9 +169,9 @@ If the decision needs implementation, create scoped issues with acceptance crite
 
 ## Open questions
 
-| Question                                                                         | Owner                    |
-| -------------------------------------------------------------------------------- | ------------------------ |
-| What do Porto's mobile and extension activity show for each wrapped transaction? | Adam, in the COM-290 run |
-| Does Compound's history match the expectations above?                            | Adam, in the COM-290 run |
-| Under option B, does the label apply on the Anchorage route only?                | Steve, through Leo       |
-| Who changes and deploys the backend under option C?                              | Adam                     |
+| Question                                                                         | Owner                                                                                                           |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| What do Porto's mobile and extension activity show for each wrapped transaction? | Adam, in the COM-290 run                                                                                        |
+| Does Compound's history match the expectations above?                            | Answered on 2026-10-26: yes, on each surface that the runs captured ([Observed](#observed-filled-from-com-290)) |
+| Under option B, does the label apply on the Anchorage route only?                | Steve, through Leo                                                                                              |
+| Who changes and deploys the backend under option C?                              | Adam                                                                                                            |
