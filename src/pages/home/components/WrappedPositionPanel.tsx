@@ -22,6 +22,11 @@ type WrappedPositionPanelProps = {
   /** An interrupted wallet request holds back new wrapped actions, and the user can stop waiting. */
   canDismissRecovered?: boolean;
   onDismissRecovered?: () => void;
+  /**
+   * The wallet's answer when it refused this session's last wrapped request before it handled it.
+   * Nothing was sent, so the notice tells the user to reconnect the wallet before a new review.
+   */
+  walletRefusalMessage?: string;
   onRetry: () => void;
 };
 
@@ -94,6 +99,7 @@ const WrappedPositionPanel = ({
   isRecoveredRequestPendingInWallet = false,
   canDismissRecovered = false,
   onDismissRecovered = () => undefined,
+  walletRefusalMessage,
   onRetry,
 }: WrappedPositionPanelProps) => {
   const { symbol } = baseAsset;
@@ -222,6 +228,14 @@ const WrappedPositionPanel = ({
           <button className="button button--small" onClick={onDismissRecovered}>
             Stop waiting
           </button>
+        </div>
+      )}
+      {walletRefusalMessage !== undefined && (
+        <div className="wrapped-position-panel__notice">
+          <p className="L3 meta text-color--2">
+            Your wallet refused the last wrapped request from this account before handling it ({walletRefusalMessage}).
+            Nothing was sent. Disconnect and reconnect your wallet on this page, then start a new review.
+          </p>
         </div>
       )}
       {content}
