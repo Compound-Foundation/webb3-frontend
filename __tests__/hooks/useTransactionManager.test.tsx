@@ -26,6 +26,14 @@ const STILL_PENDING = {
   message:
     'This request is still pending and can still complete after this message. Check its status in the Anchorage extension before you try again.',
 };
+const STOPPED_WAITING_MESSAGE =
+  'Stopped waiting because the dApp tab was closed or the wallet was disconnected. The request can still complete, so check its status in the Anchorage extension before you try again.';
+/** The Anchorage extension's answer to a request it stopped waiting on because the tab's wallet was disconnected. */
+const STOPPED_WAITING = Object.assign(new Error(STOPPED_WAITING_MESSAGE), {
+  name: 'API Error',
+  code: 4900,
+  data: { userVisibleMessage: STOPPED_WAITING_MESSAGE, operationID: 'operation-1' },
+});
 /** The Anchorage extension's answer to a request from a tab whose session in the extension has no wallet. */
 const UNAUTHORIZED = { code: 4100, message: 'Unauthorized' };
 
@@ -896,6 +904,11 @@ describe('useTransactionManager', () => {
         { status: 'pending-in-wallet', message: `${STILL_PENDING.message} (-32005)` },
       ],
       [
+        "the Anchorage extension's answer that it stopped waiting on a request that can still complete (4900)",
+        STOPPED_WAITING,
+        { status: 'pending-in-wallet', message: `${STOPPED_WAITING_MESSAGE} (4900)` },
+      ],
+      [
         "the Anchorage extension's refusal from a session with no wallet (4100)",
         UNAUTHORIZED,
         { status: 'refused', message: 'Unauthorized (4100)' },
@@ -969,6 +982,32 @@ describe('useTransactionManager', () => {
       expect(result.current.transactions).toEqual([interrupted]);
       expect(JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]')).toEqual([interrupted]);
       // The wallet answered, so its session is not broken.
+      expect(result.current.walletFailure).toBeUndefined();
+    });
+
+    it('keeps a wrapper step, marked interrupted and pending in the wallet, when the wallet stops waiting on it with 4900', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+
+      let submission: SendResult | undefined;
+      await act(async () => {
+        submission = await result.current.submitTransaction({
+          key: WRAPPER,
+          description: 'Supply USDC through the wrapper',
+          step: 'supply',
+          send: async () => Promise.reject(STOPPED_WAITING),
+        });
+      });
+
+      // 4900 alone is a refusal, but this answer says the request can still complete.
+      expect(submission).toEqual({ status: 'pending-in-wallet', message: `${STOPPED_WAITING_MESSAGE} (4900)` });
+      const interrupted = expect.objectContaining({
+        state: TransactionState.AwaitingConfirmation,
+        step: 'supply',
+        isInterrupted: true,
+        isPendingInWallet: true,
+      });
+      expect(result.current.transactions).toEqual([interrupted]);
+      expect(JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]')).toEqual([interrupted]);
       expect(result.current.walletFailure).toBeUndefined();
     });
 
