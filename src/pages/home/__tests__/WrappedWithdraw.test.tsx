@@ -330,6 +330,13 @@ function renderModal(state: WrappedActionState) {
 const explorerLinks = () =>
   screen.queryAllByRole('link', { name: /view on explorer/i }).map((link) => link.getAttribute('href'));
 
+/** The dimmed area around the open dialog. It has no role, so the test finds it by its class. */
+function backdrop(): HTMLElement {
+  const backdrops = document.querySelectorAll<HTMLElement>('.modal__backdrop');
+  if (backdrops.length !== 1) throw new Error('exactly one dialog backdrop must be shown');
+  return backdrops[0];
+}
+
 describe('WrappedWithdraw', () => {
   beforeEach(() => {
     Object.values(mockWriteState).forEach((fn) => fn.mockReset());
@@ -694,6 +701,61 @@ describe('WrappedWithdraw', () => {
       expect(within(dialog).getByRole('button', { name: 'Checking' })).toBeDisabled();
     });
 
+    it.each<[string, WrappedStepState]>([
+      ['checked before the wallet is asked', { status: 'checking' }],
+      ['in the wallet', { status: 'awaiting-signature' }],
+      ['on the network', { status: 'submitted', hash: HASH }],
+    ])(
+      'stays open on a click on the backdrop while the exit is %s, and closes with the close control or Close',
+      (_name, step) => {
+        const { onClose } = renderModal({ ...inReview(), phase: 'signing', steps: [step] });
+
+        fireEvent.click(backdrop());
+        expect(onClose).not.toHaveBeenCalled();
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+        expect(onClose).toHaveBeenCalledTimes(1);
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        expect(onClose).toHaveBeenCalledTimes(2);
+      }
+    );
+
+    it.each<[string, WrappedActionState]>([
+      ['being read', { phase: 'reading', identity: draftFor(PARTIAL_REVIEW).identity }],
+      [
+        'not ready after a failed read',
+        { phase: 'read-failed', identity: draftFor(PARTIAL_REVIEW).identity, message: 'The read failed.' },
+      ],
+      ['in review', inReview()],
+      [
+        'confirmed',
+        {
+          ...inReview(),
+          phase: 'complete',
+          steps: [
+            { status: 'confirmed', hash: HASH, receipt: { transactionHash: HASH, status: 1 } as TransactionReceipt },
+          ],
+        },
+      ],
+      ['stopped', { ...inReview(), phase: 'stopped', steps: [{ status: 'rejected' }] }],
+      [
+        'closed with a request still open in the wallet',
+        {
+          phase: 'discarded',
+          reason: 'cleared',
+          type: 'withdraw',
+          chainId: 1,
+          submittedHashes: [],
+          isWalletRequestOpen: true,
+        },
+      ],
+    ])('closes on a click on the backdrop while the withdrawal is %s', (_name, state) => {
+      const { onClose } = renderModal(state);
+
+      fireEvent.click(backdrop());
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
     it('confirms success with the transaction link, and closes', () => {
       const receipt = { transactionHash: HASH, status: 1 } as TransactionReceipt;
       const { onClose } = renderModal({
@@ -952,6 +1014,16 @@ describe('WrappedWithdraw', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
       expect(action.discard).toHaveBeenCalledTimes(2);
       expect(action.confirm).not.toHaveBeenCalled();
+    });
+
+    it('Home keeps the withdrawal on a click on the backdrop while the wallet has its request', () => {
+      const action = controller({ ...inReview(), phase: 'signing', steps: [{ status: 'awaiting-signature' }] });
+      render(homeElement(lendingWith(action), cometState(BASE_ASSET)));
+
+      fireEvent.click(backdrop());
+      expect(action.discard).not.toHaveBeenCalled();
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close dialog' }));
+      expect(action.discard).toHaveBeenCalledTimes(1);
     });
 
     it('Home shows only the supply dialog while a supply review is read', () => {

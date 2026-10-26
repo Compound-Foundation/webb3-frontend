@@ -322,7 +322,15 @@ const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: W
     }
   }
 
-  return <WrappedActionDialog title={title} content={content} actions={actions} onClose={onClose} />;
+  return (
+    <WrappedActionDialog
+      title={title}
+      content={content}
+      actions={actions}
+      onClose={onClose}
+      canBackdropClose={state.phase !== 'signing'}
+    />
+  );
 };
 
 export default WrappedWithdrawModal;
