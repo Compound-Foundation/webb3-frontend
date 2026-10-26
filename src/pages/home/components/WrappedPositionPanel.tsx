@@ -32,6 +32,11 @@ type WrappedPositionPanelProps = {
    * waiting for the request only after a reload.
    */
   hasUnansweredWalletRequest?: boolean;
+  /**
+   * The wallet's answer when it refused this session's last wrapped request before it handled it.
+   * Nothing was sent, so the notice tells the user to reconnect the wallet before a new review.
+   */
+  walletRefusalMessage?: string;
   /** The wrapped supply entry. Without it, the deposit control stays disabled. */
   supply?: {
     /** Why a wrapped supply cannot start now, as the wrapper action lifecycle reports it. */
@@ -208,6 +213,7 @@ const WrappedPositionPanel = ({
   canDismissRecovered = false,
   onDismissRecovered = () => undefined,
   hasUnansweredWalletRequest = false,
+  walletRefusalMessage,
   supply,
   onRetry,
 }: WrappedPositionPanelProps) => {
@@ -377,6 +383,14 @@ const WrappedPositionPanel = ({
           <button className="button button--small" onClick={onDismissRecovered}>
             Stop waiting
           </button>
+        </div>
+      )}
+      {walletRefusalMessage !== undefined && (
+        <div className="wrapped-position-panel__notice">
+          <p className="L3 meta text-color--2">
+            Your wallet refused the last wrapped request from this account before handling it ({walletRefusalMessage}).
+            Nothing was sent. Disconnect and reconnect your wallet on this page, then start a new review.
+          </p>
         </div>
       )}
       {content}

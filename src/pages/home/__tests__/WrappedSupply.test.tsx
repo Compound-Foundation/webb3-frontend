@@ -181,6 +181,7 @@ function controller(
     isRecoveredRequestPendingInWallet: false,
     canDismissRecovered: false,
     hasUnansweredWalletRequest: false,
+    walletRefusalMessage: undefined,
     blockedReason: () => blockedReason,
     start: jest.fn(),
     confirm: jest.fn(),

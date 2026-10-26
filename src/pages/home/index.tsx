@@ -739,6 +739,7 @@ const Home = ({
         canDismissRecovered={wrappedAction.canDismissRecovered}
         onDismissRecovered={wrappedAction.dismissRecovered}
         hasUnansweredWalletRequest={wrappedAction.hasUnansweredWalletRequest}
+        walletRefusalMessage={wrappedAction.walletRefusalMessage}
         supply={{
           blockedReason: wrappedAction.blockedReason('supply'),
           // A callback kept from an earlier visit starts no review.

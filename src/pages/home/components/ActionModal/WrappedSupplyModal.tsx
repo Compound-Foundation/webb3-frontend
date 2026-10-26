@@ -126,6 +126,8 @@ function stepStatusText(step: WrappedStepState, isNext: boolean, isStopped: bool
       return 'This transaction was sent, but this page can no longer follow it. Check it on the explorer.';
     case 'rejected':
       return 'You rejected the request in your wallet. Nothing was sent.';
+    case 'refused':
+      return `Your wallet refused this request before handling it (${step.message}), so nothing was sent. Disconnect and reconnect your wallet on this page, then start a new review.`;
     case 'provider-failure':
       if (step.isPendingInWallet === true) return pendingInWalletText(step.message);
       return `Your wallet reported an error (${step.message}). The request may still go through, so check your wallet before you try again.`;
