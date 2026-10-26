@@ -106,7 +106,7 @@ Close every item before Stage 1, except those marked for Stage 2. Items 1 and 10
      node scripts/test-wrapped-lending-fork.js --block recent --solc-output <solc output>
      ```
 
-   - Check 5, the transaction paths: the fork part passed (COM-289). The Porto part is COM-290's per-market acceptance.
+   - Check 5, the transaction paths: the fork part passed (COM-289). The Porto part is COM-290's per-market acceptance. COM-290's runs of 2026-10-26 cover USDC, and institutional USDC except its partial exit. USDT is not run, and COM-290 has not accepted the runs ([results](anchorage-porto-validation.md#results)).
    - Check 6, the rollout decision: this runbook, with the signoffs above.
 
    The registry keeps both controls off until each closure is recorded in it (`docs/anchorage-wrapper-registry.md`, its introduction and "Unresolved release checks"). Record each closure under its check there, in a docs PR merged before Stage 1.
@@ -124,11 +124,12 @@ Close every item before Stage 1, except those marked for Stage 2. Items 1 and 10
    - the wallet-network boundary of the standard queue (#64)
    - the 0.1% (10 basis points) tolerance for a partial exit's payout (#66, #67)
    - an acknowledgment of the debt warning before the first signature (#65)
-   - a dialog closed in the middle of a supply, which stops the supply (#65). While a step is checked, waits in the wallet or waits for the network, only the close control and the Close button close the dialog. A click on the backdrop then does nothing (#65, #66, [COM-290 failure 1](anchorage-porto-validation.md#release-blocking-failures))
+   - a dialog closed in the middle of a supply, which stops the supply (#65). While a step is checked, waits in the wallet or waits for the network, only the close control and the Close button close the dialog. A click on the backdrop then does nothing (#65, #66, [COM-290 failure 1](anchorage-porto-validation.md#release-blocking-failures)). M1 on USDC ran again on `8e7d022` and passed
    - up to three mobile approvals for a USDT supply (#65)
    - the Anchorage extension's pending timeout of about 4 minutes 47 seconds, shorter than a realistic custody approval. A request approved after the timeout lands as a transaction the app does not see, and new wrapped actions wait until the holder presses "Stop waiting" (#64, [COM-290 finding 1](anchorage-porto-validation.md#findings-for-anchorage)). The extension also stops waiting, with `4900` "… The request can still complete …", when the holder disconnects the wallet in the interface while a request waits. The app handles that answer the same way (#64, [Telling the states apart](anchorage-porto-validation.md#telling-the-states-apart))
    - the Anchorage extension's dropped session after a new login. The page still shows the account connected, and the next request fails with `4100` "Unauthorized" until the holder disconnects and reconnects the wallet. Nothing is sent, and the dialog and the panel say so (#64, [COM-290 finding 2](anchorage-porto-validation.md#findings-for-anchorage))
-   - the Anchorage extension's late hash. The extension returns a transaction's hash only after Anchorage's backend marks the operation complete. So the dialog can still say "Waiting for Your Wallet" after the transaction is in a block ([COM-290 finding 3](anchorage-porto-validation.md#findings-for-anchorage))
+   - the Anchorage extension's late hash. The extension returns a transaction's hash only after Anchorage's backend marks the operation complete. So the dialog can still say "Waiting for Your Wallet" after the transaction is in a block. In the runs of 2026-10-26, the hash first appeared 24 to 43 seconds after the block, and no read of the dialog showed the Broadcast state ([COM-290 finding 3](anchorage-porto-validation.md#findings-for-anchorage))
+   - the Anchorage extension's asset list, which shows no wrapper share token. The extension gives a holder no view of the wrapped position ([COM-290 finding 4](anchorage-porto-validation.md#findings-for-anchorage))
    - routing the wrapped dialogs and the panel to the security review in CODEOWNERS (#66)
    - a contract variant whose exit takes a minimum amount or a deadline (#66), which is out of this release's scope
 6. **For Stage 2: close the Extensions page's path.** #64 asks to stop the Extensions page's direct `eth_sendTransaction` for Anchorage sessions before wrapped deposits are released.
