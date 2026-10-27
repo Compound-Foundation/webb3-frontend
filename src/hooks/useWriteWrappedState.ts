@@ -859,8 +859,9 @@ export type UseWriteWrappedStateOptions = {
 
 /**
  * The wrapped route's writes, straight from the wallet: a wrapped supply through `supplyAndWrap`,
- * and a wrapped withdrawal through `unwrapAndWithdraw`. They never use the standard queue, the
- * Bulker, Permit2, a permit, a Comet manager permission or Comet's own `withdraw`.
+ * and a wrapped withdrawal through `unwrapAndWithdraw`. Home starts them when the user submits a
+ * queued base supply or withdrawal on the wrapped route. They never use the Bulker, Permit2, a
+ * permit, a Comet manager permission or Comet's own `withdraw`.
  */
 export function useWriteWrappedState({
   action,

@@ -17,6 +17,7 @@ import { useWeb3Context } from '@contexts/Web3Context';
 import { WrappedLendingContext } from '@contexts/WrappedLendingContext';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { estimateGasForActions, getKeyForActions } from '@helpers/gasEstimator';
+import { directActionsForRoute } from '@helpers/queuedExecution';
 import { QueueSession, useActionQueue } from '@hooks/useActionQueue';
 import { useCometState } from '@hooks/useCometState';
 import { useGasEstimates } from '@hooks/useGasEstimates';
@@ -176,8 +177,11 @@ function App({ Component, pageProps }: any) {
   });
 
   // Wallet connect for mobile requires that we pre-estimate gas for
-  // transactions before they are submitted for better UX.
-  const preEstimateGas = (actions: Action[]) => {
+  // transactions before they are submitted for better UX. On the wrapped route
+  // only the actions sent to Comet or the Bulker are estimated here: the
+  // wrapper action estimates each of its own steps just before it is signed.
+  const preEstimateGas = (queuedActions: Action[]) => {
+    const actions = directActionsForRoute(lendingRoute, queuedActions);
     if (
       actions.length > 0 &&
       selectedMarketState.selectedMarket[0] == StateType.Hydrated &&

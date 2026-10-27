@@ -28,6 +28,8 @@ const approveAssetHelperText = (symbol: string) =>
 const CONFIRM_BUTTON_TEXT_APPROVE = 'Approve & Add';
 const UPDATE_ALLOWANCE_STRING =
   'This amount exceeds the allowance you previously set for this asset. You will be asked to approve an increase when you add this action.';
+const WRAPPED_SUPPLY_APPROVAL_STRING =
+  'If an approval is needed, you will be asked to approve exactly this amount when you submit.';
 
 type ActionInputViewProps = {
   actions: Action[];
@@ -39,7 +41,7 @@ type ActionInputViewProps = {
   onCancel: () => void;
   onConfirm: (amount: bigint, description: string) => void;
   setPendingActionAmount: (amount?: bigint) => void;
-  /** Extra rules the amount must meet, such as blocking direct supply on the wrapped route. */
+  /** Extra rules the amount must meet, such as the wrapped route's release controls and withdrawal limit. */
   actionRules?: ActionRules;
 };
 
@@ -299,7 +301,10 @@ function getContent(
         };
       }
 
-      if (baseAsset.allowance === 0n) {
+      if (actionRules?.wrappedBase !== undefined) {
+        // The wrapper's approval is requested at submission, for exactly the supplied amount.
+        actionHintString = WRAPPED_SUPPLY_APPROVAL_STRING;
+      } else if (baseAsset.allowance === 0n) {
         actionHintString = approveAssetHelperText(baseAsset.symbol);
         confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
       } else if (maybeBigIntInputValue && baseAsset.allowance < maybeBigIntInputValue) {

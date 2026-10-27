@@ -33,7 +33,6 @@ function mockStandIn() {
   return { __esModule: true, default: () => null };
 }
 jest.mock('../components/PositionCard', () => mockStandIn());
-jest.mock('../components/WrappedPositionPanel', () => mockStandIn());
 jest.mock('../components/ActionModal', () => mockStandIn());
 jest.mock('../components/AssetRow', () => mockStandIn());
 jest.mock('../components/InstitutionalBanner', () => mockStandIn());
@@ -164,7 +163,6 @@ function app({ isDashboard, state, web3 }: { isDashboard: boolean; state: CometS
 
 const LOADING: CometState = [StateType.Loading, undefined];
 const headline = () => screen.getByRole('heading', { level: 1 }).textContent;
-const mastheadPositionStatus = () => mockLastProps.Masthead.state[1].wrappedPosition.status;
 
 describe('Home on the wrapped route across a return to the dashboard', () => {
   beforeEach(() => {
@@ -176,7 +174,6 @@ describe('Home on the wrapped route across a return to the dashboard', () => {
     const stateForA = cometState();
     const { rerender } = render(app({ isDashboard: true, state: LOADING, web3: accountA }));
     rerender(app({ isDashboard: true, state: stateForA, web3: accountA }));
-    expect(mastheadPositionStatus()).toBe('loaded');
     expect(headline()).toBe('$1,250.00');
 
     // The user leaves the dashboard and switches to account B. The app keeps A's Comet state
@@ -184,12 +181,10 @@ describe('Home on the wrapped route across a return to the dashboard', () => {
     rerender(app({ isDashboard: false, state: stateForA, web3: accountA }));
     rerender(app({ isDashboard: false, state: stateForA, web3: web3For(ACCOUNT_B) }));
     rerender(app({ isDashboard: true, state: stateForA, web3: web3For(ACCOUNT_B) }));
-    expect(mastheadPositionStatus()).not.toBe('loaded');
     expect(headline()).toBe('$1,000.00');
 
     // B's Comet state arrives while the dashboard is mounted.
     rerender(app({ isDashboard: true, state: cometState(), web3: web3For(ACCOUNT_B) }));
-    expect(mastheadPositionStatus()).toBe('loaded');
     expect(headline()).toBe('$1,250.00');
   });
 
@@ -197,21 +192,18 @@ describe('Home on the wrapped route across a return to the dashboard', () => {
     const state = cometState();
     const { rerender } = render(app({ isDashboard: true, state: LOADING, web3: mockWeb3 }));
     rerender(app({ isDashboard: true, state, web3: mockWeb3 }));
-    expect(mastheadPositionStatus()).toBe('loaded');
+    expect(headline()).toBe('$1,250.00');
 
     rerender(app({ isDashboard: false, state, web3: mockWeb3 }));
     rerender(app({ isDashboard: true, state, web3: mockWeb3 }));
-    expect(mastheadPositionStatus()).toBe('loaded');
     expect(headline()).toBe('$1,250.00');
   });
 
   it('adds no wrapped value to Comet state read before the dashboard first mounted', () => {
     const { rerender } = render(app({ isDashboard: true, state: cometState(), web3: mockWeb3 }));
-    expect(mastheadPositionStatus()).not.toBe('loaded');
     expect(headline()).toBe('$1,000.00');
 
     rerender(app({ isDashboard: true, state: cometState(), web3: mockWeb3 }));
-    expect(mastheadPositionStatus()).toBe('loaded');
     expect(headline()).toBe('$1,250.00');
   });
 });

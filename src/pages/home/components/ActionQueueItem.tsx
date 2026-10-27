@@ -6,6 +6,7 @@ import { isUnwrappedCollateralAsset, CHAINS } from '@constants/chains';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import {
+  ActionRules,
   displayTextForActionType,
   sanitizedAmountForAction,
   validateAddingAction,
@@ -38,6 +39,8 @@ type ActionQueueItemDisplayState = [
     approvalTransaction?: Transaction;
     baseAsset: BaseAssetWithAccountState;
     collateralAssets: TokenWithAccountState[];
+    /** The rules the queue checks each action against, such as the wrapped route's. */
+    actionRules?: ActionRules;
   }
 ];
 type ActionQueueItemNormalState = [
@@ -47,6 +50,8 @@ type ActionQueueItemNormalState = [
     actions: Action[];
     baseAsset: BaseAssetWithAccountState;
     collateralAssets: TokenWithAccountState[];
+    /** The rules the queue checks each action against, such as the wrapped route's. */
+    actionRules?: ActionRules;
     onClick: () => void;
     onDeleteClick: () => void;
   }
@@ -59,15 +64,16 @@ type ActionQueueItemProps = {
 
 const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
   const { selectedMarket } = useContext(getSelectedMarketContext());
-  const [type, { actionIndex, actions, baseAsset, collateralAssets }] = state;
+  const [type, { actionIndex, actions, baseAsset, collateralAssets, actionRules }] = state;
   const { symbol } = baseAsset;
   const action = actions[actionIndex];
   const [actionType, asset] = action;
   const { currency } = useCurrencyContext();
   const sanitizedAmount = sanitizedAmountForAction(baseAsset, collateralAssets, actions.slice(0, actionIndex), action);
   const amount = formatValue(asset.decimals, sanitizedAmount);
-  const actionValid = validateAddingAction(baseAsset, collateralAssets, actions.slice(0, actionIndex), action);
-  const allowanceValid = validateAllowanceForAction(baseAsset, collateralAssets, actions.slice(0, actionIndex), action);
+  const earlierActions = actions.slice(0, actionIndex);
+  const actionValid = validateAddingAction(baseAsset, collateralAssets, earlierActions, action, actionRules);
+  const allowanceValid = validateAllowanceForAction(baseAsset, collateralAssets, earlierActions, action, actionRules);
   const error = allowanceValid !== 'ok' ? allowanceValid[1] : actionValid !== 'ok' ? actionValid[1] : undefined;
 
   const baseAssetDenominated = shouldShowValueInBaseAsset(symbol as Currency, currency);

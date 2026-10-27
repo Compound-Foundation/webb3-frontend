@@ -1,5 +1,6 @@
 import { TransactionResponse } from '@ethersproject/providers';
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import '@testing-library/jest-dom';
 
 import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
@@ -12,7 +13,7 @@ import { MAX_UINT256 } from '@helpers/numbers';
 import { SendWithdrawnError } from '@helpers/walletErrors';
 import { Theme } from '@hooks/useThemeManager';
 import type { AddTransaction } from '@hooks/useTransactionManager';
-import { IDLE_WRAPPED_ACTION, WalletSessionHealth } from '@hooks/useWrappedAction';
+import { IDLE_WRAPPED_ACTION, WalletSessionHealth, WrappedActionController } from '@hooks/useWrappedAction';
 import { IDLE_WRITE_WRAPPED_STATE } from '@hooks/useWriteWrappedState';
 import {
   Action,
@@ -44,7 +45,6 @@ function mockRecordProps(name: string) {
 }
 jest.mock('../components/Masthead', () => mockRecordProps('Masthead'));
 jest.mock('../components/PositionCard', () => mockRecordProps('PositionCard'));
-jest.mock('../components/WrappedPositionPanel', () => mockRecordProps('WrappedPositionPanel'));
 jest.mock('../components/ActionModal', () => mockRecordProps('ActionModal'));
 jest.mock('../components/AssetRow', () => mockRecordProps('AssetRow'));
 jest.mock('../components/InstitutionalBanner', () => mockRecordProps('InstitutionalBanner'));
@@ -521,7 +521,7 @@ describe('Home submission guards', () => {
     expect(mockWriteState.withdraw).toHaveBeenCalledTimes(1);
   });
 
-  it('stops direct writes while the wallet session is unusable, and passes the instruction to the panel', () => {
+  it('stops direct writes while the wallet session is unusable, and shows the instruction in the masthead', () => {
     const unusable: WalletSessionHealth = {
       status: 'unusable',
       reason: 'provider-broken',
@@ -534,38 +534,48 @@ describe('Home submission guards', () => {
     act(() => positionCard().onPendingActionConfirm(10n ** 18n));
 
     Object.values(mockWriteState).forEach((fn) => expect(fn).not.toHaveBeenCalled());
-    expect(mockLastProps.WrappedPositionPanel.session).toBe(unusable);
+    expect(mockLastProps.Masthead.state[1].notice).toMatchObject({
+      message: unusable.instruction,
+      actionLabel: 'Reload',
+    });
   });
 
-  it('passes the dismissal of earlier wrapped transactions to the panel', () => {
-    const dismissRecovered = jest.fn();
-    const lending = wrappedLending({ status: 'usable' });
-    render(
-      homeElement({
-        queue: actionQueue([]),
-        lending: { ...lending, action: { ...lending.action, canDismissRecovered: true, dismissRecovered } },
-      })
-    );
+  describe('a queued base supply that an earlier wrapped request holds back', () => {
+    const SUPPLY: Action = [ActionType.Supply, BASE_ASSET, 1_000_000n];
+    function heldBack(overrides: Partial<WrappedActionController>): WrappedLending {
+      const lending = wrappedLending({ status: 'usable' });
+      return {
+        ...lending,
+        action: { ...lending.action, ...overrides },
+        write: { supply: () => 'transaction-pending', withdraw: () => 'transaction-pending' },
+      };
+    }
+    const submit = (lending: WrappedLending) => {
+      render(homeElement({ queue: actionQueue([SUPPLY]), lending }));
+      act(() => positionCard().onSubmitClicked());
+      return screen.getByRole('dialog');
+    };
 
-    expect(mockLastProps.WrappedPositionPanel.canDismissRecovered).toBe(true);
-    mockLastProps.WrappedPositionPanel.onDismissRecovered();
-    expect(dismissRecovered).toHaveBeenCalledTimes(1);
-  });
+    it('offers the dismissal of earlier wrapped transactions in the submission dialog', () => {
+      const dismissRecovered = jest.fn();
+      const dialog = submit(heldBack({ canDismissRecovered: true, dismissRecovered }));
 
-  it('tells the panel which earlier wrapped request the wallet still holds', () => {
-    const lending = wrappedLending({ status: 'usable' });
-    const action = { ...lending.action, canDismissRecovered: true, isRecoveredRequestPendingInWallet: true };
-    render(homeElement({ queue: actionQueue([]), lending: { ...lending, action } }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Stop waiting' }));
+      expect(dismissRecovered).toHaveBeenCalledTimes(1);
+      Object.values(mockWriteState).forEach((fn) => expect(fn).not.toHaveBeenCalled());
+    });
 
-    expect(mockLastProps.WrappedPositionPanel.isRecoveredRequestPendingInWallet).toBe(true);
-  });
+    it('says which earlier wrapped request the wallet still holds', () => {
+      const dialog = submit(heldBack({ canDismissRecovered: true, isRecoveredRequestPendingInWallet: true }));
 
-  it("tells the panel the wallet's answer when it refused the last wrapped request", () => {
-    const lending = wrappedLending({ status: 'usable' });
-    const action = { ...lending.action, walletRefusalMessage: 'Unauthorized (4100)' };
-    render(homeElement({ queue: actionQueue([]), lending: { ...lending, action } }));
+      expect(dialog).toHaveTextContent(/still has a request open for an earlier wrapped transaction/);
+    });
 
-    expect(mockLastProps.WrappedPositionPanel.walletRefusalMessage).toBe('Unauthorized (4100)');
+    it("shows the wallet's answer when it refused the last wrapped request", () => {
+      const dialog = submit(heldBack({ walletRefusalMessage: 'Unauthorized (4100)' }));
+
+      expect(dialog).toHaveTextContent('Unauthorized (4100)');
+    });
   });
 
   it("stops the dialog's operator approval once the wallet session is unusable", () => {

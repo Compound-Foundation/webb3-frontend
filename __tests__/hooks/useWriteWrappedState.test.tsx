@@ -42,9 +42,7 @@ import {
   WRAPPED_WITHDRAW_STEP_ID,
   WriteWrappedState,
 } from '@hooks/useWriteWrappedState';
-import WrappedSupplyModal from '@pages/home/components/ActionModal/WrappedSupplyModal';
-import WrappedWithdrawModal from '@pages/home/components/ActionModal/WrappedWithdrawModal';
-import WrappedPositionPanel from '@pages/home/components/WrappedPositionPanel';
+import QueuedSubmissionModal from '@pages/home/components/ActionModal/QueuedSubmissionModal';
 import { MarketData, SettledTransaction, TransactionState } from '@types';
 
 import { mockWeb3 } from '../mocks/mockWeb3';
@@ -639,6 +637,33 @@ const encodeSupply = (market: WrappedMarket, amount: bigint) => ({
   to: market.wrapperAddress,
   data: CALLS.encodeFunctionData('supplyAndWrap', [amount]),
 });
+
+/** The shared submission dialog as Home renders it for a queue holding only this wrapper action. */
+function renderSubmissionDialog(state: WrappedActionState, type: 'supply' | 'withdraw') {
+  const wrapper =
+    type === 'supply'
+      ? { type, action: [] as never, amount: 0n }
+      : { type, action: [] as never, request: { kind: 'full' as const } };
+  return render(
+    <QueuedSubmissionModal
+      submission={{ wrapper, directCount: 0, isWrapperDone: false }}
+      state={state}
+      symbol="USDC"
+      decimals={6}
+      recovery={{
+        canDismissRecovered: false,
+        isRecoveredRequestPendingInWallet: false,
+        hasUnansweredWalletRequest: false,
+        walletRefusalMessage: undefined,
+        sessionInstruction: undefined,
+      }}
+      onConfirm={jest.fn()}
+      onClose={jest.fn()}
+      onContinue={jest.fn()}
+      onDismissRecovered={jest.fn()}
+    />
+  );
+}
 
 describe('useWriteWrappedState', () => {
   beforeEach(() => {
@@ -1387,23 +1412,33 @@ describe('useWriteWrappedState', () => {
   describe('wrappedSupply: requires new user review after reconnect or an interrupted sequence', () => {
     const AMOUNT = 4_000_000n;
 
-    /** The wrapped panel as Home renders it from the lifecycle, the wrapped writes and the position read. */
-    function renderPanel({ action, write, position }: Harness, wallet: Wallet) {
-      const { route } = sessionFor(wallet);
-      if (route.kind !== 'wrapped') throw new Error('the route must be wrapped');
+    /**
+     * The shared submission dialog as Home renders it when a queued supply is submitted while the
+     * lifecycle holds a new review back: the reason and what the user can do.
+     */
+    function renderRefusedSubmission({ action }: Harness) {
       return render(
-        <WrappedPositionPanel
-          route={route}
-          position={position.state}
-          baseAsset={{ symbol: 'USDC', baseAssetPriceInDollars: 100_000_000n, balanceOfComet: 10n ** 12n }}
-          earnAPR={0n}
-          session={action.session}
-          canDismissRecovered={action.canDismissRecovered}
+        <QueuedSubmissionModal
+          submission={{
+            wrapper: { type: 'supply', action: [] as never, amount: AMOUNT },
+            directCount: 0,
+            refusal: action.blockedReason('supply'),
+            isWrapperDone: false,
+          }}
+          state={{ phase: 'idle' }}
+          symbol="USDC"
+          decimals={6}
+          recovery={{
+            canDismissRecovered: action.canDismissRecovered,
+            isRecoveredRequestPendingInWallet: action.isRecoveredRequestPendingInWallet,
+            hasUnansweredWalletRequest: action.hasUnansweredWalletRequest,
+            walletRefusalMessage: action.walletRefusalMessage,
+            sessionInstruction: undefined,
+          }}
+          onConfirm={jest.fn()}
+          onClose={jest.fn()}
+          onContinue={jest.fn()}
           onDismissRecovered={action.dismissRecovered}
-          hasUnansweredWalletRequest={action.hasUnansweredWalletRequest}
-          supply={{ blockedReason: action.blockedReason('supply'), onReview: write.supply }}
-          withdraw={{ blockedReason: action.blockedReason('withdraw'), onReview: write.withdraw }}
-          onRetry={jest.fn()}
         />
       );
     }
@@ -1509,16 +1544,7 @@ describe('useWriteWrappedState', () => {
 
       // The user closes the dialog. Its notice says how to stop waiting, not to start a new review.
       act(() => first.result.current.action.discard());
-      const notice = render(
-        <WrappedSupplyModal
-          state={first.result.current.action.state}
-          symbol="USDC"
-          decimals={6}
-          directBorrowBalance={0n}
-          onConfirm={jest.fn()}
-          onClose={jest.fn()}
-        />
-      );
+      const notice = renderSubmissionDialog(first.result.current.action.state, 'supply');
       const dialog = screen.getByRole('dialog');
       expect(dialog).toHaveTextContent(/approving it there still sends it/i);
       expect(dialog).toHaveTextContent(/look for the request in your wallet app/i);
@@ -1527,25 +1553,25 @@ describe('useWriteWrappedState', () => {
       notice.unmount();
       act(() => first.result.current.action.discard());
 
-      // The request still holds back a new supply. The panel says how to stop waiting for it and,
-      // before a reload, offers no dismissal.
+      // The request still holds back a new supply. Submitting a queued supply says how to stop
+      // waiting for it and, before a reload, offers no dismissal.
       expect(first.result.current.action.state).toEqual({ phase: 'idle' });
       expect(first.result.current.write.supply(AMOUNT)).toBe('transaction-pending');
       expect(first.result.current.action.canDismissRecovered).toBe(false);
-      const waiting = renderPanel(first.result.current, wallet);
+      const waiting = renderRefusedSubmission(first.result.current);
       const guidance = screen.getByText(/your wallet has not answered a request/i);
       expect(guidance).toHaveTextContent(/look for the request in your wallet app/i);
       expect(guidance).toHaveTextContent(/if it is not there, reload the page and reconnect your wallet/i);
       expect(screen.queryByRole('button', { name: 'Stop waiting' })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Supply USDC through the wrapper' })).toBeDisabled();
+      expect(screen.getByRole('dialog')).toHaveTextContent(/nothing was sent/i);
       waiting.unmount();
 
-      // After the reload, the panel offers Stop waiting, with its warning that the request can still
+      // After the reload, submitting offers Stop waiting, with its warning that the request can still
       // go through. Stopping sends nothing, and the next review waits for its own confirmation.
       first.unmount();
       const second = renderWrapped(chain, { wallet, events });
       await waitFor(() => expect(second.result.current.action.canDismissRecovered).toBe(true));
-      const restored = renderPanel(second.result.current, wallet);
+      const restored = renderRefusedSubmission(second.result.current);
       expect(screen.queryByText(/your wallet has not answered a request/i)).not.toBeInTheDocument();
       expect(screen.getByText(/the request can still go through/i)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Stop waiting' }));
@@ -1674,16 +1700,7 @@ describe('useWriteWrappedState', () => {
       // Nothing is retried or sent again.
       expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
 
-      render(
-        <WrappedSupplyModal
-          state={result.current.action.state}
-          symbol="USDC"
-          decimals={6}
-          directBorrowBalance={0n}
-          onConfirm={jest.fn()}
-          onClose={jest.fn()}
-        />
-      );
+      renderSubmissionDialog(result.current.action.state, 'supply');
       const dialog = screen.getByRole('dialog');
       expect(dialog).toHaveTextContent(text);
       // Each outcome reads differently from every other.
@@ -1749,16 +1766,7 @@ describe('useWriteWrappedState', () => {
       );
       expect(positionRead.mock.calls.length).toBeGreaterThan(readsBeforeSupply);
 
-      render(
-        <WrappedSupplyModal
-          state={result.current.action.state}
-          symbol="USDC"
-          decimals={6}
-          directBorrowBalance={0n}
-          onConfirm={jest.fn()}
-          onClose={jest.fn()}
-        />
-      );
+      renderSubmissionDialog(result.current.action.state, 'supply');
       const supplyHash = (stepsOf(result.current.action.state)[1] as { hash: string }).hash;
       expect(
         screen.getAllByRole('link', { name: /view on explorer/i }).map((link) => link.getAttribute('href'))
@@ -2310,18 +2318,10 @@ describe('useWriteWrappedState', () => {
       act(() => result.current.action.confirm());
       await waitFor(() => expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(stepsOf(result.current.action.state)[0]?.status).toBe('awaiting-signature'));
-      render(
-        <WrappedWithdrawModal
-          state={result.current.action.state}
-          symbol="USDC"
-          decimals={6}
-          onConfirm={jest.fn()}
-          onClose={jest.fn()}
-        />
-      );
+      renderSubmissionDialog(result.current.action.state, 'withdraw');
 
       const dialog = screen.getByRole('dialog');
-      expect(dialog).toHaveTextContent('Withdraw about 100.049975 USDC from the wrapper to your wallet.');
+      expect(dialog).toHaveTextContent('Withdraw about 100.049975 USDC to your wallet.');
       expect(within(dialog).getByTestId('wrapped-withdraw-cash')).toHaveTextContent('100.049975 USDC');
       expect(within(dialog).getByRole('listitem')).toHaveTextContent('Withdraw about 100.049975 USDC from the wrapper');
       expect(dialog).not.toHaveTextContent(/about 100\.000000 USDC/);

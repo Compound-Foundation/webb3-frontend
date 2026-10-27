@@ -101,18 +101,19 @@ function renderMarket(lending: WrappedLending) {
 }
 
 describe('Market page and the wrapped route', () => {
-  it('explains the wrapped route and hides the account boost banner', () => {
+  it('presents the market as the normal market, with no wrapped notice, and hides the account boost banner', () => {
     renderMarket(wrappedLending());
 
-    expect(screen.getByText(/you supply to this market goes through its wrapper/)).toBeInTheDocument();
+    expect(screen.queryByText(/wrapper/i)).not.toBeInTheDocument();
+    expect(document.querySelector('.wrapped-route-notice')).toBeNull();
     expect(screen.queryByTestId('whitelist-status-banner')).not.toBeInTheDocument();
     expect(screen.getByTestId('market-rates')).toBeInTheDocument();
   });
 
-  it('keeps the account boost banner and shows no notice on the standard route', () => {
+  it('keeps the account boost banner on the standard route', () => {
     renderMarket(STANDARD_LENDING);
 
-    expect(screen.queryByText(/goes through its wrapper/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/wrapper/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('whitelist-status-banner')).toBeInTheDocument();
   });
 });

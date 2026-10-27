@@ -8,7 +8,6 @@ import {
   getFullExitCash,
   getGrossAssets,
   getRedeemBuffer,
-  getWithdrawableCash,
   getWrappedPositionValueInDollars,
   readWrappedPosition,
   supplyIncentivesForRoute,
@@ -112,20 +111,6 @@ describe('getRedeemBuffer and getFullExitCash', () => {
   it('pays nothing when the position is worth no more than the buffer', () => {
     expect(getFullExitCash(3n, 3n)).toBe(0n);
     expect(getFullExitCash(2n, 3n)).toBe(0n);
-  });
-});
-
-describe('getWithdrawableCash', () => {
-  it('is the full-exit payout when the market can pay it', () => {
-    expect(getWithdrawableCash(250_124_997n, false, 10n ** 12n)).toEqual({ amount: 250_124_997n, limit: 'none' });
-  });
-
-  it('is capped by the base token the market holds', () => {
-    expect(getWithdrawableCash(250_124_997n, false, 50_000_000n)).toEqual({ amount: 50_000_000n, limit: 'liquidity' });
-  });
-
-  it('is zero while Comet withdrawals are paused', () => {
-    expect(getWithdrawableCash(250_124_997n, true, 10n ** 12n)).toEqual({ amount: 0n, limit: 'paused' });
   });
 });
 

@@ -1,7 +1,6 @@
 import { ReactNode, useContext, useEffect, useRef, useState } from 'react';
 
 import { isUnwrappedCollateralAsset } from '@constants/chains';
-import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
@@ -17,20 +16,32 @@ import {
 import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
-import { DEFAULT_MARKET, getMarket } from '@helpers/markets';
+import { WriteBlockReason } from '@helpers/lendingRoute';
+import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
+import {
+  isWrapperRouted,
+  planQueuedExecution,
+  QueuedExecutionPlan,
+  QueuedWrapperAction,
+  wrappedEntryBlockLabel,
+} from '@helpers/queuedExecution';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { SendWithdrawnError } from '@helpers/walletErrors';
-import { isDirectExecution } from '@helpers/wrappedActions';
+import { isDirectExecution, WrappedActionDraft, WrappedExecutionError } from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
   isSubmissionRefused,
   LiveSubmissionState,
   MarketIdentity,
   supplyIncentivesForRoute,
+  withWrappedSupply,
+  WrappedPosition,
 } from '@helpers/wrappedPositions';
+import { getWithdrawalLimits, WithdrawalLimits } from '@helpers/wrappedWithdrawals';
 import { Theme } from '@hooks/useThemeManager';
 import { AddTransaction } from '@hooks/useTransactionManager';
+import type { WrappedActionState } from '@hooks/useWrappedAction';
 import { useWriteCometState, WriteCometState } from '@hooks/useWriteCometState';
 import {
   Action,
@@ -52,13 +63,11 @@ import {
 } from '@types';
 
 import ActionModal from './components/ActionModal';
-import WrappedSupplyModal from './components/ActionModal/WrappedSupplyModal';
-import WrappedWithdrawModal from './components/ActionModal/WrappedWithdrawModal';
+import QueuedSubmissionModal, { QueuedSubmission } from './components/ActionModal/QueuedSubmissionModal';
 import AssetRow from './components/AssetRow';
 import InstitutionalBanner from './components/InstitutionalBanner';
-import Masthead, { MastheadState } from './components/Masthead';
+import Masthead, { MastheadNotice, MastheadState } from './components/Masthead';
 import PositionCard, { PositionCardState } from './components/PositionCard';
-import WrappedPositionPanel from './components/WrappedPositionPanel';
 
 const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.name ? 1 : a.name === b.name ? 0 : -1);
 
@@ -67,6 +76,52 @@ const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.nam
 // shown, so the record outlives Home. The app replaces the state object on every read, so an old
 // record is dropped with its state.
 const cometStateProvenance = new WeakMap<CometState, CometStateWithMarket>();
+
+/** A queue being submitted through the wrapper, and the visit it belongs to. */
+type SubmissionRecord = QueuedSubmission & {
+  /** The visit key it was started in. Another visit never shows it or acts on it. */
+  key: string;
+  /**
+   * The lifecycle's state when the submission started. It belongs to an earlier review, so the
+   * submission never takes a step, or a completion, from it.
+   */
+  stateBefore: WrappedActionState;
+  /** The draft and step the user hid the dialog for while it was being signed. */
+  hiddenWhileSigning?: { draft: WrappedActionDraft; stepIndex: number };
+};
+
+/** What the masthead says about a wrapped position it cannot show. */
+function unavailableNotice(reason: WriteBlockReason, reload: () => void): MastheadNotice {
+  switch (reason) {
+    case 'validation-failed':
+      return {
+        message: 'This market could not be checked for your wallet. Reload the page to try again.',
+        actionLabel: 'Reload',
+        onAction: reload,
+      };
+    case 'not-canonical':
+    case 'asset-mismatch':
+    case 'metadata-mismatch':
+      return {
+        message: "This market's wrapper did not pass its on-chain check, so supply and withdrawal are turned off.",
+      };
+    case 'missing-mapping':
+    case 'invalid-mapping':
+      return { message: 'Supply and withdrawal are not set up correctly for this market, so they are turned off.' };
+    default:
+      return { message: 'Your supplied balance is not available right now.' };
+  }
+}
+
+/** What a full or partial withdrawal through the wrapper can pay now, or undefined if it cannot be worked out. */
+function wrappedWithdrawalLimits(position: WrappedPosition, marketCash: bigint): WithdrawalLimits | undefined {
+  const { shares, baseDecimals, isWithdrawPaused, snapshot } = position;
+  try {
+    return getWithdrawalLimits({ ...snapshot, shares, baseDecimals, isWithdrawPaused, cometCash: marketCash });
+  } catch {
+    return undefined;
+  }
+}
 
 type HomeProps = {
   transactions: Transaction[];
@@ -107,8 +162,12 @@ const Home = ({
   const [cometState] = state;
 
   const wrappedLending = useWrappedLending();
-  const isWrappedRoute = wrappedLending.route.kind === 'wrapped';
-  const actionRules: ActionRules = { blockDirectBaseSupply: isWrappedRoute };
+  const { route: lendingRoute, action: wrappedAction } = wrappedLending;
+  const isWrappedRoute = lendingRoute.kind === 'wrapped';
+  // Callbacks kept from an earlier render start wrapper actions through the live lending state.
+  const liveWrappedLending = useRef(wrappedLending);
+  liveWrappedLending.current = wrappedLending;
+  const liveActionRules = useRef<ActionRules>({});
   const selectedMarketIdentity: MarketIdentity | undefined =
     selectedMarket[1] === undefined
       ? undefined
@@ -124,15 +183,15 @@ const Home = ({
   if (cometStateMarket.current.state !== state) {
     cometStateMarket.current = { market: selectedMarketIdentity, account: web3.read.account, state };
   }
-  // The wrapped route's headline addition and the supply dialog's direct borrow use a Comet state
-  // only if it is known to be the connected account's. The app keeps its Comet state while another
-  // page is shown, and after an account switch it keeps the previous account's state until the new
-  // read arrives, so the label above can name an account the state was not read for. A state that
-  // arrives while the dashboard is mounted is recorded with the account then connected, and the
-  // record outlives the dashboard. A hydrated state already there when the dashboard mounts, and
-  // never recorded, has an unknown account: the headline shows the direct balance alone and the
-  // dialog's direct borrow is unknown until the next Comet read, at most the timed refresh later.
-  // Submissions are judged by the label above, as before.
+  // On the wrapped route, the wrapped position joins a Comet state's balances only if the state is
+  // known to be the connected account's. The app keeps its Comet state while another page is shown,
+  // and after an account switch it keeps the previous account's state until the new read arrives,
+  // so the label above can name an account the state was not read for. A state that arrives while
+  // the dashboard is mounted is recorded with the account then connected, and the record outlives
+  // the dashboard. A hydrated state already there when the dashboard mounts, and never recorded, has
+  // an unknown account: the dashboard shows the direct balance alone, and offers no wrapped
+  // withdrawal, until the next Comet read, at most the timed refresh later. Submissions are judged
+  // by the label above, as before.
   const lastSeenCometState = useRef<CometState>();
   if (lastSeenCometState.current !== state) {
     if (!cometStateProvenance.has(state)) {
@@ -230,11 +289,61 @@ const Home = ({
     if (openDialog !== undefined && openDialog.key !== visitKey) setOpenDialog(undefined);
   }, [openDialog, visitKey]);
 
+  // A queue submitted through the wrapper belongs to its visit, as a dialog does. A change of
+  // account, connector, connection status, wallet network or market drops it in the same render,
+  // and the wrapper action lifecycle discards its draft for the same change.
+  const [submissionRecord, setSubmissionRecord] = useState<SubmissionRecord>();
+  const submission = submissionRecord?.key === visitKey ? submissionRecord : undefined;
+  const liveSubmission = useRef(submission);
+  liveSubmission.current = submission;
+  useEffect(() => {
+    if (submissionRecord !== undefined && submissionRecord.key !== visitKey) setSubmissionRecord(undefined);
+  }, [submissionRecord, visitKey]);
+  // The lifecycle's state, when it belongs to this submission. Until the submission's review
+  // starts, the lifecycle can still show an earlier review, which this submission never acts on.
+  const lifecycleState = wrappedAction.state;
+  const isSubmissionState = (() => {
+    if (submission === undefined || submission.refusal !== undefined) return false;
+    if (lifecycleState === submission.stateBefore) return false;
+    const type = submission.wrapper.type;
+    switch (lifecycleState.phase) {
+      case 'idle':
+        return false;
+      case 'reading':
+      case 'read-failed':
+        return lifecycleState.identity.type === type;
+      case 'discarded':
+        return lifecycleState.type === type;
+      default: {
+        const before = submission.stateBefore;
+        return (
+          lifecycleState.draft.identity.type === type && !('draft' in before && before.draft === lifecycleState.draft)
+        );
+      }
+    }
+  })();
+  const submissionState: WrappedActionState = isSubmissionState ? lifecycleState : { phase: 'idle' };
+  // Once the wrapper action confirms, it leaves the queue. The direct actions stay until they are
+  // submitted. A wrapper action that stops, or is closed, stays queued.
+  useEffect(() => {
+    if (submission === undefined || submission.isWrapperDone || submissionState.phase !== 'complete') return;
+    removeAction(submission.wrapper.action);
+    setSubmissionRecord({ ...submission, isWrapperDone: true });
+  }, [submission, submissionState]);
+
   let assetRows: ReactNode[];
   let otherAssetRows: ReactNode[] = [];
   let mastheadState: MastheadState;
   let positionCardState: PositionCardState;
   let isBulkerAllowed = false;
+  // What the submission dialog needs from the dashboard's hydrated state.
+  let submissionControls: { continueSubmission: () => void; symbol: string } | undefined;
+  // The amount form keeps its confirm callback, so the callback reads the rules of the latest render.
+  liveActionRules.current = {};
+  // The market's wrapper sends every step of a wrapper action, approvals included, under its own address.
+  const wrapperAddress = lendingRoute.kind === 'wrapped' ? lendingRoute.market?.wrapperAddress : undefined;
+  const isWrapperTransaction = (transaction: Transaction) =>
+    wrapperAddress !== undefined && transaction.key.toLowerCase() === wrapperAddress.toLowerCase();
 
   const whitelistStatus = institutionalWhitelistStatus(web3.read.account);
 
@@ -281,7 +390,7 @@ const Home = ({
   } else {
     const market = selectedMarket[1] as MarketDataLoaded; // It must be loaded if in StateType.Hydrated
     const {
-      baseAsset,
+      baseAsset: directBaseAsset,
       borrowAPR,
       collateralAssets,
       collateralValue,
@@ -294,14 +403,64 @@ const Home = ({
       isRewardsLoading
     } = state[1];
     isBulkerAllowed = state[1].isBulkerAllowed;
-    const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, baseAsset.balance, {
+    const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, directBaseAsset.balance, {
       earnRewardsAPR: supplyRewardsAPR,
       isInstitutional,
     });
+
+    // On the wrapped route, the wrapped position is the account's base supply. It is shown only
+    // with a Comet state read for the route's market and known to be the connected account's, so
+    // one account's wrapped value is never added to another account's balances.
+    let wrappedPosition: WrappedPosition | undefined;
+    let notice: MastheadNotice | undefined;
+    let actionRules: ActionRules = {};
+    if (lendingRoute.kind === 'wrapped') {
+      const cometMarket = cometStateMarket.current.market;
+      const isCometStateForRoute =
+        cometMarket !== undefined &&
+        cometMarket.chainId === lendingRoute.chainId &&
+        cometMarket.cometAddress.toLowerCase() === lendingRoute.cometAddress.toLowerCase();
+      const { position } = wrappedLending;
+      if (position.status === 'loaded' && isCometStateForRoute && isCometStateVerifiedForAccount) {
+        wrappedPosition = position.position;
+      }
+      const reload = () => window.location.reload();
+      if (wrappedAction.session.status === 'unusable') {
+        notice = { message: wrappedAction.session.instruction, actionLabel: 'Reload', onAction: reload };
+      } else if (position.status === 'error') {
+        notice = {
+          message: 'Your supplied balance could not be loaded. Check your connection and try again.',
+          actionLabel: 'Retry',
+          onAction: wrappedLending.retry,
+        };
+      } else if (position.status === 'unavailable') {
+        notice = unavailableNotice(position.reason, reload);
+      }
+      const limits =
+        wrappedPosition === undefined
+          ? undefined
+          : wrappedWithdrawalLimits(wrappedPosition, directBaseAsset.balanceOfComet);
+      actionRules = {
+        wrappedBase: {
+          supplyBlockedReason: wrappedEntryBlockLabel(lendingRoute.deposit, 'supply'),
+          withdrawBlockedReason: wrappedEntryBlockLabel(lendingRoute.exit, 'withdraw'),
+          maxPartialWithdrawal: limits?.maxPartialCash,
+          canWithdrawAll: limits?.canExitFully ?? false,
+        },
+      };
+    }
+    const wrappedValue = wrappedPosition?.grossAssets ?? 0n;
+    // The dashboard's base asset: the Comet one, with the wrapped value added to a supply. A direct
+    // borrow is shown as it is, and the wrapped value beneath it.
+    const baseAsset = withWrappedSupply(directBaseAsset, wrappedValue);
+    const wrappedSupplyApart = baseAsset === directBaseAsset && wrappedValue > 0n ? wrappedValue : undefined;
+    const isMixedSupply = wrappedValue > 0n && directBaseAsset.balance > 0n;
+    liveActionRules.current = actionRules;
+
     // Dialogs keep the callbacks below, so they check the session when they run.
     const isBlockedOnLiveRoute = (actionsToSubmit: Action[]) =>
       liveWalletUnusable.current ||
-      // A queue holding a wrapper action is refused whole, never submitted without it.
+      // A queue holding a wrapper action in any other form is refused whole, never submitted without it.
       !isDirectExecution(actionsToSubmit) ||
       isSubmissionRefused(
         liveSession.current,
@@ -310,6 +469,8 @@ const Home = ({
       );
 
     const actions = getActions(baseAsset, collateralAssets, rewards);
+    // The same queue against the Comet base asset, which the direct actions are submitted with.
+    const queuedActions = getActions(directBaseAsset, collateralAssets, rewards);
     const actionsForCompare = compare ? [] : actions;
     const updatedDataPostActions = calculateUpdatedBalances(baseAsset, collateralAssets, actionsForCompare);
     const pendingAction = getPendingAction(updatedDataPostActions.baseAsset, updatedDataPostActions.collateralAssets);
@@ -320,21 +481,29 @@ const Home = ({
       if (isFromEarlierVisit() || liveWalletUnusable.current) return;
       return writeState.allowOperator(...args);
     };
-    const submitBulkerAction = () => {
+    const submitBulkerAction = (directActions: Action[]) => {
       if (isFromEarlierVisit()) return;
-      if (isBlockedOnLiveRoute(actions)) {
+      if (isBlockedOnLiveRoute(directActions)) {
         setActionModalState(undefined);
         return;
       }
-      const description = `${actions.length} Action${actions.length > 1 ? 's' : ''}`;
-      const estimatedGasLimit = liveEstimatedGasMap.current.get(getKeyForActions(actions)) || 0;
-      writeState.invokeBulker(market, actions, baseAsset, collateralAssets, description, estimatedGasLimit, () => {
-        setPendingAction(undefined);
-        clearActions();
-        setActionModalState(undefined);
-      });
+      const description = `${directActions.length} Action${directActions.length > 1 ? 's' : ''}`;
+      const estimatedGasLimit = liveEstimatedGasMap.current.get(getKeyForActions(directActions)) || 0;
+      writeState.invokeBulker(
+        market,
+        directActions,
+        directBaseAsset,
+        collateralAssets,
+        description,
+        estimatedGasLimit,
+        () => {
+          setPendingAction(undefined);
+          clearActions();
+          setActionModalState(undefined);
+        }
+      );
       setActionModalState(
-        actionModalStateBulker(market, transactions, actions, baseAsset, collateralAssets, onRequestClose)
+        actionModalStateBulker(market, transactions, directActions, directBaseAsset, collateralAssets, onRequestClose)
       );
     };
 
@@ -366,7 +535,7 @@ const Home = ({
           );
           break;
         case ActionType.Supply: {
-          const amount = sanitizedAmountForAction(baseAsset, collateralAssets, [], singleAction);
+          const amount = sanitizedAmountForAction(directBaseAsset, collateralAssets, [], singleAction);
           writeState.supply(
             market,
             assetInfo.address,
@@ -388,7 +557,7 @@ const Home = ({
           );
           break;
         case ActionType.Borrow: {
-          const amount = sanitizedAmountForAction(baseAsset, collateralAssets, [], singleAction);
+          const amount = sanitizedAmountForAction(directBaseAsset, collateralAssets, [], singleAction);
           writeState.withdraw(
             market,
             assetInfo.address,
@@ -424,19 +593,108 @@ const Home = ({
       }
     };
 
+    // The direct actions go to Comet or the Bulker as before: a single action directly, except
+    // native-token or stETH wrapping, and several through the Bulker.
+    const submitDirectActions = (directActions: Action[]) => {
+      const nativeTokenSymbol = market.chainInformation.nativeToken.symbol;
+      const actionAssetSymbol = directActions[0][1].symbol;
+
+      if (directActions.length === 1 && actionAssetSymbol !== nativeTokenSymbol && actionAssetSymbol !== 'stETH') {
+        // don't use bulker if you're only taking a single action (that
+        // doesn't involve wrapping Ether or stETH)
+        submitSingleAction(directActions[0]);
+      } else if (!isBulkerAllowed) {
+        setActionModalState(
+          actionModalStateBulkerApprove(
+            market,
+            state[1],
+            transactions,
+            { ...writeState, allowOperator: allowOperatorWhileCurrent },
+            estimatedGasMap,
+            onRequestClose,
+            () => submitBulkerAction(directActions)
+          )
+        );
+      } else {
+        submitBulkerAction(directActions);
+      }
+    };
+
+    /**
+     * Plans the queue against the live route, or undefined when the plan refuses it. A wrapper
+     * action is never passed to Comet or the Bulker: the plan holds it apart, and the direct part
+     * is checked again before it is sent.
+     */
+    const planQueue = (): QueuedExecutionPlan | undefined => {
+      try {
+        return planQueuedExecution(liveSession.current.route, directBaseAsset, collateralAssets, queuedActions);
+      } catch (error) {
+        if (error instanceof WrappedExecutionError) return undefined;
+        throw error;
+      }
+    };
+
+    // Starts the wrapper action, which goes first. Its steps are confirmed one at a time in the
+    // submission dialog. The direct actions wait until it confirms.
+    const startWrapperAction = (wrapper: QueuedWrapperAction, directCount: number) => {
+      const { write, action } = liveWrappedLending.current;
+      const stateBefore = action.state;
+      const refusal =
+        wrapper.type === 'supply'
+          ? write.supply(wrapper.amount)
+          : write.withdraw(
+              wrapper.request,
+              wrapper.request.kind === 'full' ? wrappedPosition?.fullExitCash : undefined
+            );
+      setSubmissionRecord({
+        key: visitKey,
+        wrapper,
+        directCount,
+        refusal,
+        isWrapperDone: false,
+        stateBefore,
+      });
+    };
+
+    const submitQueue = () => {
+      if (web3.read.chainId === undefined || web3.write.chainId === undefined) return;
+      const plan = planQueue();
+      if (plan === undefined) return;
+      if (plan.direct.length > 0 && isBlockedOnLiveRoute(plan.direct)) return;
+      if (web3.write.chainId !== web3.read.chainId) {
+        switchWriteNetwork(web3.read.chainId);
+      } else if (plan.wrapper !== undefined) {
+        startWrapperAction(plan.wrapper, plan.direct.length);
+      } else if (plan.direct.length > 0) {
+        submitDirectActions(plan.direct);
+      }
+    };
+
+    // The submission dialog's Continue: the direct actions, once the wrapper action left the queue.
+    const continueSubmission = () => {
+      if (isFromEarlierVisit()) return;
+      const plan = planQueue();
+      setSubmissionRecord(undefined);
+      if (plan === undefined || plan.wrapper !== undefined || plan.direct.length === 0) return;
+      if (isBlockedOnLiveRoute(plan.direct)) return;
+      submitDirectActions(plan.direct);
+    };
+
     const approvalTransactions = transactions.filter(
       (transaction) =>
         transaction.key !== market.bulkerAddress &&
         transaction.key !== market.marketAddress &&
-        transaction.key !== market.rewardsAddress
+        transaction.key !== market.rewardsAddress &&
+        !isWrapperTransaction(transaction)
     );
     const bulkerTransaction = transactions.find((transaction) => transaction.key === market.bulkerAddress);
     const cometTransaction = transactions.find((transaction) => transaction.key === market.marketAddress);
     const rewardTransaction = transactions.find((transaction) => transaction.key === market.rewardsAddress);
+    const wrapperTransaction = transactions.find(isWrapperTransaction);
     // block the UI when there is a bulker transaction, or a single action to
-    // Comet or the Rewards contract (i.e. do not block if you're just approving
-    // an ERC token)
-    const blockingTransaction = bulkerTransaction || cometTransaction || rewardTransaction;
+    // Comet, the Rewards contract or the market's wrapper (i.e. do not block
+    // if you're just approving an ERC token)
+    const blockingTransaction = bulkerTransaction || cometTransaction || rewardTransaction || wrapperTransaction;
 
     mastheadState = [
       StateType.Hydrated,
@@ -453,7 +711,6 @@ const Home = ({
         earnAPR,
         earnRewardsAPR: supplyIncentives.earnRewardsAPR,
         isInstitutional: supplyIncentives.isInstitutional ?? false,
-        isDirectBaseSupplyBlocked: isWrappedRoute,
         institutionalWhitelistStatus: whitelistStatus,
         liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
@@ -461,11 +718,13 @@ const Home = ({
         rewardsAssetSymbol,
         theme,
         transaction: blockingTransaction,
+        wrappedSupplyApart,
+        isMixedSupply,
+        notice,
         onWithdrawAction: (pendingAction?: PendingAction) => {
           setPendingAction(pendingAction);
         },
         onSupplyAction: (pendingAction?: PendingAction) => {
-          if (isWrappedRoute && pendingAction?.[0] === ActionType.Supply) return;
           if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
             setPendingAction(pendingAction);
             setActionModalState(undefined);
@@ -509,7 +768,7 @@ const Home = ({
         },
         onDripClicked: () => {
           if (isFromEarlierVisit()) return;
-          writeState.drip(market, baseAsset.address);
+          writeState.drip(market, directBaseAsset.address);
         },
         onSelectAction: (action: Action) => {
           setPendingAction(getPendingActionFromAction(action, updatedDataPostActions.baseAsset));
@@ -523,13 +782,20 @@ const Home = ({
           if (isFromEarlierVisit()) return;
           if (pendingAction !== undefined) {
             const action = getActionFromPendingAction(pendingAction, amount);
-            // The form already refuses a base supply on the wrapped route. Refusing it here as well
-            // keeps an approval for it from being requested.
-            if (isWrappedRoute && action[0] === ActionType.Supply) return;
             const confirmAction = () => {
               setPendingAction(undefined);
               addOrUpdateAction(action);
             };
+            // The wrapper's approval is requested at submission, for exactly the amount, so a base
+            // supply or withdrawal on the wrapped route is queued as it is. A form kept from before
+            // the release controls closed queues nothing.
+            if (isWrapperRouted(liveSession.current.route, action)) {
+              const rules = liveActionRules.current.wrappedBase;
+              const blockedReason =
+                action[0] === ActionType.Supply ? rules?.supplyBlockedReason : rules?.withdrawBlockedReason;
+              if (rules !== undefined && blockedReason === undefined) confirmAction();
+              return;
+            }
             const asset = action[1] as BaseAssetWithAccountState | TokenWithAccountState;
             const actionType = action[0] as ActionType;
             if (
@@ -563,40 +829,15 @@ const Home = ({
         },
         onSubmitClicked: () => {
           if (isFromEarlierVisit()) return;
+          // One submission at a time: a submission in progress, or one whose dialog is hidden while
+          // a step is signed, holds back another.
+          if (liveSubmission.current !== undefined) return;
           setPendingAction(undefined);
-          if (isBlockedOnLiveRoute(actions)) return;
-
-          if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
-            if (web3.write.chainId !== web3.read.chainId) {
-              switchWriteNetwork(web3.read.chainId);
-            } else {
-              const nativeTokenSymbol = market.chainInformation.nativeToken.symbol;
-              const actionAssetSymbol = actions[0][1].symbol;
-
-              if (actions.length === 1 && actionAssetSymbol !== nativeTokenSymbol && actionAssetSymbol !== 'stETH') {
-                // don't use bulker if you're only taking a single action (that
-                // doesn't involve wrapping Ether or stETH)
-                submitSingleAction(actions[0]);
-              } else if (!isBulkerAllowed) {
-                setActionModalState(
-                  actionModalStateBulkerApprove(
-                    market,
-                    state[1],
-                    transactions,
-                    { ...writeState, allowOperator: allowOperatorWhileCurrent },
-                    estimatedGasMap,
-                    onRequestClose,
-                    submitBulkerAction
-                  )
-                );
-              } else {
-                submitBulkerAction();
-              }
-            }
-          }
+          submitQueue();
         },
       },
     ];
+    submissionControls = { continueSubmission, symbol: directBaseAsset.symbol };
 
     const [unwrappedAdditionalCollateralAssets, onlyActualCollateralAssets] = arrayPartition(
       collateralAssets,
@@ -723,115 +964,56 @@ const Home = ({
     });
   }
 
-  let wrappedPanel: ReactNode = null;
-  // The direct Comet borrow a wrapped supply's dialog warns about, or undefined while unknown.
-  let directBorrowBalance: bigint | undefined;
-  const { route: wrappedRoute, action: wrappedAction } = wrappedLending;
-  if (wrappedRoute.kind === 'wrapped') {
-    // The rate and price belong to the market whose Comet state this is, which can still be
-    // the previous market for a render after a switch.
-    const cometMarket = cometStateMarket.current.market;
-    const isCometStateForRoute =
-      cometMarket !== undefined &&
-      cometMarket.chainId === wrappedRoute.chainId &&
-      cometMarket.cometAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase();
-    const cometForRoute = cometState !== StateType.Loading && isCometStateForRoute ? state[1] : undefined;
-    // The borrow comes from the Comet state read for this market and known to be the connected
-    // account's only.
-    if (state[0] === StateType.Hydrated && isCometStateForRoute && isCometStateVerifiedForAccount) {
-      const { balance } = state[1].baseAsset;
-      directBorrowBalance = balance < 0n ? -balance : 0n;
+  // The submission dialog shows the submission of this visit. While a step is being signed, the
+  // user can hide it. It returns when the lifecycle moves to another step or stops.
+  const hiddenWhileSigning = submission?.hiddenWhileSigning;
+  const isHidden =
+    hiddenWhileSigning !== undefined &&
+    submissionState.phase === 'signing' &&
+    submissionState.draft === hiddenWhileSigning.draft &&
+    submissionState.stepIndex === hiddenWhileSigning.stepIndex;
+  const closeSubmission = () => {
+    if (submission === undefined) return;
+    if (submissionState.phase === 'signing') {
+      const { draft, stepIndex } = submissionState;
+      setSubmissionRecord({ ...submission, hiddenWhileSigning: { draft, stepIndex } });
+      return;
     }
-    // Only the loaded figures need the Comet state. A read failure or an unavailable wrapper
-    // shows at once, so its Retry or Reload is never hidden behind a slow Comet read.
-    const position =
-      wrappedLending.position.status === 'loaded' && cometForRoute === undefined
-        ? { status: 'loading' as const }
-        : wrappedLending.position;
-    wrappedPanel = (
-      <WrappedPositionPanel
-        route={wrappedRoute}
-        position={position}
-        baseAsset={
-          cometForRoute?.baseAsset ?? {
-            symbol: selectedMarket[1]?.baseAsset.symbol ?? '',
-            baseAssetPriceInDollars: 0n,
-            balanceOfComet: 0n,
-          }
-        }
-        earnAPR={cometForRoute?.earnAPR ?? 0n}
-        session={wrappedAction.session}
-        isRecoveredRequestPendingInWallet={wrappedAction.isRecoveredRequestPendingInWallet}
-        canDismissRecovered={wrappedAction.canDismissRecovered}
-        onDismissRecovered={wrappedAction.dismissRecovered}
-        hasUnansweredWalletRequest={wrappedAction.hasUnansweredWalletRequest}
-        walletRefusalMessage={wrappedAction.walletRefusalMessage}
-        supply={{
-          blockedReason: wrappedAction.blockedReason('supply'),
-          // A callback kept from an earlier visit starts no review.
-          onReview: (amount) => (isFromEarlierVisit() ? 'identity-changed' : wrappedLending.write.supply(amount)),
-        }}
-        withdraw={{
-          blockedReason: wrappedAction.blockedReason('withdraw'),
-          // A callback kept from an earlier visit starts no review.
-          onReview: (request, shownCash) =>
-            isFromEarlierVisit() ? 'identity-changed' : wrappedLending.write.withdraw(request, shownCash),
-        }}
-        onRetry={wrappedLending.retry}
-      />
-    );
-    // The headline reads the panel's position state, so it adds no position the panel does not
-    // show. If the Comet state is not known to be the connected account's, the headline shows the
-    // direct balance alone. Without this guard, the headline can add one account's wrapped value to
-    // another account's direct balance.
-    if (mastheadState[0] === StateType.Hydrated) {
-      const wrappedPosition =
-        position.status === 'loaded' && !isCometStateVerifiedForAccount ? { status: 'loading' as const } : position;
-      mastheadState = [StateType.Hydrated, { ...mastheadState[1], wrappedPosition }];
-    }
-  }
-
-  // The supply and withdrawal dialogs describe their draft's own market. A completed or stopped
-  // draft stays on screen after the user selects another market.
-  const { state: wrappedActionState } = wrappedAction;
-  const draftIdentity =
-    'draft' in wrappedActionState
-      ? wrappedActionState.draft.identity
-      : 'identity' in wrappedActionState
-      ? wrappedActionState.identity
-      : undefined;
-  const draftLookup =
-    draftIdentity === undefined
-      ? undefined
-      : WRAPPED_MARKET_REGISTRY.lookup(draftIdentity.chainId, draftIdentity.cometAddress);
-
-  const draftSymbol =
-    draftIdentity === undefined
-      ? ''
-      : getMarket(draftIdentity.chainId, draftIdentity.cometAddress)?.baseAsset.symbol ?? '';
-  const draftDecimals = draftLookup?.status === 'valid' ? draftLookup.market.baseDecimals : undefined;
+    // Nothing more is sent from a closed submission. Its wrapper action stays queued unless it confirmed.
+    if (isSubmissionState) wrappedAction.discard();
+    setSubmissionRecord(undefined);
+  };
+  // A confirmation belongs to this submission's review. One kept from an earlier visit does nothing.
+  const confirmSubmissionStep = () => {
+    if (isFromEarlierVisit() || submissionState.phase !== 'review') return;
+    wrappedAction.confirm();
+  };
+  const submissionModal = submission !== undefined && submissionControls !== undefined && !isHidden && (
+    <QueuedSubmissionModal
+      submission={submission}
+      state={submissionState}
+      symbol={submissionControls.symbol}
+      decimals={lendingRoute.kind === 'wrapped' ? lendingRoute.market?.baseDecimals : undefined}
+      recovery={{
+        canDismissRecovered: wrappedAction.canDismissRecovered,
+        isRecoveredRequestPendingInWallet: wrappedAction.isRecoveredRequestPendingInWallet,
+        hasUnansweredWalletRequest: wrappedAction.hasUnansweredWalletRequest,
+        walletRefusalMessage: wrappedAction.walletRefusalMessage,
+        sessionInstruction: wrappedAction.session.status === 'unusable' ? wrappedAction.session.instruction : undefined,
+      }}
+      onConfirm={confirmSubmissionStep}
+      onClose={closeSubmission}
+      onContinue={submissionControls.continueSubmission}
+      onDismissRecovered={wrappedAction.dismissRecovered}
+    />
+  );
 
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
-      <WrappedSupplyModal
-        state={wrappedActionState}
-        symbol={draftSymbol}
-        decimals={draftDecimals}
-        directBorrowBalance={directBorrowBalance}
-        onConfirm={wrappedAction.confirm}
-        onClose={wrappedAction.discard}
-      />
-      <WrappedWithdrawModal
-        state={wrappedActionState}
-        symbol={draftSymbol}
-        decimals={draftDecimals}
-        onConfirm={wrappedAction.confirm}
-        onClose={wrappedAction.discard}
-      />
+      {submissionModal}
       <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
-      {wrappedPanel}
       <div className="home__content grid-container">
         <div className="home__assets grid-column--7">
           <div className="panel panel--assets">
