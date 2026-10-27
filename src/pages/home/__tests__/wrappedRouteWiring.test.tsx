@@ -138,7 +138,13 @@ function actionQueue(actions: Action[]): ActionQueue & { setPendingAction: jest.
   };
 }
 
-type Setup = { lending: WrappedLending; market?: MarketData; state: CometState; queue: ActionQueue };
+type Setup = {
+  lending: WrappedLending;
+  market?: MarketData;
+  state: CometState;
+  queue: ActionQueue;
+  web3?: typeof mockWeb3;
+};
 
 SelectedMarketContextHelpers.initializeContext({
   selectedMarket: [StateType.Hydrated, USDC_MARKET],
@@ -147,7 +153,7 @@ SelectedMarketContextHelpers.initializeContext({
 });
 ActionQueueContextHelpers.initializeContext(actionQueue([]));
 
-function homeElement({ lending, market = USDC_MARKET, state, queue }: Setup) {
+function homeElement({ lending, market = USDC_MARKET, state, queue, web3 = mockWeb3 }: Setup) {
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
   return (
@@ -162,7 +168,7 @@ function homeElement({ lending, market = USDC_MARKET, state, queue }: Setup) {
         <ActionQueueContext.Provider value={queue}>
           <Home
             transactions={[]}
-            web3={mockWeb3}
+            web3={web3}
             selectedMarketData={{
               selectedMarket: [StateType.Hydrated, market],
               selectMarket: jest.fn(),
@@ -307,11 +313,49 @@ describe('Home on the wrapped route', () => {
 
     rerender(homeElement({ lending: loaded, market: USDC_MARKET, state, queue: actionQueue([]) }));
     expect(mockLastProps.WrappedPositionPanel.position).toEqual({ status: 'loading' });
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
 
     rerender(
       homeElement({ lending: loaded, market: USDC_MARKET, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) })
     );
     expect(mockLastProps.WrappedPositionPanel.position).toEqual(loaded.position);
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(loaded.position);
+  });
+
+  it('gives the masthead the position the panel shows', () => {
+    const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
+    render(homeElement({ lending: loaded, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
+
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toBe(mockLastProps.WrappedPositionPanel.position);
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
+  });
+
+  it.each<[string, WrappedLending['position']]>([
+    ['loading', { status: 'loading' }],
+    ['failed to read', { status: 'error', message: 'Read failed.' }],
+  ])('gives the masthead a position that is %s, as the panel shows it', (_, position) => {
+    const lending = { ...wrappedLending(), position };
+    render(homeElement({ lending, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
+
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(position);
+  });
+
+  it('adds no wrapped value to Comet state read for another account', () => {
+    const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
+    const state = cometState(EMPTY_ACCOUNT);
+    const { rerender } = render(homeElement({ lending: loaded, state, queue: actionQueue([]) }));
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
+
+    // The wallet switched accounts, and the Comet state is still the previous account's.
+    const otherAccount = '0x0000000000000000000000000000000000000bb2';
+    const switched = {
+      ...mockWeb3,
+      read: { ...mockWeb3.read, account: otherAccount },
+      write: { ...mockWeb3.write, account: otherAccount },
+    };
+    rerender(homeElement({ lending: loaded, state, queue: actionQueue([]), web3: switched }));
+
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
   });
 });
 
@@ -356,5 +400,11 @@ describe('Home on the standard route', () => {
     expect(masthead.isDirectBaseSupplyBlocked).toBe(false);
     expect(masthead.earnRewardsAPR).toBe(12_000_000_000_000_000n);
     expect(mockLastProps.PositionCard.state[1].actionRules).toEqual({ blockDirectBaseSupply: false });
+  });
+
+  it('gives the masthead no wrapped position', () => {
+    render(homeElement({ lending: STANDARD, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
+
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toBeUndefined();
   });
 });

@@ -145,6 +145,16 @@ export function getWrappedPositionValueInDollars(
   return getTokenValue(grossAssets, Currency.USD, baseAssetPriceInDollars, baseSymbol);
 }
 
+/**
+ * The base units a wrapped position adds to the dashboard's headline balance: its gross value,
+ * not its exit cash. Undefined without a position, or when the wrapper's base decimals differ
+ * from the market's `baseDecimals`. Otherwise the headline adds amounts of different scales.
+ */
+export function getHeadlineWrappedValue(position: WrappedPosition | undefined, baseDecimals: number) {
+  if (position === undefined || position.baseDecimals !== baseDecimals) return undefined;
+  return position.grossAssets;
+}
+
 function toBigInt(value: unknown, name: string): bigint {
   if (BigNumber.isBigNumber(value)) return value.toBigInt();
   throw new WrappedPositionReadError(`The wrapper read returned no number for ${name}.`);

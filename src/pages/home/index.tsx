@@ -708,12 +708,9 @@ const Home = ({
     const cometForRoute = cometState !== StateType.Loading && isCometStateForRoute ? state[1] : undefined;
     // The borrow comes from the Comet state read for this market and the connected account only.
     const cometAccount = cometStateMarket.current.account;
-    if (
-      state[0] === StateType.Hydrated &&
-      isCometStateForRoute &&
-      cometAccount !== undefined &&
-      cometAccount.toLowerCase() === web3.write.account?.toLowerCase()
-    ) {
+    const isCometStateForAccount =
+      cometAccount !== undefined && cometAccount.toLowerCase() === web3.write.account?.toLowerCase();
+    if (state[0] === StateType.Hydrated && isCometStateForRoute && isCometStateForAccount) {
       const { balance } = state[1].baseAsset;
       directBorrowBalance = balance < 0n ? -balance : 0n;
     }
@@ -755,6 +752,14 @@ const Home = ({
         onRetry={wrappedLending.retry}
       />
     );
+    // The headline reads the panel's position state, so it adds no position the panel does not
+    // show. If the Comet state was read for another account, the headline shows the direct balance
+    // alone. Otherwise it adds one account's wrapped value to another account's direct balance.
+    if (mastheadState[0] === StateType.Hydrated) {
+      const wrappedPosition =
+        position.status === 'loaded' && !isCometStateForAccount ? { status: 'loading' as const } : position;
+      mastheadState = [StateType.Hydrated, { ...mastheadState[1], wrappedPosition }];
+    }
   }
 
   // The supply and withdrawal dialogs describe their draft's own market. A completed or stopped
