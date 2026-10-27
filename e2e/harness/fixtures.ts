@@ -5,6 +5,8 @@
 // - `fork`: a viem client for reading the fork directly from Node.
 // - `context` and `page`: a fresh browser context per test, limited to the harness's origins
 //   (`egress.ts`), with the harness provider injected into the app's top frame and its binding exposed.
+// - `harnessWallet`: the wallet the provider announces, MetaMask unless a spec sets another with
+//   `test.use({ harnessWallet: ANCHORAGE_WALLET })`.
 // - Before each test, the wallet resets: the fork reverts to its baseline snapshot, and every account,
 //   request, permission, chain setting and screening behaviour is cleared.
 import fs from 'node:fs';
@@ -15,7 +17,13 @@ import { mainnet } from 'viem/chains';
 
 import { ControlClient } from './controlClient';
 import { allowLoopbackWebSocket, applyEgress, closePagesItDidNotOpen, type BlockedRequest } from './egress';
-import { BINDING_NAME, installHarnessProvider, PROVIDER_ICON, PROVIDER_NAME, PROVIDER_RDNS } from './injectedProvider';
+import {
+  BINDING_NAME,
+  installHarnessProvider,
+  METAMASK_WALLET,
+  PROVIDER_ICON,
+  type HarnessWallet,
+} from './injectedProvider';
 import type { Manifest } from './services';
 import { v3ApiReadPrefixes } from './settings';
 import { trustHarnessCertificate } from './tls';
@@ -75,7 +83,14 @@ export async function harnessContext(
     appOrigin,
     wallet,
     blocked,
-  }: { manifest: Manifest; appOrigin: string; wallet: ControlClient; blocked: BlockedRequest[] }
+    harnessWallet = METAMASK_WALLET,
+  }: {
+    manifest: Manifest;
+    appOrigin: string;
+    wallet: ControlClient;
+    blocked: BlockedRequest[];
+    harnessWallet?: HarnessWallet;
+  }
 ): Promise<BrowserContext> {
   const context = await browser.newContext({
     serviceWorkers: 'block',
@@ -96,9 +111,9 @@ export async function harnessContext(
   await context.addInitScript(installHarnessProvider, {
     appOrigin,
     bindingName: BINDING_NAME,
-    name: PROVIDER_NAME,
+    name: harnessWallet.name,
     icon: PROVIDER_ICON,
-    rdns: PROVIDER_RDNS,
+    rdns: harnessWallet.rdns,
   });
   return context;
 }
@@ -106,6 +121,7 @@ export async function harnessContext(
 type WorkerFixtures = { manifest: Manifest; wallet: ControlClient; fork: PublicClient };
 type TestFixtures = {
   appTarget: AppTarget;
+  harnessWallet: HarnessWallet;
   appOrigin: string;
   blocked: BlockedRequest[];
   consoleMessages: string[];
@@ -134,6 +150,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     { scope: 'worker' },
   ],
   appTarget: ['dev', { option: true }],
+  harnessWallet: [METAMASK_WALLET, { option: true }],
   appOrigin: async ({ manifest, appTarget }, use, testInfo) => {
     if (appTarget !== 'dev' && manifest.production.isSkipped) {
       testInfo.skip(true, `the production builds were skipped: ${manifest.production.reason}`);
@@ -157,9 +174,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     },
     { auto: true },
   ],
-  context: async ({ browser, manifest, appOrigin, wallet, blocked, resetWallet }, use) => {
+  context: async ({ browser, manifest, appOrigin, wallet, blocked, resetWallet, harnessWallet }, use) => {
     void resetWallet;
-    const context = await harnessContext(browser, { manifest, appOrigin, wallet, blocked });
+    const context = await harnessContext(browser, { manifest, appOrigin, wallet, blocked, harnessWallet });
     await use(context);
     await context.close();
   },
@@ -219,12 +236,16 @@ export async function signingCalls(wallet: ControlClient): Promise<string[]> {
 }
 
 /**
- * Connects the harness wallet through the app UI: Connect Wallet, the MetaMask row, then approval of the
- * permission request. Returns the approved request.
+ * Connects the harness wallet through the app UI: Connect Wallet, the wallet's row (MetaMask unless
+ * `walletLabel` names another), then approval of the permission request. Returns the approved request.
  */
-export async function connectThroughUi(page: Page, wallet: ControlClient, { approve = true } = {}) {
+export async function connectThroughUi(
+  page: Page,
+  wallet: ControlClient,
+  { approve = true, walletLabel = METAMASK_WALLET.label } = {}
+) {
   await page.getByRole('banner').getByText('Connect Wallet', { exact: true }).click();
-  await page.getByText('MetaMask', { exact: true }).click();
+  await page.getByText(walletLabel, { exact: true }).click();
   const request = await wallet.waitForRequest({ method: 'wallet_requestPermissions' });
   if (approve) await wallet.approve(request.id);
   return request;
@@ -249,8 +270,13 @@ export async function openApp(page: Page, path = '/') {
 }
 
 /** Connects `address`, which must be selected in the wallet, through the app UI, and waits for the header. */
-export async function connectAccount(page: Page, wallet: ControlClient, address: string) {
-  await connectThroughUi(page, wallet);
+export async function connectAccount(
+  page: Page,
+  wallet: ControlClient,
+  address: string,
+  walletLabel = METAMASK_WALLET.label
+) {
+  await connectThroughUi(page, wallet, { walletLabel });
   await headerAccount(page, address).waitFor();
 }
 

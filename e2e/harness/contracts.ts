@@ -9,6 +9,15 @@ export const USDC_BALANCE_SLOT = 9n;
 export const USDC_DECIMALS = 6;
 export const MAX_UINT256 = 2n ** 256n - 1n;
 
+/** The canonical wrapper of the Ethereum USDC Comet, which `getWrapper(COMET_USDC)` returns. */
+export const WRAPPER_USDC = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73' as Address;
+
+export const WRAPPER_ABI = parseAbi([
+  'function balanceOf(address) view returns (uint256)',
+  'function supplyAndWrap(uint256 amount) returns (uint256 shares)',
+  'function unwrapAndWithdraw(uint256 shares) returns (uint256 assets)',
+]);
+
 export const ERC20_ABI = parseAbi([
   'function balanceOf(address) view returns (uint256)',
   'function allowance(address owner, address spender) view returns (uint256)',
