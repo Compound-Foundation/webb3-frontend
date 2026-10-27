@@ -885,29 +885,34 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
+              isLocked: isQueueLocked(),
               unwrappedAssetSupplyAction: stEthWrapSupplyAction,
               onDripClicked: () => {
                 if (isFromEarlierVisit()) return;
                 writeState.drip(market, token.address);
               },
               onCancelClicked: () => {
+                if (isFromEarlierVisit() || isQueueLocked()) return;
                 if (pendingActionOrUndefined) {
                   setPendingAction(undefined);
                   action && removeAction(action);
                 }
               },
               onEditClicked: () => {
+                if (isFromEarlierVisit() || isQueueLocked()) return;
                 if (action) {
                   setPendingAction(getPendingActionFromAction(action, updatedDataPostActions.baseAsset));
                 }
               },
               onSupplyClicked: () => {
+                if (isFromEarlierVisit() || isQueueLocked()) return;
                 if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
                   setPendingAction([ActionType.SupplyCollateral, token, undefined]);
                   setActionModalState(undefined);
                 }
               },
               onWithdrawClicked: () => {
+                if (isFromEarlierVisit() || isQueueLocked()) return;
                 setPendingAction([ActionType.WithdrawCollateral, token, updatedDataPostActions.baseAsset, undefined]);
               },
             },
@@ -942,19 +947,23 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
+              isLocked: isQueueLocked(),
               wrappedAsset: matchingWrappedAsset,
               onCancelClicked: () => {
+                if (isFromEarlierVisit() || isQueueLocked()) return;
                 if (pendingActionOrUndefined) {
                   setPendingAction(undefined);
                   action && removeAction(action);
                 }
               },
               onEditClicked: () => {
+                if (isFromEarlierVisit() || isQueueLocked()) return;
                 if (action) {
                   setPendingAction(getPendingActionFromAction(action, updatedDataPostActions.baseAsset));
                 }
               },
               onSupplyClicked: () => {
+                if (isFromEarlierVisit() || isQueueLocked()) return;
                 if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
                   setPendingAction([ActionType.SupplyCollateral, token, undefined]);
                   setActionModalState(undefined);

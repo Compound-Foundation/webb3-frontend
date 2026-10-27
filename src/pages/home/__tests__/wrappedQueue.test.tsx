@@ -60,7 +60,15 @@ function mockRecordProps(name: string) {
 jest.mock('../components/Masthead', () => mockRecordProps('Masthead'));
 jest.mock('../components/PositionCard', () => mockRecordProps('PositionCard'));
 jest.mock('../components/ActionModal', () => mockRecordProps('ActionModal'));
-jest.mock('../components/AssetRow', () => mockRecordProps('AssetRow'));
+// Each collateral row's props, by its asset's symbol.
+const mockAssetRows: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
+jest.mock('../components/AssetRow', () => ({
+  __esModule: true,
+  default: (props: { state: [unknown, { asset?: { symbol: string } }?] }) => {
+    mockAssetRows[props.state[1]?.asset?.symbol ?? ''] = props;
+    return null;
+  },
+}));
 jest.mock('../components/InstitutionalBanner', () => mockRecordProps('InstitutionalBanner'));
 
 const mockWriteState = {
@@ -672,6 +680,50 @@ describe('Home on the wrapped route', () => {
       expect(queue.removeAction).not.toHaveBeenCalled();
       expect(queue.clearActions).not.toHaveBeenCalled();
       expect(queue.setPendingAction).not.toHaveBeenCalled();
+    });
+    it('holds both collateral row families still, and disables them, while a step is checked before its signature', () => {
+      // stETH is listed apart from the market's collateral, as "Other Assets".
+      const stETH = mockEthCollateralAsset({
+        address: '0xae7ab96520de3a18e5e111b5eaab095312d7fe84',
+        symbol: 'stETH',
+        name: 'Lido Staked ETH',
+      });
+      const state = cometState();
+      const withStETH = [state[0], { ...state[1], collateralAssets: [COLLATERAL, stETH] }] as unknown as CometState;
+      const collateralSupply: Action = [ActionType.SupplyCollateral, COLLATERAL, 10n ** 17n];
+      const stETHSupply: Action = [ActionType.SupplyCollateral, stETH, 10n ** 17n];
+      const queue = actionQueue([collateralSupply, stETHSupply, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      // An amount form open on a row, which its Cancel closes and takes out of the queue.
+      let pending: PendingAction | undefined;
+      queue.getPendingAction = () => pending;
+      const options = { queue, state: withStETH };
+      const { rerenderHome } = renderHome(lendingWith(controller()), options);
+      act(() => positionCard().onSubmitClicked());
+      // The check before the signature is held open: the wallet has not been asked, so the
+      // transaction manager tracks nothing yet.
+      const checking = lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }])));
+      rerenderHome(checking, options);
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      queue.setPendingAction.mockClear();
+
+      for (const [asset, action] of [
+        [COLLATERAL, collateralSupply],
+        [stETH, stETHSupply],
+      ] as const) {
+        const row = () => mockAssetRows[asset.symbol].state[1];
+        expect(row().isLocked).toBe(true);
+        act(() => row().onEditClicked());
+        act(() => row().onSupplyClicked());
+        act(() => row().onWithdrawClicked?.());
+        pending = [ActionType.SupplyCollateral, asset, action[2]];
+        rerenderHome(checking, options);
+        act(() => row().onCancelClicked());
+        pending = undefined;
+      }
+
+      expect(queue.setPendingAction).not.toHaveBeenCalled();
+      expect(queue.removeAction).not.toHaveBeenCalled();
     });
   });
 
