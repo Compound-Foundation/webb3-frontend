@@ -296,6 +296,20 @@ function homeElement(
   );
 }
 
+// On the wrapped route, Home uses a hydrated Comet state only once it knows the account it was read
+// for: one that arrived while the dashboard was mounted. This render delivers the state after the
+// dashboard mounts, as the app does.
+function renderWithCometRead(
+  lending: WrappedLending,
+  state: CometState,
+  queue: ActionQueue = actionQueue(),
+  market: MarketData = USDC_MARKET
+) {
+  const view = render(homeElement(lending, [StateType.Loading, undefined], queue, market));
+  view.rerender(homeElement(lending, state, queue, market));
+  return view;
+}
+
 function renderModal(state: WrappedActionState, directBorrowBalance: bigint | undefined = 0n) {
   const onConfirm = jest.fn();
   const onClose = jest.fn();
@@ -334,7 +348,7 @@ describe('WrappedSupply', () => {
       const action = controller(inReview());
       const lending = lendingWith(action);
       const queue = actionQueue();
-      render(homeElement(lending, cometState(BORROWER), queue));
+      renderWithCometRead(lending, cometState(BORROWER), queue);
 
       const dialog = screen.getByRole('dialog');
       const warning = within(dialog).getByRole('alert');
@@ -366,7 +380,7 @@ describe('WrappedSupply', () => {
         receipt: { transactionHash: HASH, status: 1 } as TransactionReceipt,
       };
       const review = inReview([APPROVE_STEP, SUPPLY_STEP], 1, [confirmed, { status: 'waiting' }]);
-      const { rerender } = render(homeElement(lendingWith(controller(review)), cometState(BORROWER)));
+      const { rerender } = renderWithCometRead(lendingWith(controller(review)), cometState(BORROWER));
 
       expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent(/does not repay/i);
       expect(screen.getByRole('button', { name: /supply 1,000\.000000 usdc/i })).toBeEnabled();
@@ -383,7 +397,7 @@ describe('WrappedSupply', () => {
     it("warns without an amount while the direct position shown is still the previous market's", () => {
       const state = cometState(BORROWER);
       const usdt = { ...lendingWith(controller()), route: routeFor(OPEN, USDT_COMET) };
-      const { rerender } = render(homeElement(usdt, state, actionQueue(), USDT_MARKET));
+      const { rerender } = renderWithCometRead(usdt, state, actionQueue(), USDT_MARKET);
 
       // The user switches to USDC and reviews a supply before USDC's Comet state arrives.
       rerender(homeElement(lendingWith(controller(inReview())), state, actionQueue(), USDC_MARKET));
@@ -410,7 +424,7 @@ describe('WrappedSupply', () => {
         selectMarket: jest.fn(),
         selectMarketByAddress: jest.fn(),
       };
-      render(
+      const element = (state: CometState) => (
         <WrappedLendingContext.Provider value={lendingWith(controller(inReview()))}>
           <SelectedMarketContext.Provider value={selectedMarketData as never}>
             <ActionQueueContext.Provider value={actionQueue()}>
@@ -418,7 +432,7 @@ describe('WrappedSupply', () => {
                 transactions={[]}
                 web3={otherAccount}
                 selectedMarketData={selectedMarketData as never}
-                cometState={cometState(BORROWER)}
+                cometState={state}
                 addTransaction={jest.fn()}
                 switchWriteNetwork={jest.fn()}
                 estimatedGasMap={new Map()}
@@ -428,6 +442,9 @@ describe('WrappedSupply', () => {
           </SelectedMarketContext.Provider>
         </WrappedLendingContext.Provider>
       );
+      // The state arrives after the dashboard mounts, as in the app, so Home records the read account.
+      const { rerender } = render(element([StateType.Loading, undefined]));
+      rerender(element(cometState(BORROWER)));
 
       const warning = within(screen.getByRole('dialog')).getByRole('alert');
       expect(warning).toHaveTextContent(/does not repay/i);
@@ -435,7 +452,7 @@ describe('WrappedSupply', () => {
     });
 
     it('shows no warning to an account without a direct borrow', () => {
-      render(homeElement(lendingWith(controller(inReview())), cometState({ ...BASE_ASSET, balance: 0n })));
+      renderWithCometRead(lendingWith(controller(inReview())), cometState({ ...BASE_ASSET, balance: 0n }));
 
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).not.toBeInTheDocument();
       // A borrow made elsewhere can be newer than this page's read, so the dialog still says it.

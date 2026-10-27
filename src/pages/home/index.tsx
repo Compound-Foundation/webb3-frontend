@@ -62,6 +62,11 @@ import WrappedPositionPanel from './components/WrappedPositionPanel';
 
 const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.name ? 1 : a.name === b.name ? 0 : -1);
 
+// The market and account Home recorded for each Comet state it showed. The app keeps its Comet
+// state while another page is shown, so the record outlives Home. The app replaces the state
+// object on every read, so an old record is dropped with its state.
+const cometStateProvenance = new WeakMap<CometState, CometStateWithMarket>();
+
 type HomeProps = {
   transactions: Transaction[];
   web3: Web3;
@@ -109,14 +114,24 @@ const Home = ({
       : { chainId: selectedMarket[1].chainInformation.chainId, cometAddress: selectedMarket[1].marketAddress };
   // Comet state names no market or account, and it trails a change of either by a render. Each
   // new state is recorded with the market and account current when it arrived, so a stale one
-  // keeps the old ones.
-  const cometStateMarket = useRef<CometStateWithMarket>({
-    market: selectedMarketIdentity,
-    account: web3.read.account,
-    state,
-  });
-  if (cometStateMarket.current.state !== state) {
-    cometStateMarket.current = { market: selectedMarketIdentity, account: web3.read.account, state };
+  // keeps the old ones, and a state shown on an earlier visit keeps its record.
+  // The app keeps the previous account's Comet state until the new account's read arrives, so the
+  // account of a hydrated state that arrived while the dashboard was not mounted is unknown. Until
+  // the next Comet read replaces that state, at most the timed refresh later, the headline shows
+  // the direct balance alone, the supply dialog's direct borrow is unknown and direct submissions
+  // on the wrapped route are refused. A state that arrives while the dashboard is mounted, or was
+  // recorded on an earlier visit, is used at once.
+  const lastCometState = useRef<CometStateWithMarket>();
+  let cometStateMarket = lastCometState.current;
+  if (cometStateMarket?.state !== state) {
+    const isRetainedFromBeforeMount = cometStateMarket === undefined && state[0] === StateType.Hydrated;
+    cometStateMarket = cometStateProvenance.get(state) ?? {
+      market: selectedMarketIdentity,
+      account: isRetainedFromBeforeMount ? undefined : web3.read.account,
+      state,
+    };
+    cometStateProvenance.set(state, cometStateMarket);
+    lastCometState.current = cometStateMarket;
   }
   // Submissions can start from a callback a dialog kept from an earlier render, so they are
   // judged by the session as it is now, not as it was when the callback was made.
@@ -124,13 +139,13 @@ const Home = ({
     route: wrappedLending.route,
     account: web3.write.account,
     selectedMarket: selectedMarketIdentity,
-    comet: cometStateMarket.current,
+    comet: cometStateMarket,
   });
   liveSession.current = {
     route: wrappedLending.route,
     account: web3.write.account,
     selectedMarket: selectedMarketIdentity,
-    comet: cometStateMarket.current,
+    comet: cometStateMarket,
   };
   // Review dialogs and writes belong to a visit: the account, connector, connection status, wallet
   // network and market they were made for. A change of any of them starts a new visit in the same
@@ -700,14 +715,14 @@ const Home = ({
   if (wrappedRoute.kind === 'wrapped') {
     // The rate and price belong to the market whose Comet state this is, which can still be
     // the previous market for a render after a switch.
-    const cometMarket = cometStateMarket.current.market;
+    const cometMarket = cometStateMarket.market;
     const isCometStateForRoute =
       cometMarket !== undefined &&
       cometMarket.chainId === wrappedRoute.chainId &&
       cometMarket.cometAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase();
     const cometForRoute = cometState !== StateType.Loading && isCometStateForRoute ? state[1] : undefined;
     // The borrow comes from the Comet state read for this market and the connected account only.
-    const cometAccount = cometStateMarket.current.account;
+    const cometAccount = cometStateMarket.account;
     const isCometStateForAccount =
       cometAccount !== undefined && cometAccount.toLowerCase() === web3.write.account?.toLowerCase();
     if (state[0] === StateType.Hydrated && isCometStateForRoute && isCometStateForAccount) {
@@ -753,8 +768,9 @@ const Home = ({
       />
     );
     // The headline reads the panel's position state, so it adds no position the panel does not
-    // show. If the Comet state was read for another account, the headline shows the direct balance
-    // alone. Otherwise it adds one account's wrapped value to another account's direct balance.
+    // show. If the Comet state was not read for the connected account, the headline shows the
+    // direct balance alone. Without this guard, the headline can add one account's wrapped value to
+    // another account's direct balance.
     if (mastheadState[0] === StateType.Hydrated) {
       const wrappedPosition =
         position.status === 'loaded' && !isCometStateForAccount ? { status: 'loading' as const } : position;

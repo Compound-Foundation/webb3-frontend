@@ -186,6 +186,15 @@ function homeElement({ lending, market = USDC_MARKET, state, queue, web3 = mockW
   );
 }
 
+// On the wrapped route, Home uses a hydrated Comet state only once it knows the account it was read
+// for: one that arrived while the dashboard was mounted. These renders deliver the state after the
+// dashboard mounts, as the app does.
+function renderWithCometRead(setup: Setup) {
+  const view = render(homeElement({ ...setup, state: [StateType.Loading, undefined] }));
+  view.rerender(homeElement(setup));
+  return view;
+}
+
 const EMPTY_ACCOUNT = mockBaseAsset({ address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' });
 const supplyAction = (asset: BaseAssetWithAccountState): Action => [ActionType.Supply, asset, 1_000_000n];
 
@@ -226,13 +235,11 @@ describe('Home on the wrapped route', () => {
   });
 
   it('refuses to submit a queued base supply', () => {
-    render(
-      homeElement({
-        lending: wrappedLending(),
-        state: cometState(EMPTY_ACCOUNT),
-        queue: actionQueue([supplyAction(EMPTY_ACCOUNT)]),
-      })
-    );
+    renderWithCometRead({
+      lending: wrappedLending(),
+      state: cometState(EMPTY_ACCOUNT),
+      queue: actionQueue([supplyAction(EMPTY_ACCOUNT)]),
+    });
 
     const [, positionCard] = mockLastProps.PositionCard.state;
     positionCard.onSubmitClicked();
@@ -242,13 +249,11 @@ describe('Home on the wrapped route', () => {
 
   it('submits a full repay of a direct borrow', () => {
     const borrower = { ...EMPTY_ACCOUNT, balance: -5_000_000n };
-    render(
-      homeElement({
-        lending: wrappedLending(),
-        state: cometState(borrower),
-        queue: actionQueue([[ActionType.Repay, borrower, MAX_UINT256]]),
-      })
-    );
+    renderWithCometRead({
+      lending: wrappedLending(),
+      state: cometState(borrower),
+      queue: actionQueue([[ActionType.Repay, borrower, MAX_UINT256]]),
+    });
 
     const [, positionCard] = mockLastProps.PositionCard.state;
     positionCard.onSubmitClicked();
@@ -258,7 +263,7 @@ describe('Home on the wrapped route', () => {
   it('refuses a submit callback kept from before the route became wrapped', () => {
     const queue = actionQueue([supplyAction(EMPTY_ACCOUNT)]);
     const state = cometState(EMPTY_ACCOUNT);
-    const { rerender } = render(homeElement({ lending: STANDARD, state, queue }));
+    const { rerender } = renderWithCometRead({ lending: STANDARD, state, queue });
     const keptSubmit = mockLastProps.PositionCard.state[1].onSubmitClicked;
 
     rerender(homeElement({ lending: wrappedLending(), state, queue }));
@@ -307,9 +312,12 @@ describe('Home on the wrapped route', () => {
   it('shows the panel loading while the Comet state still belongs to the previous market', () => {
     const state = cometState(EMPTY_ACCOUNT);
     const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
-    const { rerender } = render(
-      homeElement({ lending: wrappedLending(USDT_COMET), market: USDT_MARKET, state, queue: actionQueue([]) })
-    );
+    const { rerender } = renderWithCometRead({
+      lending: wrappedLending(USDT_COMET),
+      market: USDT_MARKET,
+      state,
+      queue: actionQueue([]),
+    });
 
     rerender(homeElement({ lending: loaded, market: USDC_MARKET, state, queue: actionQueue([]) }));
     expect(mockLastProps.WrappedPositionPanel.position).toEqual({ status: 'loading' });
@@ -324,7 +332,7 @@ describe('Home on the wrapped route', () => {
 
   it('gives the masthead the position the panel shows', () => {
     const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
-    render(homeElement({ lending: loaded, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
+    renderWithCometRead({ lending: loaded, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) });
 
     expect(mockLastProps.Masthead.state[1].wrappedPosition).toBe(mockLastProps.WrappedPositionPanel.position);
     expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
@@ -343,7 +351,7 @@ describe('Home on the wrapped route', () => {
   it('adds no wrapped value to Comet state read for another account', () => {
     const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
     const state = cometState(EMPTY_ACCOUNT);
-    const { rerender } = render(homeElement({ lending: loaded, state, queue: actionQueue([]) }));
+    const { rerender } = renderWithCometRead({ lending: loaded, state, queue: actionQueue([]) });
     expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
 
     // The wallet switched accounts, and the Comet state is still the previous account's.

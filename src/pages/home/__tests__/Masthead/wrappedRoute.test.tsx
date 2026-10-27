@@ -206,6 +206,25 @@ describe('Masthead on the wrapped route', () => {
       expect(counterLine()).toHaveTextContent('5,254.5721');
     });
 
+    it('adds a USDT wrapped value at the panel dollar value, before and after a direct supply', () => {
+      const options = { currency: Currency.USD, wrappedPosition: loaded() };
+      const { rerender } = renderMasthead(usdtAccount, true, [], options);
+
+      // The direct 5,004.447061 USDT is converted at $0.9995 twice, as without a position:
+      // $4,999.4439. The panel values the 250.125 wrapped USDT at $0.9995 once: $249.9999.
+      // Together they are $5,249.4438.
+      expect(headline()).toHaveTextContent('$5,249.44');
+      expect(screen.getByText('Includes $250.00 wrapped')).toBeInTheDocument();
+
+      // After a direct supply of 1,000 USDT, the direct 6,004.447061 USDT is $5,998.4441, and the
+      // headline is $6,248.4441.
+      const supply: Action = [ActionType.Supply, usdtAccount, 1_000_000_000n];
+      const after = { ...usdtAccount, balance: 6_004_447_061n };
+      rerender(mastheadElement(usdtAccount, false, [supply], { ...options, baseAssetPost: after }));
+      expect(headline()).toHaveTextContent('$6,248.44');
+      expect(screen.getByText('Includes $250.00 wrapped')).toBeInTheDocument();
+    });
+
     it('names the wrapped part of the headline in the base token', () => {
       renderMasthead(MockBaseAssetWithAccountState, true, [], {
         currency: Currency.USDC,
@@ -231,10 +250,18 @@ describe('Masthead on the wrapped route', () => {
       expect(headline()).toHaveTextContent('250.1250');
       expect(screen.getByText('Supplying')).toBeInTheDocument();
       expect(screen.getByText(/Net APR/)).toBeInTheDocument();
+      expect(screen.queryByText(/Direct supply/)).toBeNull();
       expect(screen.getByText('Includes 250.1250 USDC wrapped')).toBeInTheDocument();
       // The buttons still follow the direct balance: there is no direct supply to withdraw.
       expect(screen.queryByRole('button', { name: 'Withdraw USDC' })).toBeNull();
       expect(screen.getByRole('button', { name: 'Borrow USDC' })).toBeEnabled();
+    });
+
+    it('names the Net APR of a direct and wrapped supplier for the direct supply alone', () => {
+      renderMasthead(MockBaseAssetWithAccountState, true, [], { currency: Currency.USDC, wrappedPosition: loaded() });
+
+      // The rate includes the supply rewards, which the wrapped supply does not earn.
+      expect(screen.getByText(/Direct supply Net APR/)).toBeInTheDocument();
     });
 
     it('adds nothing for a wrapped position worth zero', () => {
@@ -365,6 +392,79 @@ describe('Masthead on the wrapped route', () => {
 
       expect(headline()).toHaveTextContent('1,000.0000');
       expect(screen.queryByText(/wrapper/)).toBeNull();
+    });
+  });
+
+  describe('changes to a mounted masthead', () => {
+    const options = { currency: Currency.USDC, wrappedPosition: loaded() };
+
+    it('moves from the supply headline to the borrow headline when a direct borrow makes the balance negative', () => {
+      const { rerender } = renderMasthead(MockBaseAssetWithAccountState, true, [], options);
+      expect(headline()).toHaveTextContent('5,254.5721');
+      expect(screen.getByText('Includes 250.1250 USDC wrapped')).toBeInTheDocument();
+
+      // A borrow of 6,004.447061 USDC leaves a direct borrow of 1,000 USDC.
+      const borrow: Action = [ActionType.Borrow, MockBaseAssetWithAccountState, 6_004_447_061n];
+      const after = { ...MockBaseAssetWithAccountState, balance: -1_000_000_000n };
+      rerender(mastheadElement(MockBaseAssetWithAccountState, true, [borrow], { ...options, baseAssetPost: after }));
+
+      expect(screen.getByText('Borrowing')).toBeInTheDocument();
+      expect(headline()).toHaveTextContent('1,000.0000');
+      expect(screen.getByText('Plus 250.1250 USDC supplied through the wrapper')).toBeInTheDocument();
+      expect(screen.queryByText(/Includes/)).toBeNull();
+    });
+
+    it('moves from the borrow headline to the wrapped value alone when a repay clears the borrow', () => {
+      const { rerender } = renderMasthead(borrower, true, [], options);
+      expect(screen.getByText('Plus 250.1250 USDC supplied through the wrapper')).toBeInTheDocument();
+
+      const repay: Action = [ActionType.Repay, borrower, 1_000_000_000n];
+      const after = { ...borrower, balance: 0n };
+      rerender(mastheadElement(borrower, true, [repay], { ...options, baseAssetPost: after }));
+
+      expect(screen.getByText('Supplying')).toBeInTheDocument();
+      expect(headline()).toHaveTextContent('250.1250');
+      expect(screen.getByText('Includes 250.1250 USDC wrapped')).toBeInTheDocument();
+      expect(screen.queryByText(/Plus/)).toBeNull();
+    });
+
+    it('shows the wrapped value alone when a withdrawal empties the direct supply', () => {
+      const { rerender } = renderMasthead(MockBaseAssetWithAccountState, true, [], options);
+
+      const withdraw: Action = [ActionType.Withdraw, MockBaseAssetWithAccountState, 5_004_447_061n];
+      const after = { ...MockBaseAssetWithAccountState, balance: 0n };
+      rerender(mastheadElement(MockBaseAssetWithAccountState, true, [withdraw], { ...options, baseAssetPost: after }));
+
+      expect(screen.getByText('Supplying')).toBeInTheDocument();
+      expect(headline()).toHaveTextContent('250.1250');
+      expect(screen.getByText('Includes 250.1250 USDC wrapped')).toBeInTheDocument();
+    });
+
+    it('keeps the headline and the wrapped line in step when the currency changes', () => {
+      const { rerender } = renderMasthead(MockBaseAssetWithAccountState, true, [], options);
+      expect(headline()).toHaveTextContent('5,254.5721');
+      expect(screen.getByText('Includes 250.1250 USDC wrapped')).toBeInTheDocument();
+
+      rerender(mastheadElement(MockBaseAssetWithAccountState, true, [], { ...options, currency: Currency.USD }));
+      expect(headline()).toHaveTextContent('$5,253.57');
+      expect(counterLine()).toHaveTextContent('5,254.5721');
+      expect(screen.getByText('Includes $250.13 wrapped')).toBeInTheDocument();
+
+      rerender(mastheadElement(MockBaseAssetWithAccountState, true, [], options));
+      expect(headline()).toHaveTextContent('5,254.5721');
+      expect(counterLine()).toHaveTextContent('5,253.57');
+      expect(screen.getByText('Includes 250.1250 USDC wrapped')).toBeInTheDocument();
+    });
+
+    it('returns to the direct balance alone when a refresh of the position fails', () => {
+      const { rerender } = renderMasthead(MockBaseAssetWithAccountState, true, [], options);
+      expect(headline()).toHaveTextContent('5,254.5721');
+
+      const failed: WrappedPositionState = { status: 'error', message: 'The read failed.' };
+      rerender(mastheadElement(MockBaseAssetWithAccountState, true, [], { ...options, wrappedPosition: failed }));
+
+      expect(headline()).toHaveTextContent('5,004.4471');
+      expect(screen.queryByText(/wrapped|wrapper/)).toBeNull();
     });
   });
 

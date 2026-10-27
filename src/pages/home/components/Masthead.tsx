@@ -640,6 +640,9 @@ function getContent(state: MastheadState): Content {
 
     if (!hasActions) {
       const anchorRect = tooltipLeftAlign.current?.getBoundingClientRect();
+      // The rate includes the supply rewards, which only the direct supply earns. A wrapped-only
+      // supplier earns no rewards on this route, so the rate is the wrapped supply's own.
+      const netRateLabel = baseAssetToUse.balance > 0n && wrappedValue > 0n ? 'Direct supply Net APR' : 'Net APR';
       overviewDetails =
         headlineBalance > 0n ? (
           <Tooltip
@@ -656,7 +659,9 @@ function getContent(state: MastheadState): Content {
             <div className="masthead__overview-details" onClick={() => setRatesDetailActive(true)}>
               <span className="meta text-color--3"> &#64; </span>
               <div className="masthead__overview-details__net-rate">
-                <span className="meta">{formatRateFactor(earnAPR + (earnRewardsAPR || 0n))} Net APR</span>
+                <span className="meta">
+                  {formatRateFactor(earnAPR + (earnRewardsAPR || 0n))} {netRateLabel}
+                </span>
                 <HoverUnder className="hover-under" long={true} theme={theme} />
               </div>
             </div>
