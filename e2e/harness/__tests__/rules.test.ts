@@ -3,7 +3,7 @@
  */
 // Small rules: the browser egress allowlist, the optional public v3 API URL, and the Comet raw-unit oracle.
 import { BASE_INDEX_SCALE, presentValueOf, principalAfterSupply, principalAfterWithdraw } from '../contracts';
-import { isAllowed, withoutQuery } from '../egress';
+import { allows, isAllowed, withoutQuery } from '../egress';
 import { v3ApiUrl } from '../settings';
 
 describe('egress', () => {
@@ -20,6 +20,21 @@ describe('egress', () => {
     expect(isAllowed('http://localhost:5173/', allowed)).toBe(false);
     expect(isAllowed('https://127.0.0.1:5173/', allowed)).toBe(false);
     expect(isAllowed('not a url', allowed)).toBe(false);
+  });
+
+  test('allows any method on an allowed origin, and only GET and HEAD under a read-only prefix', () => {
+    const egress = {
+      http: new Set(['http://127.0.0.1:5173']),
+      readOnly: new Set(['https://api.example.com/v3/market']),
+      webSocket: new Set<string>(),
+    };
+    expect(allows(egress, 'http://127.0.0.1:5173/x', 'POST')).toBe(true);
+    expect(allows(egress, 'https://api.example.com/v3/market/summary', 'GET')).toBe(true);
+    expect(allows(egress, 'https://api.example.com/v3/market/summary', 'HEAD')).toBe(true);
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
+      expect(allows(egress, 'https://api.example.com/v3/market/summary', method)).toBe(false);
+    }
+    expect(allows(egress, 'https://api.example.com/v3/account/0x1/transaction_history', 'GET')).toBe(false);
   });
 
   test('records a blocked URL without its query or fragment', () => {

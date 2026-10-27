@@ -4,12 +4,13 @@ import { spawnSync } from 'node:child_process';
 import { createHash, X509Certificate } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import tls from 'node:tls';
 
 export type Certificate = {
   key: Buffer;
   cert: Buffer;
   certPath: string;
-  /** The base64 SHA-256 of the certificate's public key, for Chromium's `--ignore-certificate-errors-spki-list`. */
+  /** The base64 SHA-256 of the certificate's public key, recorded in the manifest to identify the certificate. */
   spkiHash: string;
 };
 
@@ -63,4 +64,20 @@ export function makeCertificate(directory: string): Certificate {
     certPath,
     spkiHash: createHash('sha256').update(spki).digest('base64'),
   };
+}
+
+type TlsDefaults = {
+  getCACertificates: (type: 'default') => string[];
+  setDefaultCACertificates: (certificates: string[]) => void;
+};
+
+/**
+ * Adds the harness certificate to this Node process's default trusted certificates, beside the system's,
+ * so that the browser egress route (`egress.ts`), which fetches the browser's requests in Node, can reach the
+ * HTTPS RPC proxy. It trusts that one certificate for 127.0.0.1, and disables no verification.
+ */
+export function trustHarnessCertificate(certificatePem: string): void {
+  const defaults = tls as unknown as TlsDefaults;
+  const current = defaults.getCACertificates('default');
+  if (!current.includes(certificatePem)) defaults.setDefaultCACertificates([...current, certificatePem]);
 }

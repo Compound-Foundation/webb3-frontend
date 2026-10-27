@@ -30,3 +30,10 @@ export function v3ApiUrl(env: NodeJS.ProcessEnv = process.env): string | undefin
   }
   return url.href.replace(/\/$/, '');
 }
+
+/** The v3 API paths the app reads (`src/helpers/urls.ts`). The browser may only GET or HEAD under these. */
+export const V3_API_READ_PATHS = ['/market', '/governance', '/account', '/legacy'];
+
+/** The read-only egress prefixes for a v3 API base URL. */
+export const v3ApiReadPrefixes = (base: string | null) =>
+  base === null ? [] : V3_API_READ_PATHS.map((each) => `${base}${each}`);

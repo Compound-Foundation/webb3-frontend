@@ -14,9 +14,11 @@ import { createPublicClient, http, type PublicClient } from 'viem';
 import { mainnet } from 'viem/chains';
 
 import { ControlClient } from './controlClient';
-import { applyEgress, type BlockedRequest } from './egress';
+import { applyEgress, BROWSER_ARGS, type BlockedRequest } from './egress';
 import { BINDING_NAME, installHarnessProvider, PROVIDER_ICON, PROVIDER_NAME, PROVIDER_RDNS } from './injectedProvider';
 import type { Manifest } from './services';
+import { v3ApiReadPrefixes } from './settings';
+import { trustHarnessCertificate } from './tls';
 import type { WalletRequest } from './walletServer';
 
 export { expect };
@@ -77,14 +79,13 @@ export async function harnessContext(
 ): Promise<BrowserContext> {
   const context = await browser.newContext({
     serviceWorkers: 'block',
-    ignoreHTTPSErrors: manifest.tls.mode === 'ignore-https-errors',
     viewport: { width: 1440, height: 1000 },
   });
-  const apiPrefix = manifest.v3Api.url === null ? [] : [manifest.v3Api.url];
   await applyEgress(
     context,
     {
-      http: new Set([appOrigin, manifest.services.rpcProxy, manifest.services.screening, ...apiPrefix]),
+      http: new Set([appOrigin, manifest.services.rpcProxy, manifest.services.screening]),
+      readOnly: new Set(v3ApiReadPrefixes(manifest.v3Api.url)),
       webSocket: new Set(appOrigin === manifest.app.devOrigin ? [manifest.app.hmrOrigin] : []),
     },
     blocked
@@ -122,10 +123,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   ],
   browser: [
     async ({ playwright, manifest, headless }, use) => {
-      const browser = await playwright.chromium.launch({
-        headless,
-        args: [`--ignore-certificate-errors-spki-list=${manifest.tls.spkiHash}`],
-      });
+      // The egress route fetches each browser request in Node, so this worker trusts the harness certificate.
+      trustHarnessCertificate(fs.readFileSync(manifest.tls.certPath, 'utf8'));
+      const browser = await playwright.chromium.launch({ headless, args: BROWSER_ARGS });
       await use(browser);
       await browser.close();
     },

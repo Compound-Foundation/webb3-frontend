@@ -14,10 +14,37 @@ import http from 'node:http';
 import { encodeFunctionData } from 'viem';
 
 import { ERC20_ABI, USDC } from '../harness/contracts';
+import { applyEgress, type BlockedRequest } from '../harness/egress';
 import { connectAccount, expect, openApp, providerRequest, selectedAccount, test } from '../harness/fixtures';
 import { BINDING_NAME } from '../harness/injectedProvider';
 
 const FAKE_TOKEN = 'not-the-run-token';
+
+type Received = { method: string; url: string };
+
+/** A loopback server that records each request and answers `answer(url)`, or 200 with the URL. */
+async function recordingServer(
+  answer: (url: string) => { status: number; location?: string } | undefined = () => undefined
+) {
+  const received: Received[] = [];
+  const server = http.createServer((request, response) => {
+    received.push({ method: request.method ?? '', url: request.url ?? '' });
+    const redirect = answer(request.url ?? '');
+    if (redirect !== undefined) {
+      response.writeHead(redirect.status, redirect.location === undefined ? {} : { location: redirect.location });
+      return response.end();
+    }
+    response.writeHead(200, { 'content-type': 'text/html', 'access-control-allow-origin': '*' });
+    response.end(`served ${request.url}`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  return {
+    origin,
+    received,
+    close: () => new Promise<void>((resolve) => (server.closeAllConnections(), server.close(() => resolve()))),
+  };
+}
 
 /** A request to the control API from Node, with the headers given, which `fetch` would not let a test set. */
 function controlRequest(url: string, headers: Record<string, string>): Promise<number> {
@@ -109,6 +136,83 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
         'websocket wss://example.com/',
       ])
     );
+  });
+
+  test('egress checks every redirect hop, and allows only GET and HEAD under a read-only prefix', async ({
+    browser,
+  }) => {
+    // A denied loopback origin, except for its read-only `/v3/market` prefix, as the optional v3 API has.
+    const denied = await recordingServer();
+    const allowed = await recordingServer((url) => {
+      if (url === '/to-denied') return { status: 302, location: `${denied.origin}/forbidden` };
+      if (url === '/to-external') return { status: 307, location: 'https://example.com/' };
+      if (url === '/chain') return { status: 301, location: '/hop' };
+      if (url === '/hop') return { status: 302, location: `${denied.origin}/after-two-hops` };
+      if (url === '/to-allowed') return { status: 302, location: '/final' };
+      if (url === '/to-read-only') return { status: 303, location: `${denied.origin}/v3/market/redirected` };
+      return undefined;
+    });
+    const blocked: BlockedRequest[] = [];
+    const context = await browser.newContext({ serviceWorkers: 'block' });
+    try {
+      await applyEgress(
+        context,
+        { http: new Set([allowed.origin]), readOnly: new Set([`${denied.origin}/v3/market`]), webSocket: new Set() },
+        blocked
+      );
+      const page = await context.newPage();
+      await page.goto(`${allowed.origin}/`);
+      const answers = await page.evaluate(async (deniedOrigin) => {
+        const attempt = async (url: string, init?: RequestInit) => {
+          try {
+            const response = await fetch(url, init);
+            return `${response.status} ${await response.text()}`;
+          } catch (error) {
+            return String(error);
+          }
+        };
+        return {
+          toDenied: await attempt('/to-denied'),
+          toExternal: await attempt('/to-external'),
+          chain: await attempt('/chain'),
+          toAllowed: await attempt('/to-allowed'),
+          toReadOnly: await attempt('/to-read-only'),
+          readOnlyGet: await attempt(`${deniedOrigin}/v3/market/summary`),
+          readOnlyPost: await attempt(`${deniedOrigin}/v3/market/summary`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_sendRawTransaction', params: ['0x00'] }),
+          }),
+          outsideReadOnly: await attempt(`${deniedOrigin}/v3/admin`),
+        };
+      }, denied.origin);
+      expect(answers.toDenied).toContain('Failed to fetch');
+      expect(answers.toExternal).toContain('Failed to fetch');
+      expect(answers.chain).toContain('Failed to fetch');
+      expect(answers.toAllowed).toBe('200 served /final');
+      expect(answers.toReadOnly).toBe('200 served /v3/market/redirected');
+      expect(answers.readOnlyGet).toBe('200 served /v3/market/summary');
+      expect(answers.readOnlyPost).toContain('Failed to fetch');
+      expect(answers.outsideReadOnly).toContain('Failed to fetch');
+      // The denied server saw only the two read-only GETs: no redirected hop and no POST reached it.
+      expect(denied.received).toEqual([
+        { method: 'GET', url: '/v3/market/redirected' },
+        { method: 'GET', url: '/v3/market/summary' },
+      ]);
+      expect(blocked).toEqual(
+        expect.arrayContaining([
+          { kind: 'redirect', url: `${denied.origin}/forbidden`, from: `${allowed.origin}/to-denied`, method: 'GET' },
+          { kind: 'redirect', url: 'https://example.com/', from: `${allowed.origin}/to-external`, method: 'GET' },
+          { kind: 'redirect', url: `${denied.origin}/after-two-hops`, from: `${allowed.origin}/hop`, method: 'GET' },
+          { kind: 'http', url: `${denied.origin}/v3/market/summary`, method: 'POST' },
+          { kind: 'http', url: `${denied.origin}/v3/admin`, method: 'GET' },
+        ])
+      );
+    } finally {
+      await context.close();
+      await denied.close();
+      await allowed.close();
+    }
   });
 
   test('the RPC proxy refuses writes and fork administration from the page, on every route, and serves reads', async ({

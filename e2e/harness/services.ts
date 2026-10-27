@@ -20,7 +20,7 @@ import path from 'node:path';
 import { chromium } from '@playwright/test';
 
 import { COMET_USDC, USDC } from './contracts';
-import { applyEgress, type BlockedRequest } from './egress';
+import { applyEgress, BROWSER_ARGS, withoutQuery, type BlockedRequest } from './egress';
 import {
   createRedactor,
   failedToStartOnUpstream,
@@ -42,8 +42,8 @@ import { startRpcProxy } from './rpcProxy';
 import { recoverKilledRuns, type ProcessRecord } from './runRecords';
 import { startScreeningStub } from './screeningStub';
 import { findSecrets, outputsUnder, registerSecret, registerSecretPattern } from './secrets';
-import { v3ApiUrl } from './settings';
-import { makeCertificate } from './tls';
+import { v3ApiReadPrefixes, v3ApiUrl } from './settings';
+import { makeCertificate, trustHarnessCertificate } from './tls';
 import {
   buildProduction,
   emptyEnvDir,
@@ -92,7 +92,8 @@ export type Manifest = {
     wallet: string;
     bindings: Record<string, string>;
   };
-  tls: { mode: 'spki-pinned' | 'ignore-https-errors'; spkiHash: string };
+  /** The browser makes no TLS connection: the egress route fetches its requests in Node, which trusts `certPath`. */
+  tls: { mode: 'node-trusts-harness-certificate'; certPath: string; spkiHash: string };
   v3Api: { url: string; label: string } | { url: null; label: string };
   contracts: { usdc: string; cometUsdc: string; usdcImplementation: string };
   privateDir: string;
@@ -408,13 +409,15 @@ export async function startServices({
     ensureRunning();
     appOrigins.add(dev.origin);
 
+    trustHarnessCertificate(certificate.cert.toString());
     const tlsMode = await warmUp({
       devOrigin: dev.origin,
       hmrOrigin: dev.hmrOrigin,
       rpcProxyOrigin: rpcProxy.url,
       screeningOrigin: screening.origin,
-      spkiHash: certificate.spkiHash,
+      readOnly: v3ApiReadPrefixes(apiUrl ?? null),
       forwarded: () => rpcProxy.stats.forwarded.get('eth_call') ?? 0,
+      runDir,
     });
 
     const manifest: Manifest = {
@@ -463,7 +466,7 @@ export async function startServices({
           dev: dev.origin,
         },
       },
-      tls: { mode: tlsMode.mode, spkiHash: certificate.spkiHash },
+      tls: { mode: tlsMode.mode, certPath: certificate.certPath, spkiHash: certificate.spkiHash },
       v3Api:
         apiUrl === undefined
           ? { url: null, label: 'not configured: no display uses production API data' }
@@ -527,35 +530,38 @@ async function readUsdcImplementation(forkUrl: string): Promise<string> {
 
 /**
  * Loads the app once, so that Vite's first dependency optimization is not charged to a test. It also checks
- * that Chromium trusts the harness certificate through its SPKI hash alone: the app's `eth_call` reads must
- * reach the RPC proxy. Otherwise it falls back to ignoring certificate errors in harness contexts only.
+ * that the app's `eth_call` reads reach the RPC proxy through the egress route, which trusts the harness
+ * certificate in Node.
  */
 async function warmUp({
   devOrigin,
   hmrOrigin,
   rpcProxyOrigin,
   screeningOrigin,
-  spkiHash,
+  readOnly,
   forwarded,
+  runDir,
 }: {
   devOrigin: string;
   hmrOrigin: string;
   rpcProxyOrigin: string;
   screeningOrigin: string;
-  spkiHash: string;
+  readOnly: string[];
   forwarded: () => number;
-}): Promise<{ mode: 'spki-pinned' | 'ignore-https-errors'; browserVersion: string }> {
-  const browser = await chromium.launch({ args: [`--ignore-certificate-errors-spki-list=${spkiHash}`] });
+  runDir: string;
+}): Promise<{ mode: 'node-trusts-harness-certificate'; browserVersion: string }> {
+  const browser = await chromium.launch({ args: BROWSER_ARGS });
   try {
-    for (const mode of ['spki-pinned', 'ignore-https-errors'] as const) {
-      const context = await browser.newContext({
-        serviceWorkers: 'block',
-        ignoreHTTPSErrors: mode === 'ignore-https-errors',
-      });
+    {
+      const context = await browser.newContext({ serviceWorkers: 'block' });
       const blocked: BlockedRequest[] = [];
       await applyEgress(
         context,
-        { http: new Set([devOrigin, rpcProxyOrigin, screeningOrigin]), webSocket: new Set([hmrOrigin]) },
+        {
+          http: new Set([devOrigin, rpcProxyOrigin, screeningOrigin]),
+          readOnly: new Set(readOnly),
+          webSocket: new Set([hmrOrigin]),
+        },
         blocked
       );
       await context.addInitScript(installHarnessProvider, {
@@ -566,15 +572,34 @@ async function warmUp({
         rdns: PROVIDER_RDNS,
       });
       const page = await context.newPage();
+      // What went wrong if the app does not render, for warm-up.json in the run directory.
+      const problems: string[] = [];
+      page.on('pageerror', (error) => problems.push(`page error: ${error.message.slice(0, 300)}`));
+      page.on('requestfailed', (request) =>
+        problems.push(
+          `failed: ${request.method()} ${withoutQuery(request.url())} ${request.failure()?.errorText ?? ''}`
+        )
+      );
+      page.on('console', (message) => {
+        if (message.type() === 'error') problems.push(`console: ${message.text().slice(0, 300)}`);
+      });
       const before = forwarded();
-      await page.goto(devOrigin, { timeout: 240_000 });
-      await page.getByText('Net Supply APR').first().waitFor({ timeout: 240_000 });
+      try {
+        await page.goto(devOrigin, { timeout: 240_000 });
+        await page.getByText('Net Supply APR').first().waitFor({ timeout: 240_000 });
+      } catch (error) {
+        fs.writeFileSync(
+          path.join(runDir, 'warm-up.json'),
+          JSON.stringify({ problems: problems.slice(-200), blocked }, null, 2)
+        );
+        throw error;
+      }
       const deadline = Date.now() + 60_000;
       while (forwarded() === before && Date.now() < deadline) await page.waitForTimeout(250);
       await context.close();
-      if (forwarded() > before) return { mode, browserVersion: browser.version() };
+      if (forwarded() > before) return { mode: 'node-trusts-harness-certificate', browserVersion: browser.version() };
     }
-    throw new Error('The app made no RPC read through the HTTPS proxy, with or without the SPKI pin.');
+    throw new Error('The app made no RPC read through the HTTPS proxy.');
   } finally {
     await browser.close();
   }
