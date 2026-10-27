@@ -14,7 +14,7 @@
     "lint": "eslint . --ext .ts --ext .tsx",
     "test:browser": "playwright test -c e2e/playwright.config.ts",
     "test:browser:dev": "BROWSER_TEST_SKIP_PROD=1 playwright test -c e2e/playwright.config.ts --project=dev",
-    "test:browser:open": "BROWSER_WALLET_INTERACTIVE=1 playwright test -c e2e/playwright.config.ts --project=interactive --headed",
+    "test:browser:open": "BROWSER_WALLET_INTERACTIVE=1 playwright test -c e2e/playwright.config.ts --project=interactive",
     "ipfs": "node scripts/ipfs.js",
     "release": "node scripts/release.js"
   },
