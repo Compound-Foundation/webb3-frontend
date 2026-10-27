@@ -103,6 +103,8 @@ export class ControlClient {
   reject = (id: string, options: { code?: number; message?: string; delayMs?: number } = {}) =>
     this.request<WalletRequest | { id: string; scheduled: unknown }>('POST', `/v1/requests/${id}/reject`, options);
   calls = () => this.request<WalletCall[]>('GET', '/v1/calls');
+  /** Every provider call from the page in this generation, those the wallet answered at once included. */
+  providerCalls = () => this.request<WalletCall[]>('GET', '/v1/provider-calls');
 
   forkSend = (transaction: { from: string; to: string; data?: string; value?: string; gas?: string }) =>
     this.request<{ hash: `0x${string}` }>('POST', '/v1/fork/send', transaction);

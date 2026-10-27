@@ -143,6 +143,41 @@ describe('access to the control API', () => {
 });
 
 describe('the request queue', () => {
+  test('answers an approved permission request with the eth_accounts permission the connector reads', async () => {
+    const { address } = await client.newAccount({ usdc: '0' });
+    await client.select(address);
+    const pending = client.walletRpc(ORIGIN, 'wallet_requestPermissions', [{ eth_accounts: {} }]);
+    const request = await client.waitForRequest({ method: 'wallet_requestPermissions' });
+    await client.approve(request.id);
+    // wagmi's injected connector reads `permissions[0].caveats[0].value` as the accounts.
+    expect(await pending).toEqual({
+      result: [
+        {
+          id: 'harness-eth-accounts',
+          parentCapability: 'eth_accounts',
+          invoker: ORIGIN,
+          caveats: [{ type: 'restrictReturnedAccounts', value: [address.toLowerCase()] }],
+          date: expect.any(Number),
+        },
+      ],
+    });
+    expect(await client.walletRpc(ORIGIN, 'wallet_getPermissions', [])).toEqual(await pending);
+    expect(await client.walletRpc('http://other.example', 'wallet_getPermissions', [])).toEqual({ result: [] });
+  });
+
+  test('records every provider call, including those it answers at once', async () => {
+    await connectedAccount();
+    await client.walletRpc(ORIGIN, 'eth_chainId', []);
+    await client.walletRpc(ORIGIN, 'eth_requestAccounts', []);
+    expect((await client.providerCalls()).map((call) => [call.method, call.origin])).toEqual([
+      ['wallet_requestPermissions', ORIGIN],
+      ['eth_chainId', ORIGIN],
+      ['eth_requestAccounts', ORIGIN],
+    ]);
+    await client.reset();
+    expect(await client.providerCalls()).toEqual([]);
+  });
+
   test('answers state methods at once, and queues the permission request until it is decided', async () => {
     const address = await connectedAccount();
     expect(await client.walletRpc(ORIGIN, 'eth_chainId', [])).toEqual({ result: '0x1' });

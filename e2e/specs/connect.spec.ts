@@ -45,8 +45,21 @@ test.describe('wallet discovery and connection', { tag: ['@AC2'] }, () => {
     expect(request.chainIdAtRequest).toBe(1);
     await wallet.approve(request.id);
     await expect(headerAccount(page, address)).toBeVisible();
-    // The connector read the accounts from the permission and `eth_accounts`, so it never asked again.
+    // The connector took the accounts from the permission's caveat and `eth_accounts`, so it never called
+    // `eth_requestAccounts`, which the wallet would answer at once, without queueing it.
     expect((await wallet.requests()).map((each) => each.method)).toEqual(['wallet_requestPermissions']);
+    const methods = (await wallet.providerCalls()).map((call) => call.method);
+    expect(methods).toContain('wallet_requestPermissions');
+    expect(methods).toContain('eth_accounts');
+    expect(methods).not.toContain('eth_requestAccounts');
+    const approved = await wallet.getRequest(request.id);
+    expect(approved.result).toEqual([
+      expect.objectContaining({
+        parentCapability: 'eth_accounts',
+        invoker: appOrigin,
+        caveats: [{ type: 'restrictReturnedAccounts', value: [address.toLowerCase()] }],
+      }),
+    ]);
     expect(await storedConnector(page)).toBe('io.metamask');
     const screened = await wallet.screeningLog();
     expect(screened).toEqual([

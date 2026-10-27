@@ -177,6 +177,10 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
   let policies = new Map<string, Policy>();
   const requests = new Map<string, WalletRequest>();
   const calls: WalletCall[] = [];
+  /** Every provider call from the page, those answered at once included. */
+  const providerCalls: WalletCall[] = [];
+  /** When the permission was granted, as its `date`. */
+  let permittedAt = 0;
   const controlSends: { hash: string; from: string; to: string; generation: number }[] = [];
   const outcomes = new Map<string, { outcome?: Outcome; waiters: Set<() => void>; timer?: NodeJS.Timeout }>();
   const events: WalletEvent[] = [];
@@ -330,6 +334,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       case 'wallet_requestPermissions': {
         if (selected.length === 0) throw new WalletError(-32603, 'harness: no account is selected');
         permittedOrigin = request.origin;
+        permittedAt = Date.now();
         emit('accountsChanged', exposedAccounts());
         return request.method === 'eth_requestAccounts' ? exposedAccounts() : [permission(request.origin)];
       }
@@ -416,7 +421,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     parentCapability: 'eth_accounts',
     invoker: origin,
     caveats: [{ type: 'restrictReturnedAccounts', value: exposedAccounts() }],
-    date: Date.now(),
+    date: permittedAt,
   });
 
   const waitForOutcome = (id: string, waitMs: number): Promise<Outcome | { pending: string }> => {
@@ -440,6 +445,8 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
   /** The wallet's answer to one provider call from the page. */
   const walletRpc = async (origin: string, method: string, params: unknown): Promise<Outcome | { pending: string }> => {
     if (typeof method !== 'string') return { error: { code: -32600, message: 'harness: no method' } };
+    providerCalls.push({ method, origin, receivedAt: now(), generation });
+    if (providerCalls.length > 10_000) providerCalls.shift();
     try {
       if ((QUEUED_METHODS as readonly string[]).includes(method)) {
         const queued = method as QueuedMethod;
@@ -580,6 +587,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       outcomes.clear();
       requests.clear();
       calls.length = 0;
+      providerCalls.length = 0;
       controlSends.length = 0;
       events.length = 0;
       for (const wake of [...eventWaiters]) wake();
@@ -671,6 +679,8 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
         };
       case 'GET /v1/requests':
         return requestList(query);
+      case 'GET /v1/provider-calls':
+        return providerCalls;
       case 'GET /v1/calls':
         return calls;
       case 'GET /v1/control-sends':
