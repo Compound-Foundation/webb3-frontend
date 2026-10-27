@@ -178,9 +178,8 @@ Preconditions: preflight items 1 and 10, and Adam's and Leo's signoff of Stage 0
 
 The controls are as committed: both off on every market. Release the stack's merge commit with steps 8 to 11 of [Ship a release-control change](#ship-a-release-control-change). Verify the [standard checks](#verify-after-each-release), and check the Anchorage session on each market:
 
-- The wrapped panel shows the holdings.
-- The supply control reads "Wrapped deposits are not open yet.", and the withdraw control "Wrapped withdrawals are not open yet." (`src/pages/home/components/WrappedPositionPanel.tsx:97-99`).
-- The direct Supply button is absent.
+- The masthead and the position card show the holdings as the supplied balance.
+- The amount form of Supply reads "Supply Not Open Yet", and that of Withdraw "Withdrawals Not Open Yet", and neither adds the action (`wrappedEntryBlockLabel` in `src/helpers/queuedExecution.ts`). The queue's execution is described in [`anchorage-queued-execution.md`](anchorage-queued-execution.md).
 
 ### Stage 1: exits on, deposits off
 
@@ -190,8 +189,8 @@ Change: `isExitEnabled: true` on each market to open. `isDepositEnabled` stays `
 
 Verify the standard checks, and on each opened market:
 
-- The panel shows the holdings, and the supply control still reads "Wrapped deposits are not open yet.".
-- The withdraw control opens its form for a position worth more than the buffer.
+- The masthead shows the holdings, and the amount form of Supply still reads "Supply Not Open Yet".
+- The amount form of Withdraw adds a withdrawal for a position worth more than the buffer.
 - The authorized holder's exit through the production app completes (preflight item 9). Without it, Stage 2 waits.
 
 ### Stage 2: deposits on
@@ -395,9 +394,9 @@ The rehearsal has two parts.
 
    Never commit or push that change. With the Anchorage extension, check on each market:
 
-   - the supply control reads "Wrapped deposits are not open yet."
-   - the panel shows the holdings, and the withdraw control opens its form for a position
-   - the direct Supply button stays absent
+   - the amount form of Supply reads "Supply Not Open Yet"
+   - the masthead shows the holdings, and the amount form of Withdraw adds a withdrawal for a position
+   - a queued supply never reaches Comet or the Bulker
    - another wallet and a watch-only view stay on the standard route
 
    The withdraw form needs a wrapped position. Without an authorized one, record that check as not exercised.
