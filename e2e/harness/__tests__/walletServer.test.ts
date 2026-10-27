@@ -292,6 +292,16 @@ describe('checks on each request', () => {
     expect(node.calls.filter((call) => call.method === 'eth_sendTransaction')).toEqual([]);
   });
 
+  test('a signature approved after the wallet changed chain fails with 4901, and nothing is signed', async () => {
+    const address = await connectedAccount();
+    const signing = client.walletRpc(ORIGIN, 'personal_sign', ['0x00', address]);
+    const request = await client.waitForRequest({ method: 'personal_sign' });
+    await client.setChain(8453);
+    await client.approve(request.id);
+    expect(await signing).toEqual({ error: expect.objectContaining({ code: 4901 }) });
+    expect((await client.getRequest(request.id)).status).toBe('failed');
+  });
+
   test('a send goes to anvil only after the fork is verified again, with only the transaction fields it knows', async () => {
     const address = await connectedAccount();
     const sending = client.walletRpc(ORIGIN, 'eth_sendTransaction', [
