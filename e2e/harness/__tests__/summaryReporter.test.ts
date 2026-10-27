@@ -51,7 +51,8 @@ const MANIFEST = {
 async function summaryOf(selected: readonly (readonly string[])[], inventory: () => string[]) {
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-summary-'));
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(MANIFEST));
-  const reporter = new SummaryReporter({ runDir, inventory });
+  // The synthetic inventory holds none of the real required cases, which the last tests below cover.
+  const reporter = new SummaryReporter({ runDir, inventory, requiredCases: [] });
   const tests = selected.map(([project, file, title]) => testCase(project, file, title));
   reporter.onBegin({ projects: [] } as unknown as FullConfig, { allTests: () => tests } as unknown as Suite);
   for (const each of tests) reporter.onTestEnd(each, passed);
@@ -102,6 +103,32 @@ test('a known acceptance case that is not executed makes its criterion and the a
   expect(summary).toContain('All implemented tests passed: yes (1 passed, 0 failed).');
   expect(summary).toMatch(/\| AC7 \| INCOMPLETE \|/);
   expect(summary).toContain('not executed: the product fix is a follow-up');
+});
+
+test('a required acceptance case missing from the full suite makes its criterion and the acceptance INCOMPLETE', async () => {
+  // The placeholder was deleted: the run and the full inventory agree, and every test passed, but the
+  // independent list of required cases still names it.
+  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-summary-'));
+  fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(MANIFEST));
+  const ran = testCase('prod-build', 'prod-build.spec.ts', 'fails closed');
+  (ran as unknown as { tags: string[] }).tags = ['@AC7'];
+  const required = {
+    criterion: 'AC7',
+    id: 'prod-build › prod-build.spec.ts › suite › a NODE_ENV=development build',
+    why: 'test',
+  };
+  const reporter = new SummaryReporter({ runDir, inventory: () => [testId(ran)], requiredCases: [required] });
+  reporter.onBegin({ projects: [] } as unknown as FullConfig, { allTests: () => [ran] } as unknown as Suite);
+  reporter.onTestEnd(ran, passed);
+  const write = process.stdout.write;
+  process.stdout.write = (() => true) as typeof process.stdout.write;
+  await reporter.onEnd({ status: 'passed' } as never).finally(() => (process.stdout.write = write));
+  const summary = fs.readFileSync(path.join(runDir, 'summary.md'), 'utf8');
+  fs.rmSync(runDir, { recursive: true, force: true });
+  expect(summary).toContain('Verdict: **INCOMPLETE**');
+  expect(summary).toContain('All implemented tests passed: yes (1 passed, 0 failed).');
+  expect(summary).toMatch(/\| AC7 \| INCOMPLETE \|/);
+  expect(summary).toContain(`required acceptance case missing from the suite: ${required.id}`);
 });
 
 test('a run whose harness did not start is not a PASS', async () => {

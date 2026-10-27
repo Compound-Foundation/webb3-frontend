@@ -14,6 +14,7 @@ import path from 'node:path';
 
 import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 
+import { REQUIRED_ACCEPTANCE_CASES, type RequiredCase } from './acceptance';
 import { REPO_ROOT } from './paths';
 import { findSecrets, outputsUnder, registeredSecretCount } from './secrets';
 
@@ -38,6 +39,16 @@ type ListedSuite = {
 };
 
 /**
+ * The environment of the listing: the caller's, without an interactive session, and without Jest's worker
+ * marker, which makes Playwright refuse to run inside a Jest test such as `acceptanceInventory.test.ts`.
+ */
+function listingEnvironment(): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = { ...process.env, BROWSER_WALLET_INTERACTIVE: '' };
+  delete environment.JEST_WORKER_ID;
+  return environment;
+}
+
+/**
  * Every test of the full suite, as `testId` names them, from `playwright test --list` with the same
  * configuration and no filter. The listing loads the specs only: it runs no global setup and no test.
  */
@@ -52,7 +63,7 @@ export function listFullSuite(configFile: string): string[] {
       '--list',
       '--reporter=json',
     ],
-    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, BROWSER_WALLET_INTERACTIVE: '' } }
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: listingEnvironment() }
   );
   const ids: string[] = [];
   const walk = (suite: ListedSuite, titles: string[]) => {
@@ -72,11 +83,21 @@ export default class SummaryReporter implements Reporter {
   readonly #output: string[] = [];
   #startedAt = Date.now();
   readonly #inventory: (() => string[]) | undefined;
+  readonly #requiredCases: readonly RequiredCase[];
   #configFile: string | undefined;
 
-  constructor({ runDir, inventory }: { runDir: string; inventory?: () => string[] }) {
+  constructor({
+    runDir,
+    inventory,
+    requiredCases = REQUIRED_ACCEPTANCE_CASES,
+  }: {
+    runDir: string;
+    inventory?: () => string[];
+    requiredCases?: readonly RequiredCase[];
+  }) {
     this.#runDir = runDir;
     this.#inventory = inventory;
+    this.#requiredCases = requiredCases;
   }
 
   printsToStdio() {
@@ -90,7 +111,7 @@ export default class SummaryReporter implements Reporter {
   }
 
   /** The tests of the full suite this run did not select, or why the full suite could not be listed. */
-  #notSelected(): { missing: string[]; total: number } | { problem: string } {
+  #notSelected(): { missing: string[]; total: number; missingRequired: RequiredCase[] } | { problem: string } {
     if (process.env.BROWSER_WALLET_INTERACTIVE === '1')
       return { problem: 'an interactive session is not an acceptance run' };
     let inventory: string[];
@@ -102,7 +123,11 @@ export default class SummaryReporter implements Reporter {
     }
     if (inventory.length === 0) return { problem: 'the reporter could not list the full suite (no tests listed)' };
     const selected = new Set(this.#tests.map(testId));
-    return { missing: inventory.filter((each) => !selected.has(each)), total: inventory.length };
+    return {
+      missing: inventory.filter((each) => !selected.has(each)),
+      total: inventory.length,
+      missingRequired: this.#requiredCases.filter((each) => !inventory.includes(each.id)),
+    };
   }
 
   onTestEnd(test: TestCase, result: TestResult) {
@@ -180,11 +205,18 @@ export default class SummaryReporter implements Reporter {
       { file: 'test stdout and stderr', content: this.#output.join('') },
     ]);
 
+    // The run's tests against the full suite's inventory and the required acceptance cases.
+    const selection = this.#notSelected();
     const criteria = new Map<string, Row[]>();
     for (const row of rows)
       for (const tag of row.tags.filter((each) => /^@AC\d+$/.test(each))) {
         criteria.set(tag, [...(criteria.get(tag) ?? []), row]);
       }
+    // A criterion whose required case is missing from the suite gets a row even if no test of it ran.
+    if (!('problem' in selection)) {
+      for (const each of selection.missingRequired)
+        if (!criteria.has(`@${each.criterion}`)) criteria.set(`@${each.criterion}`, []);
+    }
     const criterionStatus = (list: Row[]) =>
       list.some((row) => row.status === 'FAILED')
         ? 'FAILED'
@@ -193,7 +225,6 @@ export default class SummaryReporter implements Reporter {
         : 'passed';
     const isProductionSkipped = manifest?.production?.isSkipped === true;
     const bundleLeaks: { file: string; secret: string }[] = stats?.bundleSecretScan?.leaks ?? [];
-    const selection = this.#notSelected();
     const isKnownCase = (row: Row) => row.reason.startsWith('known case not executed');
     const hasEveryImplementedTestPassed =
       result.status === 'passed' && rows.filter((row) => !isKnownCase(row)).every((row) => row.status === 'passed');
@@ -206,7 +237,8 @@ export default class SummaryReporter implements Reporter {
           rows.length === 0 ||
           manifest === undefined ||
           'problem' in selection ||
-          selection.missing.length > 0
+          selection.missing.length > 0 ||
+          selection.missingRequired.length > 0
         ? 'INCOMPLETE'
         : 'PASS';
 
@@ -229,6 +261,14 @@ export default class SummaryReporter implements Reporter {
         ''
       );
     }
+    if (!('problem' in selection)) {
+      for (const each of selection.missingRequired) {
+        lines.push(
+          `**${each.criterion} INCOMPLETE:** required acceptance case missing from the suite: ${each.id}. ${each.why}`,
+          ''
+        );
+      }
+    }
     if ('problem' in selection) {
       lines.push(`**Not an acceptance run, INCOMPLETE:** ${selection.problem}.`, '');
     } else if (selection.missing.length > 0) {
@@ -246,7 +286,13 @@ export default class SummaryReporter implements Reporter {
       // A criterion cannot pass on a scoped run: the tests the run left out may be its own.
       const status = criterionStatus(list);
       const isScoped = 'problem' in selection || selection.missing.length > 0;
-      lines.push(`| ${tag.slice(1)} | ${status === 'passed' && isScoped ? 'INCOMPLETE' : status} | ${list.length} |`);
+      const isMissingRequired =
+        !('problem' in selection) && selection.missingRequired.some((each) => `@${each.criterion}` === tag);
+      lines.push(
+        `| ${tag.slice(1)} | ${status === 'passed' && (isScoped || isMissingRequired) ? 'INCOMPLETE' : status} | ${
+          list.length
+        } |`
+      );
     }
     lines.push(
       '',
