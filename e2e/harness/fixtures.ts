@@ -14,7 +14,7 @@ import { createPublicClient, http, type PublicClient } from 'viem';
 import { mainnet } from 'viem/chains';
 
 import { ControlClient } from './controlClient';
-import { allowLoopbackWebSocket, applyEgress, type BlockedRequest } from './egress';
+import { allowLoopbackWebSocket, applyEgress, closePagesItDidNotOpen, type BlockedRequest } from './egress';
 import { BINDING_NAME, installHarnessProvider, PROVIDER_ICON, PROVIDER_NAME, PROVIDER_RDNS } from './injectedProvider';
 import type { Manifest } from './services';
 import { v3ApiReadPrefixes } from './settings';
@@ -82,6 +82,7 @@ export async function harnessContext(
     viewport: { width: 1440, height: 1000 },
   });
   if (appOrigin === manifest.app.devOrigin) await allowLoopbackWebSocket(context, appOrigin);
+  closePagesItDidNotOpen(context, blocked);
   await applyEgress(
     context,
     {

@@ -17,18 +17,59 @@ import type { BrowserContext } from '@playwright/test';
  * GET and HEAD may reach. `webSocket`: WebSocket origins.
  */
 export type Egress = { http: ReadonlySet<string>; readOnly?: ReadonlySet<string>; webSocket: ReadonlySet<string> };
-export type BlockedRequest = { kind: 'http' | 'redirect' | 'websocket'; url: string; method?: string; from?: string };
+export type BlockedRequest = {
+  kind: 'http' | 'redirect' | 'websocket' | 'popup';
+  url: string;
+  method?: string;
+  from?: string;
+};
 
 /**
  * Lets pages at `origin` open a WebSocket to a loopback address, for Vite's HMR on the dev server. The route
  * fulfills every document, and a fulfilled document has no network address, so Chromium's Local Network
  * Access check counts it as public and blocks its WebSocket to 127.0.0.1. Without HMR, Vite cannot reload a
- * page after it re-optimizes dependencies, and the page loads two copies of React. The permission is
- * granted to the dev server's origin only: the check stays on for every other origin, such as an extension
- * frame's, and `routeWebSocket` still decides each WebSocket that a page or frame opens.
+ * page after it re-optimizes dependencies, and the page loads two copies of React.
+ *
+ * The permission is for the dev server's top-level origin: a top-level page from another origin still gets
+ * the check. Frames under a dev page inherit the permission, whatever their origin, the extension frame
+ * included. So the check is no boundary for frames. The enforced boundaries there are the route, which
+ * decides each HTTP request, `routeWebSocket`, which decides each WebSocket a page or frame opens, and the
+ * worker policy (`DOCUMENT_POLICY`).
  */
 export async function allowLoopbackWebSocket(context: BrowserContext, origin: string): Promise<void> {
   await context.grantPermissions(['local-network-access'], { origin });
+}
+
+/**
+ * Closes every page in `context` that the harness did not open itself with `context.newPage()`, as soon as
+ * it appears, and records it in `blocked`. A page-created popup is such a page. One opened `noopener` on
+ * `about:blank` gets no network response, so the route never fulfills it with the worker policy, and in
+ * this Chromium its blank document does not inherit the opener's policy. The opening page cannot reach it
+ * (its reference is null), and page-only attempts through such popups reached nothing in the tests, but
+ * code that automation injected there could start a worker. So no such page is left open.
+ */
+export function closePagesItDidNotOpen(context: BrowserContext, blocked: BlockedRequest[]): void {
+  // Playwright emits the context's `page` event for a page before `context.newPage()` resolves with it, so
+  // each call expects one event, which the handler takes.
+  let expectedPages = 0;
+  const newPage = context.newPage.bind(context);
+  context.newPage = async () => {
+    expectedPages += 1;
+    try {
+      return await newPage();
+    } catch (error) {
+      expectedPages = Math.max(0, expectedPages - 1);
+      throw error;
+    }
+  };
+  context.on('page', (page) => {
+    if (expectedPages > 0) {
+      expectedPages -= 1;
+      return;
+    }
+    blocked.push({ kind: 'popup', url: withoutQuery(page.url()) });
+    void page.close().catch(() => undefined);
+  });
 }
 
 /** The most redirects the route follows for one request, as a guard against a redirect loop. */
@@ -39,7 +80,11 @@ const READ_METHODS = ['GET', 'HEAD'];
 export function withoutQuery(url: string): string {
   try {
     const parsed = new URL(url);
-    return `${parsed.origin}${parsed.pathname}`;
+    if (['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol)) return `${parsed.origin}${parsed.pathname}`;
+    if (parsed.protocol === 'about:') return `about:${parsed.pathname}`;
+    // A blob URL by the origin that made it; any other scheme, such as data: or javascript:, by name only.
+    if (parsed.protocol === 'blob:') return `blob:${new URL(parsed.pathname).origin}/…`;
+    return `${parsed.protocol}…`;
   } catch {
     return '<an unparsable URL>';
   }
@@ -73,6 +118,13 @@ export function isAllowed(url: string, prefixes: ReadonlySet<string>): boolean {
  * worker may start. A worker's own fetch, XHR and WebSocket do not pass through the route, so a worker
  * could reach any server, raw anvil included. The app starts no worker. A frame that a document makes
  * from `about:`, `data:` or `blob:` inherits the policy.
+ *
+ * One document has no policy: a popup a page opens `noopener` on `about:blank`. It gets no network
+ * response, so the route never fulfills it, and in this Chromium its blank document does not inherit the
+ * opener's policy. The page cannot reach it, since its reference is null, and the page-only variants the
+ * tests try (`javascript:`, `data:` and `blob:` URLs, `noopener` links, a named popup reacquired, an
+ * opener cleared) reached nothing. Code that automation injected into it could start a worker. So a
+ * harness context closes every page it did not open (`closePagesItDidNotOpen`).
  */
 export const DOCUMENT_POLICY = "worker-src 'none'";
 

@@ -279,6 +279,101 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
     }
   });
 
+  test('page-only popups reach no target, and the harness closes every page it did not open', async ({
+    page,
+    manifest,
+    fork,
+    blocked,
+  }) => {
+    // A server outside the allowlist that records every HTTP request and WebSocket upgrade.
+    const reached: string[] = [];
+    const target = http.createServer((request, response) => {
+      reached.push(`http ${request.method} ${request.url}`);
+      response.end();
+    });
+    target.on('upgrade', (request, socket) => {
+      reached.push(`websocket ${request.url}`);
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => target.listen(0, '127.0.0.1', () => resolve()));
+    const targetOrigin = `http://127.0.0.1:${(target.address() as { port: number }).port}`;
+    const address = '0x000000000000000000000000000000000000a305';
+    const before = await fork.getBalance({ address });
+    try {
+      await openApp(page);
+      // Script a popup would run: workers that call the target and raw anvil, and the same calls directly.
+      const calls = `
+        const setBalance = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'anvil_setBalance', params: ['${address}', '0x123'] });
+        const call = () => {
+          fetch('${targetOrigin}/popup-fetch', { method: 'POST', body: 'x' }).catch(() => {});
+          fetch('${
+            manifest.fork.localUrl
+          }', { method: 'POST', headers: { 'content-type': 'application/json' }, body: setBalance }).catch(() => {});
+          for (const url of ['${targetOrigin.replace('http:', 'ws:')}/popup-ws', '${manifest.fork.localUrl.replace(
+        'http:',
+        'ws:'
+      )}']) {
+            try { const s = new WebSocket(url); s.onopen = () => s.send(setBalance); } catch (e) {}
+          }
+        };
+        call();
+        const source = '(' + call.toString() + ')()';
+        try { new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))); } catch (e) {}
+        try { new SharedWorker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))); } catch (e) {}
+      `;
+      const attempts = await page.evaluate(async (script) => {
+        const html = `<script>${script}</` + 'script>';
+        const urls: Record<string, string> = {
+          javascript: `javascript:${encodeURIComponent(script)}`,
+          data: `data:text/html,${encodeURIComponent(html)}`,
+          blob: URL.createObjectURL(new Blob([html], { type: 'text/html' })),
+        };
+        const outcomes: Record<string, string> = {};
+        for (const [kind, url] of Object.entries(urls)) {
+          outcomes[`noopener ${kind}`] = window.open(url, '_blank', 'noopener') === null ? 'no reference' : 'reference';
+          const link = document.createElement('a');
+          link.href = url;
+          link.rel = 'noopener';
+          link.target = '_blank';
+          document.body.append(link);
+          link.click();
+          outcomes[`noopener link ${kind}`] = 'clicked';
+        }
+        // A named popup opened noopener, then reacquired by name.
+        window.open('about:blank', 'harness-named', 'noopener');
+        const named = window.open('', 'harness-named');
+        try {
+          named?.document.write(html);
+          outcomes['named reacquired'] = named === null ? 'no reference' : 'written';
+        } catch (error) {
+          outcomes['named reacquired'] = `refused: ${(error as Error).name}`;
+        }
+        // An ordinary popup whose opener the page clears before writing into it.
+        const cleared = window.open('about:blank', '_blank');
+        try {
+          if (cleared !== null) cleared.opener = null;
+          cleared?.document.write(html);
+          outcomes['opener cleared'] = cleared === null ? 'no reference' : 'written';
+        } catch (error) {
+          outcomes['opener cleared'] = `refused: ${(error as Error).name}`;
+        }
+        return outcomes;
+      }, calls);
+      await test.info().attach('popup-attempts.json', { body: JSON.stringify(attempts, null, 2) });
+      await page.waitForTimeout(3_000);
+      expect({ reached, anvilBalance: await fork.getBalance({ address }) }).toEqual({
+        reached: [],
+        anvilBalance: before,
+      });
+      // Every popup was closed and recorded: only the page the test opened is left.
+      expect(page.context().pages()).toEqual([page]);
+      expect(blocked.filter((entry) => entry.kind === 'popup').length).toBeGreaterThan(0);
+    } finally {
+      target.closeAllConnections();
+      await new Promise<void>((resolve) => target.close(() => resolve()));
+    }
+  });
+
   test('a redirect hop follows browser rules: the method, body and credentials it keeps or drops', async ({
     browser,
   }) => {

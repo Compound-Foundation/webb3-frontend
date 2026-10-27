@@ -39,6 +39,11 @@ describe('egress', () => {
 
   test('records a blocked URL without its query or fragment', () => {
     expect(withoutQuery('https://rpc.example.com/v2/x?key=secret#frag')).toBe('https://rpc.example.com/v2/x');
+    // A popup's URL can be any scheme: it is recorded by scheme, and never by a data URL's content.
+    expect(withoutQuery('about:blank')).toBe('about:blank');
+    expect(withoutQuery('blob:http://127.0.0.1:5173/3f2a')).toBe('blob:http://127.0.0.1:5173/…');
+    expect(withoutQuery('data:text/html,<script>secret</script>')).toBe('data:…');
+    expect(withoutQuery('javascript:alert(1)')).toBe('javascript:…');
   });
 });
 

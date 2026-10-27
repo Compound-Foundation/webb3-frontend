@@ -20,7 +20,13 @@ import path from 'node:path';
 import { chromium } from '@playwright/test';
 
 import { COMET_USDC, USDC } from './contracts';
-import { allowLoopbackWebSocket, applyEgress, withoutQuery, type BlockedRequest } from './egress';
+import {
+  allowLoopbackWebSocket,
+  applyEgress,
+  closePagesItDidNotOpen,
+  withoutQuery,
+  type BlockedRequest,
+} from './egress';
 import {
   createRedactor,
   failedToStartOnUpstream,
@@ -563,6 +569,7 @@ async function warmUp({
       const context = await browser.newContext({ serviceWorkers: 'block' });
       await allowLoopbackWebSocket(context, devOrigin);
       const blocked: BlockedRequest[] = [];
+      closePagesItDidNotOpen(context, blocked);
       await applyEgress(
         context,
         {
