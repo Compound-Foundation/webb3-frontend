@@ -3,11 +3,18 @@
 // - each acceptance criterion, from the tests' `@ACn` tags, as passed, failed or INCOMPLETE
 // - the fork, the tool versions, the production builds' resolved DEV and PROD, and the proxies' counts
 // - the scan of every output of the run for the run's secrets. A secret found fails the run.
+//
+// The verdict is PASS only for a run of the whole suite. The reporter lists the full suite with
+// `playwright test --list` and compares it, test by test, with the tests this run selected, so a run that
+// selected fewer by any means (a title filter, an inverted one, a file or line, a project, a shard) is
+// INCOMPLETE, and the summary names the tests it left out.
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
 import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 
+import { REPO_ROOT } from './paths';
 import { findSecrets, outputsUnder, registeredSecretCount } from './secrets';
 
 type Row = { title: string; project: string; tags: string[]; status: string; reason: string; durationMs: number };
@@ -21,17 +28,55 @@ const firstLine = (text: string | undefined) =>
     ?.trim()
     .slice(0, 240) ?? '';
 
+/** A test's identity across runs: its project and its title path from the spec file down. */
+export const testId = (test: TestCase) => `${test.parent.project()?.name} › ${test.titlePath().slice(2).join(' › ')}`;
+
+type ListedSuite = {
+  title: string;
+  specs?: { title: string; tests?: { projectName: string }[] }[];
+  suites?: ListedSuite[];
+};
+
+/**
+ * Every test of the full suite, as `testId` names them, from `playwright test --list` with the same
+ * configuration and no filter. The listing loads the specs only: it runs no global setup and no test.
+ */
+export function listFullSuite(configFile: string): string[] {
+  const output = execFileSync(
+    process.execPath,
+    [
+      path.join(REPO_ROOT, 'node_modules/@playwright/test/cli.js'),
+      'test',
+      '-c',
+      configFile,
+      '--list',
+      '--reporter=json',
+    ],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, BROWSER_WALLET_INTERACTIVE: '' } }
+  );
+  const ids: string[] = [];
+  const walk = (suite: ListedSuite, titles: string[]) => {
+    for (const spec of suite.specs ?? []) {
+      for (const each of spec.tests ?? []) ids.push(`${each.projectName} › ${[...titles, spec.title].join(' › ')}`);
+    }
+    for (const child of suite.suites ?? []) walk(child, [...titles, child.title]);
+  };
+  for (const file of (JSON.parse(output) as { suites: ListedSuite[] }).suites) walk(file, [file.title]);
+  return ids;
+}
+
 export default class SummaryReporter implements Reporter {
   readonly #runDir: string;
   #tests: TestCase[] = [];
   readonly #results = new Map<TestCase, TestResult>();
   readonly #output: string[] = [];
   #startedAt = Date.now();
-  /** The project and spec files of the full suite that this run did not include. */
-  readonly #leftOut: string[] = [];
+  readonly #inventory: (() => string[]) | undefined;
+  #configFile: string | undefined;
 
-  constructor({ runDir }: { runDir: string }) {
+  constructor({ runDir, inventory }: { runDir: string; inventory?: () => string[] }) {
     this.#runDir = runDir;
+    this.#inventory = inventory;
   }
 
   printsToStdio() {
@@ -41,20 +86,23 @@ export default class SummaryReporter implements Reporter {
   onBegin(config: FullConfig, suite: Suite) {
     this.#tests = suite.allTests();
     this.#startedAt = Date.now();
-    // The full suite is every project and every spec file. A run filtered by project, file or title runs
-    // less, and its summary says what it left out.
-    const projects = config.projects.filter((project) => project.name !== 'interactive');
-    const ran = new Set(
-      this.#tests.map((test) => `${test.parent.project()?.name} ${path.basename(test.location.file)}`)
-    );
-    for (const project of projects) {
-      const files = fs.readdirSync(project.testDir).filter((name) => {
-        const included = [project.testMatch].flat().some((match) => match instanceof RegExp && match.test(name));
-        const ignored = [project.testIgnore].flat().some((match) => match instanceof RegExp && match.test(name));
-        return included && !ignored;
-      });
-      for (const file of files) if (!ran.has(`${project.name} ${file}`)) this.#leftOut.push(`${project.name}: ${file}`);
+    this.#configFile = config.configFile;
+  }
+
+  /** The tests of the full suite this run did not select, or why the full suite could not be listed. */
+  #notSelected(): { missing: string[]; total: number } | { problem: string } {
+    if (process.env.BROWSER_WALLET_INTERACTIVE === '1')
+      return { problem: 'an interactive session is not an acceptance run' };
+    let inventory: string[];
+    try {
+      const configFile = this.#configFile;
+      inventory = this.#inventory?.() ?? (configFile === undefined ? [] : listFullSuite(configFile));
+    } catch (error) {
+      return { problem: `the reporter could not list the full suite (${firstLine((error as Error)?.message)})` };
     }
+    if (inventory.length === 0) return { problem: 'the reporter could not list the full suite (no tests listed)' };
+    const selected = new Set(this.#tests.map(testId));
+    return { missing: inventory.filter((each) => !selected.has(each)), total: inventory.length };
   }
 
   onTestEnd(test: TestCase, result: TestResult) {
@@ -141,11 +189,17 @@ export default class SummaryReporter implements Reporter {
         : 'passed';
     const productionSkipped = manifest?.production?.skipped === true;
     const bundleLeaks: { file: string; secret: string }[] = stats?.bundleSecretScan?.leaks ?? [];
+    const selection = this.#notSelected();
     const counts = (status: string) => rows.filter((row) => row.status === status).length;
     const verdict =
       result.status !== 'passed' || counts('FAILED') > 0 || leaks.length > 0 || bundleLeaks.length > 0
         ? 'FAIL'
-        : counts('INCOMPLETE') > 0 || productionSkipped || rows.length === 0 || this.#leftOut.length > 0
+        : counts('INCOMPLETE') > 0 ||
+          productionSkipped ||
+          rows.length === 0 ||
+          manifest === undefined ||
+          'problem' in selection ||
+          selection.missing.length > 0
         ? 'INCOMPLETE'
         : 'PASS';
 
@@ -163,14 +217,24 @@ export default class SummaryReporter implements Reporter {
         ''
       );
     }
-    if (this.#leftOut.length > 0) {
-      lines.push(`**Scoped run, INCOMPLETE:** the run left out ${this.#leftOut.join(', ')}.`, '');
+    if ('problem' in selection) {
+      lines.push(`**Not an acceptance run, INCOMPLETE:** ${selection.problem}.`, '');
+    } else if (selection.missing.length > 0) {
+      lines.push(
+        `**Scoped run, INCOMPLETE:** ${selection.missing.length} of ${selection.total} tests in the full suite were not selected:`,
+        '',
+        ...selection.missing.map((each) => `- ${each}`),
+        ''
+      );
     }
     if (manifest === undefined)
       lines.push('The harness did not start: see startup-failure.txt and the test output.', '');
     lines.push('## Acceptance criteria', '', '| Criterion | Status | Tests |', '| --- | --- | --- |');
     for (const [tag, list] of [...criteria].sort(([a], [b]) => Number(a.slice(3)) - Number(b.slice(3)))) {
-      lines.push(`| ${tag.slice(1)} | ${criterionStatus(list)} | ${list.length} |`);
+      // A criterion cannot pass on a scoped run: the tests the run left out may be its own.
+      const status = criterionStatus(list);
+      const isScoped = 'problem' in selection || selection.missing.length > 0;
+      lines.push(`| ${tag.slice(1)} | ${status === 'passed' && isScoped ? 'INCOMPLETE' : status} | ${list.length} |`);
     }
     lines.push(
       '',
