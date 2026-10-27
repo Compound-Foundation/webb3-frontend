@@ -16,6 +16,8 @@ import {
   openApp,
   providerRequest,
   selectedAccount,
+  signingCalls,
+  signingRequests,
   test,
 } from '../harness/fixtures';
 import type { WalletRequest } from '../harness/walletServer';
@@ -118,6 +120,10 @@ test.describe('signing', { tag: ['@AC5'] }, () => {
     // Before the app is permitted, nothing is signed.
     await openApp(page);
     expect((await providerRequest(page, 'personal_sign', ['early', account])).error?.code).toBe(4100);
+    // Refused before it was queued: absent from the queue, present in the record of provider calls, which the
+    // screening tests read for the same reason.
+    expect(await signingRequests(wallet)).toEqual([]);
+    expect(await signingCalls(wallet)).toEqual(['personal_sign']);
     await connectAccount(page, wallet, account);
     // An account that is not the selected one.
     expect((await providerRequest(page, 'personal_sign', ['other', other])).error?.code).toBe(4100);

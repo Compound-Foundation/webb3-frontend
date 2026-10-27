@@ -21,6 +21,7 @@ import {
   headerConnect,
   openApp,
   screeningOverlay,
+  signingCalls,
   signingRequests,
   storedConnector,
   test,
@@ -73,6 +74,7 @@ test.describe('production build without a screening endpoint', { tag: ['@AC7'] }
     expect(await storedConnector(page)).toBeNull();
     await expect(page.getByRole('button', { name: 'Supply USDC' })).toBeDisabled();
     expect(await signingRequests(wallet)).toEqual([]);
+    expect(await signingCalls(wallet)).toEqual([]);
     // The stub would have allowed the account, but the build has no endpoint, so it was never asked.
     expect(await wallet.screeningLog()).toEqual([]);
     expect(consoleMessages.filter((message) => message.includes(BYPASS_WARNING))).toEqual([]);

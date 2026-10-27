@@ -106,6 +106,8 @@ export type WalletServerOptions = {
   log?: (line: string) => void;
   /** Gets every key the server makes, for the run's secret scan. */
   onSecret?: (secret: string) => void;
+  /** The most provider calls one generation records. Past it the record reports an overflow. */
+  providerCallLimit?: number;
   /** Checks the fork before each send. Tests replace it to see the server refuse. */
   verify?: typeof verifyFork;
 };
@@ -179,6 +181,9 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
   const calls: WalletCall[] = [];
   /** Every provider call from the page, those answered at once included. */
   const providerCalls: WalletCall[] = [];
+  const providerCallLimit = options.providerCallLimit ?? 100_000;
+  /** Whether this generation made more provider calls than the record holds. */
+  let hasProviderCallOverflow = false;
   /** When the permission was granted, as its `date`. */
   let permittedAt = 0;
   const controlSends: { hash: string; from: string; to: string; generation: number }[] = [];
@@ -445,8 +450,10 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
   /** The wallet's answer to one provider call from the page. */
   const walletRpc = async (origin: string, method: string, params: unknown): Promise<Outcome | { pending: string }> => {
     if (typeof method !== 'string') return { error: { code: -32600, message: 'harness: no method' } };
-    providerCalls.push({ method, origin, receivedAt: now(), generation });
-    if (providerCalls.length > 10_000) providerCalls.shift();
+    // The record is complete or reports that it is not: a test that asserts a method was never called must
+    // not pass on a record that dropped the call.
+    if (providerCalls.length < providerCallLimit) providerCalls.push({ method, origin, receivedAt: now(), generation });
+    else hasProviderCallOverflow = true;
     try {
       if ((QUEUED_METHODS as readonly string[]).includes(method)) {
         const queued = method as QueuedMethod;
@@ -588,6 +595,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       requests.clear();
       calls.length = 0;
       providerCalls.length = 0;
+      hasProviderCallOverflow = false;
       controlSends.length = 0;
       events.length = 0;
       for (const wake of [...eventWaiters]) wake();
@@ -680,7 +688,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       case 'GET /v1/requests':
         return requestList(query);
       case 'GET /v1/provider-calls':
-        return providerCalls;
+        return { calls: providerCalls, hasOverflowed: hasProviderCallOverflow };
       case 'GET /v1/calls':
         return calls;
       case 'GET /v1/control-sends':

@@ -178,6 +178,17 @@ describe('the request queue', () => {
     expect(await client.providerCalls()).toEqual([]);
   });
 
+  test('a signing call refused before it is queued is in the provider-call record, not the queue', async () => {
+    const { address } = await client.newAccount({ usdc: '0' });
+    await client.select(address);
+    // No permission yet: the wallet answers 4100 at once and queues nothing.
+    expect(await client.walletRpc(ORIGIN, 'personal_sign', ['unscreened attempt', address])).toEqual({
+      error: expect.objectContaining({ code: 4100 }),
+    });
+    expect(await client.requests()).toEqual([]);
+    expect((await client.providerCalls()).map((call) => call.method)).toEqual(['personal_sign']);
+  });
+
   test('answers state methods at once, and queues the permission request until it is decided', async () => {
     const address = await connectedAccount();
     expect(await client.walletRpc(ORIGIN, 'eth_chainId', [])).toEqual({ result: '0x1' });
@@ -535,4 +546,26 @@ test('a request record holds what tests assert', async () => {
   );
   expect(screening.behaviours.get(address.toLowerCase())).toBe('allowed');
   await client.reject(request.id);
+});
+
+test('a provider-call record past its limit reports the overflow instead of dropping calls silently', async () => {
+  const small = await startWalletServer({
+    fork: { localUrl: node.url },
+    target: { number: FORK_BLOCK, hash: FORK_HASH },
+    token: TOKEN,
+    screening,
+    providerCallLimit: 3,
+  });
+  const smallClient = new ControlClient(small.url, TOKEN);
+  try {
+    for (let index = 0; index < 3; index++) await smallClient.walletRpc(ORIGIN, 'eth_chainId', []);
+    expect(await smallClient.providerCalls()).toHaveLength(3);
+    await smallClient.walletRpc(ORIGIN, 'eth_chainId', []);
+    await expect(smallClient.providerCalls()).rejects.toThrow('the provider-call record overflowed');
+    // A reset starts a new record.
+    await smallClient.reset();
+    expect(await smallClient.providerCalls()).toEqual([]);
+  } finally {
+    await small.close();
+  }
 });

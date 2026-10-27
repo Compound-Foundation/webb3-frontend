@@ -104,7 +104,12 @@ export class ControlClient {
     this.request<WalletRequest | { id: string; scheduled: unknown }>('POST', `/v1/requests/${id}/reject`, options);
   calls = () => this.request<WalletCall[]>('GET', '/v1/calls');
   /** Every provider call from the page in this generation, those the wallet answered at once included. */
-  providerCalls = () => this.request<WalletCall[]>('GET', '/v1/provider-calls');
+  providerCalls = async () => {
+    const record = await this.request<{ calls: WalletCall[]; hasOverflowed: boolean }>('GET', '/v1/provider-calls');
+    if (record.hasOverflowed)
+      throw new Error('the provider-call record overflowed, so it cannot show a call was never made');
+    return record.calls;
+  };
 
   forkSend = (transaction: { from: string; to: string; data?: string; value?: string; gas?: string }) =>
     this.request<{ hash: `0x${string}` }>('POST', '/v1/fork/send', transaction);

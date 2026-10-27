@@ -195,6 +195,28 @@ export async function signingRequests(wallet: ControlClient): Promise<WalletRequ
   return (await wallet.requests()).filter((request) => SIGNING_METHODS.includes(request.method));
 }
 
+/** Every provider method that signs or sends, those the wallet does not support included. */
+export const SIGNING_CALL_METHODS = [
+  ...SIGNING_METHODS,
+  'eth_sign',
+  'eth_signTransaction',
+  'eth_sendRawTransaction',
+  'eth_signTypedData',
+  'eth_signTypedData_v3',
+];
+
+/**
+ * Every provider call in this test that asked to sign or send, from the wallet's record of all provider
+ * calls. Unlike `signingRequests`, it holds the calls the wallet refused before queueing them, such as one
+ * from an account that is no longer selected, so a test that asserts the app made no such call does not
+ * credit the app with the wallet's own refusal.
+ */
+export async function signingCalls(wallet: ControlClient): Promise<string[]> {
+  return (await wallet.providerCalls())
+    .map((call) => call.method)
+    .filter((method) => SIGNING_CALL_METHODS.includes(method));
+}
+
 /**
  * Connects the harness wallet through the app UI: Connect Wallet, the MetaMask row, then approval of the
  * permission request. Returns the approved request.

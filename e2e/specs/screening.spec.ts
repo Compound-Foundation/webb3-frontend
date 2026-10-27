@@ -16,6 +16,7 @@ import {
   headerConnect,
   openApp,
   screeningOverlay,
+  signingCalls,
   signingRequests,
   storedConnector,
   test,
@@ -40,6 +41,7 @@ async function expectFailedClosed(page: Page, wallet: ControlClient, consoleMess
   await expect(supplyButton(page)).toBeDisabled();
   await attempt('Supply USDC', supplyButton(page));
   expect(await signingRequests(wallet)).toEqual([]);
+  expect(await signingCalls(wallet)).toEqual([]);
   expect(consoleMessages.filter((message) => message.includes(BYPASS_WARNING))).toEqual([]);
 }
 
@@ -111,6 +113,7 @@ test.describe('screening', { tag: ['@AC7'] }, () => {
     await expect(page.getByText('to preview this extension.')).toBeVisible();
     await expect(page.locator('iframe')).toHaveCount(0);
     expect(await signingRequests(wallet)).toEqual([]);
+    expect(await signingCalls(wallet)).toEqual([]);
     // The navigation sent a new screening request, which the stub holds too. Answer both: blocked.
     await expect
       .poll(async () => (await wallet.screeningLog()).filter((entry) => entry.outcome === 'held').length)
@@ -119,6 +122,7 @@ test.describe('screening', { tag: ['@AC7'] }, () => {
     await expect(screeningOverlay(page)).toBeVisible();
     await expect(headerConnect(page)).toBeVisible();
     expect(await signingRequests(wallet)).toEqual([]);
+    expect(await signingCalls(wallet)).toEqual([]);
     expect(consoleMessages.filter((message) => message.includes(BYPASS_WARNING))).toEqual([]);
   });
 
@@ -154,12 +158,14 @@ test.describe('screening', { tag: ['@AC7'] }, () => {
     await attempt('Approve & Add while the new account is pending', approve);
     await page.waitForTimeout(1_000);
     expect(await signingRequests(wallet)).toEqual([]);
+    expect(await signingCalls(wallet)).toEqual([]);
     await wallet.releaseScreening(second, 'blocked');
     await expect(screeningOverlay(page)).toBeVisible();
     await expect(headerConnect(page)).toBeVisible();
     await attempt('Approve & Add after the block', approve);
     await page.waitForTimeout(1_000);
     expect(await signingRequests(wallet)).toEqual([]);
+    expect(await signingCalls(wallet)).toEqual([]);
   });
 
   test('allowed, then an account change to a blocked account during an extension signing request: nothing is signed', async ({
@@ -185,9 +191,11 @@ test.describe('screening', { tag: ['@AC7'] }, () => {
     );
     await page.waitForTimeout(1_000);
     expect(await signingRequests(wallet)).toEqual([]);
+    expect(await signingCalls(wallet)).toEqual([]);
     await wallet.releaseScreening(second, 'blocked');
     await expect(screeningOverlay(page)).toBeVisible();
     await expect(page.locator('iframe')).toHaveCount(0);
     expect(await signingRequests(wallet)).toEqual([]);
+    expect(await signingCalls(wallet)).toEqual([]);
   });
 });
