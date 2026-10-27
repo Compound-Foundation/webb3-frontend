@@ -7,14 +7,12 @@ import {
   isSubmissionRefused,
   getFullExitCash,
   getGrossAssets,
-  getHeadlineWrappedValue,
   getRedeemBuffer,
   getWithdrawableCash,
   getWrappedPositionValueInDollars,
   readWrappedPosition,
   supplyIncentivesForRoute,
   waitForBlock,
-  WrappedPosition,
   WrappedPositionReadError,
 } from '@helpers/wrappedPositions';
 import { Action, ActionType, CometState, StateType } from '@types';
@@ -139,33 +137,6 @@ describe('getWrappedPositionValueInDollars', () => {
 
   it('values USDC at one dollar, as the rest of the app does', () => {
     expect(getWrappedPositionValueInDollars(250_125_000n, 99_980_000n, 'USDC')).toBe(250_125_000n);
-  });
-});
-
-describe('getHeadlineWrappedValue', () => {
-  const position: WrappedPosition = {
-    shares: 250n * 10n ** 18n,
-    shareDecimals: 18,
-    grossAssets: 250_125_000n,
-    baseDecimals: 6,
-    baseWalletBalance: 0n,
-    wrapperAllowance: 0n,
-    redeemBuffer: 3n,
-    fullExitCash: 250_124_997n,
-    isWithdrawPaused: false,
-    snapshot: { totalSupply: 0n, totalAssets: 0n, baseSupplyIndex: 0n },
-  };
-
-  it('adds the gross value, not the exit cash', () => {
-    expect(getHeadlineWrappedValue(position, 6)).toBe(250_125_000n);
-  });
-
-  it('adds nothing without a loaded position', () => {
-    expect(getHeadlineWrappedValue(undefined, 6)).toBeUndefined();
-  });
-
-  it('adds nothing when the wrapper and the market use different base decimals', () => {
-    expect(getHeadlineWrappedValue(position, 18)).toBeUndefined();
   });
 });
 

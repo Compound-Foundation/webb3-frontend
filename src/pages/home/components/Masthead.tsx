@@ -19,9 +19,10 @@ import {
   formatValueInDollars,
   getValueInDollars,
   PRICE_PRECISION,
+  PRICE_SCALE,
   shouldShowValueInBaseAsset,
 } from '@helpers/numbers';
-import { getHeadlineWrappedValue } from '@helpers/wrappedPositions';
+import { getWrappedPositionValueInDollars } from '@helpers/wrappedPositions';
 import { Theme } from '@hooks/useThemeManager';
 import type { WrappedPositionState } from '@hooks/useWrappedPosition';
 import {
@@ -273,21 +274,22 @@ function getContent(state: MastheadState): Content {
     </Tooltip>
   ) : null;
 
-  // The wrapped value is display-only. Only the headline and its wrapped line show it. Borrow
-  // capacity, the liquidation point, the utilization meter and the buttons read Comet state alone.
-  // Direct actions do not move wrapper shares, so the value is the same before and after them.
-  const wrappedValue =
-    wrappedPosition?.status === 'loaded'
-      ? getHeadlineWrappedValue(wrappedPosition.position, baseAsset.decimals)
-      : undefined;
+  // The wrapped value changes the headline and its wrapped line and nothing else. Borrow capacity,
+  // the liquidation point, the utilization meter and the buttons read Comet state alone. Direct
+  // actions do not move wrapper shares, so the value is the same before and after them.
+  // The wrapper's base units are the market's, because the route is validated before a position is read.
+  const wrappedValue = wrappedPosition?.status === 'loaded' ? wrappedPosition.position.grossAssets : 0n;
+  // In dollars the wrapped value is the one the wrapped position panel shows, in base units.
+  const wrappedValueInDollars = getWrappedPositionValueInDollars(
+    wrappedValue,
+    baseAsset.baseAssetPriceInDollars,
+    symbol
+  );
   let wrappedValueText: string | undefined;
-  if (wrappedValue !== undefined && wrappedValue > 0n) {
+  if (wrappedValue > 0n) {
     wrappedValueText = shouldShowValueInBaseAsset(symbol as Currency, currency)
-      ? `${displayValue(baseAssetToUse.decimals, wrappedValue)} ${symbol}`
-      : formatValueInDollars(
-          baseAssetToUse.decimals + PRICE_PRECISION,
-          getValueInDollars(baseAssetToUse.price * wrappedValue, baseAsset)
-        );
+      ? `${displayValue(baseAsset.decimals, wrappedValue)} ${symbol}`
+      : formatValueInDollars(baseAsset.decimals, wrappedValueInDollars);
   }
 
   const utilizationMeterState: UtilizationMeterState = [
@@ -582,7 +584,7 @@ function getContent(state: MastheadState): Content {
       balance: (
         <Balance wholeNumberBalance={wholeNumberBalance} fractionalNumberBalance={fractionalNumberBalance}></Balance>
       ),
-      // A wrapped supply never nets against the direct borrow, so the headline keeps the borrow alone.
+      // The headline shows the borrow without subtracting the wrapped supply.
       wrappedSupply: wrappedValueText !== undefined && (
         <p className="meta text-color--3">{`Plus ${wrappedValueText} supplied through the wrapper`}</p>
       ),
@@ -599,20 +601,22 @@ function getContent(state: MastheadState): Content {
   else {
     // The headline counts a wrapped supply with the direct supply. The buttons still follow the
     // direct balance, because they act on Comet only.
-    const headlineBalance = baseAssetToUse.balance + (wrappedValue ?? 0n);
+    const headlineBalance = baseAssetToUse.balance + wrappedValue;
+    // In dollars the headline is the direct balance's dollar value plus the panel's dollar value
+    // of the wrapped position, raised to the direct value's scale.
+    const headlineValueInDollars =
+      getValueInDollars(baseAssetToUse.price * baseAssetToUse.balance, baseAsset) + wrappedValueInDollars * PRICE_SCALE;
     const baseAssetDenominatedForBigNumber = shouldShowValueInBaseAsset(symbol as Currency, currency);
     let currencyValue;
     let valueBasedOnCounterCurrency;
     if (baseAssetDenominatedForBigNumber) {
       currencyValue = displayValue(baseAssetToUse.decimals, headlineBalance);
-      const valueToUseForCounterCurrency = getValueInDollars(baseAssetToUse.price * headlineBalance, baseAsset);
       valueBasedOnCounterCurrency = formatValueInDollars(
         baseAssetToUse.decimals + PRICE_PRECISION,
-        valueToUseForCounterCurrency
+        headlineValueInDollars
       );
     } else {
-      const valueToUse = getValueInDollars(baseAssetToUse.price * headlineBalance, baseAsset);
-      currencyValue = formatValueInDollars(baseAssetToUse.decimals + PRICE_PRECISION, valueToUse);
+      currencyValue = formatValueInDollars(baseAssetToUse.decimals + PRICE_PRECISION, headlineValueInDollars);
       valueBasedOnCounterCurrency = displayValue(baseAssetToUse.decimals, headlineBalance);
     }
     // TODO with the toggle the Big Number and small number are the same logic, refactor naming of BalanceValue and Balance

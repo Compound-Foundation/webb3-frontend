@@ -3,7 +3,8 @@ import '@testing-library/jest-dom';
 import { ReactElement } from 'react';
 
 import { CurrencyManagerContext } from '@contexts/CurrencyContext';
-import { WrappedPosition } from '@helpers/wrappedPositions';
+import { formatValueInDollars, getValueInDollars, PRICE_PRECISION, PRICE_SCALE } from '@helpers/numbers';
+import { getWrappedPositionValueInDollars, WrappedPosition } from '@helpers/wrappedPositions';
 import { Theme } from '@hooks/useThemeManager';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
 import { Action, ActionType, BaseAssetWithAccountState, Currency, StateType } from '@types';
@@ -13,8 +14,10 @@ import Masthead, { MastheadState } from '../../components/Masthead';
 
 type RenderOptions = {
   baseAssetPost?: BaseAssetWithAccountState;
+  collateralValue?: bigint;
   compare?: boolean;
   currency?: Currency;
+  liquidationCapacity?: bigint;
   wrappedPosition?: WrappedPositionState;
 };
 
@@ -22,7 +25,7 @@ const mastheadState = (
   baseAsset: BaseAssetWithAccountState,
   isDirectBaseSupplyBlocked: boolean,
   actions: Action[],
-  { baseAssetPost, compare = false, wrappedPosition }: RenderOptions
+  { baseAssetPost, collateralValue = 0n, compare = false, liquidationCapacity = 0n, wrappedPosition }: RenderOptions
 ): MastheadState => [
   StateType.Hydrated,
   {
@@ -32,13 +35,13 @@ const mastheadState = (
     borrowAPR: 0n,
     borrowRewardsAPR: 0n,
     collateralAssets: [],
-    collateralValue: 0n,
-    collateralValuePost: 0n,
+    collateralValue,
+    collateralValuePost: collateralValue,
     compare,
     earnAPR: 0n,
     earnRewardsAPR: 0n,
-    liquidationCapacity: 0n,
-    liquidationCapacityPost: 0n,
+    liquidationCapacity,
+    liquidationCapacityPost: liquidationCapacity,
     onSupplyAction: () => undefined,
     onWithdrawAction: () => undefined,
     setCompare: () => undefined,
@@ -110,6 +113,40 @@ const POSITION: WrappedPosition = {
 const loaded = (position: WrappedPosition = POSITION): WrappedPositionState => ({ status: 'loaded', position });
 
 const headline = () => screen.getByRole('heading', { level: 1 });
+// The smaller figure beneath the headline, in the other currency.
+const counterLine = () => document.querySelector('.masthead__balance-value + .meta');
+const meter = (container: HTMLElement) => container.querySelector('.masthead')?.lastElementChild?.outerHTML;
+
+// A USDT market at a feed price of $0.9995, where the masthead's direct conversion and the
+// panel's conversion give different dollar values.
+const usdtAccount: BaseAssetWithAccountState = {
+  ...MockBaseAssetWithAccountState,
+  symbol: 'USDT',
+  name: 'Tether USD',
+  price: 99_950_000n,
+  baseAssetPriceInDollars: 99_950_000n,
+};
+
+// The dollar value the wrapped position panel shows for the position.
+const panelDollars = (baseAsset: BaseAssetWithAccountState) =>
+  formatValueInDollars(
+    baseAsset.decimals,
+    getWrappedPositionValueInDollars(POSITION.grossAssets, baseAsset.baseAssetPriceInDollars, baseAsset.symbol)
+  );
+
+// The headline in dollars: the direct balance converted as without a position, plus the panel's
+// dollar value of the wrapped position.
+const usdHeadline = (baseAsset: BaseAssetWithAccountState) =>
+  formatValueInDollars(
+    baseAsset.decimals + PRICE_PRECISION,
+    getValueInDollars(baseAsset.price * baseAsset.balance, baseAsset) +
+      getWrappedPositionValueInDollars(POSITION.grossAssets, baseAsset.baseAssetPriceInDollars, baseAsset.symbol) *
+        PRICE_SCALE
+  );
+
+// $5,000 of collateral and 4,000 USDC of liquidation capacity, so a 1,000 USDC borrow fills 25% of
+// the utilization meter.
+const COLLATERAL = { collateralValue: 500_000_000_000n, liquidationCapacity: 4_000_000_000n };
 
 describe('Masthead on the wrapped route', () => {
   const emptyAccount = { ...MockBaseAssetWithAccountState, balance: 0n };
@@ -151,16 +188,22 @@ describe('Masthead on the wrapped route', () => {
       // 5,004.447061 + 250.125 = 5,254.572061 USDC, shown to four places.
       expect(headline()).toHaveTextContent('5,254.5721');
       expect(screen.getByText('Supplying')).toBeInTheDocument();
+      // The dollar figure beneath it is the same sum as the dollar headline.
+      expect(counterLine()).toHaveTextContent(usdHeadline(MockBaseAssetWithAccountState).replace('$', ''));
+      expect(counterLine()).toHaveTextContent('5,253.57');
     });
 
-    it('adds the wrapped value to the direct balance in dollars', () => {
+    it('adds the wrapped dollar value to the direct dollar value in dollars', () => {
       renderMasthead(MockBaseAssetWithAccountState, true, [], {
         currency: Currency.USD,
         wrappedPosition: loaded(),
       });
 
-      // 5,254.572061 USDC at $0.9998 is $5,253.5211.
-      expect(headline()).toHaveTextContent('$5,253.52');
+      // 5,004.447061 USDC at $0.9998 is $5,003.4462, and the panel values the 250.125 wrapped USDC
+      // at $250.125. Together they are $5,253.5712.
+      expect(headline()).toHaveTextContent(usdHeadline(MockBaseAssetWithAccountState));
+      expect(headline()).toHaveTextContent('$5,253.57');
+      expect(counterLine()).toHaveTextContent('5,254.5721');
     });
 
     it('names the wrapped part of the headline in the base token', () => {
@@ -172,14 +215,14 @@ describe('Masthead on the wrapped route', () => {
       expect(screen.getByText('Includes 250.1250 USDC wrapped')).toBeInTheDocument();
     });
 
-    it('names the wrapped part of the headline in dollars', () => {
-      renderMasthead(MockBaseAssetWithAccountState, true, [], {
-        currency: Currency.USD,
-        wrappedPosition: loaded(),
-      });
+    it.each<[string, BaseAssetWithAccountState, string]>([
+      ['USDC', MockBaseAssetWithAccountState, '$250.13'],
+      ['USDT', usdtAccount, '$250.00'],
+    ])('names the wrapped part of a %s headline in dollars as the panel values it', (_, baseAsset, dollars) => {
+      renderMasthead(baseAsset, true, [], { currency: Currency.USD, wrappedPosition: loaded() });
 
-      // 250.125 USDC at $0.9998 is $250.074975.
-      expect(screen.getByText('Includes $250.07 wrapped')).toBeInTheDocument();
+      expect(panelDollars(baseAsset)).toBe(dollars);
+      expect(screen.getByText(`Includes ${dollars} wrapped`)).toBeInTheDocument();
     });
 
     it('shows a wrapped-only supplier as supplying, with the Net APR', () => {
@@ -220,6 +263,21 @@ describe('Masthead on the wrapped route', () => {
       expect(headline()).toHaveTextContent('5,254.5721');
     });
 
+    it('adds the wrapped dollar value on both sides of a direct action', () => {
+      const supply: Action = [ActionType.Supply, MockBaseAssetWithAccountState, 1_000_000_000n];
+      const after = { ...MockBaseAssetWithAccountState, balance: 6_004_447_061n };
+      const options = { baseAssetPost: after, currency: Currency.USD, wrappedPosition: loaded() };
+
+      const { unmount } = renderMasthead(MockBaseAssetWithAccountState, false, [supply], options);
+      expect(headline()).toHaveTextContent(usdHeadline(after));
+      expect(screen.getByText(`Includes ${panelDollars(after)} wrapped`)).toBeInTheDocument();
+      unmount();
+
+      renderMasthead(MockBaseAssetWithAccountState, false, [supply], { ...options, compare: true });
+      expect(headline()).toHaveTextContent(usdHeadline(MockBaseAssetWithAccountState));
+      expect(screen.getByText(`Includes ${panelDollars(MockBaseAssetWithAccountState)} wrapped`)).toBeInTheDocument();
+    });
+
     it('updates the headline when the panel position refreshes', () => {
       const options = { currency: Currency.USDC, wrappedPosition: loaded() };
       const { rerender } = renderMasthead(MockBaseAssetWithAccountState, true, [], options);
@@ -247,9 +305,14 @@ describe('Masthead on the wrapped route', () => {
     });
 
     it('shows a wrapped-only supplier a zero balance, not a stand-in, while the position loads', () => {
-      renderMasthead(emptyAccount, true, [], { currency: Currency.USDC, wrappedPosition: { status: 'loading' } });
+      const { container } = renderMasthead(emptyAccount, true, [], {
+        currency: Currency.USDC,
+        wrappedPosition: { status: 'loading' },
+      });
 
       expect(screen.getByText('Balance')).toBeInTheDocument();
+      expect(headline()).toHaveTextContent('0.0000');
+      expect(container).not.toHaveTextContent('250');
       expect(screen.queryByText(/wrapped|wrapper/)).toBeNull();
     });
   });
@@ -264,23 +327,37 @@ describe('Masthead on the wrapped route', () => {
       expect(screen.queryByText(/Includes/)).toBeNull();
     });
 
-    it('shows the wrapped supply beneath the borrow in dollars', () => {
-      renderMasthead(borrower, true, [], { currency: Currency.USD, wrappedPosition: loaded() });
+    it.each<[string, BaseAssetWithAccountState, string, string]>([
+      ['USDC', MockBaseAssetWithAccountState, '$999.80', '$250.13'],
+      ['USDT', usdtAccount, '$999.00', '$250.00'],
+    ])('shows the wrapped supply beneath a %s borrow in dollars', (_, baseAsset, borrowDollars, wrappedDollars) => {
+      const borrowing = { ...baseAsset, balance: -1_000_000_000n };
+      renderMasthead(borrowing, true, [], { currency: Currency.USD, wrappedPosition: loaded() });
 
-      // 1,000 USDC at $0.9998 is $999.80. The wrapped value does not net against it.
-      expect(headline()).toHaveTextContent('$999.80');
-      expect(screen.getByText('Plus $250.07 supplied through the wrapper')).toBeInTheDocument();
+      // The headline is the borrow converted as without a position. The wrapped value does not
+      // net against it.
+      expect(headline()).toHaveTextContent(
+        formatValueInDollars(
+          baseAsset.decimals + PRICE_PRECISION,
+          getValueInDollars(baseAsset.price * 1_000_000_000n, baseAsset)
+        )
+      );
+      expect(headline()).toHaveTextContent(borrowDollars);
+      expect(panelDollars(baseAsset)).toBe(wrappedDollars);
+      expect(screen.getByText(`Plus ${wrappedDollars} supplied through the wrapper`)).toBeInTheDocument();
     });
 
     it('keeps the borrow buttons and the utilization meter as they are without the position', () => {
-      const withoutPosition = renderMasthead(borrower, true, [], { currency: Currency.USDC });
+      const options = { ...COLLATERAL, currency: Currency.USDC };
+      const withoutPosition = renderMasthead(borrower, true, [], options);
       const buttonsWithout = screen.getAllByRole('button').map((button) => button.textContent);
-      const meterWithout = withoutPosition.container.querySelector('.masthead')?.lastElementChild?.outerHTML;
+      const meterWithout = meter(withoutPosition.container);
       withoutPosition.unmount();
 
-      const withPosition = renderMasthead(borrower, true, [], { currency: Currency.USDC, wrappedPosition: loaded() });
+      const withPosition = renderMasthead(borrower, true, [], { ...options, wrappedPosition: loaded() });
       expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(buttonsWithout);
-      expect(withPosition.container.querySelector('.masthead')?.lastElementChild?.outerHTML).toEqual(meterWithout);
+      expect(withPosition.container.querySelector('.utilization-meter__percent')).toHaveTextContent('25%');
+      expect(meter(withPosition.container)).toEqual(meterWithout);
     });
 
     it('shows no wrapped line while the position is loading', () => {
@@ -292,16 +369,22 @@ describe('Masthead on the wrapped route', () => {
   });
 
   describe('figures other than the headline', () => {
-    it('leaves the utilization meter to the direct position', () => {
-      const withoutPosition = renderMasthead(MockBaseAssetWithAccountState, true, [], { currency: Currency.USDC });
-      const meterWithout = withoutPosition.container.querySelector('.masthead')?.lastElementChild?.outerHTML;
+    // A supplier's meter shows no borrow with or without the wrapped value, so a borrower with a
+    // direct action shows whether the meter reads the wrapped value before or after the action.
+    it.each<[string, boolean, string]>([
+      ['after', false, '38%'],
+      ['before', true, '25%'],
+    ])('leaves the utilization meter to the direct position %s a direct action', (_, compare, percent) => {
+      const borrowMore: Action = [ActionType.Borrow, borrower, 500_000_000n];
+      const after = { ...borrower, balance: -1_500_000_000n };
+      const options = { ...COLLATERAL, baseAssetPost: after, compare, currency: Currency.USDC };
+      const withoutPosition = renderMasthead(borrower, true, [borrowMore], options);
+      const meterWithout = meter(withoutPosition.container);
       withoutPosition.unmount();
 
-      const withPosition = renderMasthead(MockBaseAssetWithAccountState, true, [], {
-        currency: Currency.USDC,
-        wrappedPosition: loaded(),
-      });
-      expect(withPosition.container.querySelector('.masthead')?.lastElementChild?.outerHTML).toEqual(meterWithout);
+      const withPosition = renderMasthead(borrower, true, [borrowMore], { ...options, wrappedPosition: loaded() });
+      expect(withPosition.container.querySelector('.utilization-meter__percent')).toHaveTextContent(percent);
+      expect(meter(withPosition.container)).toEqual(meterWithout);
     });
   });
 
