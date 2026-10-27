@@ -117,7 +117,7 @@ export class ControlClient {
 
   stats = () => this.request<Record<string, unknown>>('GET', '/v1/stats');
   endSession = () => this.request('POST', '/v1/session/end', {});
-  session = () => this.request<{ ended: boolean }>('GET', '/v1/session');
+  session = () => this.request<{ hasEnded: boolean }>('GET', '/v1/session');
 
   /** Waits until a request matching `filter` is in the queue, and returns the first one. */
   async waitForRequest(

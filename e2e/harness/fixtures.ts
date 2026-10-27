@@ -33,7 +33,7 @@ export function readManifest(): Manifest {
 
 export function originOf(manifest: Manifest, target: AppTarget): string {
   if (target === 'dev') return manifest.app.devOrigin;
-  if (manifest.production.skipped) throw new Error(`production builds were skipped: ${manifest.production.reason}`);
+  if (manifest.production.isSkipped) throw new Error(`production builds were skipped: ${manifest.production.reason}`);
   return target === 'prod-allowed' ? manifest.production.allowed.origin : manifest.production.missingEndpoint.origin;
 }
 
@@ -133,7 +133,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   ],
   appTarget: ['dev', { option: true }],
   appOrigin: async ({ manifest, appTarget }, use, testInfo) => {
-    if (appTarget !== 'dev' && manifest.production.skipped) {
+    if (appTarget !== 'dev' && manifest.production.isSkipped) {
       testInfo.skip(true, `the production builds were skipped: ${manifest.production.reason}`);
     }
     await use(originOf(manifest, appTarget));

@@ -35,7 +35,7 @@ const builtJavaScript = (outDir: string) =>
     .join('\n');
 
 const production = (manifest: Manifest) => {
-  if (manifest.production.skipped) throw new Error('production builds were skipped');
+  if (manifest.production.isSkipped) throw new Error('production builds were skipped');
   return manifest.production;
 };
 

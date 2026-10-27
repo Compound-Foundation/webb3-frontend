@@ -60,7 +60,7 @@ export function recoverKilledRuns(runsDir = RUNS_DIR): string[] {
     if (isAlive(record.runnerPid)) continue;
     // A live process at the recorded PID that is not the recorded anvil keeps the record, so a person can
     // still check it by hand.
-    let keepRecord = false;
+    let shouldKeepRecord = false;
     if (record.anvilPid !== undefined && isAlive(record.anvilPid)) {
       let command = '';
       try {
@@ -72,18 +72,22 @@ export function recoverKilledRuns(runsDir = RUNS_DIR): string[] {
         process.kill(record.anvilPid, 'SIGKILL');
         done.push(`stopped anvil ${record.anvilPid} of run ${run}`);
       } else {
-        keepRecord = true;
+        shouldKeepRecord = true;
       }
     }
     if (isHarnessDirectory(record.privateDir, 'cf-browser-wallet-') && fs.existsSync(record.privateDir)) {
       fs.rmSync(record.privateDir, { recursive: true, force: true });
       done.push(`removed the private directory of run ${run}`);
     }
-    if (!keepRecord && isHarnessDirectory(record.anvilCwd, 'cf-browser-anvil-') && fs.existsSync(record.anvilCwd)) {
+    if (
+      !shouldKeepRecord &&
+      isHarnessDirectory(record.anvilCwd, 'cf-browser-anvil-') &&
+      fs.existsSync(record.anvilCwd)
+    ) {
       fs.rmSync(record.anvilCwd, { recursive: true, force: true });
       done.push(`removed anvil's working directory of run ${run}`);
     }
-    if (!keepRecord) fs.rmSync(file);
+    if (!shouldKeepRecord) fs.rmSync(file);
   }
   return done;
 }

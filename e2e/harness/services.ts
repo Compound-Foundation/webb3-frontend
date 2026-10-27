@@ -62,10 +62,10 @@ export type Manifest = {
   runId: string;
   startedAt: string;
   finishedAt?: string;
-  interactive: boolean;
+  isInteractive: boolean;
   fork: ForkTarget & { endpoint: string; localUrl: string; anvilPid: number; upstreamProxyUrl: string };
   tools: Record<string, string | undefined>;
-  git: { head: string | undefined; dirty: boolean | undefined };
+  git: { head: string | undefined; isDirty: boolean | undefined };
   app: {
     devOrigin: string;
     hmrOrigin: string;
@@ -74,9 +74,9 @@ export type Manifest = {
     removedViteVariables: string[];
   };
   production:
-    | { skipped: true; reason: string }
+    | { isSkipped: true; reason: string }
     | {
-        skipped: false;
+        isSkipped: false;
         missingEndpoint: {
           origin: string;
           outDir: string;
@@ -114,19 +114,19 @@ function gitState() {
   try {
     const head = execFileSync('git', ['-C', REPO_ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const status = execFileSync('git', ['-C', REPO_ROOT, 'status', '--porcelain'], { encoding: 'utf8' });
-    return { head, dirty: status.trim() !== '' };
+    return { head, isDirty: status.trim() !== '' };
   } catch {
-    return { head: undefined, dirty: undefined };
+    return { head: undefined, isDirty: undefined };
   }
 }
 
 export async function startServices({
   runId,
-  interactive,
+  isInteractive,
   skipProduction,
 }: {
   runId: string;
-  interactive: boolean;
+  isInteractive: boolean;
   skipProduction: string | undefined;
 }): Promise<Services> {
   const startedAt = new Date().toISOString();
@@ -197,15 +197,15 @@ export async function startServices({
 
   const anvilLog = fs.openSync(path.join(runDir, 'anvil.log'), 'a', 0o600);
   const walletLog = fs.openSync(path.join(runDir, 'wallet.log'), 'a', 0o600);
-  let logsOpen = true;
+  let areLogsOpen = true;
   /** Writes to a log until the logs close. anvil's last output and a late control error can come after. */
   const writeLog = (fd: number, text: string) => {
-    if (logsOpen) fs.writeSync(fd, text);
+    if (areLogsOpen) fs.writeSync(fd, text);
   };
   stops.push({
     name: 'logs',
     run: () => {
-      logsOpen = false;
+      areLogsOpen = false;
       [anvilLog, walletLog].forEach((fd) => fs.closeSync(fd));
     },
   });
@@ -373,7 +373,7 @@ export async function startServices({
     };
     let production: Manifest['production'];
     if (skipProduction !== undefined) {
-      production = { skipped: true, reason: skipProduction };
+      production = { isSkipped: true, reason: skipProduction };
     } else {
       const missingEnvironment = { ...baseEnvironment };
       const allowedEnvironment = { ...baseEnvironment, VITE_SCREENING_ENDPOINT: screening.endpoint };
@@ -388,7 +388,7 @@ export async function startServices({
       addStop({ name: 'production server (allowed)', run: () => allowedServer.close() });
       appOrigins.add(missingServer.origin).add(allowedServer.origin);
       production = {
-        skipped: false,
+        isSkipped: false,
         missingEndpoint: {
           origin: missingServer.origin,
           outDir: missingOut,
@@ -430,7 +430,7 @@ export async function startServices({
     const manifest: Manifest = {
       runId,
       startedAt,
-      interactive,
+      isInteractive,
       fork: {
         ...target,
         endpoint: chosen.label,

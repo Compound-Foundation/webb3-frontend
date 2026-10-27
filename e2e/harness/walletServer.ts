@@ -186,7 +186,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
   const events: WalletEvent[] = [];
   let cursor = 0;
   const eventWaiters = new Set<() => void>();
-  let sessionEnded = false;
+  let hasSessionEnded = false;
 
   // Fork writes run one at a time, so a reset never interleaves with a send or a funding.
   let forkQueue: Promise<unknown> = Promise.resolve();
@@ -514,13 +514,13 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
   };
 
   const createAccount = async (
-    { eth = '10', usdc = '0', screening: behaviour = 'allowed', keyed }: AccountOptions & { keyed: boolean },
+    { eth = '10', usdc = '0', screening: behaviour = 'allowed', hasKey }: AccountOptions & { hasKey: boolean },
     given?: Address
   ) =>
     serially(async () => {
       if (!SCREENING_BEHAVIOURS.includes(behaviour)) throw new HttpError(400, 'unknown screening behaviour');
       let account: Account;
-      if (keyed) {
+      if (hasKey) {
         const key = generatePrivateKey();
         options.onSecret?.(key);
         account = { address: privateKeyToAccount(key).address, key };
@@ -535,8 +535,8 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       if (usdcUnits > 0n) await fundUsdc(address, usdcUnits);
       accounts.set(address.toLowerCase(), account);
       screening.setBehaviour(address, behaviour);
-      log(`account ${address} ${keyed ? 'keyed' : 'impersonated'}`);
-      return { address, kind: keyed ? 'keyed' : 'impersonated' };
+      log(`account ${address} ${hasKey ? 'keyed' : 'impersonated'}`);
+      return { address, kind: hasKey ? 'keyed' : 'impersonated' };
     });
 
   /**
@@ -699,11 +699,11 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
         return Object.fromEntries(policies);
       }
       case 'POST /v1/accounts/new':
-        return createAccount({ ...(body as AccountOptions), keyed: true });
+        return createAccount({ ...(body as AccountOptions), hasKey: true });
       case 'POST /v1/accounts/impersonate': {
         if (!isAddress(body.address)) throw new HttpError(400, 'address must be an address');
         if (accounts.has(body.address.toLowerCase())) throw new HttpError(409, 'the account already exists');
-        return createAccount({ ...(body as AccountOptions), keyed: false }, body.address as Address);
+        return createAccount({ ...(body as AccountOptions), hasKey: false }, body.address as Address);
       }
       case 'POST /v1/accounts/select': {
         const addresses = body.addresses;
@@ -770,10 +770,10 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       case 'POST /v1/reset':
         return reset();
       case 'POST /v1/session/end':
-        sessionEnded = true;
-        return { ended: true };
+        hasSessionEnded = true;
+        return { hasEnded: true };
       case 'GET /v1/session':
-        return { ended: sessionEnded };
+        return { hasEnded: hasSessionEnded };
     }
     throw new HttpError(404, 'no such endpoint');
   };
@@ -795,14 +795,14 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     const url = new URL(request.url ?? '/', `http://127.0.0.1:${port}`);
     const chunks: Buffer[] = [];
     let size = 0;
-    let tooLarge = false;
+    let isTooLarge = false;
     request.on('data', (chunk: Buffer) => {
       size += chunk.length;
       if (size <= MAX_CONTROL_BODY_BYTES) chunks.push(chunk);
-      else tooLarge = true;
+      else isTooLarge = true;
     });
     request.on('end', async () => {
-      if (tooLarge) return send(413, { error: 'body over 1 MB' });
+      if (isTooLarge) return send(413, { error: 'body over 1 MB' });
       let body: Record<string, unknown> = {};
       if (request.method === 'POST') {
         if (!String(request.headers['content-type'] ?? '').startsWith('application/json'))

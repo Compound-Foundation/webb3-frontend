@@ -112,20 +112,21 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
         Promise.all(
           urls.map(
             (url) =>
-              new Promise<{ url: string; messages: number; closed: boolean }>((resolve) => {
+              new Promise<{ url: string; messages: number; isClosed: boolean }>((resolve) => {
                 let messages = 0;
                 const socket = new WebSocket(url);
                 socket.onopen = () =>
                   socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_accounts', params: [] }));
                 socket.onmessage = () => (messages += 1);
-                socket.onclose = () => resolve({ url, messages, closed: true });
-                setTimeout(() => resolve({ url, messages, closed: socket.readyState === WebSocket.CLOSED }), 5_000);
+                socket.onclose = () => resolve({ url, messages, isClosed: true });
+                setTimeout(() => resolve({ url, messages, isClosed: socket.readyState === WebSocket.CLOSED }), 5_000);
               })
           )
         ),
       [manifest.fork.localUrl.replace('http:', 'ws:'), 'wss://example.com/']
     );
-    for (const result of webSockets) expect(result, result.url).toEqual({ url: result.url, messages: 0, closed: true });
+    for (const result of webSockets)
+      expect(result, result.url).toEqual({ url: result.url, messages: 0, isClosed: true });
     const blockedUrls = blocked.map((entry) => `${entry.kind} ${entry.url}`);
     expect(blockedUrls).toEqual(
       expect.arrayContaining([
@@ -312,18 +313,18 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
       .find((each) => each !== page.mainFrame() && each.url().startsWith(manifest.services.screening));
     expect(frame).toBeDefined();
     const inFrame = await frame?.evaluate(async (name) => {
-      let announced = false;
-      window.addEventListener('eip6963:announceProvider', () => (announced = true));
+      let hasAnnounced = false;
+      window.addEventListener('eip6963:announceProvider', () => (hasAnnounced = true));
       window.dispatchEvent(new Event('eip6963:requestProvider'));
       const answer = await (window as unknown as Record<string, (payload: unknown) => Promise<unknown>>)[name]({
         kind: 'rpc',
         method: 'eth_accounts',
         params: [],
       });
-      return { announced, answer };
+      return { hasAnnounced, answer };
     }, BINDING_NAME);
     expect(inFrame).toEqual({
-      announced: false,
+      hasAnnounced: false,
       answer: { error: { code: 4100, message: "harness: only the app page's top frame may use the wallet" } },
     });
     // After a navigation of the top frame to another origin: no provider, and the binding refuses.
@@ -347,7 +348,7 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
     const anvil = listeningAddresses(manifest.fork.anvilPid);
     // The upstream proxy, RPC proxy, screening stub, wallet server and dev server, and the two production
     // servers when the builds ran. Vite's HMR shares the dev server's port.
-    expect(runner.length).toBe(5 + (manifest.production.skipped ? 0 : 2));
+    expect(runner.length).toBe(5 + (manifest.production.isSkipped ? 0 : 2));
     for (const address of [...runner, ...anvil]) expect(address).toMatch(/^127\.0\.0\.1:\d+$/);
     const ports = new Set([...runner, ...anvil].map((address) => address.split(':')[1]));
     for (const url of Object.values(manifest.services.bindings)) {

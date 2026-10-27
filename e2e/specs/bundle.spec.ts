@@ -48,8 +48,8 @@ function filesUnder(directory: string): string[] {
 
 test.describe('the production bundle', { tag: ['@AC10'] }, () => {
   test('holds no harness code, test key or control credential', async ({ manifest }) => {
-    test.skip(manifest.production.skipped, 'the production builds were skipped');
-    if (manifest.production.skipped) return;
+    test.skip(manifest.production.isSkipped, 'the production builds were skipped');
+    if (manifest.production.isSkipped) return;
     const token = fs.readFileSync(manifest.tokenFile, 'utf8').trim();
     const outputs = [manifest.production.missingEndpoint.outDir, manifest.production.allowed.outDir];
     const repositoryDist = path.join(REPO_ROOT, 'dist');

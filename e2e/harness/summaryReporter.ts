@@ -187,7 +187,7 @@ export default class SummaryReporter implements Reporter {
         : list.some((row) => row.status === 'INCOMPLETE')
         ? 'INCOMPLETE'
         : 'passed';
-    const productionSkipped = manifest?.production?.skipped === true;
+    const isProductionSkipped = manifest?.production?.isSkipped === true;
     const bundleLeaks: { file: string; secret: string }[] = stats?.bundleSecretScan?.leaks ?? [];
     const selection = this.#notSelected();
     const counts = (status: string) => rows.filter((row) => row.status === status).length;
@@ -195,7 +195,7 @@ export default class SummaryReporter implements Reporter {
       result.status !== 'passed' || counts('FAILED') > 0 || leaks.length > 0 || bundleLeaks.length > 0
         ? 'FAIL'
         : counts('INCOMPLETE') > 0 ||
-          productionSkipped ||
+          isProductionSkipped ||
           rows.length === 0 ||
           manifest === undefined ||
           'problem' in selection ||
@@ -211,7 +211,7 @@ export default class SummaryReporter implements Reporter {
       )} failed, ${counts('INCOMPLETE')} incomplete, in ${Math.round((Date.now() - this.#startedAt) / 1000)} s.`,
       '',
     ];
-    if (productionSkipped) {
+    if (isProductionSkipped) {
       lines.push(
         `**AC7 production coverage INCOMPLETE:** the production builds were skipped (${manifest.production.reason}).`,
         ''
@@ -273,7 +273,7 @@ export default class SummaryReporter implements Reporter {
       );
     }
     if (manifest !== undefined) {
-      const production = manifest.production.skipped
+      const production = manifest.production.isSkipped
         ? `skipped (${manifest.production.reason})`
         : `no endpoint: DEV=${manifest.production.missingEndpoint.resolved.DEV}, PROD=${manifest.production.missingEndpoint.resolved.PROD}; allowed control: DEV=${manifest.production.allowed.resolved.DEV}, PROD=${manifest.production.allowed.resolved.PROD}`;
       lines.push(
@@ -285,7 +285,7 @@ export default class SummaryReporter implements Reporter {
           .filter(([, value]) => value !== undefined)
           .map(([name, value]) => `${name} ${value}`)
           .join(', ')}`,
-        `- Git: ${manifest.git.head ?? 'unknown'}${manifest.git.dirty ? ' (dirty tree)' : ''}`,
+        `- Git: ${manifest.git.head ?? 'unknown'}${manifest.git.isDirty ? ' (dirty tree)' : ''}`,
         `- Production builds: ${production}`,
         `- Dev server resolved DEV=${manifest.app.devResolved.DEV}; HTTPS trust: ${manifest.tls.mode}`,
         `- v3 API: ${manifest.v3Api.label}`,

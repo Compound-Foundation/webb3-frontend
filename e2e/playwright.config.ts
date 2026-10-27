@@ -10,7 +10,7 @@ import { RUNS_DIR } from './harness/paths';
 // The run ID is set once, in the runner, and the workers inherit it.
 process.env.BROWSER_HARNESS_RUN_ID ??= `${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}`;
 const runDir = path.join(RUNS_DIR, process.env.BROWSER_HARNESS_RUN_ID);
-const interactive = process.env.BROWSER_WALLET_INTERACTIVE === '1';
+const isInteractive = process.env.BROWSER_WALLET_INTERACTIVE === '1';
 
 export default defineConfig({
   testDir: './specs',
@@ -31,10 +31,10 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     // An interactive session is headed, unless BROWSER_WALLET_HEADLESS=1 (for agents without a display).
-    headless: !interactive || process.env.BROWSER_WALLET_HEADLESS === '1',
+    headless: !isInteractive || process.env.BROWSER_WALLET_HEADLESS === '1',
     viewport: { width: 1440, height: 1000 },
   },
-  projects: interactive
+  projects: isInteractive
     ? [{ name: 'interactive', testMatch: /interactive\.session\.ts/, timeout: 0 }]
     : [
         { name: 'dev', testMatch: /\.spec\.ts$/, testIgnore: /(prod-build|bundle)\.spec\.ts$/ },

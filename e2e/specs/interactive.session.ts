@@ -19,5 +19,5 @@ test('interactive session', async ({ page, wallet, manifest }) => {
     ].join('\n')
   );
   await openApp(page);
-  while (!(await wallet.session()).ended) await page.waitForTimeout(1_000);
+  while (!(await wallet.session()).hasEnded) await page.waitForTimeout(1_000);
 });

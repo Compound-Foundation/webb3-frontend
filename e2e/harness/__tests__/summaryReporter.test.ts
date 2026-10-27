@@ -36,9 +36,9 @@ const id = ([project, file, title]: readonly string[]) => `${project} › ${file
 const MANIFEST = {
   fork: { number: 26244888, mode: 'pinned', hash: '0x00', endpoint: 'test' },
   tools: { node: 'v22' },
-  git: { head: 'abc', dirty: false },
+  git: { head: 'abc', isDirty: false },
   production: {
-    skipped: false,
+    isSkipped: false,
     missingEndpoint: { resolved: { DEV: false, PROD: true } },
     allowed: { resolved: { DEV: false, PROD: true } },
   },
