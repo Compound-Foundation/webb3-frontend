@@ -29,6 +29,8 @@ yarn test          # Jest in UTC; CI does not run it, so run it locally
 yarn build         # the production build CI publishes to IPFS
 ```
 
+For a change to the browser harness (`e2e/`), wallet connection, transactions or screening, also run `yarn test:browser`, the browser suite on a local mainnet fork. CI does not run it. `docs/browser-fork-wallet.md` covers its prerequisites, commands and limits.
+
 Format with Prettier under `.prettierrc`, as the README's editor setup does. Prettier is not a dependency and CI does not check formatting, so format the files you change. Tests live in `__tests__/` and in `__tests__` directories beside the code. Mock API responses come from the `msw` handlers in `handlers/`. A change to behaviour gets a test, and a bugfix gets a regression test observed failing before the fix.
 
 ## Review standards

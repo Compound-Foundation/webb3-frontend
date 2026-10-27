@@ -31,6 +31,9 @@
 /*.html
 /*/index.html
 /*/ipfs-404.html
+# The browser test harness: it holds per-run keys and the control token,
+# impersonates accounts on the fork, and controls the browser's network routes.
+/e2e/
 # Dependencies, CI, and the IPFS build, preview and release scripts.
 /package.json
 /yarn.lock
