@@ -116,3 +116,15 @@ test.describe('production build with the screening endpoint (control)', { tag: [
     expect(consoleMessages.filter((message) => message.includes(BYPASS_WARNING))).toEqual([]);
   });
 });
+
+test.describe('production build with NODE_ENV=development', { tag: ['@AC7'] }, () => {
+  // A known case of AC7 that the suite does not execute, so that the summary reports AC7, and the
+  // acceptance, INCOMPLETE until it does. `vite build` with NODE_ENV=development compiles DEV=true, and
+  // `SCREENING_DISABLED` in envVars.ts then turns on the screening bypass when no endpoint is set. Gating the
+  // bypass on the build's mode too is a product change to envVars.ts, which this PR does not make. Once
+  // it is made, this test builds with NODE_ENV=development and no endpoint, connects an allowed account,
+  // and expects the app to fail closed, as the first describe block does.
+  test('cannot use the dev-only screening bypass', () => {
+    test.fixme(true, 'the product fix to SCREENING_DISABLED in envVars.ts is a follow-up to this PR');
+  });
+});

@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import type { FullConfig, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 
-import SummaryReporter from '../summaryReporter';
+import SummaryReporter, { testId } from '../summaryReporter';
 
 /** A test case as the reporter reads one. */
 const testCase = (project: string, file: string, title: string) =>
@@ -78,6 +78,30 @@ test('a title-filtered run that represents every spec file but omits tests is IN
   expect(summary).toContain('1 of 4 tests in the full suite were not selected');
   expect(summary).toContain('dev › connect.spec.ts › suite › second');
   expect(summary).toMatch(/\| AC2 \| INCOMPLETE \|/);
+});
+
+test('a known acceptance case that is not executed makes its criterion and the acceptance INCOMPLETE', async () => {
+  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-summary-'));
+  fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(MANIFEST));
+  const ran = testCase('prod-build', 'prod-build.spec.ts', 'fails closed');
+  const known = {
+    ...testCase('prod-build', 'prod-build.spec.ts', 'a NODE_ENV=development build'),
+    annotations: [{ type: 'fixme', description: 'not executed: the product fix is a follow-up' }],
+  } as unknown as TestCase;
+  for (const each of [ran, known]) (each as unknown as { tags: string[] }).tags = ['@AC7'];
+  const reporter = new SummaryReporter({ runDir, inventory: () => [testId(ran), testId(known)] });
+  reporter.onBegin({ projects: [] } as unknown as FullConfig, { allTests: () => [ran, known] } as unknown as Suite);
+  reporter.onTestEnd(ran, passed);
+  reporter.onTestEnd(known, { status: 'skipped', duration: 0, annotations: [], errors: [] } as unknown as TestResult);
+  const write = process.stdout.write;
+  process.stdout.write = (() => true) as typeof process.stdout.write;
+  await reporter.onEnd({ status: 'passed' } as never).finally(() => (process.stdout.write = write));
+  const summary = fs.readFileSync(path.join(runDir, 'summary.md'), 'utf8');
+  fs.rmSync(runDir, { recursive: true, force: true });
+  expect(summary).toContain('Verdict: **INCOMPLETE**');
+  expect(summary).toContain('All implemented tests passed: yes (1 passed, 0 failed).');
+  expect(summary).toMatch(/\| AC7 \| INCOMPLETE \|/);
+  expect(summary).toContain('not executed: the product fix is a follow-up');
 });
 
 test('a run whose harness did not start is not a PASS', async () => {

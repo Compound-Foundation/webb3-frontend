@@ -139,9 +139,13 @@ export default class SummaryReporter implements Reporter {
         reason = incomplete?.description ?? '';
       } else if (outcome.status === 'skipped') {
         status = 'INCOMPLETE';
-        reason = `skipped: ${
-          test.annotations.find((annotation) => annotation.type === 'skip')?.description ?? 'no reason given'
-        }`;
+        // A `test.fixme` is a known acceptance case the suite does not execute yet, and stays INCOMPLETE.
+        const fixme = test.annotations.find((annotation) => annotation.type === 'fixme');
+        reason = fixme
+          ? `known case not executed: ${fixme.description ?? 'no reason given'}`
+          : `skipped: ${
+              test.annotations.find((annotation) => annotation.type === 'skip')?.description ?? 'no reason given'
+            }`;
       } else if (outcome.status === 'interrupted') {
         status = 'INCOMPLETE';
         reason = 'interrupted';
@@ -190,6 +194,9 @@ export default class SummaryReporter implements Reporter {
     const isProductionSkipped = manifest?.production?.isSkipped === true;
     const bundleLeaks: { file: string; secret: string }[] = stats?.bundleSecretScan?.leaks ?? [];
     const selection = this.#notSelected();
+    const isKnownCase = (row: Row) => row.reason.startsWith('known case not executed');
+    const hasEveryImplementedTestPassed =
+      result.status === 'passed' && rows.filter((row) => !isKnownCase(row)).every((row) => row.status === 'passed');
     const counts = (status: string) => rows.filter((row) => row.status === status).length;
     const verdict =
       result.status !== 'passed' || counts('FAILED') > 0 || leaks.length > 0 || bundleLeaks.length > 0
@@ -206,9 +213,14 @@ export default class SummaryReporter implements Reporter {
     const lines = [
       `# Browser fork wallet run ${path.basename(this.#runDir)}`,
       '',
-      `Verdict: **${verdict}** (Playwright: ${result.status}). ${counts('passed')} passed, ${counts(
+      `Verdict: **${verdict}** (acceptance; Playwright: ${result.status}). ${counts('passed')} passed, ${counts(
         'FAILED'
       )} failed, ${counts('INCOMPLETE')} incomplete, in ${Math.round((Date.now() - this.#startedAt) / 1000)} s.`,
+      '',
+      // Separate from the acceptance verdict, which a known case not executed keeps INCOMPLETE.
+      `All implemented tests passed: ${hasEveryImplementedTestPassed ? 'yes' : 'no'} (${counts(
+        'passed'
+      )} passed, ${counts('FAILED')} failed).`,
       '',
     ];
     if (isProductionSkipped) {
@@ -308,7 +320,11 @@ export default class SummaryReporter implements Reporter {
       );
     }
     fs.writeFileSync(path.join(this.#runDir, 'summary.md'), `${lines.join('\n')}\n`);
-    process.stdout.write(`\nBrowser harness: ${verdict}. Summary: ${path.join(this.#runDir, 'summary.md')}\n`);
+    process.stdout.write(
+      `\nBrowser harness: ${verdict} (all implemented tests passed: ${
+        hasEveryImplementedTestPassed ? 'yes' : 'no'
+      }). Summary: ${path.join(this.#runDir, 'summary.md')}\n`
+    );
     return leaks.length > 0 || bundleLeaks.length > 0 ? { status: 'failed' } : undefined;
   }
 }
