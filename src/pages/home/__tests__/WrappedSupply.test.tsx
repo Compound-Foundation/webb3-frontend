@@ -296,9 +296,9 @@ function homeElement(
   );
 }
 
-// On the wrapped route, Home uses a hydrated Comet state only once it knows the account it was read
-// for: one that arrived while the dashboard was mounted. This render delivers the state after the
-// dashboard mounts, as the app does.
+// On the wrapped route, the supply dialog shows the direct borrow of a hydrated Comet state only once
+// Home knows the account it was read for: one that arrived while the dashboard was mounted. This
+// render delivers the state after the dashboard mounts, as the app does.
 function renderWithCometRead(
   lending: WrappedLending,
   state: CometState,
@@ -380,7 +380,7 @@ describe('WrappedSupply', () => {
         receipt: { transactionHash: HASH, status: 1 } as TransactionReceipt,
       };
       const review = inReview([APPROVE_STEP, SUPPLY_STEP], 1, [confirmed, { status: 'waiting' }]);
-      const { rerender } = renderWithCometRead(lendingWith(controller(review)), cometState(BORROWER));
+      const { rerender } = render(homeElement(lendingWith(controller(review)), cometState(BORROWER)));
 
       expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent(/does not repay/i);
       expect(screen.getByRole('button', { name: /supply 1,000\.000000 usdc/i })).toBeEnabled();
@@ -442,7 +442,8 @@ describe('WrappedSupply', () => {
           </SelectedMarketContext.Provider>
         </WrappedLendingContext.Provider>
       );
-      // The state arrives after the dashboard mounts, as in the app, so Home records the read account.
+      // The state arrives after the dashboard mounts, as in the app, so Home records the read account
+      // and the warning omits the amount because that account is not the connected one.
       const { rerender } = render(element([StateType.Loading, undefined]));
       rerender(element(cometState(BORROWER)));
 

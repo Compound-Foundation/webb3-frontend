@@ -186,9 +186,9 @@ function homeElement({ lending, market = USDC_MARKET, state, queue, web3 = mockW
   );
 }
 
-// On the wrapped route, Home uses a hydrated Comet state only once it knows the account it was read
-// for: one that arrived while the dashboard was mounted. These renders deliver the state after the
-// dashboard mounts, as the app does.
+// On the wrapped route, the masthead gets the loaded wrapped position only once Home knows the account
+// a hydrated Comet state was read for: one that arrived while the dashboard was mounted. These
+// renders deliver the state after the dashboard mounts, as the app does.
 function renderWithCometRead(setup: Setup) {
   const view = render(homeElement({ ...setup, state: [StateType.Loading, undefined] }));
   view.rerender(homeElement(setup));
@@ -235,11 +235,13 @@ describe('Home on the wrapped route', () => {
   });
 
   it('refuses to submit a queued base supply', () => {
-    renderWithCometRead({
-      lending: wrappedLending(),
-      state: cometState(EMPTY_ACCOUNT),
-      queue: actionQueue([supplyAction(EMPTY_ACCOUNT)]),
-    });
+    render(
+      homeElement({
+        lending: wrappedLending(),
+        state: cometState(EMPTY_ACCOUNT),
+        queue: actionQueue([supplyAction(EMPTY_ACCOUNT)]),
+      })
+    );
 
     const [, positionCard] = mockLastProps.PositionCard.state;
     positionCard.onSubmitClicked();
@@ -249,11 +251,13 @@ describe('Home on the wrapped route', () => {
 
   it('submits a full repay of a direct borrow', () => {
     const borrower = { ...EMPTY_ACCOUNT, balance: -5_000_000n };
-    renderWithCometRead({
-      lending: wrappedLending(),
-      state: cometState(borrower),
-      queue: actionQueue([[ActionType.Repay, borrower, MAX_UINT256]]),
-    });
+    render(
+      homeElement({
+        lending: wrappedLending(),
+        state: cometState(borrower),
+        queue: actionQueue([[ActionType.Repay, borrower, MAX_UINT256]]),
+      })
+    );
 
     const [, positionCard] = mockLastProps.PositionCard.state;
     positionCard.onSubmitClicked();
@@ -263,7 +267,7 @@ describe('Home on the wrapped route', () => {
   it('refuses a submit callback kept from before the route became wrapped', () => {
     const queue = actionQueue([supplyAction(EMPTY_ACCOUNT)]);
     const state = cometState(EMPTY_ACCOUNT);
-    const { rerender } = renderWithCometRead({ lending: STANDARD, state, queue });
+    const { rerender } = render(homeElement({ lending: STANDARD, state, queue }));
     const keptSubmit = mockLastProps.PositionCard.state[1].onSubmitClicked;
 
     rerender(homeElement({ lending: wrappedLending(), state, queue }));
@@ -364,6 +368,23 @@ describe('Home on the wrapped route', () => {
     rerender(homeElement({ lending: loaded, state, queue: actionQueue([]), web3: switched }));
 
     expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
+  });
+
+  it('adds no wrapped value to Comet state read before the dashboard mounted, but still submits from it', () => {
+    const borrower = { ...EMPTY_ACCOUNT, balance: -5_000_000n };
+    render(
+      homeElement({
+        lending: { ...wrappedLending(), position: LOADED },
+        state: cometState(borrower),
+        queue: actionQueue([[ActionType.Repay, borrower, MAX_UINT256]]),
+      })
+    );
+
+    // The account this state was read for is unknown, so the headline leaves out the wrapped value.
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
+    // A direct submission is judged as on any other visit.
+    mockLastProps.PositionCard.state[1].onSubmitClicked();
+    expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
   });
 });
 

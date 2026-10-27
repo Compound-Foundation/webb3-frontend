@@ -216,15 +216,6 @@ function homeElement({
   );
 }
 
-// On the wrapped route, Home judges a direct submission by a Comet state it knows was read for the
-// connected account: one that arrived while the dashboard was mounted. Each element carries a new
-// Comet state, so the second render delivers one.
-function renderWithCometRead(setup: Setup) {
-  const view = render(homeElement(setup));
-  view.rerender(homeElement(setup));
-  return view;
-}
-
 const positionCard = () => mockLastProps.PositionCard.state[1];
 const openDialog = () => mockLastProps.ActionModal.state;
 
@@ -500,7 +491,7 @@ describe('Home submission guards', () => {
       const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
       const queue = actionQueue([], pendingSupply);
       const usable = wrappedLending({ status: 'usable' });
-      const { rerender } = renderWithCometRead({ queue, lending: usable, addTransaction: manager.addTransaction });
+      const { rerender } = render(homeElement({ queue, lending: usable, addTransaction: manager.addTransaction }));
       act(() => positionCard().onPendingActionConfirm(10n ** 18n));
 
       const unusable = wrappedLending({ status: 'unusable', reason: 'provider-broken', instruction: 'Reload.' });
@@ -537,7 +528,7 @@ describe('Home submission guards', () => {
       instruction: 'Reload the page and reconnect your wallet before you continue.',
     };
     const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
-    renderWithCometRead({ queue: actionQueue([BORROW], pendingSupply), lending: wrappedLending(unusable) });
+    render(homeElement({ queue: actionQueue([BORROW], pendingSupply), lending: wrappedLending(unusable) }));
 
     act(() => positionCard().onSubmitClicked());
     act(() => positionCard().onPendingActionConfirm(10n ** 18n));
@@ -580,7 +571,7 @@ describe('Home submission guards', () => {
   it("stops the dialog's operator approval once the wallet session is unusable", () => {
     const queue = actionQueue([BORROW, SUPPLY_COMP]);
     const usable = wrappedLending({ status: 'usable' });
-    const { rerender } = renderWithCometRead({ queue, lending: usable });
+    const { rerender } = render(homeElement({ queue, lending: usable }));
     act(() => positionCard().onSubmitClicked());
     const { onActionClicked: approveOperator } = openDialog()[1];
 
@@ -596,7 +587,7 @@ describe('Home submission guards', () => {
 
   it('allows direct writes on the wrapped route while the wallet session is usable', () => {
     const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
-    renderWithCometRead({ queue: actionQueue([BORROW], pendingSupply), lending: wrappedLending({ status: 'usable' }) });
+    render(homeElement({ queue: actionQueue([BORROW], pendingSupply), lending: wrappedLending({ status: 'usable' }) }));
 
     act(() => positionCard().onSubmitClicked());
     act(() => positionCard().onPendingActionConfirm(10n ** 18n));
