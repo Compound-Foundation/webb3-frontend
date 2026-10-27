@@ -12,7 +12,7 @@ import {
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
-import { STANDARD_LENDING, WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
 import { calculateUpdatedBalances, validateAddingAction, validateAllowanceForAction } from '@helpers/actions';
 import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
@@ -43,6 +43,7 @@ import {
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
 import { mockEthCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
+import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
 
 // Home's children record their props. The submission dialog is real.
@@ -238,6 +239,7 @@ function lendingWith(
     retry: jest.fn(),
     action,
     write: { supply: jest.fn(() => supplyRefusal), withdraw: jest.fn(() => undefined) },
+    submission: STANDARD_LENDING.submission,
   };
 }
 
@@ -318,11 +320,18 @@ SelectedMarketContextHelpers.initializeContext({
 });
 ActionQueueContextHelpers.initializeContext(actionQueue());
 
-type HomeOptions = { queue?: ActionQueue; market?: MarketData; web3?: Web3; state?: CometState };
+type HomeOptions = {
+  queue?: ActionQueue;
+  market?: MarketData;
+  web3?: Web3;
+  state?: CometState;
+  /** Whether the dashboard is shown. App and its providers stay mounted when another page is shown. */
+  isDashboard?: boolean;
+};
 
 function homeElement(
   lending: WrappedLending,
-  { queue = actionQueue(), market = USDC_MARKET, web3 = WEB3, state }: HomeOptions = {}
+  { queue = actionQueue(), market = USDC_MARKET, web3 = WEB3, state, isDashboard = true }: HomeOptions = {}
 ) {
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
@@ -332,22 +341,24 @@ function homeElement(
     selectMarketByAddress: jest.fn(),
   };
   return (
-    <WrappedLendingContext.Provider value={lending}>
+    <TestLendingProvider value={lending}>
       <SelectedMarketContext.Provider value={selectedMarketData as never}>
         <ActionQueueContext.Provider value={queue}>
-          <Home
-            transactions={[]}
-            web3={web3}
-            selectedMarketData={selectedMarketData as never}
-            cometState={state ?? cometState()}
-            addTransaction={jest.fn()}
-            switchWriteNetwork={jest.fn()}
-            estimatedGasMap={new Map()}
-            theme={Theme.Dark}
-          />
+          {isDashboard && (
+            <Home
+              transactions={[]}
+              web3={web3}
+              selectedMarketData={selectedMarketData as never}
+              cometState={state ?? cometState()}
+              addTransaction={jest.fn()}
+              switchWriteNetwork={jest.fn()}
+              estimatedGasMap={new Map()}
+              theme={Theme.Dark}
+            />
+          )}
         </ActionQueueContext.Provider>
       </SelectedMarketContext.Provider>
-    </WrappedLendingContext.Provider>
+    </TestLendingProvider>
   );
 }
 
@@ -591,6 +602,123 @@ describe('Home on the wrapped route', () => {
 
       expect(lending.write.supply).toHaveBeenCalledTimes(1);
       expect(reading.write.supply).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('keeps a submission across a visit to another page', () => {
+    it('shows the submission again on return, and takes the supply out of the queue once it confirmed meanwhile', () => {
+      const steps = [APPROVE_STEP, SUPPLY_STEP];
+      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
+      act(() => positionCard().onSubmitClicked());
+      const signing = supplyState('signing', steps, [confirmed(), { status: 'submitted', hash: HASH }], 1);
+      rerenderHome(lendingWith(controller(signing)), { queue });
+
+      // The user opens another page while the supply is pending, and it confirms there.
+      const complete = supplyState(
+        'complete',
+        steps,
+        [confirmed(), confirmed()],
+        1,
+        signing.phase === 'signing' ? signing.draft : undefined
+      );
+      rerenderHome(lendingWith(controller(signing)), { queue, isDashboard: false });
+      rerenderHome(lendingWith(controller(complete)), { queue, isDashboard: false });
+      expect(queue.removeAction).not.toHaveBeenCalled();
+
+      rerenderHome(lendingWith(controller(complete)), { queue });
+      expect(queue.removeAction).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('dialog', { name: 'Transactions Confirmed' })).toBeInTheDocument();
+    });
+
+    it('shows a review the user left on another page, so its next step can be confirmed or closed', () => {
+      const steps = [APPROVE_STEP, SUPPLY_STEP];
+      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
+      act(() => positionCard().onSubmitClicked());
+      rerenderHome(lendingWith(controller()), { queue, isDashboard: false });
+
+      const nextStep = controller(supplyState('review', steps, [confirmed(), { status: 'waiting' }], 1));
+      rerenderHome(lendingWith(nextStep), { queue });
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Supply 1,000.000000 USDC' }));
+      expect(nextStep.confirm).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('holds the queue still while it is submitted', () => {
+    it('ignores edits, removals, clears and new amounts while the dialog is hidden', () => {
+      const steps = [APPROVE_STEP, SUPPLY_STEP];
+      const supply: Action = [ActionType.Supply, BASE_ASSET, AMOUNT];
+      const queue = actionQueue([supply], [ActionType.Supply, BASE_ASSET, undefined]);
+      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
+      act(() => positionCard().onSubmitClicked());
+      rerenderHome(
+        lendingWith(controller(supplyState('signing', steps, [{ status: 'checking' }, { status: 'waiting' }]))),
+        {
+          queue,
+        }
+      );
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      queue.setPendingAction.mockClear();
+
+      act(() => positionCard().onPendingActionConfirm(5n * AMOUNT));
+      act(() => positionCard().onDeleteAction(supply));
+      act(() => positionCard().onClearClicked());
+      act(() => positionCard().onSelectAction(supply));
+      act(() => masthead().onSupplyAction([ActionType.Supply, BASE_ASSET, undefined]));
+
+      expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
+      expect(queue.removeAction).not.toHaveBeenCalled();
+      expect(queue.clearActions).not.toHaveBeenCalled();
+      expect(queue.setPendingAction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a wrapper action that stops where it can still go through', () => {
+    it('leaves the queue when its last step may still execute, and says so', () => {
+      const steps = [APPROVE_STEP, SUPPLY_STEP];
+      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
+      act(() => positionCard().onSubmitClicked());
+      const pending: WrappedStepState = {
+        status: 'provider-failure',
+        message: 'The request can still complete (4900)',
+        isPendingInWallet: true,
+      };
+      rerenderHome(lendingWith(controller(supplyState('stopped', steps, [confirmed(), pending], 1))), { queue });
+
+      expect(queue.removeAction).toHaveBeenCalledTimes(1);
+      expect(dialog()).toHaveTextContent(/may still go through, so it was taken out of your queue/);
+    });
+
+    it('stays queued when only its approval may still execute, since the supply was never sent', () => {
+      const steps = [APPROVE_STEP, SUPPLY_STEP];
+      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
+      act(() => positionCard().onSubmitClicked());
+      const failed: WrappedStepState = { status: 'provider-failure', message: 'Internal error' };
+      rerenderHome(lendingWith(controller(supplyState('stopped', steps, [failed, { status: 'waiting' }], 0))), {
+        queue,
+      });
+
+      expect(queue.removeAction).not.toHaveBeenCalled();
+      expect(dialog()).toHaveTextContent(/stay in the queue/);
+    });
+
+    it('stays queued when its last step reverted', () => {
+      const steps = [SUPPLY_STEP];
+      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
+      act(() => positionCard().onSubmitClicked());
+      const reverted: WrappedStepState = {
+        status: 'reverted',
+        hash: HASH,
+        receipt: { transactionHash: HASH, status: 0 } as TransactionReceipt,
+      };
+      rerenderHome(lendingWith(controller(supplyState('stopped', steps, [reverted], 0))), { queue });
+
+      expect(queue.removeAction).not.toHaveBeenCalled();
     });
   });
 

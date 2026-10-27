@@ -6,7 +6,7 @@ import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
-import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
 import { getKeyForActions } from '@helpers/gasEstimator';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
@@ -30,6 +30,7 @@ import {
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
 import { mockCompCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
+import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
 
 // Child components are replaced with stand-ins that record the props Home passes them.
@@ -137,6 +138,7 @@ const STANDARD: WrappedLending = {
   retry: jest.fn(),
   action: IDLE_WRAPPED_ACTION,
   write: IDLE_WRITE_WRAPPED_STATE,
+  submission: STANDARD_LENDING.submission,
 };
 
 function wrappedLending(session: WalletSessionHealth): WrappedLending {
@@ -158,6 +160,7 @@ function wrappedLending(session: WalletSessionHealth): WrappedLending {
     retry: jest.fn(),
     action: { ...IDLE_WRAPPED_ACTION, session },
     write: IDLE_WRITE_WRAPPED_STATE,
+    submission: STANDARD_LENDING.submission,
   };
 }
 
@@ -197,7 +200,7 @@ function homeElement({
     selectMarketByAddress: jest.fn(),
   };
   return (
-    <WrappedLendingContext.Provider value={lending}>
+    <TestLendingProvider value={lending}>
       <SelectedMarketContext.Provider value={selectedMarketData}>
         <ActionQueueContext.Provider value={queue}>
           <Home
@@ -212,7 +215,7 @@ function homeElement({
           />
         </ActionQueueContext.Provider>
       </SelectedMarketContext.Provider>
-    </WrappedLendingContext.Provider>
+    </TestLendingProvider>
   );
 }
 

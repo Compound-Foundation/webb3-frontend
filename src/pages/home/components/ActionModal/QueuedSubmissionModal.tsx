@@ -1,24 +1,13 @@
 import type { ReactNode } from 'react';
 
 import { CircleClose } from '@components/Icons';
-import type { QueuedWrapperAction } from '@helpers/queuedExecution';
+import type { QueuedSubmission } from '@contexts/WrappedLendingContext';
 import { getBlockExplorerUrl } from '@helpers/urls';
 import { WrappedBlockReason, WrappedStep } from '@helpers/wrappedActions';
 import type { WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import useDisableScroll from '@hooks/useDisableScroll';
 import { WrappedActionState, WrappedStepState } from '@hooks/useWrappedAction';
 import { formatExactUnits, WRAPPED_SUPPLY_STEP_IDS } from '@hooks/useWriteWrappedState';
-
-/** A queue being submitted on the wrapped route: the wrapper action first, then the direct actions. */
-export type QueuedSubmission = {
-  wrapper: QueuedWrapperAction;
-  /** How many queued actions go to Comet or the Bulker after the wrapper action, in one transaction. */
-  directCount: number;
-  /** Why the wrapper action did not start, if it did not. Nothing was sent. */
-  refusal?: WrappedBlockReason;
-  /** Whether the wrapper action confirmed and left the queue. */
-  isWrapperDone: boolean;
-};
 
 /** What the page knows about this account's earlier wrapper requests, and the wallet session. */
 export type SubmissionRecovery = {
@@ -427,7 +416,7 @@ const QueuedSubmissionModal = ({
   onDismissRecovered,
 }: QueuedSubmissionModalProps) => {
   useDisableScroll(true);
-  const { wrapper, directCount, refusal, isWrapperDone } = submission;
+  const { wrapper, directCount, refusal, isWrapperDone, mayHaveExecuted = false } = submission;
   const formatAmount = (value: bigint) =>
     decimals === undefined
       ? `${value.toString()} base units of ${symbol}`
@@ -577,7 +566,13 @@ const QueuedSubmissionModal = ({
               })}
               {directItem(directStatus)}
             </ol>
-            {isStopped && <p className="L4 meta text-color--2">{STAYS_QUEUED}</p>}
+            {isStopped && (
+              <p className="L4 meta text-color--2">
+                {mayHaveExecuted
+                  ? `This ${noun} may still go through, so it was taken out of your queue to keep it from being sent twice. Check your wallet and the explorer. Any other actions stay in the queue.`
+                  : STAYS_QUEUED}
+              </p>
+            )}
             {isStopped && <RecoveryNotices recovery={recovery} onDismissRecovered={onDismissRecovered} />}
             {phase === 'signing' && (
               <p className="L4 meta text-color--2">

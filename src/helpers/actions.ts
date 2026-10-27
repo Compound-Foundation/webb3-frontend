@@ -213,11 +213,14 @@ export type ActionRules = {
 /**
  * Why `actionToAdd` cannot be queued on the wrapped route, after `actions`. A base supply or
  * withdrawal needs its release control open and the route eligible. A queue holds at most one of
- * the two, since each is a separate wrapper action. A withdrawal pays at most what the wrapper pays
- * now. A repay may not exceed the debt, since the excess would be a direct Comet supply.
+ * the two, since each is a separate wrapper action. A supply waits until a direct borrow is repaid
+ * in its own submission: the wrapper's steps go before the direct actions, so the supply could
+ * spend what a queued repay needs. A withdrawal pays at most what the wrapper pays now. A repay may
+ * not exceed the debt, since the excess would be a direct Comet supply.
  */
 function wrappedBaseProblem(
   rules: WrappedBaseRules,
+  baseAssetPre: BaseAssetWithAccountState,
   baseAsset: BaseAssetWithAccountState,
   actions: Action[],
   actionToAdd: Action
@@ -227,6 +230,7 @@ function wrappedBaseProblem(
   switch (actionType) {
     case ActionType.Supply:
       if (rules.supplyBlockedReason !== undefined) return rules.supplyBlockedReason;
+      if (baseAssetPre.balance < 0n || hasQueued(ActionType.Repay)) return 'Repay Your Borrow First, Separately';
       return hasQueued(ActionType.Withdraw) ? 'Submit Supply And Withdrawal Separately' : undefined;
     case ActionType.Withdraw:
       if (rules.withdrawBlockedReason !== undefined) return rules.withdrawBlockedReason;
@@ -258,7 +262,7 @@ export function validateAddingAction(
   const wrappedProblem =
     rules.wrappedBase === undefined
       ? undefined
-      : wrappedBaseProblem(rules.wrappedBase, baseAsset, actions, actionToAdd);
+      : wrappedBaseProblem(rules.wrappedBase, baseAssetPre, baseAsset, actions, actionToAdd);
   if (wrappedProblem !== undefined) {
     return [false, wrappedProblem];
   }

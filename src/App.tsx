@@ -14,7 +14,7 @@ import { CurrencyContextProvider } from '@contexts/CurrencyContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { initializeContext, getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { useWeb3Context } from '@contexts/Web3Context';
-import { WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { SubmissionRecord, submissionScope, WrappedLendingContext } from '@contexts/WrappedLendingContext';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { estimateGasForActions, getKeyForActions } from '@helpers/gasEstimator';
 import { directActionsForRoute } from '@helpers/queuedExecution';
@@ -134,12 +134,30 @@ function App({ Component, pageProps }: any) {
     readProvider: wrappedChainProvider,
     baseSymbol: selectedMarketState.selectedMarket[1]?.baseAsset.symbol,
   });
+  // The queued submission lives here, with the lifecycle, so it survives the dashboard's unmount. It
+  // belongs to its scope, and a change of scope drops it whichever page is shown, so a return to the
+  // same scope never brings back a submission from before the change.
+  const selectedMarket = selectedMarketState.selectedMarket[1];
+  const scope = submissionScope(
+    web3.write,
+    selectedMarket === undefined
+      ? undefined
+      : { chainId: selectedMarket.chainInformation.chainId, cometAddress: selectedMarket.marketAddress }
+  );
+  const [submissionRecord, setSubmissionRecord] = useState<SubmissionRecord>();
+  useEffect(() => {
+    setSubmissionRecord((current) => (current !== undefined && current.scope !== scope ? undefined : current));
+  }, [scope]);
   const wrappedLending = {
     route: lendingRoute,
     position: wrappedPosition.state,
     retry: wrappedPosition.retry,
     action: wrappedAction,
     write: wrappedWrite,
+    submission: {
+      record: submissionRecord?.scope === scope ? submissionRecord : undefined,
+      setRecord: setSubmissionRecord,
+    },
   };
 
   const handleRequestNetworkSwitch = (fromChainId: number, toChainId: number, description?: string) => {

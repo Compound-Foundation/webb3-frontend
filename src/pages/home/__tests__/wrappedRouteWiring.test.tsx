@@ -3,7 +3,7 @@ import { render } from '@testing-library/react';
 import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
-import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
@@ -23,6 +23,7 @@ import {
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
+import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
 
 // Child components are replaced with stand-ins that record the props Home passes them.
@@ -78,6 +79,7 @@ function wrappedLending(cometAddress = USDC_COMET): WrappedLending {
     retry: jest.fn(),
     action: IDLE_WRAPPED_ACTION,
     write: IDLE_WRITE_WRAPPED_STATE,
+    submission: STANDARD_LENDING.submission,
   };
 }
 
@@ -103,6 +105,7 @@ const STANDARD: WrappedLending = {
   retry: jest.fn(),
   action: IDLE_WRAPPED_ACTION,
   write: IDLE_WRITE_WRAPPED_STATE,
+  submission: STANDARD_LENDING.submission,
 };
 
 function cometState(baseAsset: BaseAssetWithAccountState): CometState {
@@ -157,7 +160,7 @@ function homeElement({ lending, market = USDC_MARKET, state, queue, web3 = mockW
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
   return (
-    <WrappedLendingContext.Provider value={lending}>
+    <TestLendingProvider value={lending}>
       <SelectedMarketContext.Provider
         value={{
           selectedMarket: [StateType.Hydrated, market],
@@ -182,7 +185,7 @@ function homeElement({ lending, market = USDC_MARKET, state, queue, web3 = mockW
           />
         </ActionQueueContext.Provider>
       </SelectedMarketContext.Provider>
-    </WrappedLendingContext.Provider>
+    </TestLendingProvider>
   );
 }
 

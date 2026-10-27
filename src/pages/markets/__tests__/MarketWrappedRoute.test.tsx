@@ -78,6 +78,7 @@ function wrappedLending(): WrappedLending {
     retry: jest.fn(),
     action: STANDARD_LENDING.action,
     write: STANDARD_LENDING.write,
+    submission: STANDARD_LENDING.submission,
   };
 }
 

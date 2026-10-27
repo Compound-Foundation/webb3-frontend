@@ -70,11 +70,19 @@ export function planQueuedExecution(
 }
 
 /**
- * Why the amount form refuses a base supply or withdrawal on the wrapped route, as the form shows
- * it, or undefined when it can be queued. Only a wallet on another network is let through: Submit
- * asks the wallet to switch first, as it does for direct actions.
+ * Why the amount form refuses a base supply or withdrawal on `route`, as the form shows it, or
+ * undefined when it can be queued. A closed release control is named first: the route reports a
+ * wallet on another network before it, and that wallet would otherwise queue an action the control
+ * refuses. Only a wallet on another network is let through: Submit asks the wallet to switch first,
+ * as it does for direct actions.
  */
-export function wrappedEntryBlockLabel(eligibility: Eligibility, type: 'supply' | 'withdraw'): string | undefined {
+export function wrappedEntryBlockLabel(
+  route: Extract<LendingRoute, { kind: 'wrapped' }>,
+  type: 'supply' | 'withdraw'
+): string | undefined {
+  const isReleased = type === 'supply' ? route.market?.isDepositEnabled : route.market?.isExitEnabled;
+  if (isReleased === false) return type === 'supply' ? 'Supply Not Open Yet' : 'Withdrawals Not Open Yet';
+  const eligibility: Eligibility = type === 'supply' ? route.deposit : route.exit;
   if (eligibility.isEligible) return undefined;
   switch (eligibility.reason) {
     case 'wrong-chain':

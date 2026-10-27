@@ -4,7 +4,7 @@ import {
   HARDCODED_WRAPPED_LENDING_SOURCE,
   WrappedMarketRegistry,
 } from '@constants/wrappedMarkets';
-import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
+import { Eligibility, LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { MAX_UINT256 } from '@helpers/numbers';
 import {
   directActionsForRoute,
@@ -184,30 +184,60 @@ describe('isWrapperRouted and planQueuedExecution', () => {
 });
 
 describe('wrappedEntryBlockLabel', () => {
+  type WrappedRoute = Extract<LendingRoute, { kind: 'wrapped' }>;
+  const OPEN_ROUTE = routeFor(WRAPPED_MARKETS[0].comet) as WrappedRoute;
+  /** The open route with `eligibility` for both actions. */
+  const routeWith = (eligibility: Eligibility): WrappedRoute => ({
+    ...OPEN_ROUTE,
+    deposit: eligibility,
+    exit: eligibility,
+  });
+
   it('lets the amount be queued when the action is eligible, or only waits for a network switch', () => {
-    expect(wrappedEntryBlockLabel({ isEligible: true }, 'supply')).toBeUndefined();
-    expect(wrappedEntryBlockLabel({ isEligible: false, reason: 'wrong-chain', requiredChainId: 1 }, 'withdraw')).toBe(
-      undefined
-    );
+    expect(wrappedEntryBlockLabel(OPEN_ROUTE, 'supply')).toBeUndefined();
+    expect(
+      wrappedEntryBlockLabel(routeWith({ isEligible: false, reason: 'wrong-chain', requiredChainId: 1 }), 'withdraw')
+    ).toBe(undefined);
   });
 
   it('names closed release controls', () => {
-    expect(wrappedEntryBlockLabel({ isEligible: false, reason: 'deposits-disabled' }, 'supply')).toBe(
-      'Supply Not Open Yet'
-    );
-    expect(wrappedEntryBlockLabel({ isEligible: false, reason: 'exits-disabled' }, 'withdraw')).toBe(
-      'Withdrawals Not Open Yet'
-    );
+    const closed = routeFor(
+      WRAPPED_MARKETS[0].comet,
+      ANCHORAGE_CONNECTOR_ID,
+      buildWrappedMarketRegistry(HARDCODED_WRAPPED_LENDING_SOURCE)
+    ) as WrappedRoute;
+
+    expect(wrappedEntryBlockLabel(closed, 'supply')).toBe('Supply Not Open Yet');
+    expect(wrappedEntryBlockLabel(closed, 'withdraw')).toBe('Withdrawals Not Open Yet');
+  });
+
+  it('names closed release controls for a wallet on another network too', () => {
+    const live = { ...session(ANCHORAGE_CONNECTOR_ID), chainId: 8453 };
+    const lookup = buildWrappedMarketRegistry(HARDCODED_WRAPPED_LENDING_SOURCE).lookup(1, WRAPPED_MARKETS[1].comet);
+    if (lookup.status !== 'valid') throw new Error('the mapping must be valid');
+    const route = resolveLendingRoute({
+      market: { chainId: 1, cometAddress: WRAPPED_MARKETS[1].comet },
+      session: live,
+      conflictedRdns: new Set(),
+      validation: { key: wrappedRouteKey(lookup.market, live), status: 'matched' },
+      registry: buildWrappedMarketRegistry(HARDCODED_WRAPPED_LENDING_SOURCE),
+    }) as WrappedRoute;
+
+    expect(route.deposit).toMatchObject({ isEligible: false, reason: 'wrong-chain' });
+    expect(wrappedEntryBlockLabel(route, 'supply')).toBe('Supply Not Open Yet');
+    expect(wrappedEntryBlockLabel(route, 'withdraw')).toBe('Withdrawals Not Open Yet');
   });
 
   it('names a failed wrapper check, screening and a pending check', () => {
     for (const reason of ['not-canonical', 'asset-mismatch', 'metadata-mismatch', 'validation-failed'] as const) {
-      expect(wrappedEntryBlockLabel({ isEligible: false, reason }, 'supply')).toBe('Unavailable For This Market');
+      expect(wrappedEntryBlockLabel(routeWith({ isEligible: false, reason }), 'supply')).toBe(
+        'Unavailable For This Market'
+      );
     }
-    expect(wrappedEntryBlockLabel({ isEligible: false, reason: 'screening' }, 'supply')).toBe(
+    expect(wrappedEntryBlockLabel(routeWith({ isEligible: false, reason: 'screening' }), 'supply')).toBe(
       'Address Not Cleared By Screening'
     );
-    expect(wrappedEntryBlockLabel({ isEligible: false, reason: 'validation-pending' }, 'withdraw')).toBe(
+    expect(wrappedEntryBlockLabel(routeWith({ isEligible: false, reason: 'validation-pending' }), 'withdraw')).toBe(
       'Checking Your Wallet And This Market'
     );
   });

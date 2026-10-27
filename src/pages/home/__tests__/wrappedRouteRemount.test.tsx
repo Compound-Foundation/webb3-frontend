@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
-import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { Theme } from '@hooks/useThemeManager';
@@ -13,6 +13,7 @@ import { ActionQueue, BaseAssetWithAccountState, CometState, MarketData, Selecte
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
+import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
 
 // The masthead renders for real so the headline can be read. It also records the props Home
@@ -76,6 +77,7 @@ function wrappedLending(): WrappedLending {
     retry: jest.fn(),
     action: IDLE_WRAPPED_ACTION,
     write: IDLE_WRITE_WRAPPED_STATE,
+    submission: STANDARD_LENDING.submission,
   };
 }
 
@@ -137,7 +139,7 @@ function app({ isDashboard, state, web3 }: { isDashboard: boolean; state: CometS
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
   return (
-    <WrappedLendingContext.Provider value={wrappedLending()}>
+    <TestLendingProvider value={wrappedLending()}>
       <SelectedMarketContext.Provider value={selectedMarketData}>
         <ActionQueueContext.Provider value={actionQueue()}>
           <div id="overlay" />
@@ -157,7 +159,7 @@ function app({ isDashboard, state, web3 }: { isDashboard: boolean; state: CometS
           )}
         </ActionQueueContext.Provider>
       </SelectedMarketContext.Provider>
-    </WrappedLendingContext.Provider>
+    </TestLendingProvider>
   );
 }
 

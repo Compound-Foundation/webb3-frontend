@@ -405,6 +405,21 @@ describe('validateAddingAction with base lending through the wrapper', () => {
     ).toEqual([false, 'Submit Supply And Withdrawal Separately']);
   });
 
+  it('refuses a wrapped supply while the account borrows directly, even after a queued repay', () => {
+    // The wrapper's steps go before the direct actions, so a supply could spend what the repay needs.
+    const borrower = noAllowance({ balance: -1_000_000_000n });
+    const repayAll = mockBaseAction({ actionType: ActionType.Repay, amount: MAX_UINT256 });
+
+    expect(validateAddingAction(borrower, collateralAssetsPre(), [], supply(1_000_000n), OPEN)).toEqual([
+      false,
+      'Repay Your Borrow First, Separately',
+    ]);
+    expect(validateAddingAction(borrower, collateralAssetsPre(), [repayAll], supply(1_000_000n), OPEN)).toEqual([
+      false,
+      'Repay Your Borrow First, Separately',
+    ]);
+  });
+
   it('rejects a repay above the debt, whose excess would become a direct supply', () => {
     const result = validateAddingAction(
       mockBaseAsset({ balance: -10000000000n }),

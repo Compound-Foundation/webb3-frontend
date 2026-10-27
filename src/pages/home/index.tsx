@@ -5,7 +5,7 @@ import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
-import { useWrappedLending } from '@contexts/WrappedLendingContext';
+import { SubmissionRecord, submissionScope, useWrappedLending } from '@contexts/WrappedLendingContext';
 import {
   ActionRules,
   isSameToken,
@@ -28,7 +28,7 @@ import {
 } from '@helpers/queuedExecution';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { SendWithdrawnError } from '@helpers/walletErrors';
-import { isDirectExecution, WrappedActionDraft, WrappedExecutionError } from '@helpers/wrappedActions';
+import { isDirectExecution, WrappedExecutionError } from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
   isSubmissionRefused,
@@ -63,7 +63,7 @@ import {
 } from '@types';
 
 import ActionModal from './components/ActionModal';
-import QueuedSubmissionModal, { QueuedSubmission } from './components/ActionModal/QueuedSubmissionModal';
+import QueuedSubmissionModal from './components/ActionModal/QueuedSubmissionModal';
 import AssetRow from './components/AssetRow';
 import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadNotice, MastheadState } from './components/Masthead';
@@ -77,18 +77,16 @@ const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.nam
 // record is dropped with its state.
 const cometStateProvenance = new WeakMap<CometState, CometStateWithMarket>();
 
-/** A queue being submitted through the wrapper, and the visit it belongs to. */
-type SubmissionRecord = QueuedSubmission & {
-  /** The visit key it was started in. Another visit never shows it or acts on it. */
-  key: string;
-  /**
-   * The lifecycle's state when the submission started. It belongs to an earlier review, so the
-   * submission never takes a step, or a completion, from it.
-   */
-  stateBefore: WrappedActionState;
-  /** The draft and step the user hid the dialog for while it was being signed. */
-  hiddenWhileSigning?: { draft: WrappedActionDraft; stepIndex: number };
-};
+/**
+ * Whether a stopped wrapper action's last step can still go through: the wallet answered with an
+ * error after it may have sent the request, or the transaction was sent and can no longer be
+ * followed. A reverted or replaced step did not execute, and a refusal or a check sent nothing.
+ */
+function mayStillExecute(state: Extract<WrappedActionState, { phase: 'stopped' }>): boolean {
+  const lastIndex = state.draft.steps.length - 1;
+  const status = state.steps[lastIndex]?.status;
+  return state.stepIndex === lastIndex && (status === 'provider-failure' || status === 'unresolved');
+}
 
 /** What the masthead says about a wrapped position it cannot show. */
 function unavailableNotice(reason: WriteBlockReason, reload: () => void): MastheadNotice {
@@ -226,15 +224,7 @@ const Home = ({
   // render, so a reconnect with the same account and connector does too. A callback kept from an
   // earlier visit, even one to the same account and market, starts no write. It can open or close
   // only a dialog of its own visit, which is never shown.
-  const visitIdentity = [
-    web3.write.account?.toLowerCase() ?? '',
-    web3.write.connector?.uid ?? '',
-    web3.write.status,
-    web3.write.chainId ?? '',
-    selectedMarketIdentity === undefined
-      ? ''
-      : `${selectedMarketIdentity.chainId}:${selectedMarketIdentity.cometAddress.toLowerCase()}`,
-  ].join('|');
+  const visitIdentity = submissionScope(web3.write, selectedMarketIdentity);
   const visit = useRef({ identity: visitIdentity, count: 0 });
   if (visit.current.identity !== visitIdentity) {
     visit.current = { identity: visitIdentity, count: visit.current.count + 1 };
@@ -289,16 +279,17 @@ const Home = ({
     if (openDialog !== undefined && openDialog.key !== visitKey) setOpenDialog(undefined);
   }, [openDialog, visitKey]);
 
-  // A queue submitted through the wrapper belongs to its visit, as a dialog does. A change of
-  // account, connector, connection status, wallet network or market drops it in the same render,
-  // and the wrapper action lifecycle discards its draft for the same change.
-  const [submissionRecord, setSubmissionRecord] = useState<SubmissionRecord>();
-  const submission = submissionRecord?.key === visitKey ? submissionRecord : undefined;
+  // A queue submitted through the wrapper belongs to its scope: the account, connector, connection
+  // status, wallet network and market. App keeps it beside the wrapper action lifecycle, so it
+  // survives a visit to another page. A change of scope drops it in the same render, and the
+  // lifecycle discards its draft for the same change.
+  const submissionStore = wrappedLending.submission;
+  const submission = submissionStore.record?.scope === visitIdentity ? submissionStore.record : undefined;
+  const setSubmissionRecord = (record: SubmissionRecord | undefined) => submissionStore.setRecord(() => record);
   const liveSubmission = useRef(submission);
   liveSubmission.current = submission;
-  useEffect(() => {
-    if (submissionRecord !== undefined && submissionRecord.key !== visitKey) setSubmissionRecord(undefined);
-  }, [submissionRecord, visitKey]);
+  // While a submission is in progress, the queue it was planned from cannot change.
+  const isQueueLocked = () => liveSubmission.current !== undefined;
   // The lifecycle's state, when it belongs to this submission. Until the submission's review
   // starts, the lifecycle can still show an earlier review, which this submission never acts on.
   const lifecycleState = wrappedAction.state;
@@ -324,11 +315,18 @@ const Home = ({
   })();
   const submissionState: WrappedActionState = isSubmissionState ? lifecycleState : { phase: 'idle' };
   // Once the wrapper action confirms, it leaves the queue. The direct actions stay until they are
-  // submitted. A wrapper action that stops, or is closed, stays queued.
+  // submitted. A wrapper action that stops before its last step was sent, or is closed, stays queued.
+  // One that stops at its last step in a state where it can still go through leaves the queue too,
+  // so it is not submitted twice.
   useEffect(() => {
-    if (submission === undefined || submission.isWrapperDone || submissionState.phase !== 'complete') return;
-    removeAction(submission.wrapper.action);
-    setSubmissionRecord({ ...submission, isWrapperDone: true });
+    if (submission === undefined || submission.isWrapperDone || submission.mayHaveExecuted) return;
+    if (submissionState.phase === 'complete') {
+      removeAction(submission.wrapper.action);
+      setSubmissionRecord({ ...submission, isWrapperDone: true });
+    } else if (submissionState.phase === 'stopped' && mayStillExecute(submissionState)) {
+      removeAction(submission.wrapper.action);
+      setSubmissionRecord({ ...submission, mayHaveExecuted: true });
+    }
   }, [submission, submissionState]);
 
   let assetRows: ReactNode[];
@@ -442,8 +440,8 @@ const Home = ({
           : wrappedWithdrawalLimits(wrappedPosition, directBaseAsset.balanceOfComet);
       actionRules = {
         wrappedBase: {
-          supplyBlockedReason: wrappedEntryBlockLabel(lendingRoute.deposit, 'supply'),
-          withdrawBlockedReason: wrappedEntryBlockLabel(lendingRoute.exit, 'withdraw'),
+          supplyBlockedReason: wrappedEntryBlockLabel(lendingRoute, 'supply'),
+          withdrawBlockedReason: wrappedEntryBlockLabel(lendingRoute, 'withdraw'),
           maxPartialWithdrawal: limits?.maxPartialCash,
           canWithdrawAll: limits?.canExitFully ?? false,
         },
@@ -647,7 +645,7 @@ const Home = ({
               wrapper.request.kind === 'full' ? wrappedPosition?.fullExitCash : undefined
             );
       setSubmissionRecord({
-        key: visitKey,
+        scope: visitIdentity,
         wrapper,
         directCount,
         refusal,
@@ -722,9 +720,11 @@ const Home = ({
         isMixedSupply,
         notice,
         onWithdrawAction: (pendingAction?: PendingAction) => {
+          if (isQueueLocked()) return;
           setPendingAction(pendingAction);
         },
         onSupplyAction: (pendingAction?: PendingAction) => {
+          if (isQueueLocked()) return;
           if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
             setPendingAction(pendingAction);
             setActionModalState(undefined);
@@ -758,12 +758,14 @@ const Home = ({
         isRewardsLoading,
         transaction: blockingTransaction,
         onClearClicked: () => {
+          if (isQueueLocked()) return;
           clearActions();
         },
         onCompareClicked: () => {
           setCompare(!compare);
         },
         onDeleteAction: (action: Action) => {
+          if (isQueueLocked()) return;
           removeAction(action);
         },
         onDripClicked: () => {
@@ -771,6 +773,7 @@ const Home = ({
           writeState.drip(market, directBaseAsset.address);
         },
         onSelectAction: (action: Action) => {
+          if (isQueueLocked()) return;
           setPendingAction(getPendingActionFromAction(action, updatedDataPostActions.baseAsset));
         },
         onPendingActionCancel: () => {
@@ -778,8 +781,8 @@ const Home = ({
         },
         onPendingActionConfirm: (amount: bigint) => {
           // The amount form keeps this callback. One from an earlier visit asks for no approval or
-          // network switch, and queues nothing.
-          if (isFromEarlierVisit()) return;
+          // network switch, and queues nothing. Nor does one during a submission.
+          if (isFromEarlierVisit() || isQueueLocked()) return;
           if (pendingAction !== undefined) {
             const action = getActionFromPendingAction(pendingAction, amount);
             const confirmAction = () => {
