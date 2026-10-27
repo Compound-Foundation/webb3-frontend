@@ -21,6 +21,7 @@ import { BINDING_NAME } from '../harness/injectedProvider';
 const FAKE_TOKEN = 'not-the-run-token';
 
 type Received = { method: string; url: string };
+type Detailed = Received & { body: string; contentType?: string; authorization?: string };
 
 /** A loopback server that records each request and answers `answer(url)`, or 200 with the URL. */
 async function recordingServer(
@@ -36,6 +37,45 @@ async function recordingServer(
     }
     response.writeHead(200, { 'content-type': 'text/html', 'access-control-allow-origin': '*' });
     response.end(`served ${request.url}`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  return {
+    origin,
+    received,
+    close: () => new Promise<void>((resolve) => (server.closeAllConnections(), server.close(() => resolve()))),
+  };
+}
+
+/** A loopback server that records each request's method, URL, body, content type and Authorization header. */
+async function detailedServer(
+  answer: (url: string) => { status: number; location: string } | undefined = () => undefined
+) {
+  const received: Detailed[] = [];
+  const server = http.createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => {
+      received.push({
+        method: request.method ?? '',
+        url: request.url ?? '',
+        body: Buffer.concat(chunks).toString(),
+        contentType: request.headers['content-type'],
+        authorization: request.headers.authorization,
+      });
+      const redirect = answer(request.url ?? '');
+      if (redirect !== undefined) {
+        response.writeHead(redirect.status, { location: redirect.location });
+        return response.end();
+      }
+      response.writeHead(200, {
+        'content-type': 'text/html',
+        'access-control-allow-origin': '*',
+        'access-control-allow-headers': '*',
+        'access-control-allow-methods': '*',
+      });
+      response.end(`served ${request.url}`);
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -137,6 +177,181 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
         'websocket wss://example.com/',
       ])
     );
+  });
+
+  test('no worker starts in a harness page or frame, so no worker reaches a denied server or raw anvil', async ({
+    page,
+    manifest,
+    fork,
+  }) => {
+    // A server outside the allowlist that records every HTTP request and every WebSocket upgrade it gets.
+    const denied = await recordingServer();
+    const upgrades: string[] = [];
+    const deniedServer = http.createServer();
+    deniedServer.on('upgrade', (request, socket) => {
+      upgrades.push(request.url ?? '');
+      socket.destroy();
+    });
+    deniedServer.on('request', (request, response) => {
+      upgrades.push(`http ${request.url}`);
+      response.end();
+    });
+    await new Promise<void>((resolve) => deniedServer.listen(0, '127.0.0.1', () => resolve()));
+    const deniedWebSocket = `ws://127.0.0.1:${(deniedServer.address() as { port: number }).port}/worker`;
+    const anvilWebSocket = manifest.fork.localUrl.replace('http:', 'ws:');
+    const target = '0x000000000000000000000000000000000000a304';
+    const before = await fork.getBalance({ address: target });
+    try {
+      await openApp(page);
+      // What a worker would try: a WebSocket and a fetch to the denied server, and a WebSocket and a fetch that
+      // administer raw anvil.
+      const workerSource = `
+        const setBalance = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'anvil_setBalance', params: ['${target}', '0x123'] });
+        const ws = (url, message) => { try { const s = new WebSocket(url); s.onopen = () => s.send(message); } catch (e) {} };
+        ws('${deniedWebSocket}', 'SYNTHETIC_WORKER_PROBE');
+        ws('${anvilWebSocket}', setBalance);
+        fetch('${denied.origin}/worker-fetch', { method: 'POST', body: 'x' }).catch(() => {});
+        fetch('${manifest.fork.localUrl}', { method: 'POST', headers: { 'content-type': 'application/json' }, body: setBalance }).catch(() => {});
+        try { const x = new XMLHttpRequest(); x.open('POST', '${denied.origin}/worker-xhr'); x.send('x'); } catch (e) {}
+        postMessage('started');
+      `;
+      // Tries to start a dedicated worker, a shared worker and, inside it, the same requests, in one context.
+      const attempt = async (frame: import('@playwright/test').Frame) =>
+        frame.evaluate(async (source) => {
+          const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+          const outcomes: string[] = [];
+          const started = (start: () => { addEventListener: (type: string, listener: () => void) => void }) =>
+            new Promise<string>((resolve) => {
+              try {
+                const worker = start();
+                worker.addEventListener('message', () => resolve('started'));
+                worker.addEventListener('error', () => resolve('refused'));
+                setTimeout(() => resolve('no answer'), 3_000);
+              } catch (error) {
+                resolve(`refused: ${(error as Error).name}`);
+              }
+            });
+          outcomes.push(`dedicated ${await started(() => new Worker(url))}`);
+          outcomes.push(
+            `shared ${await started(() => {
+              const shared = new SharedWorker(url);
+              shared.port.start();
+              return shared.port as unknown as { addEventListener: (type: string, listener: () => void) => void };
+            })}`
+          );
+          return outcomes;
+        }, workerSource);
+      const outcomes: Record<string, string[]> = { top: await attempt(page.mainFrame()) };
+      // Nested frames: same-origin (srcdoc), from another allowed origin (the screening stub), and documents a
+      // frame makes from `data:` and `blob:` URLs, which inherit the policy of the document that made them.
+      const frames = ['srcdoc-frame', 'other-origin-frame', 'data-frame', 'blob-frame'];
+      await page.evaluate((extensionUrl) => {
+        const add = (name: string, set: (frame: HTMLIFrameElement) => void) => {
+          const frame = document.createElement('iframe');
+          frame.name = name;
+          set(frame);
+          document.body.append(frame);
+        };
+        add('srcdoc-frame', (frame) => (frame.srcdoc = '<p>nested</p>'));
+        add('other-origin-frame', (frame) => (frame.src = extensionUrl));
+        add('data-frame', (frame) => (frame.src = 'data:text/html,<p>data</p>'));
+        const blob = new Blob(['<p>blob</p>'], { type: 'text/html' });
+        add('blob-frame', (frame) => (frame.src = URL.createObjectURL(blob)));
+      }, manifest.services.extensionUrl);
+      for (const name of frames) {
+        await expect.poll(() => page.frame({ name })?.url() ?? '').not.toBe('');
+        await page.frame({ name })?.waitForLoadState();
+        outcomes[name] = await attempt(page.frame({ name }) as import('@playwright/test').Frame);
+      }
+      await test.info().attach('worker-outcomes.json', { body: JSON.stringify(outcomes, null, 2) });
+      await page.waitForTimeout(2_000);
+      // What reached the network comes first, then that no worker started at all.
+      expect({ upgrades, http: denied.received, anvilBalance: await fork.getBalance({ address: target }) }).toEqual({
+        upgrades: [],
+        http: [],
+        anvilBalance: before,
+      });
+      for (const each of Object.values(outcomes).flat()) expect(each).not.toMatch(/started$/);
+    } finally {
+      deniedServer.closeAllConnections();
+      await new Promise<void>((resolve) => deniedServer.close(() => resolve()));
+      await denied.close();
+    }
+  });
+
+  test('a redirect hop follows browser rules: the method, body and credentials it keeps or drops', async ({
+    browser,
+  }) => {
+    const other = await detailedServer();
+    const start = await detailedServer((url) => {
+      if (url === '/post-303') return { status: 303, location: `${other.origin}/v3/market/after-303` };
+      if (url === '/post-302') return { status: 302, location: `${other.origin}/v3/market/after-302` };
+      if (url === '/post-301') return { status: 301, location: `${other.origin}/v3/market/after-301` };
+      if (url === '/put-301') return { status: 301, location: '/after-put-301' };
+      if (url === '/post-307') return { status: 307, location: '/after-307' };
+      if (url === '/post-308-cross') return { status: 308, location: `${other.origin}/any/after-308` };
+      return undefined;
+    });
+    const blocked: BlockedRequest[] = [];
+    const context = await browser.newContext({ serviceWorkers: 'block' });
+    try {
+      await applyEgress(
+        context,
+        {
+          http: new Set([start.origin, `${other.origin}/any`]),
+          readOnly: new Set([`${other.origin}/v3/market`]),
+          webSocket: new Set(),
+        },
+        blocked
+      );
+      const page = await context.newPage();
+      await page.goto(`${start.origin}/`);
+      await page.evaluate(async () => {
+        const send = (url: string, method: string) =>
+          fetch(url, {
+            method,
+            headers: { 'content-type': 'application/json', authorization: 'Bearer SYNTHETIC_ONLY' },
+            body: '{"private":"SYNTHETIC_BODY"}',
+          }).catch(() => undefined);
+        for (const url of ['/post-303', '/post-302', '/post-301', '/post-307', '/post-308-cross'])
+          await send(url, 'POST');
+        await send('/put-301', 'PUT');
+      });
+      const body = '{"private":"SYNTHETIC_BODY"}';
+      const hop = (method: string, url: string, isBodyKept: boolean, authorization?: string) => ({
+        method,
+        url,
+        body: isBodyKept ? body : '',
+        contentType: isBodyKept ? 'application/json' : undefined,
+        authorization,
+      });
+      const recorded = (list: Detailed[]) =>
+        list.map(({ method, url, body, contentType, authorization }) => ({
+          method,
+          url,
+          body,
+          contentType,
+          authorization,
+        }));
+      // Same origin: a 307 keeps the method, body and Authorization, and a 301 keeps a PUT as it is.
+      expect(recorded(start.received.filter((each) => each.url.startsWith('/after')))).toEqual([
+        hop('POST', '/after-307', true, 'Bearer SYNTHETIC_ONLY'),
+        hop('PUT', '/after-put-301', true, 'Bearer SYNTHETIC_ONLY'),
+      ]);
+      // Another origin: a 303, and a 302 or 301 of a POST, become a GET with no body and no body headers. No hop
+      // to another origin carries the Authorization header. A 308 keeps the POST and its body.
+      expect(recorded(other.received)).toEqual([
+        hop('GET', '/v3/market/after-303', false),
+        hop('GET', '/v3/market/after-302', false),
+        hop('GET', '/v3/market/after-301', false),
+        hop('POST', '/any/after-308', true),
+      ]);
+      expect(blocked).toEqual([]);
+    } finally {
+      await context.close();
+      await start.close();
+      await other.close();
+    }
   });
 
   test('egress checks every redirect hop, and allows only GET and HEAD under a read-only prefix', async ({

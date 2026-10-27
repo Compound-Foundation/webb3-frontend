@@ -20,7 +20,7 @@ import path from 'node:path';
 import { chromium } from '@playwright/test';
 
 import { COMET_USDC, USDC } from './contracts';
-import { applyEgress, BROWSER_ARGS, withoutQuery, type BlockedRequest } from './egress';
+import { allowLoopbackWebSocket, applyEgress, withoutQuery, type BlockedRequest } from './egress';
 import {
   createRedactor,
   failedToStartOnUpstream,
@@ -557,10 +557,11 @@ async function warmUp({
   forwarded: () => number;
   runDir: string;
 }): Promise<{ mode: 'node-trusts-harness-certificate'; browserVersion: string }> {
-  const browser = await chromium.launch({ args: BROWSER_ARGS });
+  const browser = await chromium.launch();
   try {
     {
       const context = await browser.newContext({ serviceWorkers: 'block' });
+      await allowLoopbackWebSocket(context, devOrigin);
       const blocked: BlockedRequest[] = [];
       await applyEgress(
         context,

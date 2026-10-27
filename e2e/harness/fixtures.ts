@@ -14,7 +14,7 @@ import { createPublicClient, http, type PublicClient } from 'viem';
 import { mainnet } from 'viem/chains';
 
 import { ControlClient } from './controlClient';
-import { applyEgress, BROWSER_ARGS, type BlockedRequest } from './egress';
+import { allowLoopbackWebSocket, applyEgress, type BlockedRequest } from './egress';
 import { BINDING_NAME, installHarnessProvider, PROVIDER_ICON, PROVIDER_NAME, PROVIDER_RDNS } from './injectedProvider';
 import type { Manifest } from './services';
 import { v3ApiReadPrefixes } from './settings';
@@ -81,6 +81,7 @@ export async function harnessContext(
     serviceWorkers: 'block',
     viewport: { width: 1440, height: 1000 },
   });
+  if (appOrigin === manifest.app.devOrigin) await allowLoopbackWebSocket(context, appOrigin);
   await applyEgress(
     context,
     {
@@ -125,7 +126,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     async ({ playwright, manifest, headless }, use) => {
       // The egress route fetches each browser request in Node, so this worker trusts the harness certificate.
       trustHarnessCertificate(fs.readFileSync(manifest.tls.certPath, 'utf8'));
-      const browser = await playwright.chromium.launch({ headless, args: BROWSER_ARGS });
+      const browser = await playwright.chromium.launch({ headless });
       await use(browser);
       await browser.close();
     },
