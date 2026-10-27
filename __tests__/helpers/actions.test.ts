@@ -394,6 +394,32 @@ describe('validateAddingAction with base lending through the wrapper', () => {
     ]);
   });
 
+  it('allows a full exit the wrapper can pay, though the gross position exceeds the market cash', () => {
+    // A gross position of 2,500.125000 less the wrapper's buffer of 0.000003 pays 2,500.124997,
+    // which is exactly the market's cash. The wrapper pays the exit; Comet never pays the gross.
+    const position = noAllowance({ balance: 2_500_125_000n, balanceOfComet: 2_500_124_997n });
+    const payable: ActionRules = {
+      wrappedBase: { ...OPEN_BASE, maxPartialWithdrawal: 2_500_124_997n, canWithdrawAll: true },
+    };
+
+    expect(validateAddingAction(position, collateralAssetsPre(), [], withdraw(MAX_UINT256), payable)).toBe('ok');
+    expect(validateAddingAction(position, collateralAssetsPre(), [], withdraw(2_500_124_997n), payable)).toBe('ok');
+    // A direct withdrawal of the same position still needs the gross amount in the market.
+    expect(validateAddingAction(position, collateralAssetsPre(), [], withdraw(MAX_UINT256))).toEqual([
+      false,
+      'Not Enough Market Liquidity',
+    ]);
+  });
+
+  it('still refuses a wrapped withdrawal while the account borrows directly', () => {
+    const borrower = noAllowance({ balance: -1_000_000_000n });
+
+    expect(validateAddingAction(borrower, collateralAssetsPre(), [], withdraw(MAX_UINT256), OPEN)).toEqual([
+      false,
+      'Must Repay Borrow First',
+    ]);
+  });
+
   it('refuses a supply and a withdrawal in one queue', () => {
     const withBalance = noAllowance({ balance: 2_500_000_000n });
 

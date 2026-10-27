@@ -339,9 +339,14 @@ export function validateAddingAction(
 
       const isMax = amount === MAX_UINT256;
       const mustRepayBorrow = borrowBalance > 0n;
-      const amountExceedsBalance = !isMax && amount > earnBalance;
+      // On the wrapped route the wrapper pays the withdrawal, and `wrappedBaseProblem` has checked it
+      // against what the wrapper pays now, net of its buffer and within the market's cash. The
+      // gross balance is never withdrawn from Comet, so it is not compared with the market's cash.
+      const isWrapped = rules.wrappedBase !== undefined;
+      const amountExceedsBalance = !isWrapped && !isMax && amount > earnBalance;
       const notEnoughLiquidity =
-        (isMax && earnBalance > baseAsset.balanceOfComet) || (!isMax && amount > baseAsset.balanceOfComet);
+        !isWrapped &&
+        ((isMax && earnBalance > baseAsset.balanceOfComet) || (!isMax && amount > baseAsset.balanceOfComet));
       if (mustRepayBorrow) {
         return [false, 'Must Repay Borrow First'];
       } else if (amountExceedsBalance) {
