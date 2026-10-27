@@ -39,7 +39,7 @@ import {
 import { BINDING_NAME, installHarnessProvider, PROVIDER_ICON, PROVIDER_NAME, PROVIDER_RDNS } from './injectedProvider';
 import { RUNS_DIR } from './paths';
 import { startRpcProxy } from './rpcProxy';
-import { recoverKilledRuns, type ProcessRecord } from './runRecords';
+import { cleanUpSynchronously, recoverKilledRuns, type ProcessRecord } from './runRecords';
 import { startScreeningStub } from './screeningStub';
 import { findSecrets, outputsUnder, registerSecret, registerSecretPattern } from './secrets';
 import { v3ApiReadPrefixes, v3ApiUrl } from './settings';
@@ -135,6 +135,7 @@ export async function startServices({
   const recovered = recoverKilledRuns();
   const stops: Stop[] = [];
   let anvilChild: ChildProcess | undefined;
+  let anvilCwd: string | undefined;
   let privateDir: string | undefined;
   let stopped: Promise<string[]> | undefined;
   /** The production builds and `dist/`, scanned for the run's secrets before the private directory goes. */
@@ -185,12 +186,7 @@ export async function startServices({
     })();
     return stopped;
   };
-  const exitHandler = () => {
-    // Synchronous last resort: the async stop may not have run. It kills through the child's handle, so
-    // a reused PID is never signalled.
-    if (anvilChild !== undefined && !hasExited(anvilChild)) anvilChild.kill('SIGKILL');
-    if (privateDir !== undefined) fs.rmSync(privateDir, { recursive: true, force: true });
-  };
+  const exitHandler = () => cleanUpSynchronously({ anvil: anvilChild, anvilCwd, privateDir });
   // Playwright handles SIGINT itself and runs the teardown; the exit handler covers a SIGINT during
   // start-up. Playwright's runner does not handle SIGTERM, so this stops the services and then exits, as
   // Node would have without a listener.
@@ -266,11 +262,22 @@ export async function startServices({
           target,
           log: (text) => writeLog(anvilLog, text),
           redactor,
-          onChild: (spawned) => {
+          onChild: (spawned, directory) => {
             child = spawned;
             anvilChild = spawned;
-            addStop({ name: 'anvil', run: () => stopChild(spawned) });
-            writeRecord({ anvilPid: spawned.pid, upstreamProxyPort: Number(new URL(proxy.url).port) });
+            anvilCwd = directory;
+            addStop({
+              name: 'anvil',
+              run: async () => {
+                await stopChild(spawned);
+                fs.rmSync(directory, { recursive: true, force: true });
+              },
+            });
+            writeRecord({
+              anvilPid: spawned.pid,
+              upstreamProxyPort: Number(new URL(proxy.url).port),
+              anvilCwd: directory,
+            });
           },
         });
         void child;

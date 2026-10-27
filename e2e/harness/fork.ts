@@ -777,8 +777,9 @@ export type Fork = { child: ChildProcess; localUrl: string; port: number; pid: n
 
 /**
  * Starts anvil on 127.0.0.1, forked from `target` through the proxy at `upstreamUrl`, with no unlocked
- * account. anvil binds a free port itself, and the port is read from its output. `onChild` gets the child as
- * soon as it is spawned, so that cleanup can stop it whatever happens next.
+ * account. anvil binds a free port itself, and the port is read from its output. `onChild` gets the child and
+ * its working directory as soon as it is spawned, so that cleanup can stop it and remove the directory
+ * whatever happens next.
  */
 export async function startFork({
   anvil,
@@ -794,7 +795,7 @@ export async function startFork({
   target: ForkTarget;
   log: (text: string) => void;
   redactor: Redactor;
-  onChild: (child: ChildProcess) => void;
+  onChild: (child: ChildProcess, directory: string) => void;
   readyTimeoutMs?: number;
 }): Promise<Fork> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-browser-anvil-'));
@@ -830,7 +831,7 @@ export async function startFork({
     env: { PATH: process.env.PATH, HOME: process.env.HOME },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  onChild(child);
+  onChild(child, directory);
   const closed = new Promise((resolve) => child.once('close', resolve));
   closed.finally(() => fs.rmSync(directory, { recursive: true, force: true }));
   let boundPort: number | undefined;

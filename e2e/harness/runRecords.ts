@@ -1,6 +1,6 @@
 // The record of each run's processes, which lets a later run stop an anvil whose runner was killed with
 // SIGKILL and so could not stop it itself.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +8,20 @@ import path from 'node:path';
 import { RUNS_DIR } from './paths';
 
 /** The process record that lets a later run stop an anvil whose runner was killed. */
-export type ProcessRecord = { runnerPid: number; anvilPid?: number; upstreamProxyPort?: number; privateDir: string };
+export type ProcessRecord = {
+  runnerPid: number;
+  anvilPid?: number;
+  upstreamProxyPort?: number;
+  /** anvil's empty working directory, which anvil's own exit removes only when the runner lives on. */
+  anvilCwd?: string;
+  privateDir: string;
+};
+
+/** Whether `directory` is one the harness made under the system's temporary directory, with `prefix`. */
+const isHarnessDirectory = (directory: string | undefined, prefix: string): directory is string =>
+  directory !== undefined &&
+  path.dirname(directory) === os.tmpdir().replace(/\/$/, '') &&
+  path.basename(directory).startsWith(prefix);
 
 export const isAlive = (pid: number) => {
   try {
@@ -62,14 +75,36 @@ export function recoverKilledRuns(runsDir = RUNS_DIR): string[] {
         keepRecord = true;
       }
     }
-    if (
-      record.privateDir.startsWith(path.join(os.tmpdir(), 'cf-browser-wallet-')) &&
-      fs.existsSync(record.privateDir)
-    ) {
+    if (isHarnessDirectory(record.privateDir, 'cf-browser-wallet-') && fs.existsSync(record.privateDir)) {
       fs.rmSync(record.privateDir, { recursive: true, force: true });
       done.push(`removed the private directory of run ${run}`);
+    }
+    if (!keepRecord && isHarnessDirectory(record.anvilCwd, 'cf-browser-anvil-') && fs.existsSync(record.anvilCwd)) {
+      fs.rmSync(record.anvilCwd, { recursive: true, force: true });
+      done.push(`removed anvil's working directory of run ${run}`);
     }
     if (!keepRecord) fs.rmSync(file);
   }
   return done;
+}
+
+/**
+ * The exit handler's synchronous last resort, as when SIGINT ends the runner during start-up, before the
+ * global setup has returned its teardown: kills anvil through its handle, so a reused PID is never
+ * signalled, and removes anvil's working directory and the private directory. An asynchronous stop cannot
+ * run once the process is exiting.
+ */
+export function cleanUpSynchronously({
+  anvil,
+  anvilCwd,
+  privateDir,
+}: {
+  anvil: ChildProcess | undefined;
+  anvilCwd: string | undefined;
+  privateDir: string | undefined;
+}): void {
+  if (anvil !== undefined && anvil.exitCode === null && anvil.signalCode === null) anvil.kill('SIGKILL');
+  for (const directory of [anvilCwd, privateDir]) {
+    if (directory !== undefined) fs.rmSync(directory, { recursive: true, force: true });
+  }
 }
