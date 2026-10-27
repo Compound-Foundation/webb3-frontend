@@ -5,7 +5,13 @@ import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
-import { SubmissionRecord, submissionScope, useWrappedLending } from '@contexts/WrappedLendingContext';
+import {
+  queueScope,
+  SentWrapperAction,
+  SubmissionRecord,
+  submissionScope,
+  useWrappedLending,
+} from '@contexts/WrappedLendingContext';
 import {
   ActionRules,
   isSameToken,
@@ -288,8 +294,17 @@ const Home = ({
   const setSubmissionRecord = (record: SubmissionRecord | undefined) => submissionStore.setRecord(() => record);
   const liveSubmission = useRef(submission);
   liveSubmission.current = submission;
-  // While a submission is in progress, the queue it was planned from cannot change.
-  const isQueueLocked = () => liveSubmission.current !== undefined;
+  // The wrapper action a submission started belongs to the queue's scope, which leaves out the
+  // wallet's network. App follows it until its last step's outcome is known, after the submission
+  // itself is dropped or closed.
+  const sentScope = queueScope(web3.write, selectedMarketIdentity);
+  const sent = submissionStore.sent?.scope === sentScope ? submissionStore.sent : undefined;
+  const liveSent = useRef(sent);
+  liveSent.current = sent;
+  // While a submission is in progress, the queue it was planned from cannot change. Nor can it while
+  // the wrapper action it started may still be carried out, so the action is never offered again
+  // before it is known whether it executed.
+  const isQueueLocked = () => liveSubmission.current !== undefined || liveSent.current !== undefined;
   // The lifecycle's state, when it belongs to this submission. Until the submission's review
   // starts, the lifecycle can still show an earlier review, which this submission never acts on.
   const lifecycleState = wrappedAction.state;
@@ -652,6 +667,20 @@ const Home = ({
         isWrapperDone: false,
         stateBefore,
       });
+      const { route } = liveSession.current;
+      const account = web3.write.account?.toLowerCase();
+      const chainId = web3.write.chainId;
+      if (refusal !== undefined || route.kind !== 'wrapped' || route.market === undefined) return;
+      if (account === undefined || chainId === undefined) return;
+      const started: SentWrapperAction = {
+        scope: sentScope,
+        action: wrapper.action,
+        type: wrapper.type,
+        account,
+        chainId,
+        wrapperAddress: route.market.wrapperAddress,
+      };
+      submissionStore.setSent(started);
     };
 
     const submitQueue = () => {
@@ -832,9 +861,9 @@ const Home = ({
         },
         onSubmitClicked: () => {
           if (isFromEarlierVisit()) return;
-          // One submission at a time: a submission in progress, or one whose dialog is hidden while
-          // a step is signed, holds back another.
-          if (liveSubmission.current !== undefined) return;
+          // One submission at a time: a submission in progress, one whose dialog is hidden while a
+          // step is signed, or a wrapper action whose last step may still execute holds back another.
+          if (isQueueLocked()) return;
           setPendingAction(undefined);
           submitQueue();
         },

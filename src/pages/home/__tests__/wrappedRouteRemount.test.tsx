@@ -139,7 +139,7 @@ function app({ isDashboard, state, web3 }: { isDashboard: boolean; state: CometS
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
   return (
-    <TestLendingProvider value={wrappedLending()}>
+    <TestLendingProvider value={wrappedLending()} web3={web3} market={USDC_MARKET}>
       <SelectedMarketContext.Provider value={selectedMarketData}>
         <ActionQueueContext.Provider value={actionQueue()}>
           <div id="overlay" />

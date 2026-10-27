@@ -14,7 +14,7 @@ import { CurrencyContextProvider } from '@contexts/CurrencyContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { initializeContext, getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { useWeb3Context } from '@contexts/Web3Context';
-import { SubmissionRecord, submissionScope, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { queueScope, submissionScope, WrappedLendingContext } from '@contexts/WrappedLendingContext';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { estimateGasForActions, getKeyForActions } from '@helpers/gasEstimator';
 import { directActionsForRoute } from '@helpers/queuedExecution';
@@ -24,6 +24,7 @@ import { useGasEstimates } from '@hooks/useGasEstimates';
 import { useLendingRoute } from '@hooks/useLendingRoute';
 import { useRewardsState } from '@hooks/useRewardsState';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
+import { useSubmissionStore } from '@hooks/useSubmissionStore';
 import { useThemeManager } from '@hooks/useThemeManager';
 import { useTransactionManager } from '@hooks/useTransactionManager';
 import { useWrappedAction } from '@hooks/useWrappedAction';
@@ -134,31 +135,6 @@ function App({ Component, pageProps }: any) {
     readProvider: wrappedChainProvider,
     baseSymbol: selectedMarketState.selectedMarket[1]?.baseAsset.symbol,
   });
-  // The queued submission lives here, with the lifecycle, so it survives the dashboard's unmount. It
-  // belongs to its scope, and a change of scope drops it whichever page is shown, so a return to the
-  // same scope never brings back a submission from before the change.
-  const selectedMarket = selectedMarketState.selectedMarket[1];
-  const scope = submissionScope(
-    web3.write,
-    selectedMarket === undefined
-      ? undefined
-      : { chainId: selectedMarket.chainInformation.chainId, cometAddress: selectedMarket.marketAddress }
-  );
-  const [submissionRecord, setSubmissionRecord] = useState<SubmissionRecord>();
-  useEffect(() => {
-    setSubmissionRecord((current) => (current !== undefined && current.scope !== scope ? undefined : current));
-  }, [scope]);
-  const wrappedLending = {
-    route: lendingRoute,
-    position: wrappedPosition.state,
-    retry: wrappedPosition.retry,
-    action: wrappedAction,
-    write: wrappedWrite,
-    submission: {
-      record: submissionRecord?.scope === scope ? submissionRecord : undefined,
-      setRecord: setSubmissionRecord,
-    },
-  };
 
   const handleRequestNetworkSwitch = (fromChainId: number, toChainId: number, description?: string) => {
     setNetworkSwitchState({
@@ -248,6 +224,32 @@ function App({ Component, pageProps }: any) {
       preEstimateGas(actionsInQueue);
     }
   }, [transactions, selectedMarketState.selectedMarket[0], cometState[0], rewardsState[0], web3.write.chainId]);
+
+  // The queued submission and the wrapper action it started live here, with the lifecycle, so they
+  // survive the dashboard's unmount. The submission belongs to its scope, the wallet's network
+  // included, and a change of scope drops it whichever page is shown. The wrapper action it started
+  // is followed until its last step's outcome is known, across a change of network, and its queue
+  // entry is held until then.
+  const selectedMarket = selectedMarketState.selectedMarket[1];
+  const marketIdentity =
+    selectedMarket === undefined
+      ? undefined
+      : { chainId: selectedMarket.chainInformation.chainId, cometAddress: selectedMarket.marketAddress };
+  const submissionStore = useSubmissionStore({
+    scope: submissionScope(web3.write, marketIdentity),
+    queueScope: queueScope(web3.write, marketIdentity),
+    transactions,
+    settledTransactions,
+    removeAction: actionQueue.removeAction,
+  });
+  const wrappedLending = {
+    route: lendingRoute,
+    position: wrappedPosition.state,
+    retry: wrappedPosition.retry,
+    action: wrappedAction,
+    write: wrappedWrite,
+    submission: submissionStore,
+  };
 
   ActionQueueContextHelpers.initializeContext(actionQueue);
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();

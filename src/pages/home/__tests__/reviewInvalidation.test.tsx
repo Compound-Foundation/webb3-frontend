@@ -200,7 +200,7 @@ function homeElement({
     selectMarketByAddress: jest.fn(),
   };
   return (
-    <TestLendingProvider value={lending}>
+    <TestLendingProvider value={lending} web3={web3} market={market}>
       <SelectedMarketContext.Provider value={selectedMarketData}>
         <ActionQueueContext.Provider value={queue}>
           <Home

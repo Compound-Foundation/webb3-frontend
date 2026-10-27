@@ -160,7 +160,7 @@ function homeElement({ lending, market = USDC_MARKET, state, queue, web3 = mockW
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
   return (
-    <TestLendingProvider value={lending}>
+    <TestLendingProvider value={lending} web3={web3} market={market}>
       <SelectedMarketContext.Provider
         value={{
           selectedMarket: [StateType.Hydrated, market],

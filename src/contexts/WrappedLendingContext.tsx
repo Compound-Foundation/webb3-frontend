@@ -2,10 +2,11 @@ import { createContext, useContext } from 'react';
 
 import { LendingRoute } from '@helpers/lendingRoute';
 import type { QueuedWrapperAction } from '@helpers/queuedExecution';
-import type { WrappedActionDraft, WrappedBlockReason } from '@helpers/wrappedActions';
+import type { WrappedActionDraft, WrappedActionType, WrappedBlockReason } from '@helpers/wrappedActions';
 import { IDLE_WRAPPED_ACTION, WrappedActionController, WrappedActionState } from '@hooks/useWrappedAction';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
 import { IDLE_WRITE_WRAPPED_STATE, WriteWrappedState } from '@hooks/useWriteWrappedState';
+import type { Action } from '@types';
 
 /** A queue being submitted on the wrapped route: the wrapper action first, then the direct actions. */
 export type QueuedSubmission = {
@@ -37,6 +38,44 @@ export type SubmissionRecord = QueuedSubmission & {
 };
 
 /**
+ * A queued wrapper action that was started, from its start until what became of its last step is
+ * known. Its queue entry is held out of every submission meanwhile. A change of the wallet's network
+ * drops the submission, and the lifecycle ignores what its draft sent, but the last step can still
+ * have reached the wallet. Unless this record is kept, the entry stays queued after that step
+ * confirms, and the next submission sends it again.
+ */
+export type SentWrapperAction = {
+  /** The `queueScope` it was started in. A change of scope also resets the queue, entry included. */
+  scope: string;
+  /** The queue entry the wrapper action carries out. */
+  action: Action;
+  type: WrappedActionType;
+  /** The sender, in lower case. */
+  account: string;
+  chainId: number;
+  wrapperAddress: string;
+  /** The transaction manager's record of the last step, once the step reaches the manager. */
+  transactionId?: string;
+};
+
+/**
+ * The account, connector, connection status and market the queue belongs to. The wallet's network
+ * is not part of it, as it is not part of the queue's session, so a sent wrapper action is followed
+ * across a change of network.
+ */
+export function queueScope(
+  write: { account: string | undefined; connector?: { uid?: string }; status: string },
+  market: { chainId: number; cometAddress: string } | undefined
+): string {
+  return [
+    write.account?.toLowerCase() ?? '',
+    write.connector?.uid ?? '',
+    write.status,
+    market === undefined ? '' : `${market.chainId}:${market.cometAddress.toLowerCase()}`,
+  ].join('|');
+}
+
+/**
  * The account, connector, connection status, wallet network and market a submission belongs to. The
  * wrapper action lifecycle discards its draft when any of them changes, and so does the submission.
  */
@@ -54,13 +93,16 @@ export function submissionScope(
 }
 
 /**
- * The queued submission in progress. App keeps it with the lifecycle, so a submission survives the
- * dashboard's unmount: on return the dialog shows it again, and its completion still takes the wrapper
- * action out of the queue.
+ * The queued submission in progress, and the wrapper action it started. App keeps both with the
+ * lifecycle, so they survive the dashboard's unmount: on return the dialog shows the submission
+ * again, and its completion still takes the wrapper action out of the queue.
  */
 export type SubmissionStore = {
   record: SubmissionRecord | undefined;
   setRecord: (update: (current: SubmissionRecord | undefined) => SubmissionRecord | undefined) => void;
+  /** The wrapper action started from the queue, until what became of its last step is known. */
+  sent: SentWrapperAction | undefined;
+  setSent: (sent: SentWrapperAction | undefined) => void;
 };
 
 /**
@@ -85,7 +127,7 @@ export const STANDARD_LENDING: WrappedLending = Object.freeze({
   retry: () => undefined,
   action: IDLE_WRAPPED_ACTION,
   write: IDLE_WRITE_WRAPPED_STATE,
-  submission: { record: undefined, setRecord: () => undefined },
+  submission: { record: undefined, setRecord: () => undefined, sent: undefined, setSent: () => undefined },
 });
 
 export const WrappedLendingContext = createContext<WrappedLending>(STANDARD_LENDING);

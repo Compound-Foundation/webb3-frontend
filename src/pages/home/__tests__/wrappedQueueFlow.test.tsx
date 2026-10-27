@@ -157,7 +157,7 @@ function Dashboard({ value, state }: { value: WrappedLending; state: CometState 
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   return (
-    <TestLendingProvider value={value}>
+    <TestLendingProvider value={value} web3={WEB3} market={USDC_MARKET}>
       <SelectedMarketContext.Provider value={SELECTED as never}>
         <ActionQueueContext.Provider value={queue as ActionQueue}>
           <Home
