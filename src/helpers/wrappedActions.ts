@@ -59,7 +59,7 @@ export type WrappedStepCheck = WrappedSupplyCheck | WrappedWithdrawalCheck;
 type WrappedStepFields = {
   /** Unique within the draft. The transaction manager stores a submitted hash under it. */
   id: string;
-  /** Shown in review and in the transaction list. */
+  /** Describes the wallet's request in the transaction list. */
   description: string;
   /** The encoded call, which `checkWrappedStep` holds to `kind`. It never carries value. */
   request: { to: string; data: string };
