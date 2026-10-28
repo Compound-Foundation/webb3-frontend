@@ -115,7 +115,15 @@ describe('sentActionStatus', () => {
 });
 
 describe('useSubmissionStore', () => {
-  const RECORD = { scope: 'scope-1' } as SubmissionRecord;
+  // A supply submitted from the queue, still running.
+  const RECORD: SubmissionRecord = {
+    kind: 'execute',
+    wrapper: { type: 'supply', action: ACTION, amount: 1_000_000n },
+    directCount: 0,
+    scope: 'scope-1',
+    status: { kind: 'running' },
+    stateBefore: { phase: 'idle' },
+  };
 
   function renderStore(initial: Partial<UseSubmissionStoreOptions> = {}) {
     const removeAction = jest.fn();
@@ -134,7 +142,7 @@ describe('useSubmissionStore', () => {
     return { ...hook, removeAction, rerender };
   }
 
-  it('keeps a sent action across a change of network, which drops the submission, until its step confirms', () => {
+  it('keeps a sent action across a change of network, which drops the run, until its step confirms', () => {
     const { result, rerender, removeAction } = renderStore();
     act(() => {
       result.current.setRecord(() => RECORD);
@@ -143,7 +151,7 @@ describe('useSubmissionStore', () => {
     rerender({ transactions: [pending()] });
     expect(result.current.sent).toEqual({ ...SENT, transactionId: 'transaction-1' });
 
-    // The wallet's network is part of the submission's scope, but not the queue's.
+    // The wallet's network is part of the run's scope, but not the queue's.
     rerender({ scope: 'scope-on-base', transactions: [pending()] });
     expect(result.current.record).toBeUndefined();
     expect(result.current.sent).toEqual({ ...SENT, transactionId: 'transaction-1' });
@@ -166,7 +174,10 @@ describe('useSubmissionStore', () => {
     expect(removeAction).not.toHaveBeenCalled();
   });
 
-  it('releases a sent action whose submission ended before its last step reached the wallet', () => {
+  it.each<[string, SubmissionRecord | undefined]>([
+    ['ended', undefined],
+    ['stopped with nothing sent', { ...RECORD, status: { kind: 'stopped', label: 'Not Sent, Try Again' } }],
+  ])('releases a sent action whose run %s before its last step reached the wallet', (_name, ending) => {
     const { result, removeAction } = renderStore();
     act(() => {
       result.current.setRecord(() => RECORD);
@@ -174,8 +185,25 @@ describe('useSubmissionStore', () => {
     });
     expect(result.current.sent).toBeDefined();
 
-    act(() => result.current.setRecord(() => undefined));
+    act(() => result.current.setRecord(() => ending));
     expect(result.current.sent).toBeUndefined();
     expect(removeAction).not.toHaveBeenCalled();
+  });
+
+  it("does not hold a sent action for Approve & Add's approval, which never sends the supply", () => {
+    const { result } = renderStore();
+    const approval: SubmissionRecord = {
+      kind: 'approve',
+      action: ACTION,
+      scope: 'scope-1',
+      status: { kind: 'running' },
+      stateBefore: { phase: 'idle' },
+    };
+    act(() => {
+      result.current.setRecord(() => approval);
+      result.current.setSent(SENT);
+    });
+
+    expect(result.current.sent).toBeUndefined();
   });
 });

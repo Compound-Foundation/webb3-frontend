@@ -32,8 +32,6 @@ type AssetRowHydrated = [
     baseAsset: BaseAssetWithAccountState;
     pendingAction?: PendingAction;
     transaction?: Transaction;
-    /** Whether the queue is held still while it is submitted. The row's buttons are then disabled. */
-    isLocked?: boolean;
     unwrappedAssetSupplyAction?: Action;
     wrappedAsset?: TokenWithAccountState;
     onCancelClicked: () => void;
@@ -130,7 +128,6 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
     action,
     pendingAction,
     transaction,
-    isLocked,
     unwrappedAssetSupplyAction,
     onCancelClicked,
     onEditClicked,
@@ -162,7 +159,6 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
   }
   const balanceToUse = balance + balanceDifferenceFromActions(pendingAction, actionAmount);
   const onIconClick = () => onDripClicked && onDripClicked();
-  const isDisabled = transaction !== undefined || isLocked === true;
 
   let buttons: ReactNode;
 
@@ -170,7 +166,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
     buttons = (
       <button
         className="button button--selected"
-        disabled={isDisabled}
+        disabled={transaction !== undefined}
         onClick={() => {
           onCancelClicked();
         }}
@@ -187,7 +183,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
     buttons = (
       <button
         className="button button--deselected"
-        disabled={isDisabled}
+        disabled={transaction !== undefined}
         onClick={() => {
           onEditClicked();
         }}
@@ -210,7 +206,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
             onSupplyClicked();
           }}
           className={`button${supplyButtonModifier}`}
-          disabled={walletBalance === 0n || isDisabled}
+          disabled={walletBalance === 0n || transaction !== undefined}
         >
           <Plus />
           <span className={supplyButtonTextClass}>Supply</span>
@@ -219,7 +215,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
           <button
             onClick={() => onWithdrawClicked()}
             className="button button--circle"
-            disabled={balanceToUse === 0n || isDisabled}
+            disabled={balanceToUse === 0n || transaction !== undefined}
           >
             <Minus />
             <span className="mobile-only">Withdraw</span>

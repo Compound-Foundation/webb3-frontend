@@ -349,30 +349,13 @@ export type PrepareWrappedSupplyInput = {
 };
 
 /**
- * Reads the account's wallet balance and allowance to the wrapper again and builds the steps of a
- * wrapped supply of `amount`:
- * - When the allowance covers the amount, the wrapper's `supplyAndWrap(amount)` alone.
- * - Otherwise the base token's `approve(wrapper, amount)` first. For a token such as USDT, whose
- *   `approve` refuses to change one nonzero allowance to another, a nonzero allowance is first
- *   reset with `approve(wrapper, 0)`.
- *
- * The amount must be positive and within the wallet balance just read. The approval is for exactly
- * the amount, never more. Before each signature, its step reads the balance and allowance again.
- * The step stops, and the user reviews again, when the balance is below the amount or the
- * allowance is not the one the plan expects:
- * - before a reset, or an approval with no reset before it, exactly the allowance read at review
- * - before an approval after a reset, zero
- * - before the supply, at least the amount
- *
- * The supply is then simulated from the account, at the block of that read.
+ * Checks a supply's identity and amount, and reads the account's wallet balance and allowance to
+ * the wrapper for it. The amount must be positive, never the unlimited sentinel, and within the
+ * wallet balance just read. Returns the funds read, with the step check both drafts use: before
+ * each signature it reads the balance and allowance again, and refuses the step when the balance is
+ * below the amount or the allowance is not the one the step expects.
  */
-export async function prepareWrappedSupply({
-  identity,
-  market,
-  amount,
-  symbol,
-  reads,
-}: PrepareWrappedSupplyInput): Promise<{ amount: bigint; steps: WrappedStep[] }> {
+async function readSupplyForReview({ identity, market, amount, symbol, reads }: PrepareWrappedSupplyInput) {
   if (identity.type !== 'supply' || !isMarketOf(market, identity)) {
     throw new WrappedReviewError('The wrapper for this market changed. Review the supply again.');
   }
@@ -426,7 +409,30 @@ export async function prepareWrappedSupply({
       ? simulateSupplyAndWrap(reads, identity, amount, fundsBeforeSigning.blockNumber)
       : { ok: true };
   };
+  return { funds, formatAmount, checkBefore };
+}
 
+/**
+ * Reads the account's wallet balance and allowance to the wrapper again and builds the approval a
+ * wrapped supply of `amount` needs, as Approve & Add asks for it: the base token's
+ * `approve(wrapper, amount)`, for exactly the amount, never more. For a token such as USDT, whose
+ * `approve` refuses to change one nonzero allowance to another, a nonzero allowance is first reset
+ * with `approve(wrapper, 0)`. The approval waits for the reset to confirm.
+ *
+ * An allowance that already covers the amount needs no approval, and the draft is refused. Before
+ * each signature, its step reads the balance and allowance again, and stops unless the allowance is
+ * exactly the one the plan expects: before a reset, or an approval with no reset before it, the
+ * allowance read here; before an approval after a reset, zero.
+ */
+export async function prepareWrappedApproval(
+  input: PrepareWrappedSupplyInput
+): Promise<{ amount: bigint; steps: WrappedStep[]; isApprovalOnly: true }> {
+  const { identity, amount, symbol } = input;
+  const { funds, formatAmount, checkBefore } = await readSupplyForReview(input);
+  const allowanceAtReview = funds.allowance;
+  if (allowanceAtReview >= amount) {
+    throw new WrappedReviewError(`The wrapper's allowance already covers ${formatAmount(amount)}.`);
+  }
   const approval = (id: string, approvedAmount: bigint, description: string, rule: AllowanceRule): WrappedStep => ({
     id,
     kind: 'approve',
@@ -437,31 +443,49 @@ export async function prepareWrappedSupply({
     },
     check: checkBefore(rule, false),
   });
-
   const steps: WrappedStep[] = [];
-  const allowanceAtReview = funds.allowance;
-  if (allowanceAtReview < amount) {
-    const isResetFirst = allowanceAtReview > 0n && requiresAllowanceReset(identity.chainId, identity.baseTokenAddress);
-    if (isResetFirst) {
-      steps.push(
-        approval(WRAPPED_SUPPLY_STEP_IDS.reset, 0n, `Reset the ${symbol} allowance for the wrapper to 0`, {
-          exactly: allowanceAtReview,
-        })
-      );
-    }
+  const isResetFirst = allowanceAtReview > 0n && requiresAllowanceReset(identity.chainId, identity.baseTokenAddress);
+  if (isResetFirst) {
     steps.push(
-      approval(WRAPPED_SUPPLY_STEP_IDS.approve, amount, `Approve ${formatAmount(amount)} for the wrapper`, {
-        exactly: isResetFirst ? 0n : allowanceAtReview,
+      approval(WRAPPED_SUPPLY_STEP_IDS.reset, 0n, `Enable ${symbol}`, {
+        exactly: allowanceAtReview,
       })
     );
   }
-  steps.push({
-    id: WRAPPED_SUPPLY_STEP_IDS.supply,
-    kind: 'supply-and-wrap',
-    description: `Supply ${formatAmount(amount)} through the wrapper`,
-    request: { to: identity.wrapperAddress, data: wrapperInterface.encodeFunctionData('supplyAndWrap', [amount]) },
-    check: checkBefore({ atLeast: amount }, true),
-  });
+  steps.push(
+    approval(WRAPPED_SUPPLY_STEP_IDS.approve, amount, `Enable ${symbol}`, {
+      exactly: isResetFirst ? 0n : allowanceAtReview,
+    })
+  );
+  return { amount, steps, isApprovalOnly: true };
+}
+
+/**
+ * Reads the account's wallet balance and allowance to the wrapper again and builds a wrapped supply
+ * of `amount`: the wrapper's `supplyAndWrap(amount)` alone. An allowance below the amount refuses
+ * it, so submitting never asks the wallet for an approval: Approve & Add does. Before the
+ * signature, the step reads the balance and allowance again, stops unless the allowance still
+ * covers the amount, and simulates the supply from the account at the block of that read.
+ */
+export async function prepareWrappedSupply(
+  input: PrepareWrappedSupplyInput
+): Promise<{ amount: bigint; steps: WrappedStep[] }> {
+  const { identity, amount, symbol } = input;
+  const { funds, formatAmount, checkBefore } = await readSupplyForReview(input);
+  if (funds.allowance < amount) {
+    throw new WrappedReviewError(
+      `The wrapper's allowance is ${formatAmount(funds.allowance)}, less than this supply. Approve it first.`
+    );
+  }
+  const steps: WrappedStep[] = [
+    {
+      id: WRAPPED_SUPPLY_STEP_IDS.supply,
+      kind: 'supply-and-wrap',
+      description: `Supply ${symbol}`,
+      request: { to: identity.wrapperAddress, data: wrapperInterface.encodeFunctionData('supplyAndWrap', [amount]) },
+      check: checkBefore({ atLeast: amount }, true),
+    },
+  ];
   return { amount, steps };
 }
 
@@ -549,7 +573,7 @@ function describeExitRevert(data: string, symbol: string): string {
   }
   switch (exitErrorName(data)) {
     case 'ZeroAssetsTransferred':
-      return "these shares are worth no more than the wrapper's rounding buffer, so the wrapper refuses to withdraw them (ZeroAssetsTransferred). Withdraw a larger amount, or choose Everything";
+      return "these shares are worth no more than the wrapper's rounding buffer, so the wrapper refuses to withdraw them (ZeroAssetsTransferred). Withdraw a larger amount, or choose Max";
     case 'ExcessiveAssetsDebited':
       return 'Comet would take more from the wrapper than these shares cover, and the wrapper refuses that so that its other holders do not pay for it (ExcessiveAssetsDebited). Try again in a few minutes, or with a different amount';
     case 'ZeroSharesBurned':
@@ -649,7 +673,7 @@ function revisionMessage(
       return 'Enter an amount greater than 0.';
     case 'exceeds-position': {
       const fullExit = limits.canExitFully
-        ? ` Or choose Everything to withdraw your whole position, about ${formatAmount(limits.fullExitCash)}.`
+        ? ` Or choose Max to withdraw your whole position, about ${formatAmount(limits.fullExitCash)}.`
         : '';
       // Only an amount the user entered can be more than the position pays. A full exit asks for its value.
       const asked = request.kind === 'partial' ? formatAmount(request.cash) : 'This amount';
@@ -708,8 +732,6 @@ export type PrepareWrappedWithdrawalInput = {
   identity: WrappedActionIdentity;
   market: WrappedMarket;
   request: WithdrawalRequest;
-  /** The full-exit cash the page showed before the review, which the review shows next to the new quote. */
-  shownCash: bigint | undefined;
   symbol: string;
   reads: WrappedWithdrawalReads;
 };
@@ -726,7 +748,7 @@ export type PrepareWrappedWithdrawalInput = {
  * the review's. `recheckWithdrawal` then stops it when the share balance, the pause, the cash the
  * shares pay or the market's cash no longer allows the reviewed exit. The step then simulates the
  * exit from the account at that block. A check that passes gives the reviewed shares
- * quoted at that block, so the dialog and the transaction list show the cash the exit pays there.
+ * quoted at that block, which the lifecycle keeps.
  * The method has no minimum amount and no deadline, and the simulation enforces neither: the
  * wrapper computes the cash when the transaction runs.
  */
@@ -734,7 +756,6 @@ export async function prepareWrappedWithdrawal({
   identity,
   market,
   request,
-  shownCash,
   symbol,
   reads,
 }: PrepareWrappedWithdrawalInput): Promise<{ amount: bigint; steps: WrappedStep[]; withdrawal: WithdrawalReview }> {
@@ -758,11 +779,8 @@ export async function prepareWrappedWithdrawal({
     throw new WrappedReviewError(revisionMessage(plan, request, read.snapshot, formatAmount, symbol));
   }
   const { quote } = plan;
-  // The step's description, with the cash `exitQuote` pays.
-  const describeExit = (exitQuote: WithdrawalQuote) =>
-    exitQuote.kind === 'full'
-      ? `Withdraw all your wrapped ${symbol}, about ${formatAmount(exitQuote.cash)}`
-      : `Withdraw about ${formatAmount(exitQuote.cash)} from the wrapper`;
+  // The step's description in the list of transactions, as a direct withdrawal's.
+  const describeExit = () => `Withdraw ${symbol}`;
 
   const checkBeforeExit = async (): Promise<WrappedWithdrawalCheck> => {
     let latest: WithdrawalRead;
@@ -804,14 +822,14 @@ export async function prepareWrappedWithdrawal({
     const requote = requoteWithdrawal(quote, latest.snapshot);
     return {
       ok: true,
-      rechecked: { quote: requote, blockNumber: latest.blockNumber, description: describeExit(requote) },
+      rechecked: { quote: requote, blockNumber: latest.blockNumber, description: describeExit() },
     };
   };
 
   const step: WrappedStep = {
     id: WRAPPED_WITHDRAW_STEP_ID,
     kind: 'unwrap-and-withdraw',
-    description: describeExit(quote),
+    description: describeExit(),
     request: {
       to: identity.wrapperAddress,
       data: wrapperInterface.encodeFunctionData('unwrapAndWithdraw', [quote.shares]),
@@ -821,28 +839,34 @@ export async function prepareWrappedWithdrawal({
   return {
     amount: quote.shares,
     steps: [step],
-    withdrawal: { request, quote, shownCash, blockNumber: read.blockNumber },
+    withdrawal: { request, quote, blockNumber: read.blockNumber },
   };
 }
 
 export type WriteWrappedState = {
   /**
-   * Starts a fresh review of a wrapped supply of `amount`, in raw base-token units. Returns why it
-   * was refused, if it was. The review reads the wallet balance and allowance again, and each step
-   * is signed only after its own confirmation, through the wrapper action lifecycle.
+   * Starts the approval a wrapped supply of `amount` needs, in raw base-token units, as Approve &
+   * Add asks for it. Returns why it was refused, if it was. It reads the wallet balance and
+   * allowance again, and approves exactly the amount, after a reset to zero for a token that needs
+   * one.
+   */
+  approve: (amount: bigint) => WrappedBlockReason | undefined;
+  /**
+   * Starts a wrapped supply of `amount`, in raw base-token units. Returns why it was refused, if it
+   * was. It reads the wallet balance and allowance again, and supplies only when the allowance
+   * already covers the amount.
    */
   supply: (amount: bigint) => WrappedBlockReason | undefined;
   /**
-   * Starts a fresh review of a wrapped withdrawal: an amount of base-token cash, or the whole
-   * position. Returns why it was refused, if it was. The review reads the position again and quotes
-   * the exit. `shownCash` is the full-exit cash the page showed, which the review compares with the
-   * new quote.
+   * Starts a wrapped withdrawal: an amount of base-token cash, or the whole position. Returns why it
+   * was refused, if it was. It reads the position again and quotes the exit.
    */
-  withdraw: (request: WithdrawalRequest, shownCash?: bigint) => WrappedBlockReason | undefined;
+  withdraw: (request: WithdrawalRequest) => WrappedBlockReason | undefined;
 };
 
 /** The wrapped writes outside the wrapped route. */
 export const IDLE_WRITE_WRAPPED_STATE: WriteWrappedState = Object.freeze<WriteWrappedState>({
+  approve: () => 'not-wrapped',
   supply: () => 'not-wrapped',
   withdraw: () => 'not-wrapped',
 });
@@ -858,9 +882,10 @@ export type UseWriteWrappedStateOptions = {
 };
 
 /**
- * The wrapped route's writes, straight from the wallet: a wrapped supply through `supplyAndWrap`,
- * and a wrapped withdrawal through `unwrapAndWithdraw`. Home starts them when the user submits a
- * queued base supply or withdrawal on the wrapped route. They never use the Bulker, Permit2, a
+ * The wrapped route's writes, straight from the wallet: the wrapper's approval, a wrapped supply
+ * through `supplyAndWrap`, and a wrapped withdrawal through `unwrapAndWithdraw`. Home starts the
+ * approval when the user adds a base supply on the wrapped route, and the supply or withdrawal
+ * when the user submits it. They never use the Bulker, Permit2, a
  * permit, a Comet manager permission or Comet's own `withdraw`.
  */
 export function useWriteWrappedState({
@@ -870,44 +895,49 @@ export function useWriteWrappedState({
   baseSymbol,
   blockWait = DEFAULT_BLOCK_WAIT,
 }: UseWriteWrappedStateOptions): WriteWrappedState {
-  // A form or dialog can keep `supply` from an earlier render, and steps read when they are
+  // A form or callback can keep `supply` from an earlier render, and steps read when they are
   // confirmed, so both read the live values.
   const live = useRef({ action, route, readProvider, baseSymbol, blockWait });
   live.current = { action, route, readProvider, baseSymbol, blockWait };
 
-  const supply = (amount: bigint): WrappedBlockReason | undefined => {
-    const current = live.current;
-    if (current.route.kind !== 'wrapped' || current.route.market === undefined) return 'not-wrapped';
-    const { market } = current.route;
-    const provider = current.readProvider;
-    const symbol = current.baseSymbol ?? 'base token';
-    return current.action.start('supply', async (identity) => {
-      if (provider === undefined) {
-        throw new WrappedReviewError("This market's network cannot be read right now. Try again in a moment.");
-      }
-      return prepareWrappedSupply({
-        identity,
-        market,
-        amount,
-        symbol,
-        reads: {
-          // Each read waits for the provider to show this account's newest settled wrapper
-          // transaction, such as the approval a review's previous step just confirmed.
-          readFunds: () =>
-            readSupplyFunds(
-              provider,
-              identity,
-              newestReceiptBlock(live.current.action.recovered.settled),
-              live.current.blockWait
-            ),
-          call: (request, blockNumber) => provider.call(request, blockNumber),
-          retryIntervalMs: live.current.blockWait.intervalMs,
-        },
+  // Approve & Add's approval and Submit's supply read the same funds, through the same checks.
+  const startSupply =
+    (prepare: typeof prepareWrappedSupply | typeof prepareWrappedApproval) =>
+    (amount: bigint): WrappedBlockReason | undefined => {
+      const current = live.current;
+      if (current.route.kind !== 'wrapped' || current.route.market === undefined) return 'not-wrapped';
+      const { market } = current.route;
+      const provider = current.readProvider;
+      const symbol = current.baseSymbol ?? 'base token';
+      return current.action.start('supply', async (identity) => {
+        if (provider === undefined) {
+          throw new WrappedReviewError("This market's network cannot be read right now. Try again in a moment.");
+        }
+        return prepare({
+          identity,
+          market,
+          amount,
+          symbol,
+          reads: {
+            // Each read waits for the provider to show this account's newest settled wrapper
+            // transaction, such as the approval or the reset before it that just confirmed.
+            readFunds: () =>
+              readSupplyFunds(
+                provider,
+                identity,
+                newestReceiptBlock(live.current.action.recovered.settled),
+                live.current.blockWait
+              ),
+            call: (request, blockNumber) => provider.call(request, blockNumber),
+            retryIntervalMs: live.current.blockWait.intervalMs,
+          },
+        });
       });
-    });
-  };
+    };
+  const approve = startSupply(prepareWrappedApproval);
+  const supply = startSupply(prepareWrappedSupply);
 
-  const withdraw = (request: WithdrawalRequest, shownCash?: bigint): WrappedBlockReason | undefined => {
+  const withdraw = (request: WithdrawalRequest): WrappedBlockReason | undefined => {
     const current = live.current;
     if (current.route.kind !== 'wrapped' || current.route.market === undefined) return 'not-wrapped';
     const { market } = current.route;
@@ -921,7 +951,6 @@ export function useWriteWrappedState({
         identity,
         market,
         request,
-        shownCash,
         symbol,
         reads: {
           // Each read waits for the provider to show this account's newest settled wrapper
@@ -941,5 +970,5 @@ export function useWriteWrappedState({
     });
   };
 
-  return { supply, withdraw };
+  return { approve, supply, withdraw };
 }

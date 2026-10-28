@@ -25,6 +25,10 @@ import {
 
 const approveAssetHelperText = (symbol: string) =>
   `You need to approve Compound on the ${symbol} contract before you can use this asset. You only need to do this once.`;
+// On the wrapped route each approval is for exactly the amount and the supply spends it, so the
+// hint does not say that one approval is enough.
+const approveWrapperHelperText = (symbol: string) =>
+  `You need to approve Compound on the ${symbol} contract before you can use this asset.`;
 const CONFIRM_BUTTON_TEXT_APPROVE = 'Approve & Add';
 const UPDATE_ALLOWANCE_STRING =
   'This amount exceeds the allowance you previously set for this asset. You will be asked to approve an increase when you add this action.';
@@ -299,15 +303,27 @@ function getContent(
         };
       }
 
-      // The Comet allowance does not apply on the wrapped route: the wrapper's approval is requested
-      // at submission, so the form shows no allowance hint there.
-      const usesDirectAllowance = actionRules?.wrappedBase === undefined;
-      if (usesDirectAllowance && baseAsset.allowance === 0n) {
-        actionHintString = approveAssetHelperText(baseAsset.symbol);
-        confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
-      } else if (usesDirectAllowance && maybeBigIntInputValue && baseAsset.allowance < maybeBigIntInputValue) {
-        actionHintString = UPDATE_ALLOWANCE_STRING;
-        confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
+      const wrappedBase = actionRules?.wrappedBase;
+      if (wrappedBase === undefined) {
+        if (baseAsset.allowance === 0n) {
+          actionHintString = approveAssetHelperText(baseAsset.symbol);
+          confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
+        } else if (maybeBigIntInputValue && baseAsset.allowance < maybeBigIntInputValue) {
+          actionHintString = UPDATE_ALLOWANCE_STRING;
+          confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
+        }
+      } else {
+        // On the wrapped route the supply spends the allowance to the wrapper, which Approve & Add
+        // asks for, for exactly the amount. Max supplies the wallet balance.
+        const wrapperAllowance = wrappedBase.supplyAllowance ?? 0n;
+        const amount = maxClicked ? availableAmountRaw : maybeBigIntInputValue;
+        if (wrapperAllowance === 0n) {
+          actionHintString = approveWrapperHelperText(baseAsset.symbol);
+          confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
+        } else if (amount && wrapperAllowance < amount) {
+          actionHintString = UPDATE_ALLOWANCE_STRING;
+          confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
+        }
       }
 
       onMaxButtonClicked = () => {

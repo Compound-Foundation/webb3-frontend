@@ -1,5 +1,5 @@
 import { TransactionResponse } from '@ethersproject/providers';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
@@ -13,7 +13,7 @@ import { MAX_UINT256 } from '@helpers/numbers';
 import { SendWithdrawnError } from '@helpers/walletErrors';
 import { Theme } from '@hooks/useThemeManager';
 import type { AddTransaction } from '@hooks/useTransactionManager';
-import { IDLE_WRAPPED_ACTION, WalletSessionHealth, WrappedActionController } from '@hooks/useWrappedAction';
+import { IDLE_WRAPPED_ACTION, WalletSessionHealth } from '@hooks/useWrappedAction';
 import { IDLE_WRITE_WRAPPED_STATE } from '@hooks/useWriteWrappedState';
 import {
   Action,
@@ -543,42 +543,25 @@ describe('Home submission guards', () => {
     });
   });
 
-  describe('a queued base supply that an earlier wrapped request holds back', () => {
-    const SUPPLY: Action = [ActionType.Supply, BASE_ASSET, 1_000_000n];
-    function heldBack(overrides: Partial<WrappedActionController>): WrappedLending {
-      const lending = wrappedLending({ status: 'usable' });
-      return {
-        ...lending,
-        action: { ...lending.action, ...overrides },
-        write: { supply: () => 'transaction-pending', withdraw: () => 'transaction-pending' },
-      };
-    }
-    const submit = (lending: WrappedLending) => {
-      render(homeElement({ queue: actionQueue([SUPPLY]), lending }));
-      act(() => positionCard().onSubmitClicked());
-      return screen.getByRole('dialog');
+  it('labels a queued base supply that an earlier wrapped request holds back, and opens no dialog', () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const supply: Action = [ActionType.Supply, BASE_ASSET, 1_000_000n];
+    const lending = wrappedLending({ status: 'usable' });
+    const heldBack: WrappedLending = {
+      ...lending,
+      write: {
+        approve: () => 'transaction-pending',
+        supply: () => 'transaction-pending',
+        withdraw: () => 'transaction-pending',
+      },
     };
+    render(homeElement({ queue: actionQueue([supply]), lending: heldBack }));
 
-    it('offers the dismissal of earlier wrapped transactions in the submission dialog', () => {
-      const dismissRecovered = jest.fn();
-      const dialog = submit(heldBack({ canDismissRecovered: true, dismissRecovered }));
+    act(() => positionCard().onSubmitClicked());
 
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Stop waiting' }));
-      expect(dismissRecovered).toHaveBeenCalledTimes(1);
-      Object.values(mockWriteState).forEach((fn) => expect(fn).not.toHaveBeenCalled());
-    });
-
-    it('says which earlier wrapped request the wallet still holds', () => {
-      const dialog = submit(heldBack({ canDismissRecovered: true, isRecoveredRequestPendingInWallet: true }));
-
-      expect(dialog).toHaveTextContent(/still has a request open for an earlier wrapped transaction/);
-    });
-
-    it("shows the wallet's answer when it refused the last wrapped request", () => {
-      const dialog = submit(heldBack({ walletRefusalMessage: 'Unauthorized (4100)' }));
-
-      expect(dialog).toHaveTextContent('Unauthorized (4100)');
-    });
+    expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Earlier Request Still Pending');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    Object.values(mockWriteState).forEach((fn) => expect(fn).not.toHaveBeenCalled());
   });
 
   it("stops the dialog's operator approval once the wallet session is unusable", () => {

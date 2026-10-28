@@ -96,7 +96,7 @@ export function wrappedEntryBlockLabel(
     case 'no-signer':
       return 'Checking Your Wallet And This Market';
     case 'screening':
-      return 'Address Not Cleared By Screening';
+    case 'connector-conflict':
     case 'not-canonical':
     case 'asset-mismatch':
     case 'metadata-mismatch':
@@ -104,8 +104,6 @@ export function wrappedEntryBlockLabel(
     case 'missing-mapping':
     case 'invalid-mapping':
       return 'Unavailable For This Market';
-    case 'connector-conflict':
-      return 'Wallet Conflict: Reconnect Your Wallet';
     case 'watch-only':
     case 'disconnected':
     case 'no-account':

@@ -2,47 +2,53 @@ import { createContext, useContext } from 'react';
 
 import { LendingRoute } from '@helpers/lendingRoute';
 import type { QueuedWrapperAction } from '@helpers/queuedExecution';
-import type { WrappedActionDraft, WrappedActionType, WrappedBlockReason } from '@helpers/wrappedActions';
+import type { WrappedActionType } from '@helpers/wrappedActions';
 import { IDLE_WRAPPED_ACTION, WrappedActionController, WrappedActionState } from '@hooks/useWrappedAction';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
 import { IDLE_WRITE_WRAPPED_STATE, WriteWrappedState } from '@hooks/useWriteWrappedState';
 import type { Action } from '@types';
 
-/** A queue being submitted on the wrapped route: the wrapper action first, then the direct actions. */
-export type QueuedSubmission = {
-  wrapper: QueuedWrapperAction;
-  /** How many queued actions go to Comet or the Bulker after the wrapper action, in one transaction. */
-  directCount: number;
-  /** Why the wrapper action did not start, if it did not. Nothing was sent. */
-  refusal?: WrappedBlockReason;
-  /** Whether the wrapper action confirmed and left the queue. */
-  isWrapperDone: boolean;
-  /**
-   * Whether the wrapper action stopped at its last step in a state where it can still go through, such
-   * as a request the wallet still holds. It then left the queue, so it is not submitted twice.
-   */
-  mayHaveExecuted?: boolean;
-};
+/**
+ * A wrapper action the dashboard started, and what became of it:
+ * - `approve`: Approve & Add's approval for a queued base supply. It never locks the queue.
+ * - `execute`: Submit Transaction's supply or withdrawal, before the direct actions queued with it.
+ *   Once it confirms, it leaves the queue, the run ends, and the direct actions are submitted as
+ *   before.
+ */
+export type WrappedRun =
+  | { kind: 'approve'; action: Action }
+  | {
+      kind: 'execute';
+      wrapper: QueuedWrapperAction;
+      /** How many queued actions go to Comet or the Bulker after the wrapper action. */
+      directCount: number;
+    };
 
-/** A queued submission, with the session and market it belongs to. */
-export type SubmissionRecord = QueuedSubmission & {
+/** Where a wrapped run stands. */
+export type WrappedRunStatus =
+  /** Being read, checked, signed or followed to its receipt. */
+  | { kind: 'running' }
+  /** It stopped with nothing sent. Its queue row shows `label`, and it can be submitted again. */
+  | { kind: 'stopped'; label: string };
+
+/** A wrapped run, with the session and market it belongs to. */
+export type SubmissionRecord = WrappedRun & {
   /** The `submissionScope` it was started in. No other scope shows it or acts on it. */
   scope: string;
+  status: WrappedRunStatus;
   /**
-   * The lifecycle's state when the submission started. It belongs to an earlier review, so the
-   * submission never takes a step, or a completion, from it.
+   * The lifecycle's state when the run started. It belongs to an earlier run, so this run never
+   * takes a step, or a completion, from it.
    */
   stateBefore: WrappedActionState;
-  /** The draft and step the user hid the dialog for while it was being signed. */
-  hiddenWhileSigning?: { draft: WrappedActionDraft; stepIndex: number };
 };
 
 /**
- * A queued wrapper action that was started, from its start until what became of its last step is
- * known. Its queue entry is held out of every submission meanwhile. A change of the wallet's network
- * drops the submission, and the lifecycle ignores what its draft sent, but the last step can still
- * have reached the wallet. Unless this record is kept, the entry stays queued after that step
- * confirms, and the next submission sends it again.
+ * A queued wrapper action that was submitted, from its start until what became of its last step is
+ * known. Its queue entry is never submitted again meanwhile. A change of the wallet's network drops
+ * the run, and the lifecycle ignores what its draft sent, but the last step can still have reached
+ * the wallet. Unless this record is kept, the entry stays queued after that step confirms, and the
+ * next submission sends it again. It shows nothing of its own.
  */
 export type SentWrapperAction = {
   /** The `queueScope` it was started in. A change of scope also resets the queue, entry included. */
@@ -76,8 +82,8 @@ export function queueScope(
 }
 
 /**
- * The account, connector, connection status, wallet network and market a submission belongs to. The
- * wrapper action lifecycle discards its draft when any of them changes, and so does the submission.
+ * The account, connector, connection status, wallet network and market a wrapped run belongs to. The
+ * wrapper action lifecycle discards its draft when any of them changes, and the run is dropped.
  */
 export function submissionScope(
   write: { account: string | undefined; connector?: { uid?: string }; status: string; chainId: number | undefined },
@@ -93,14 +99,14 @@ export function submissionScope(
 }
 
 /**
- * The queued submission in progress, and the wrapper action it started. App keeps both with the
- * lifecycle, so they survive the dashboard's unmount: on return the dialog shows the submission
- * again, and its completion still takes the wrapper action out of the queue.
+ * The wrapped run, and the queued wrapper action it submitted. App keeps both with the lifecycle,
+ * so they survive the dashboard's unmount: on return the run's completion still takes the wrapper
+ * action out of the queue.
  */
 export type SubmissionStore = {
   record: SubmissionRecord | undefined;
   setRecord: (update: (current: SubmissionRecord | undefined) => SubmissionRecord | undefined) => void;
-  /** The wrapper action started from the queue, until what became of its last step is known. */
+  /** The wrapper action submitted from the queue, until what became of its last step is known. */
   sent: SentWrapperAction | undefined;
   setSent: (sent: SentWrapperAction | undefined) => void;
 };
@@ -108,8 +114,8 @@ export type SubmissionStore = {
 /**
  * What the selected market's wrapped lending needs in this session. `route` is its lending route
  * and `position` the wrapped position read for it. `action` is the wrapper action lifecycle, with
- * its check of the wallet session, and `write` starts a review in that lifecycle. `submission` is
- * the queued submission that drives them.
+ * its check of the wallet session, and `write` starts an action in that lifecycle. `submission` is
+ * the wrapped run that drives them.
  */
 export type WrappedLending = {
   route: LendingRoute;

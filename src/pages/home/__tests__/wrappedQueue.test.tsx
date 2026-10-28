@@ -1,6 +1,6 @@
 import { Interface } from '@ethersproject/abi';
 import { TransactionReceipt } from '@ethersproject/providers';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import {
@@ -38,15 +38,17 @@ import {
   PendingAction,
   StateType,
   TokenWithAccountState,
+  Transaction,
+  TransactionState,
 } from '@types';
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
-import { mockEthCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
+import { mockCompCollateralAsset, mockEthCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
 
-// Home's children record their props. The submission dialog is real.
+// Home's children record their props.
 const mockLastProps: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
 function mockRecordProps(name: string) {
   return {
@@ -149,22 +151,16 @@ function draftFor(type: WrappedActionType, steps: WrappedStep[], amount = AMOUNT
   return { kind: WRAPPED_ACTION, id: `draft-${type}`, identity, amount, steps };
 }
 
-const RESET_STEP: WrappedStep = {
-  id: 'reset-allowance',
-  kind: 'approve',
-  description: 'Reset the USDC allowance for the wrapper to 0',
-  request: { to: USDC, data: CALLS.encodeFunctionData('approve', [USDC_WRAPPER, 0n]) },
-};
 const APPROVE_STEP: WrappedStep = {
   id: 'approve',
   kind: 'approve',
-  description: 'Approve 1,000.000000 USDC for the wrapper',
+  description: 'Enable USDC',
   request: { to: USDC, data: CALLS.encodeFunctionData('approve', [USDC_WRAPPER, AMOUNT]) },
 };
 const SUPPLY_STEP: WrappedStep = {
   id: 'supply',
   kind: 'supply-and-wrap',
-  description: 'Supply 1,000.000000 USDC through the wrapper',
+  description: 'Supply USDC',
   request: { to: USDC_WRAPPER, data: CALLS.encodeFunctionData('supplyAndWrap', [AMOUNT]) },
 };
 
@@ -172,7 +168,7 @@ const SHARES = 400n * 10n ** 18n;
 const WITHDRAW_STEP: WrappedStep = {
   id: 'withdraw',
   kind: 'unwrap-and-withdraw',
-  description: 'Withdraw about 400.000000 USDC from the wrapper',
+  description: 'Withdraw USDC',
   request: { to: USDC_WRAPPER, data: CALLS.encodeFunctionData('unwrapAndWithdraw', [SHARES]) },
   check: async () => ({ ok: false, message: 'not used' }),
 };
@@ -193,22 +189,17 @@ const confirmed = (hash = HASH): WrappedStepState => ({
   receipt: { transactionHash: hash, status: 1 } as TransactionReceipt,
 });
 
-type Controller = WrappedActionController & { confirm: jest.Mock; discard: jest.Mock; dismissRecovered: jest.Mock };
+type Controller = WrappedActionController & { confirm: jest.Mock; discard: jest.Mock };
 
 function controller(state: WrappedActionState = { phase: 'idle' }, overrides: Partial<Controller> = {}): Controller {
   return {
     state,
     session: { status: 'usable' },
     recovered: { pending: [], settled: [] },
-    isRecoveredRequestPendingInWallet: false,
-    canDismissRecovered: false,
-    hasUnansweredWalletRequest: false,
-    walletRefusalMessage: undefined,
     blockedReason: () => undefined,
     start: jest.fn(),
     confirm: jest.fn(),
     discard: jest.fn(),
-    dismissRecovered: jest.fn(),
     ...overrides,
   };
 }
@@ -231,13 +222,16 @@ const POSITION: WrappedPosition = {
   },
 };
 
-type Lending = WrappedLending & { write: { supply: jest.Mock; withdraw: jest.Mock } };
+type Lending = WrappedLending & { write: { approve: jest.Mock; supply: jest.Mock; withdraw: jest.Mock } };
+
+/** The position with an allowance to the wrapper that covers a supply of `AMOUNT`. */
+const APPROVED: WrappedPosition = { ...POSITION, wrapperAllowance: AMOUNT };
 
 function lendingWith(
   action: Controller = controller(),
   {
     route = routeFor(),
-    position = POSITION,
+    position = APPROVED,
     supplyRefusal,
   }: { route?: LendingRoute; position?: WrappedPosition | undefined; supplyRefusal?: WrappedBlockReason } = {}
 ): Lending {
@@ -246,7 +240,11 @@ function lendingWith(
     position: position === undefined ? { status: 'loading' } : { status: 'loaded', position },
     retry: jest.fn(),
     action,
-    write: { supply: jest.fn(() => supplyRefusal), withdraw: jest.fn(() => undefined) },
+    write: {
+      approve: jest.fn(() => undefined),
+      supply: jest.fn(() => supplyRefusal),
+      withdraw: jest.fn(() => undefined),
+    },
     submission: STANDARD_LENDING.submission,
   };
 }
@@ -328,8 +326,12 @@ SelectedMarketContextHelpers.initializeContext({
 });
 ActionQueueContextHelpers.initializeContext(actionQueue());
 
+const switchWriteNetwork = jest.fn(async () => true);
+
 type HomeOptions = {
   queue?: ActionQueue;
+  /** The transaction manager's list. */
+  transactions?: Transaction[];
   market?: MarketData;
   web3?: Web3;
   state?: CometState;
@@ -339,7 +341,14 @@ type HomeOptions = {
 
 function homeElement(
   lending: WrappedLending,
-  { queue = actionQueue(), market = USDC_MARKET, web3 = WEB3, state, isDashboard = true }: HomeOptions = {}
+  {
+    queue = actionQueue(),
+    transactions = [],
+    market = USDC_MARKET,
+    web3 = WEB3,
+    state,
+    isDashboard = true,
+  }: HomeOptions = {}
 ) {
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
@@ -354,12 +363,12 @@ function homeElement(
         <ActionQueueContext.Provider value={queue}>
           {isDashboard && (
             <Home
-              transactions={[]}
+              transactions={transactions}
               web3={web3}
               selectedMarketData={selectedMarketData as never}
               cometState={state ?? cometState()}
               addTransaction={jest.fn()}
-              switchWriteNetwork={jest.fn()}
+              switchWriteNetwork={switchWriteNetwork}
               estimatedGasMap={new Map()}
               theme={Theme.Dark}
             />
@@ -384,11 +393,38 @@ function renderHome(lending: WrappedLending, options: HomeOptions = {}) {
 
 const masthead = () => mockLastProps.Masthead.state[1];
 const positionCard = () => mockLastProps.PositionCard.state[1];
-const dialog = () => screen.getByRole('dialog');
+
+/**
+ * Whether any dialog is shown. App keeps its modal nodes mounted and marks the shown one active, so
+ * both are checked, as is the dashboard's own modal, which is recorded here.
+ */
+function expectNoDialog() {
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.querySelector('.modal--active')).toBeNull();
+  expect(mockLastProps.ActionModal.state).toBeUndefined();
+}
+
+/** A wrapper transaction in the manager's list, as the lifecycle sends one. */
+function wrapperTransaction(step: string, state: TransactionState): Transaction {
+  const base = {
+    id: `transaction-${step}`,
+    key: USDC_WRAPPER,
+    networkId: 1,
+    networkName: 'homestead',
+    description: step === 'supply' ? 'Supply USDC' : step === 'withdraw' ? 'Withdraw USDC' : 'Enable USDC',
+    nonce: 5,
+    account: ACCOUNT.toLowerCase(),
+    step,
+  };
+  return state === TransactionState.Pending
+    ? { ...base, state, hash: HASH }
+    : { ...base, state: TransactionState.AwaitingConfirmation };
+}
 
 describe('Home on the wrapped route', () => {
   beforeEach(() => {
     Object.values(mockWriteState).forEach((fn) => fn.mockReset());
+    switchWriteNetwork.mockClear();
   });
 
   describe('uses the normal dashboard', () => {
@@ -405,26 +441,19 @@ describe('Home on the wrapped route', () => {
       expect(queue.setPendingAction).toHaveBeenCalledWith(supply);
     });
 
-    it('queues a confirmed base supply without asking for an approval to Comet', () => {
-      const queue = actionQueue([], [ActionType.Supply, BASE_ASSET, undefined]);
-      renderHome(lendingWith(), { queue });
-
-      act(() => positionCard().onPendingActionConfirm(AMOUNT));
-
-      expect(queue.addOrUpdateAction).toHaveBeenCalledTimes(1);
-      const [queued] = queue.addOrUpdateAction.mock.calls[0];
-      expect(queued[0]).toBe(ActionType.Supply);
-      expect(queued[2]).toBe(AMOUNT);
-      expect(mockWriteState.approve).not.toHaveBeenCalled();
-    });
-
-    it('gives the amount form and queue rules that accept a supply without an allowance to Comet', () => {
-      renderHome(lendingWith());
+    it("gives the amount form and queue the allowance to the wrapper, not Comet's", () => {
+      renderHome(lendingWith(controller(), { position: { ...POSITION, wrapperAllowance: AMOUNT - 1n } }));
       const { actionRules, baseAsset, collateralAssets } = positionCard();
       const supply: Action = [ActionType.Supply, baseAsset, AMOUNT];
 
+      expect(actionRules.wrappedBase.supplyAllowance).toBe(AMOUNT - 1n);
+      // The Comet snapshot keeps its own allowance.
+      expect(baseAsset.allowance).toBe(BASE_ASSET.allowance);
       expect(validateAddingAction(baseAsset, collateralAssets, [], supply, actionRules)).toBe('ok');
-      expect(validateAllowanceForAction(baseAsset, collateralAssets, [], supply, actionRules)).toBe('ok');
+      expect(validateAllowanceForAction(baseAsset, collateralAssets, [], supply, actionRules)).toEqual([
+        false,
+        'Approval Failed',
+      ]);
     });
 
     it('shows the wrapped value as the base balance, and queued actions in the after values', () => {
@@ -461,7 +490,8 @@ describe('Home on the wrapped route', () => {
 
     it("shows the route's blocked reason instead of queueing while the release controls are closed", () => {
       const queue = actionQueue([], [ActionType.Supply, BASE_ASSET, undefined]);
-      renderHome(lendingWith(controller(), { route: routeFor(CLOSED) }), { queue });
+      const lending = lendingWith(controller(), { route: routeFor(CLOSED), position: POSITION });
+      renderHome(lending, { queue });
       const { actionRules, baseAsset, collateralAssets } = positionCard();
 
       expect(
@@ -471,14 +501,145 @@ describe('Home on the wrapped route', () => {
         validateAddingAction(baseAsset, collateralAssets, [], [ActionType.Withdraw, baseAsset, 1n], actionRules)
       ).toEqual([false, 'Withdrawals Not Open Yet']);
 
-      // A form callback kept from before the controls closed queues nothing either.
+      // A form callback kept from before the controls closed queues nothing and asks for nothing.
       act(() => positionCard().onPendingActionConfirm(AMOUNT));
       expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
+      expect(lending.write.approve).not.toHaveBeenCalled();
     });
   });
 
-  describe('submits a queued base supply through the wrapper', () => {
-    it('starts the wrapped supply of the queued amount, never a Comet supply or the Bulker', () => {
+  describe('adds a base supply as production does: Approve & Add requests the approval', () => {
+    it('requests the exact approval to the wrapper and queues the supply, with no dialog', () => {
+      const lending = lendingWith(controller(), { position: POSITION });
+      const queue = actionQueue([], [ActionType.Supply, BASE_ASSET, undefined]);
+      renderHome(lending, { queue });
+
+      act(() => positionCard().onPendingActionConfirm(AMOUNT));
+
+      expect(lending.write.approve).toHaveBeenCalledWith(AMOUNT);
+      expect(queue.addOrUpdateAction).toHaveBeenCalledTimes(1);
+      const [queued] = queue.addOrUpdateAction.mock.calls[0];
+      expect([queued[0], queued[2]]).toEqual([ActionType.Supply, AMOUNT]);
+      // Never an approval of Comet, and nothing is supplied yet.
+      expect(mockWriteState.approve).not.toHaveBeenCalled();
+      expect(lending.write.supply).not.toHaveBeenCalled();
+      expectNoDialog();
+    });
+
+    it('approves the wallet balance for a Max supply', () => {
+      const lending = lendingWith(controller(), { position: POSITION });
+      renderHome(lending, { queue: actionQueue([], [ActionType.Supply, BASE_ASSET, undefined]) });
+
+      act(() => positionCard().onPendingActionConfirm(MAX_UINT256));
+
+      expect(lending.write.approve).toHaveBeenCalledWith(BASE_ASSET.walletBalance);
+    });
+
+    it('queues with no request when the allowance to the wrapper covers the amount, as Add Action does', () => {
+      const lending = lendingWith();
+      const queue = actionQueue([], [ActionType.Supply, BASE_ASSET, undefined]);
+      renderHome(lending, { queue });
+
+      act(() => positionCard().onPendingActionConfirm(AMOUNT));
+
+      expect(queue.addOrUpdateAction).toHaveBeenCalledTimes(1);
+      expect(lending.write.approve).not.toHaveBeenCalled();
+    });
+
+    it('asks for an approval again when the amount is raised above the allowance', () => {
+      const lending = lendingWith();
+      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]], [ActionType.Supply, BASE_ASSET, AMOUNT]);
+      renderHome(lending, { queue });
+
+      act(() => positionCard().onPendingActionConfirm(AMOUNT + 1n));
+
+      expect(lending.write.approve).toHaveBeenCalledWith(AMOUNT + 1n);
+    });
+
+    it('queues nothing and leaves the form open when the approval cannot start, as while an earlier one is pending', () => {
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const lending = lendingWith(controller(), { position: POSITION });
+      lending.write.approve.mockReturnValue('action-in-progress');
+      const queue = actionQueue([], [ActionType.Supply, BASE_ASSET, undefined]);
+      renderHome(lending, { queue });
+
+      act(() => positionCard().onPendingActionConfirm(AMOUNT));
+
+      expect(lending.write.approve).toHaveBeenCalledWith(AMOUNT);
+      expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
+      expect(queue.setPendingAction).not.toHaveBeenCalled();
+    });
+
+    it('asks the wallet to switch network first, as production does, and queues nothing', () => {
+      const lending = lendingWith(controller(), { position: POSITION });
+      const queue = actionQueue([], [ActionType.Supply, BASE_ASSET, undefined]);
+      renderHome(lending, { queue, web3: { ...WEB3, write: { ...WEB3.write, chainId: 8453 } } });
+
+      act(() => positionCard().onPendingActionConfirm(AMOUNT));
+
+      expect(switchWriteNetwork).toHaveBeenCalledWith(1);
+      expect(lending.write.approve).not.toHaveBeenCalled();
+      expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
+    });
+
+    it('queues a withdrawal with no approval', () => {
+      const lending = lendingWith(controller(), { position: POSITION });
+      const queue = actionQueue([], [ActionType.Withdraw, BASE_ASSET, undefined]);
+      renderHome(lending, { queue });
+
+      act(() => positionCard().onPendingActionConfirm(400_000_000n));
+
+      expect(queue.addOrUpdateAction).toHaveBeenCalledTimes(1);
+      expect(lending.write.approve).not.toHaveBeenCalled();
+    });
+
+    it("shows the supply's row as Approval Pending from the press until the receipt, without holding the dashboard", () => {
+      const supply: Action = [ActionType.Supply, BASE_ASSET, AMOUNT];
+      const queue = actionQueue([], [ActionType.Supply, BASE_ASSET, undefined]);
+      const { rerenderHome } = renderHome(lendingWith(controller(), { position: POSITION }), { queue });
+      act(() => positionCard().onPendingActionConfirm(AMOUNT));
+      const queued = actionQueue([supply]);
+      const approvalRow = () =>
+        positionCard().approvalTransactions.find((transaction: Transaction) => transaction.key === BASE_ASSET.address);
+
+      // The approval's checks run before the wallet is asked.
+      const identity = draftFor('supply', [APPROVE_STEP]).identity;
+      rerenderHome(lendingWith(controller({ phase: 'reading', identity }), { position: POSITION }), {
+        queue: queued,
+      });
+      expect(approvalRow()).toBeDefined();
+      expect(positionCard().transaction).toBeUndefined();
+
+      // The wallet has the request, then its hash.
+      const approving = { ...draftFor('supply', [APPROVE_STEP]), isApprovalOnly: true };
+      for (const state of [TransactionState.AwaitingConfirmation, TransactionState.Pending]) {
+        const step: WrappedStepState =
+          state === TransactionState.Pending ? { status: 'submitted', hash: HASH } : { status: 'awaiting-signature' };
+        rerenderHome(
+          lendingWith(controller(supplyState('signing', [APPROVE_STEP], [step], 0, approving)), { position: POSITION }),
+          {
+            queue: queued,
+            transactions: [wrapperTransaction('approve', state)],
+          }
+        );
+        expect(approvalRow()).toMatchObject({ state });
+        // An approval does not hold the dashboard.
+        expect(positionCard().transaction).toBeUndefined();
+        expect(masthead().transaction).toBeUndefined();
+        expect(mockAssetRows[COLLATERAL.symbol].state[1].transaction).toBeUndefined();
+      }
+
+      rerenderHome(lendingWith(controller(supplyState('complete', [APPROVE_STEP], [confirmed()], 0, approving))), {
+        queue: queued,
+      });
+      expect(approvalRow()).toBeUndefined();
+      expect(queue.removeAction).not.toHaveBeenCalled();
+      expectNoDialog();
+    });
+  });
+
+  describe('submits a queued base supply through the wrapper, with the position card states', () => {
+    it('starts the wrapped supply of the queued amount, never a Comet supply, an approval or the Bulker', () => {
       const lending = lendingWith();
       const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
       renderHome(lending, { queue });
@@ -486,13 +647,15 @@ describe('Home on the wrapped route', () => {
       act(() => positionCard().onSubmitClicked());
 
       expect(lending.write.supply).toHaveBeenCalledWith(AMOUNT);
+      expect(lending.write.approve).not.toHaveBeenCalled();
       expect(mockWriteState.supply).not.toHaveBeenCalled();
       expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
       expect(mockWriteState.approve).not.toHaveBeenCalled();
+      expectNoDialog();
     });
 
     it('supplies the wallet balance for a maximum supply', () => {
-      const lending = lendingWith();
+      const lending = lendingWith(controller(), { position: { ...POSITION, wrapperAllowance: MAX_UINT256 } });
       renderHome(lending, { queue: actionQueue([[ActionType.Supply, BASE_ASSET, MAX_UINT256]]) });
 
       act(() => positionCard().onSubmitClicked());
@@ -500,77 +663,124 @@ describe('Home on the wrapped route', () => {
       expect(lending.write.supply).toHaveBeenCalledWith(BASE_ASSET.walletBalance);
     });
 
-    it('shows the exact approval, the USDT reset first, then the supply, in order, each waiting for a confirmation', () => {
-      const steps = [RESET_STEP, APPROVE_STEP, SUPPLY_STEP];
-      const action = controller(
-        supplyState(
-          'review',
-          steps,
-          steps.map(() => ({ status: 'waiting' }))
-        )
-      );
+    it('shows Confirm Transaction from the press, Transaction Pending... after the hash, and clears the supply on its receipt', () => {
       const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
+      const { rerenderHome } = renderHome(lendingWith(), { queue });
       act(() => positionCard().onSubmitClicked());
-      rerenderHome(lendingWith(action), { queue });
+      const card = () => positionCard().transaction?.state;
 
-      const items = within(dialog()).getAllByRole('listitem');
-      expect(items.map((item) => item.querySelector('.body--emphasized')?.textContent)).toEqual([
-        RESET_STEP.description,
-        APPROVE_STEP.description,
-        SUPPLY_STEP.description,
-      ]);
-      expect(items[0]).toHaveTextContent('Ready for you to confirm.');
-      expect(items[1]).toHaveTextContent('Waits for the step before it.');
-
-      fireEvent.click(within(dialog()).getByRole('button', { name: 'Reset Allowance' }));
-      expect(action.confirm).toHaveBeenCalledTimes(1);
-    });
-
-    it('takes the supplied action out of the queue once the supply confirms', () => {
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
-      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
-      act(() => positionCard().onSubmitClicked());
-
+      // The checks before the wallet is asked.
+      const identity = draftFor('supply', [SUPPLY_STEP]).identity;
+      rerenderHome(lendingWith(controller({ phase: 'reading', identity })), { queue });
+      expect(card()).toBe(TransactionState.AwaitingConfirmation);
+      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), { queue });
+      expect(card()).toBe(TransactionState.AwaitingConfirmation);
+      // The wallet has the request.
+      const draft = draftFor('supply', [SUPPLY_STEP]);
       rerenderHome(
-        lendingWith(controller(supplyState('signing', steps, [confirmed(), { status: 'submitted', hash: HASH }], 1))),
-        {
-          queue,
-        }
+        lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'awaiting-signature' }], 0, draft))),
+        { queue, transactions: [wrapperTransaction('supply', TransactionState.AwaitingConfirmation)] }
       );
+      expect(card()).toBe(TransactionState.AwaitingConfirmation);
+      expect(masthead().transaction).toBeDefined();
+      expect(mockAssetRows[COLLATERAL.symbol].state[1].transaction).toBeDefined();
+      // The hash.
+      rerenderHome(
+        lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'submitted', hash: HASH }], 0, draft))),
+        { queue, transactions: [wrapperTransaction('supply', TransactionState.Pending)] }
+      );
+      expect(card()).toBe(TransactionState.Pending);
       expect(queue.removeAction).not.toHaveBeenCalled();
+      expectNoDialog();
 
-      rerenderHome(lendingWith(controller(supplyState('complete', steps, [confirmed(), confirmed()], 1))), { queue });
+      // The receipt.
+      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()], 0, draft))), { queue });
       expect(queue.removeAction).toHaveBeenCalledTimes(1);
       expect(queue.removeAction.mock.calls[0][0][0]).toBe(ActionType.Supply);
       expect(queue.clearActions).not.toHaveBeenCalled();
+      expect(card()).toBeUndefined();
+      expectNoDialog();
     });
 
-    it('keeps the queued supply when a step is rejected, and closing sends nothing more', () => {
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
+    it('returns the queue to Submit after a rejection, with nothing said, as production does', () => {
       const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
+      const first = lendingWith();
+      const { rerenderHome } = renderHome(first, { queue });
       act(() => positionCard().onSubmitClicked());
-      const stopped = controller(supplyState('stopped', steps, [confirmed(), { status: 'rejected' }], 1));
-      rerenderHome(lendingWith(stopped), { queue });
+      const rejected = lendingWith(controller(supplyState('stopped', [SUPPLY_STEP], [{ status: 'rejected' }])));
+      rerenderHome(rejected, { queue });
 
-      expect(dialog()).toHaveTextContent('You rejected the request in your wallet. Nothing was sent.');
-      expect(dialog()).toHaveTextContent(/stay in the queue/i);
-      fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }));
-
+      expect(positionCard().transaction).toBeUndefined();
+      expect(positionCard().actionRules.wrappedBase.stopped).toBeUndefined();
       expect(queue.removeAction).not.toHaveBeenCalled();
-      expect(queue.clearActions).not.toHaveBeenCalled();
-      expect(stopped.discard).toHaveBeenCalledTimes(1);
-      expect(screen.queryByRole('dialog')).toBeNull();
+      expectNoDialog();
+
+      act(() => positionCard().onSubmitClicked());
+      expect(rejected.write.supply).toHaveBeenCalledWith(AMOUNT);
+    });
+
+    it.each<[string, WrappedActionState, string]>([
+      [
+        'a check before the signature',
+        supplyState('stopped', [SUPPLY_STEP], [{ status: 'blocked', reason: 'step-check-failed', message: 'x' }]),
+        'Not Sent, Try Again',
+      ],
+      [
+        'the reads before the checks',
+        { phase: 'read-failed', identity: draftFor('supply', [SUPPLY_STEP]).identity, message: 'rate limited' },
+        'Not Sent, Try Again',
+      ],
+      [
+        "the wallet's refusal before it handled the request",
+        supplyState('stopped', [SUPPLY_STEP], [{ status: 'refused', message: 'Unauthorized (4100)' }]),
+        'Reconnect Your Wallet',
+      ],
+    ])(
+      'labels the row in its error position when %s stops the supply, and Submit sends it again',
+      (_name, state, label) => {
+        jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const supply: Action = [ActionType.Supply, BASE_ASSET, AMOUNT];
+        const queue = actionQueue([supply]);
+        const { rerenderHome } = renderHome(lendingWith(), { queue });
+        act(() => positionCard().onSubmitClicked());
+        const stopped = lendingWith(controller(state));
+        rerenderHome(stopped, { queue });
+
+        expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+          action: expect.arrayContaining([ActionType.Supply]),
+          label,
+        });
+        expect(positionCard().transaction).toBeUndefined();
+        expect(queue.removeAction).not.toHaveBeenCalled();
+        expectNoDialog();
+
+        act(() => positionCard().onSubmitClicked());
+        expect(stopped.write.supply).toHaveBeenCalledTimes(1);
+      }
+    );
+
+    it.each<[WrappedBlockReason, string]>([
+      // An earlier request can still go through, so the row does not ask for another try.
+      ['transaction-pending', 'Earlier Request Still Pending'],
+      ['action-in-progress', 'Earlier Request Still Pending'],
+      ['session-unusable', 'Not Sent, Try Again'],
+    ])('labels the row when the start is refused with %s, and opens no dialog', (refusal, label) => {
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      renderHome(lendingWith(controller(), { supplyRefusal: refusal }), { queue });
+
+      act(() => positionCard().onSubmitClicked());
+
+      expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe(label);
+      expect(positionCard().transaction).toBeUndefined();
+      expectNoDialog();
     });
 
     it('does not take a supply out of the queue for a draft that completed before this submission', () => {
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
-      const earlier = supplyState('complete', steps, [confirmed(), confirmed()], 1);
+      const earlier = supplyState('complete', [SUPPLY_STEP], [confirmed()]);
       const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
       // The start is accepted, but the lifecycle still shows the earlier draft, as it does until the
-      // new review's first render.
+      // new draft's first render.
       const lending = lendingWith(controller(earlier));
       const { rerenderHome } = renderHome(lending, { queue });
 
@@ -578,19 +788,6 @@ describe('Home on the wrapped route', () => {
       rerenderHome(lending, { queue });
 
       expect(lending.write.supply).toHaveBeenCalledTimes(1);
-      expect(queue.removeAction).not.toHaveBeenCalled();
-    });
-
-    it('explains a refused start, and lets the user stop waiting for an interrupted request', () => {
-      const action = controller({ phase: 'idle' }, { canDismissRecovered: true });
-      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      renderHome(lendingWith(action, { supplyRefusal: 'transaction-pending' }), { queue });
-
-      act(() => positionCard().onSubmitClicked());
-
-      expect(dialog()).toHaveTextContent('another wrapped transaction from this account is still pending');
-      fireEvent.click(within(dialog()).getByRole('button', { name: 'Stop waiting' }));
-      expect(action.dismissRecovered).toHaveBeenCalledTimes(1);
       expect(queue.removeAction).not.toHaveBeenCalled();
     });
 
@@ -613,61 +810,36 @@ describe('Home on the wrapped route', () => {
     });
   });
 
-  describe('keeps a submission across a visit to another page', () => {
-    it('shows the submission again on return, and takes the supply out of the queue once it confirmed meanwhile', () => {
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
+  describe('keeps a run across a visit to another page', () => {
+    it('takes the supply out of the queue once it confirmed while another page was shown', () => {
       const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
       const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
       act(() => positionCard().onSubmitClicked());
-      const signing = supplyState('signing', steps, [confirmed(), { status: 'submitted', hash: HASH }], 1);
+      const draft = draftFor('supply', [SUPPLY_STEP]);
+      const signing = supplyState('signing', [SUPPLY_STEP], [{ status: 'submitted', hash: HASH }], 0, draft);
       rerenderHome(lendingWith(controller(signing)), { queue });
 
       // The user opens another page while the supply is pending, and it confirms there.
-      const complete = supplyState(
-        'complete',
-        steps,
-        [confirmed(), confirmed()],
-        1,
-        signing.phase === 'signing' ? signing.draft : undefined
-      );
+      const complete = supplyState('complete', [SUPPLY_STEP], [confirmed()], 0, draft);
       rerenderHome(lendingWith(controller(signing)), { queue, isDashboard: false });
       rerenderHome(lendingWith(controller(complete)), { queue, isDashboard: false });
       expect(queue.removeAction).not.toHaveBeenCalled();
 
       rerenderHome(lendingWith(controller(complete)), { queue });
       expect(queue.removeAction).toHaveBeenCalledTimes(1);
-      expect(screen.getByRole('dialog', { name: 'Transactions Confirmed' })).toBeInTheDocument();
-    });
-
-    it('shows a review the user left on another page, so its next step can be confirmed or closed', () => {
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
-      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
-      act(() => positionCard().onSubmitClicked());
-      rerenderHome(lendingWith(controller()), { queue, isDashboard: false });
-
-      const nextStep = controller(supplyState('review', steps, [confirmed(), { status: 'waiting' }], 1));
-      rerenderHome(lendingWith(nextStep), { queue });
-      fireEvent.click(within(dialog()).getByRole('button', { name: 'Supply 1,000.000000 USDC' }));
-      expect(nextStep.confirm).toHaveBeenCalledTimes(1);
+      expectNoDialog();
     });
   });
 
-  describe('holds the queue still while it is submitted', () => {
-    it('ignores edits, removals, clears and new amounts while the dialog is hidden', () => {
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
+  describe('holds the queue still while a supply runs', () => {
+    it('ignores edits, removals, clears and new amounts kept from earlier renders while its checks run', () => {
       const supply: Action = [ActionType.Supply, BASE_ASSET, AMOUNT];
       const queue = actionQueue([supply], [ActionType.Supply, BASE_ASSET, undefined]);
       const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
       act(() => positionCard().onSubmitClicked());
-      rerenderHome(
-        lendingWith(controller(supplyState('signing', steps, [{ status: 'checking' }, { status: 'waiting' }]))),
-        {
-          queue,
-        }
-      );
-      fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }));
-      expect(screen.queryByRole('dialog')).toBeNull();
+      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), {
+        queue,
+      });
       queue.setPendingAction.mockClear();
 
       act(() => positionCard().onPendingActionConfirm(5n * AMOUNT));
@@ -681,38 +853,8 @@ describe('Home on the wrapped route', () => {
       expect(queue.clearActions).not.toHaveBeenCalled();
       expect(queue.setPendingAction).not.toHaveBeenCalled();
     });
-    it('says the queue is held while the dialog is hidden, and Submit or Show Progress shows it again', () => {
-      const lending = lendingWith(controller());
-      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const { rerenderHome } = renderHome(lending, { queue });
-      act(() => positionCard().onSubmitClicked());
-      const signing = lendingWith(
-        controller(supplyState('signing', [APPROVE_STEP, SUPPLY_STEP], [{ status: 'checking' }, { status: 'waiting' }]))
-      );
-      rerenderHome(signing, { queue });
-      expect(positionCard().queueNotice).toBeUndefined();
 
-      fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }));
-      expect(screen.queryByRole('dialog')).toBeNull();
-      expect(positionCard().queueNotice).toEqual({
-        message: 'Your USDC supply is in progress. The queue stays as it is until it finishes.',
-        actionLabel: 'Show Progress',
-        onAction: expect.any(Function),
-      });
-
-      act(() => positionCard().onSubmitClicked());
-      expect(dialog()).toBeInTheDocument();
-      expect(positionCard().queueNotice).toBeUndefined();
-
-      fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }));
-      act(() => positionCard().queueNotice?.onAction?.());
-      expect(dialog()).toBeInTheDocument();
-      // Neither starts another supply.
-      expect(lending.write.supply).toHaveBeenCalledTimes(1);
-      expect(signing.write.supply).not.toHaveBeenCalled();
-    });
-
-    it('holds both collateral row families still, and disables them, while a step is checked before its signature', () => {
+    it('disables both collateral row families as a pending transaction to Comet does', () => {
       // stETH is listed apart from the market's collateral, as "Other Assets".
       const stETH = mockEthCollateralAsset({
         address: '0xae7ab96520de3a18e5e111b5eaab095312d7fe84',
@@ -721,46 +863,24 @@ describe('Home on the wrapped route', () => {
       });
       const state = cometState();
       const withStETH = [state[0], { ...state[1], collateralAssets: [COLLATERAL, stETH] }] as unknown as CometState;
-      const collateralSupply: Action = [ActionType.SupplyCollateral, COLLATERAL, 10n ** 17n];
-      const stETHSupply: Action = [ActionType.SupplyCollateral, stETH, 10n ** 17n];
-      const queue = actionQueue([collateralSupply, stETHSupply, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      // An amount form open on a row, which its Cancel closes and takes out of the queue.
-      let pending: PendingAction | undefined;
-      queue.getPendingAction = () => pending;
+      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
       const options = { queue, state: withStETH };
       const { rerenderHome } = renderHome(lendingWith(controller()), options);
       act(() => positionCard().onSubmitClicked());
       // The check before the signature is held open: the wallet has not been asked, so the
       // transaction manager tracks nothing yet.
-      const checking = lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }])));
-      rerenderHome(checking, options);
-      fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }));
-      expect(screen.queryByRole('dialog')).toBeNull();
-      queue.setPendingAction.mockClear();
+      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), options);
 
-      for (const [asset, action] of [
-        [COLLATERAL, collateralSupply],
-        [stETH, stETHSupply],
-      ] as const) {
-        const row = () => mockAssetRows[asset.symbol].state[1];
-        expect(row().isLocked).toBe(true);
-        act(() => row().onEditClicked());
-        act(() => row().onSupplyClicked());
-        act(() => row().onWithdrawClicked?.());
-        pending = [ActionType.SupplyCollateral, asset, action[2]];
-        rerenderHome(checking, options);
-        act(() => row().onCancelClicked());
-        pending = undefined;
+      for (const asset of [COLLATERAL, stETH]) {
+        expect(mockAssetRows[asset.symbol].state[1].transaction).toMatchObject({
+          state: TransactionState.AwaitingConfirmation,
+        });
       }
-
-      expect(queue.setPendingAction).not.toHaveBeenCalled();
-      expect(queue.removeAction).not.toHaveBeenCalled();
     });
   });
 
-  describe('a wrapper action that stops where it can still go through', () => {
-    it('leaves the queue when its last step may still execute, and says so', () => {
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
+  describe('a supply that stops where it can still go through', () => {
+    it('leaves the queue when the wallet may still send it, and shows nothing more', () => {
       const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
       const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
       act(() => positionCard().onSubmitClicked());
@@ -769,28 +889,14 @@ describe('Home on the wrapped route', () => {
         message: 'The request can still complete (4900)',
         isPendingInWallet: true,
       };
-      rerenderHome(lendingWith(controller(supplyState('stopped', steps, [confirmed(), pending], 1))), { queue });
+      rerenderHome(lendingWith(controller(supplyState('stopped', [SUPPLY_STEP], [pending]))), { queue });
 
       expect(queue.removeAction).toHaveBeenCalledTimes(1);
-      expect(dialog()).toHaveTextContent(/may still go through, so it was taken out of your queue/);
+      expect(positionCard().actionRules.wrappedBase.stopped).toBeUndefined();
+      expectNoDialog();
     });
 
-    it('stays queued when only its approval may still execute, since the supply was never sent', () => {
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
-      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
-      act(() => positionCard().onSubmitClicked());
-      const failed: WrappedStepState = { status: 'provider-failure', message: 'Internal error' };
-      rerenderHome(lendingWith(controller(supplyState('stopped', steps, [failed, { status: 'waiting' }], 0))), {
-        queue,
-      });
-
-      expect(queue.removeAction).not.toHaveBeenCalled();
-      expect(dialog()).toHaveTextContent(/stay in the queue/);
-    });
-
-    it('stays queued when its last step reverted', () => {
-      const steps = [SUPPLY_STEP];
+    it('stays queued, labelled, when it reverted', () => {
       const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
       const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
       act(() => positionCard().onSubmitClicked());
@@ -799,45 +905,71 @@ describe('Home on the wrapped route', () => {
         hash: HASH,
         receipt: { transactionHash: HASH, status: 0 } as TransactionReceipt,
       };
-      rerenderHome(lendingWith(controller(supplyState('stopped', steps, [reverted], 0))), { queue });
+      rerenderHome(lendingWith(controller(supplyState('stopped', [SUPPLY_STEP], [reverted]))), { queue });
 
       expect(queue.removeAction).not.toHaveBeenCalled();
+      expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Transaction Failed');
     });
 
-    it('leaves the queue when another transaction took the nonce of its last step, as a sped-up copy does', () => {
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
+    it('leaves the queue when another transaction took its nonce, as a sped-up copy does', () => {
       const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
       const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
       act(() => positionCard().onSubmitClicked());
       const replaced: WrappedStepState = { status: 'replaced', hash: HASH };
-      rerenderHome(lendingWith(controller(supplyState('stopped', steps, [confirmed(), replaced], 1))), { queue });
+      rerenderHome(lendingWith(controller(supplyState('stopped', [SUPPLY_STEP], [replaced]))), { queue });
 
       expect(queue.removeAction).toHaveBeenCalledTimes(1);
-      expect(dialog()).toHaveTextContent(/may have gone through as another transaction/);
-      expect(dialog()).toHaveTextContent(/taken out of your queue to keep it from being sent twice/);
+      expectNoDialog();
     });
   });
 
   describe('submits a queued base withdrawal through the wrapper', () => {
-    it('asks the wrapper for the queued cash', () => {
+    it('asks the wrapper for the queued cash, with no dialog', () => {
       const lending = lendingWith();
       renderHome(lending, { queue: actionQueue([[ActionType.Withdraw, BASE_ASSET, 400_000_000n]]) });
 
       act(() => positionCard().onSubmitClicked());
 
-      expect(lending.write.withdraw).toHaveBeenCalledWith({ kind: 'partial', cash: 400_000_000n }, undefined);
+      expect(lending.write.withdraw).toHaveBeenCalledWith({ kind: 'partial', cash: 400_000_000n });
       expect(mockWriteState.withdraw).not.toHaveBeenCalled();
       expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+      expectNoDialog();
     });
 
-    it('asks for a full exit for a maximum withdrawal, with the cash the page showed', () => {
+    it('asks for a full exit for a maximum withdrawal, and its row shows the cash the exit pays', () => {
       const lending = lendingWith();
       renderHome(lending, { queue: actionQueue([[ActionType.Withdraw, BASE_ASSET, MAX_UINT256]]) });
 
+      expect(positionCard().actionRules.wrappedBase.fullExitCash).toBe(POSITION.fullExitCash);
       act(() => positionCard().onSubmitClicked());
 
-      expect(lending.write.withdraw).toHaveBeenCalledWith({ kind: 'full' }, POSITION.fullExitCash);
+      expect(lending.write.withdraw).toHaveBeenCalledWith({ kind: 'full' });
       expect(mockWriteState.withdraw).not.toHaveBeenCalled();
+      expectNoDialog();
+    });
+
+    it('shows Confirm Transaction and Transaction Pending... for the withdrawal, and clears it on its receipt', () => {
+      const queue = actionQueue([[ActionType.Withdraw, BASE_ASSET, MAX_UINT256]]);
+      const { rerenderHome } = renderHome(lendingWith(), { queue });
+      act(() => positionCard().onSubmitClicked());
+      const draft = draftFor('withdraw', [WITHDRAW_STEP], SHARES);
+      const withdrawing = (step: WrappedStepState) =>
+        lendingWith(controller({ phase: 'signing', draft, steps: [step], stepIndex: 0 }));
+
+      rerenderHome(withdrawing({ status: 'checking' }), { queue });
+      expect(positionCard().transaction?.state).toBe(TransactionState.AwaitingConfirmation);
+      rerenderHome(withdrawing({ status: 'submitted', hash: HASH }), {
+        queue,
+        transactions: [wrapperTransaction('withdraw', TransactionState.Pending)],
+      });
+      expect(positionCard().transaction?.state).toBe(TransactionState.Pending);
+
+      rerenderHome(lendingWith(controller({ phase: 'complete', draft, steps: [confirmed()], stepIndex: 0 })), {
+        queue,
+      });
+      expect(queue.removeAction).toHaveBeenCalledTimes(1);
+      expect(queue.removeAction.mock.calls[0][0][0]).toBe(ActionType.Withdraw);
+      expectNoDialog();
     });
 
     it('limits a partial withdrawal to what the wrapper pays, net of its rounding buffer', () => {
@@ -848,87 +980,35 @@ describe('Home on the wrapped route', () => {
       expect(actionRules.wrappedBase.maxPartialWithdrawal).toBeLessThan(POSITION.grossAssets);
       expect(actionRules.wrappedBase.canWithdrawAll).toBe(true);
     });
-
-    it('shows the quote figures and the cash rounding before the exit is confirmed', () => {
-      const draft: WrappedActionDraft = {
-        ...draftFor('withdraw', [WITHDRAW_STEP], SHARES),
-        withdrawal: {
-          request: { kind: 'partial', cash: 400_000_000n },
-          quote: {
-            kind: 'partial',
-            shares: SHARES,
-            grossAssets: 400_000_004n,
-            redeemBuffer: 3n,
-            cash: 400_000_001n,
-            leavesDust: false,
-          },
-          shownCash: undefined,
-          blockNumber: 1,
-        },
-      };
-      const queue = actionQueue([[ActionType.Withdraw, BASE_ASSET, 400_000_000n]]);
-      const { rerenderHome } = renderHome(lendingWith(), { queue });
-      act(() => positionCard().onSubmitClicked());
-      const action = controller({ phase: 'review', draft, steps: [{ status: 'waiting' }], stepIndex: 0 });
-      rerenderHome(lendingWith(action), { queue });
-
-      expect(within(dialog()).getByTestId('wrapped-withdraw-cash')).toHaveTextContent('400.000001 USDC');
-      expect(dialog()).toHaveTextContent(/because shares are burned in whole units/);
-      fireEvent.click(within(dialog()).getByRole('button', { name: 'Withdraw About 400.000001 USDC' }));
-      expect(action.confirm).toHaveBeenCalledTimes(1);
-    });
   });
 
-  describe('orders a mixed queue: the wrapper steps first, then the direct actions', () => {
+  describe('a mixed queue: the wrapper action first, then the direct actions through the production path', () => {
     const supplyCollateral: Action = [ActionType.SupplyCollateral, COLLATERAL, 10n ** 17n];
     const withdrawCollateral: Action = [ActionType.WithdrawCollateral, COLLATERAL, 10n ** 16n];
 
-    it('starts the wrapper action alone and lists the direct actions after it', () => {
+    it('starts the wrapper action alone, with no dialog', () => {
       const lending = lendingWith();
       const queue = actionQueue([supplyCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const { rerenderHome } = renderHome(lending, { queue });
+      renderHome(lending, { queue });
 
       act(() => positionCard().onSubmitClicked());
+
       expect(lending.write.supply).toHaveBeenCalledWith(AMOUNT);
       expect(mockWriteState.supply).not.toHaveBeenCalled();
       expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
-
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
-      rerenderHome(
-        lendingWith(
-          controller(
-            supplyState(
-              'review',
-              steps,
-              steps.map(() => ({ status: 'waiting' }))
-            )
-          )
-        ),
-        {
-          queue,
-        }
-      );
-      const items = within(dialog()).getAllByRole('listitem');
-      expect(items).toHaveLength(3);
-      expect(items[2]).toHaveTextContent('1 other action');
-      expect(items[2]).toHaveTextContent('Sent after the steps above, as a separate transaction.');
+      expectNoDialog();
     });
 
-    it('sends the direct actions only after the wrapper action completes, and the Bulker never gets the wrapper action', () => {
+    it('sends the direct actions through the Bulker once the wrapper action confirms, and never the wrapper action', () => {
       const queue = actionQueue([supplyCollateral, withdrawCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
       const { rerenderHome } = renderHome(lendingWith(), { queue });
       act(() => positionCard().onSubmitClicked());
-
-      const steps = [SUPPLY_STEP];
-      rerenderHome(lendingWith(controller(supplyState('complete', steps, [confirmed()]))), { queue });
-      expect(queue.removeAction).toHaveBeenCalledTimes(1);
+      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), { queue });
       expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
 
-      // The queue no longer holds the supply.
-      const remaining = actionQueue([supplyCollateral, withdrawCollateral]);
-      rerenderHome(lendingWith(controller(supplyState('complete', steps, [confirmed()]))), { queue: remaining });
-      fireEvent.click(within(dialog()).getByRole('button', { name: 'Submit 2 Remaining Actions' }));
+      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()]))), { queue });
 
+      expect(queue.removeAction).toHaveBeenCalledTimes(1);
       expect(mockWriteState.invokeBulker).toHaveBeenCalledTimes(1);
       const bulkerActions: Action[] = mockWriteState.invokeBulker.mock.calls[0][1];
       expect(bulkerActions.map((action) => action[0])).toEqual([
@@ -936,32 +1016,86 @@ describe('Home on the wrapped route', () => {
         ActionType.WithdrawCollateral,
       ]);
       expect(mockWriteState.supply).not.toHaveBeenCalled();
+      // The Bulker's own transaction dialog, as for any queue of several direct actions.
+      expect(mockLastProps.ActionModal.state[0]).toBe('bulker');
     });
 
-    it('keeps every action queued when the wrapper action stops', () => {
+    it("opens the Bulker's own approval first when the Bulker is not yet allowed", () => {
+      const queue = actionQueue([supplyCollateral, withdrawCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      const options = { queue, state: cometState(BASE_ASSET, false) };
+      const { rerenderHome } = renderHome(lendingWith(), options);
+      act(() => positionCard().onSubmitClicked());
+      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), options);
+      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()]))), options);
+
+      expect(mockLastProps.ActionModal.state[0]).toBe('bulker-approve');
+      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+    });
+
+    it('sends one remaining direct action straight to Comet, as production does for a token that is not wrapped', () => {
+      // ETH and stETH go through the Bulker even alone, so the remaining action is a COMP supply.
+      const comp = mockCompCollateralAsset({ walletBalance: 10n ** 18n });
+      const state = cometState();
+      const withComp = [state[0], { ...state[1], collateralAssets: [COLLATERAL, comp] }] as unknown as CometState;
+      const queue = actionQueue([
+        [ActionType.SupplyCollateral, comp, 10n ** 17n],
+        [ActionType.Supply, BASE_ASSET, AMOUNT],
+      ]);
+      const options = { queue, state: withComp };
+      const { rerenderHome } = renderHome(lendingWith(), options);
+      act(() => positionCard().onSubmitClicked());
+      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), options);
+      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()]))), options);
+
+      expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
+      expect(mockWriteState.supply.mock.calls[0][1]).toBe(comp.address);
+      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+      expectNoDialog();
+    });
+
+    it('leaves the direct actions queued for the next Submit when the wrapper action confirmed while another page was shown', () => {
+      const queue = actionQueue([supplyCollateral, withdrawCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      const { rerenderHome } = renderHome(lendingWith(), { queue });
+      act(() => positionCard().onSubmitClicked());
+      const draft = draftFor('supply', [SUPPLY_STEP]);
+      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }], 0, draft))), {
+        queue,
+      });
+
+      // The user opens another page, and the supply confirms there.
+      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()], 0, draft))), {
+        queue,
+        isDashboard: false,
+      });
+      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()], 0, draft))), { queue });
+
+      expect(queue.removeAction).toHaveBeenCalledTimes(1);
+      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+      expect(mockWriteState.supply).not.toHaveBeenCalled();
+      expectNoDialog();
+    });
+
+    it('keeps every action queued and sends no direct action when the wrapper action stops', () => {
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
       const queue = actionQueue([supplyCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
       const { rerenderHome } = renderHome(lendingWith(), { queue });
       act(() => positionCard().onSubmitClicked());
 
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
       rerenderHome(
         lendingWith(
-          controller(
-            supplyState('stopped', steps, [{ status: 'blocked', reason: 'supply-paused' }, { status: 'waiting' }])
-          )
+          controller(supplyState('stopped', [SUPPLY_STEP], [{ status: 'blocked', reason: 'supply-paused' }]))
         ),
         { queue }
       );
 
-      expect(within(dialog()).getAllByRole('listitem')[2]).toHaveTextContent('Not sent. It stays in your queue.');
-      expect(screen.queryByRole('button', { name: /remaining action/i })).toBeNull();
       expect(queue.removeAction).not.toHaveBeenCalled();
       expect(mockWriteState.supply).not.toHaveBeenCalled();
       expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+      expectNoDialog();
     });
   });
 
-  describe('drops a submission when the session or market changes', () => {
+  describe('drops a run when the session or market changes', () => {
     const variants: [string, HomeOptions][] = [
       ['account', { web3: { ...WEB3, write: { ...WEB3.write, account: OTHER_ACCOUNT } } }],
       [
@@ -981,29 +1115,26 @@ describe('Home on the wrapped route', () => {
       ['market', { market: USDT_MARKET }],
     ];
 
-    it.each(variants)('closes the submission and ignores its kept callbacks after a change of %s', (_name, change) => {
-      const steps = [APPROVE_STEP, SUPPLY_STEP];
-      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const reviewed = controller(
-        supplyState(
-          'review',
-          steps,
-          steps.map(() => ({ status: 'waiting' }))
-        )
-      );
-      const { rerenderHome } = renderHome(lendingWith(), { queue });
-      const keptSubmit = positionCard().onSubmitClicked;
-      act(() => keptSubmit());
-      rerenderHome(lendingWith(reviewed), { queue });
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    it.each(variants)(
+      'shows nothing of the run and ignores its kept callbacks after a change of %s',
+      (_name, change) => {
+        const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
+        const checking = controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]));
+        const { rerenderHome } = renderHome(lendingWith(), { queue });
+        const keptSubmit = positionCard().onSubmitClicked;
+        act(() => keptSubmit());
+        rerenderHome(lendingWith(checking), { queue });
+        expect(positionCard().transaction).toBeDefined();
 
-      const changed = lendingWith(reviewed, change.market === undefined ? {} : { route: routeFor(OPEN, USDT_COMET) });
-      rerenderHome(changed, { queue, ...change });
+        const changed = lendingWith(checking, change.market === undefined ? {} : { route: routeFor(OPEN, USDT_COMET) });
+        rerenderHome(changed, { queue, ...change });
 
-      expect(screen.queryByRole('dialog')).toBeNull();
-      act(() => keptSubmit());
-      expect(changed.write.supply).not.toHaveBeenCalled();
-    });
+        expect(positionCard().transaction).toBeUndefined();
+        act(() => keptSubmit());
+        expect(changed.write.supply).not.toHaveBeenCalled();
+        expectNoDialog();
+      }
+    );
   });
 });
 

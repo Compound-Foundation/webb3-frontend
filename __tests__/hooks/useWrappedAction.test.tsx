@@ -27,7 +27,7 @@ import {
   TransactionRequest,
   useTransactionManager,
 } from '@hooks/useTransactionManager';
-import { useWrappedAction, WrappedActionController, WrappedStepState } from '@hooks/useWrappedAction';
+import { useSignWhenReady, useWrappedAction, WrappedActionController, WrappedStepState } from '@hooks/useWrappedAction';
 import {
   AwaitingConfirmationTransaction,
   PendingTransaction,
@@ -84,7 +84,14 @@ const SUPPLY: WrappedStep = {
   description: 'Supply USDC through the wrapper',
   request: { to: USDC_WRAPPER, data: CALLS.encodeFunctionData('supplyAndWrap', [1_000_000n]) },
 };
-const PLAN = { amount: 1_000_000n, steps: [APPROVE, SUPPLY] };
+const RESET: WrappedStep = {
+  id: 'reset-allowance',
+  kind: 'approve',
+  description: 'Enable USDC',
+  request: { to: USDC, data: CALLS.encodeFunctionData('approve', [USDC_WRAPPER, 0n]) },
+};
+/** Approve & Add's approval after a reset to zero: two steps, each signed after the one before it confirms. */
+const PLAN = { amount: 1_000_000n, steps: [RESET, APPROVE], isApprovalOnly: true };
 const prepareSupply = async () => PLAN;
 
 function openRegistry({ deposits = true } = {}): WrappedMarketRegistry {
@@ -158,12 +165,7 @@ function sessionFor(wallet: Wallet, setup: SessionSetup = {}): WrappedSession {
 
 type Manager = Pick<
   TransactionManager,
-  | 'transactions'
-  | 'settledTransactions'
-  | 'walletFailure'
-  | 'restoredSession'
-  | 'submitTransaction'
-  | 'dismissTransaction'
+  'transactions' | 'settledTransactions' | 'walletFailure' | 'restoredSession' | 'submitTransaction'
 >;
 
 /**
@@ -177,7 +179,6 @@ function fakeManager(wallet: Wallet) {
     settledTransactions: [],
     walletFailure: undefined,
     restoredSession: { provider: wallet, account: ACCOUNT, chainId: 1 },
-    dismissTransaction: jest.fn(),
     submitTransaction: jest.fn(
       (request: TransactionRequest) => new Promise<SendResult>((resolve) => requests.push({ request, resolve }))
     ),
@@ -307,7 +308,7 @@ describe('useWrappedAction', () => {
         // Only a fresh review and confirmation sends anything, starting from the first step.
         await reachReview(result);
         await confirmAndWaitForWallet(result, requests, requests.length + 1);
-        expect(requests[requests.length - 1].request.step).toBe('approve');
+        expect(requests[requests.length - 1].request.step).toBe('reset-allowance');
       }
     );
 
@@ -904,31 +905,36 @@ describe('useWrappedAction', () => {
       await reachReview(result);
       await confirmAndWaitForWallet(result, requests, 1);
 
-      expect(requests[0].request).toMatchObject({ key: USDC_WRAPPER, step: 'approve', account: ACCOUNT, chainId: 1 });
+      expect(requests[0].request).toMatchObject({
+        key: USDC_WRAPPER,
+        step: 'reset-allowance',
+        account: ACCOUNT,
+        chainId: 1,
+      });
       await expect(requests[0].request.send()).resolves.toBe('0xsent');
       expect(wallet.getSigner).toHaveBeenCalledWith(ACCOUNT);
-      expect(wallet.estimateGas).toHaveBeenCalledWith({ ...APPROVE.request, chainId: 1, from: ACCOUNT });
+      expect(wallet.estimateGas).toHaveBeenCalledWith({ ...RESET.request, chainId: 1, from: ACCOUNT });
       expect(wallet.sendUncheckedTransaction).toHaveBeenCalledWith({
-        ...APPROVE.request,
+        ...RESET.request,
         chainId: 1,
         gasLimit: BigNumber.from(120_000),
       });
 
-      await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xapproval' }));
-      act(() => requests[0].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xapproval') }));
+      await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xreset' }));
+      act(() => requests[0].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xreset') }));
       await act(async () => undefined);
       expect(requests).toHaveLength(1);
 
       await confirmAndWaitForWallet(result, requests, 2);
-      expect(requests[1].request).toMatchObject({ key: USDC_WRAPPER, step: 'supply' });
+      expect(requests[1].request).toMatchObject({ key: USDC_WRAPPER, step: 'approve' });
       await requests[1].request.send();
       expect(wallet.sendUncheckedTransaction).toHaveBeenLastCalledWith({
-        ...SUPPLY.request,
+        ...APPROVE.request,
         chainId: 1,
         gasLimit: BigNumber.from(120_000),
       });
-      await act(async () => requests[1].resolve({ status: 'submitted', id: 'id-2', hash: '0xsupply' }));
-      act(() => requests[1].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xsupply') }));
+      await act(async () => requests[1].resolve({ status: 'submitted', id: 'id-2', hash: '0xapproval' }));
+      act(() => requests[1].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xapproval') }));
 
       expect(result.current.state.phase).toBe('complete');
     });
@@ -1057,52 +1063,18 @@ describe('useWrappedAction', () => {
         stepIndex: 0,
         steps: [{ status: 'refused', message: 'Unauthorized (4100)' }, { status: 'waiting' }],
       });
-      // The wallet answered, so the session stays usable, and its answer is kept for the panel.
+      // The wallet answered, so the session stays usable.
       expect(result.current.session).toEqual({ status: 'usable' });
-      expect(result.current.walletRefusalMessage).toBe('Unauthorized (4100)');
-      expect(result.current.canDismissRecovered).toBe(false);
       act(() => result.current.confirm());
       await act(async () => undefined);
       expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
 
-      // Nothing was sent, so a new review starts at once, and it clears the refusal.
+      // Nothing was sent, so a new review starts at once.
       act(() => result.current.discard());
-      expect(result.current.walletRefusalMessage).toBe('Unauthorized (4100)');
       expect(result.current.blockedReason('supply')).toBeUndefined();
       await reachReview(result);
-      expect(result.current.walletRefusalMessage).toBeUndefined();
       expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
       expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
-    });
-
-    it.each<[string, (wallet: Wallet) => WrappedSession]>([
-      ['a reconnected wallet, with a new wallet provider', () => sessionFor(walletProvider())],
-      ['another account', (wallet) => sessionFor(wallet, { account: OTHER_ACCOUNT })],
-      ['another network', (wallet) => sessionFor(wallet, { chainId: 8453 })],
-    ])('shows a refusal only to the wallet session that refused: %s', async (_name, otherSession) => {
-      const { manager, requests } = fakeManager(wallet);
-      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
-      await reachReview(result);
-      await confirmAndWaitForWallet(result, requests, 1);
-      await act(async () => requests[0].resolve({ status: 'refused', message: 'Unauthorized (4100)' }));
-      expect(result.current.walletRefusalMessage).toBe('Unauthorized (4100)');
-
-      rerender({ session: otherSession(wallet), manager });
-
-      expect(result.current.walletRefusalMessage).toBeUndefined();
-    });
-
-    it('drops a refusal that arrives after the wallet session changed', async () => {
-      const { manager, requests } = fakeManager(wallet);
-      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
-      await reachReview(result);
-      await confirmAndWaitForWallet(result, requests, 1);
-
-      rerender({ session: sessionFor(wallet, { account: OTHER_ACCOUNT }), manager });
-      await act(async () => requests[0].resolve({ status: 'refused', message: 'Unauthorized (4100)' }));
-      rerender({ session: sessionFor(wallet), manager });
-
-      expect(result.current.walletRefusalMessage).toBeUndefined();
     });
 
     it('keeps an outcome that arrives before the hash it belongs to is recorded', async () => {
@@ -1391,96 +1363,26 @@ describe('useWrappedAction', () => {
       expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
     });
 
-    it('waits for a wallet request left open at a reload, until the user dismisses it', () => {
+    it.each<[string, Transaction]>([
+      ['an interrupted request the wallet said it still holds', interruptedRequest({ isPendingInWallet: true })],
+      ['an interrupted request with no such answer', interruptedRequest()],
+      ['a request with no answer yet', interruptedRequest({ isInterrupted: false })],
+      ['a broadcast transaction', wrapperTransaction()],
+    ])('holds back a fresh review for %s until it leaves the list', (_name, transaction) => {
       const { manager } = fakeManager(wallet);
-      const interrupted: Transaction = {
-        id: 'interrupted',
-        key: USDC_WRAPPER,
-        networkId: 1,
-        networkName: 'homestead',
-        description: 'Supply USDC through the wrapper',
-        nonce: 7,
-        account: ACCOUNT,
-        step: 'supply',
-        state: TransactionState.AwaitingConfirmation,
-        isInterrupted: true,
-      };
-      const { result } = renderAction({
+      const { result, rerender } = renderAction({
         session: sessionFor(wallet),
-        manager: { ...manager, transactions: [interrupted] },
+        manager: { ...manager, transactions: [transaction] },
       });
 
+      expect(result.current.recovered.pending).toEqual([transaction]);
       expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
-      expect(result.current.canDismissRecovered).toBe(true);
-      expect(result.current.hasUnansweredWalletRequest).toBe(false);
-      act(() => result.current.dismissRecovered());
 
-      expect(manager.dismissTransaction).toHaveBeenCalledWith('interrupted');
+      // It settles, or the user clears it from the list of transactions after checking the wallet.
+      rerender({ session: sessionFor(wallet), manager });
+      expect(result.current.blockedReason('supply')).toBeUndefined();
       expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
-
-    it('says when the wallet has not answered a request of this account, once no draft is in progress', async () => {
-      const { manager, requests } = fakeManager(wallet);
-      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
-      await reachReview(result);
-      await confirmAndWaitForWallet(result, requests, 1);
-      // The manager tracks the step's own request, with no hash and not interrupted, until the
-      // wallet answers it.
-      const unanswered: Transaction = {
-        id: 'unanswered',
-        key: USDC_WRAPPER,
-        networkId: 1,
-        networkName: 'homestead',
-        description: 'Approve USDC for the wrapper',
-        nonce: 7,
-        account: ACCOUNT,
-        step: 'approve',
-        state: TransactionState.AwaitingConfirmation,
-      };
-      rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [unanswered] } });
-      expect(result.current.state.phase).toBe('signing');
-      expect(result.current.hasUnansweredWalletRequest).toBe(false);
-
-      act(() => result.current.discard());
-
-      expect(result.current.hasUnansweredWalletRequest).toBe(true);
-      expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
-      // The user can stop waiting for the request only after a reload.
-      expect(result.current.canDismissRecovered).toBe(false);
-      act(() => result.current.dismissRecovered());
-      expect(manager.dismissTransaction).not.toHaveBeenCalled();
-    });
-
-    it.each<[string, Transaction, boolean, boolean]>([
-      [
-        'an interrupted request the wallet said it still holds',
-        interruptedRequest({ isPendingInWallet: true }),
-        true,
-        true,
-      ],
-      ['an interrupted request with no such answer', interruptedRequest(), true, false],
-      [
-        'a request with no answer yet, whatever its record says',
-        interruptedRequest({ isInterrupted: false, isPendingInWallet: true }),
-        false,
-        false,
-      ],
-      ['a broadcast transaction', wrapperTransaction(), false, false],
-    ])(
-      'reports whether the wallet still holds a request it waits for: %s',
-      (_name, transaction, canDismiss, isPending) => {
-        const { manager } = fakeManager(wallet);
-        const { result } = renderAction({
-          session: sessionFor(wallet),
-          manager: { ...manager, transactions: [transaction] },
-        });
-
-        expect(result.current.canDismissRecovered).toBe(canDismiss);
-        expect(result.current.isRecoveredRequestPendingInWallet).toBe(isPending);
-        // Either way, a fresh review waits for it.
-        expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
-      }
-    );
 
     it('checks again at the signature for another wrapper transaction of the account, and sends nothing', async () => {
       const { manager } = fakeManager(wallet);
@@ -1534,28 +1436,6 @@ describe('useWrappedAction', () => {
       });
 
       expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
-      expect(result.current.canDismissRecovered).toBe(false);
-      expect(result.current.hasUnansweredWalletRequest).toBe(false);
-      act(() => result.current.dismissRecovered());
-
-      expect(manager.dismissTransaction).not.toHaveBeenCalled();
-    });
-
-    it('does not dismiss an interrupted request while a draft is in progress', async () => {
-      const { manager, requests } = fakeManager(wallet);
-      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
-      await reachReview(result);
-      await confirmAndWaitForWallet(result, requests, 1);
-      // The wallet answered the step with an ambiguous error. The manager has marked the step's own
-      // record interrupted, and the draft has not yet heard the result.
-      const interrupted = interruptedRequest({ id: 'in-flight', step: 'approve' });
-      rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [interrupted] } });
-      expect(result.current.state.phase).toBe('signing');
-
-      expect(result.current.canDismissRecovered).toBe(false);
-      act(() => result.current.dismissRecovered());
-
-      expect(manager.dismissTransaction).not.toHaveBeenCalled();
     });
 
     it("ignores other accounts', chains' and contracts' transactions", () => {
@@ -1569,6 +1449,66 @@ describe('useWrappedAction', () => {
 
       expect(result.current.recovered.pending).toEqual([]);
       expect(result.current.blockedReason('supply')).toBeUndefined();
+    });
+  });
+
+  describe('useSignWhenReady', () => {
+    function renderSigned(manager: Manager) {
+      return renderHook(() => {
+        const action = useWrappedAction({
+          session: sessionFor(wallet),
+          manager,
+          readProvider: undefined,
+          checkRestriction: async () => undefined,
+        });
+        useSignWhenReady(action);
+        return action;
+      });
+    }
+
+    it('signs each step once it is ready, with no other confirmation, and the next only after the one before it confirms', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result } = renderSigned(manager);
+      await waitFor(() => expect(result.current.session.status).toBe('usable'));
+
+      act(() => {
+        result.current.start('supply', prepareSupply);
+      });
+      await waitFor(() => expect(requests).toHaveLength(1));
+      expect(requests[0].request.step).toBe('reset-allowance');
+      await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xreset' }));
+      await act(async () => undefined);
+      // The approval waits for the reset's receipt.
+      expect(requests).toHaveLength(1);
+
+      act(() => requests[0].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xreset') }));
+      await waitFor(() => expect(requests).toHaveLength(2));
+      expect(requests[1].request.step).toBe('approve');
+      await act(async () => requests[1].resolve({ status: 'submitted', id: 'id-2', hash: '0xapproval' }));
+      act(() => requests[1].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xapproval') }));
+
+      expect(result.current.state.phase).toBe('complete');
+      expect(manager.submitTransaction).toHaveBeenCalledTimes(2);
+    });
+
+    it.each<[string, SendResult]>([
+      ['rejected', { status: 'rejected' }],
+      ['refused', { status: 'refused', message: 'Unauthorized (4100)' }],
+      ['answered with an error', { status: 'provider-failure', message: 'Internal error (-32603)' }],
+    ])('signs nothing more once a step is %s', async (_name, answer) => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result } = renderSigned(manager);
+      await waitFor(() => expect(result.current.session.status).toBe('usable'));
+
+      act(() => {
+        result.current.start('supply', prepareSupply);
+      });
+      await waitFor(() => expect(requests).toHaveLength(1));
+      await act(async () => requests[0].resolve(answer));
+      await act(async () => undefined);
+
+      expect(result.current.state).toMatchObject({ phase: 'stopped', stepIndex: 0 });
+      expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -1613,7 +1553,6 @@ describe('useWrappedAction', () => {
         cash: 100_000_000n,
         leavesDust: false,
       },
-      shownCash: undefined,
       blockNumber: 101,
     });
     /** The exit as its check found it just before the signature, after interest raised its cash. */
@@ -1900,19 +1839,24 @@ describe('useWrappedAction with the transaction manager', () => {
     return { wallet, network, supplyReceipt };
   }
 
+  /** Clears the list of transactions, as the list's Clear does. Set by the hook below. */
+  let clearList: () => void = () => undefined;
+
   function renderWithManager(wallet: Wallet) {
     const web3 = {
       ...mockWeb3,
       write: { ...mockWeb3.write, account: ACCOUNT, chainId: 1, provider: wallet as unknown as JsonRpcProvider },
     };
-    return renderHook(() =>
-      useWrappedAction({
+    return renderHook(() => {
+      const manager = useTransactionManager(web3);
+      clearList = manager.clearTransactions;
+      return useWrappedAction({
         session: sessionFor(wallet),
-        manager: useTransactionManager(web3),
+        manager,
         readProvider: undefined,
         checkRestriction: async () => undefined,
-      })
-    );
+      });
+    });
   }
 
   beforeEach(() => {
@@ -1976,7 +1920,7 @@ describe('useWrappedAction with the transaction manager', () => {
     expect(stepStatuses(result)).toEqual(['confirmed', 'confirmed']);
   });
 
-  it('stops at -32005 from the wallet, keeps the request open, and waits for the user to stop waiting', async () => {
+  it('stops at -32005 from the wallet, keeps the request open, and waits until the user clears it from the list', async () => {
     const wallet = Object.assign(walletProvider(), {
       getNetwork: jest.fn(async () => ({ chainId: 1, name: 'homestead' })),
       getTransactionReceipt: jest.fn(async () => null),
@@ -2001,18 +1945,16 @@ describe('useWrappedAction with the transaction manager', () => {
     expect(result.current.session).toEqual({ status: 'usable' });
     // The request stays open in the wallet, so its record stays, marked interrupted.
     expect(result.current.recovered.pending).toEqual([
-      expect.objectContaining({ step: 'approve', isInterrupted: true, isPendingInWallet: true }),
+      expect.objectContaining({ step: 'reset-allowance', isInterrupted: true, isPendingInWallet: true }),
     ]);
-    expect(result.current.canDismissRecovered).toBe(true);
-    expect(result.current.isRecoveredRequestPendingInWallet).toBe(true);
 
-    // Closing the dialog does not end the wait.
+    // Clearing the draft does not end the wait.
     act(() => result.current.discard());
     expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
 
-    // The user stops waiting after checking the wallet. A fresh review then starts from its first step.
-    act(() => result.current.dismissRecovered());
-    expect(result.current.isRecoveredRequestPendingInWallet).toBe(false);
+    // The user clears the list after checking the wallet. A fresh review then starts from its first step.
+    act(() => clearList());
+    expect(result.current.recovered.pending).toEqual([]);
     await reachReview(result);
     expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
     expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
@@ -2044,20 +1986,16 @@ describe('useWrappedAction with the transaction manager', () => {
     // Nothing was sent and the wallet holds nothing, so no record is left and nothing waits for one.
     expect(result.current.recovered.pending).toEqual([]);
     expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
-    expect(result.current.canDismissRecovered).toBe(false);
-    expect(result.current.isRecoveredRequestPendingInWallet).toBe(false);
-    expect(result.current.walletRefusalMessage).toBe('Unauthorized (4100)');
 
     // A new review starts at once, from its first step, and sends nothing until it is confirmed.
     act(() => result.current.discard());
     expect(result.current.blockedReason('supply')).toBeUndefined();
     await reachReview(result);
     expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);
-    expect(result.current.walletRefusalMessage).toBeUndefined();
     expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the request open when the wallet stops waiting on it after the page disconnects, until the user stops waiting', async () => {
+  it('keeps the request open when the wallet stops waiting on it after the page disconnects, until the user clears it from the list', async () => {
     const wallet = Object.assign(walletProvider(), {
       getNetwork: jest.fn(async () => ({ chainId: 1, name: 'homestead' })),
       getTransactionReceipt: jest.fn(async () => null),
@@ -2076,11 +2014,13 @@ describe('useWrappedAction with the transaction manager', () => {
             ? { ...mockWeb3.write, account: ACCOUNT, chainId: 1, provider: wallet as unknown as JsonRpcProvider }
             : { ...mockWeb3.write, account: undefined, status: 'disconnected' as const, provider: undefined },
         };
+        const manager = useTransactionManager(web3);
+        clearList = manager.clearTransactions;
         return useWrappedAction({
           session: isConnected
             ? sessionFor(wallet)
             : sessionFor(wallet, { connector: undefined, status: 'disconnected', account: undefined }),
-          manager: useTransactionManager(web3),
+          manager,
           readProvider: undefined,
           checkRestriction: async () => undefined,
         });
@@ -2104,16 +2044,13 @@ describe('useWrappedAction with the transaction manager', () => {
     rerender({ isConnected: true });
     await waitFor(() =>
       expect(result.current.recovered.pending).toEqual([
-        expect.objectContaining({ step: 'approve', isInterrupted: true, isPendingInWallet: true }),
+        expect.objectContaining({ step: 'reset-allowance', isInterrupted: true, isPendingInWallet: true }),
       ])
     );
-    expect(result.current.isRecoveredRequestPendingInWallet).toBe(true);
-    expect(result.current.canDismissRecovered).toBe(true);
-    expect(result.current.walletRefusalMessage).toBeUndefined();
     expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
 
-    // The user stops waiting after checking the wallet. A fresh review then starts from its first step.
-    act(() => result.current.dismissRecovered());
+    // The user clears the list after checking the wallet. A fresh review then starts from its first step.
+    act(() => clearList());
     expect(result.current.blockedReason('supply')).toBeUndefined();
     await reachReview(result);
     expect(stepStatuses(result)).toEqual(['waiting', 'waiting']);

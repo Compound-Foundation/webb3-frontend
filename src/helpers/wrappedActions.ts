@@ -47,8 +47,8 @@ export type WrappedSupplyCheck = { ok: true } | WrappedStepRefusal;
 
 /**
  * The result of a withdrawal's own check. A check that passes gives `rechecked`, and the lifecycle
- * stops one that does not. The dialog then shows the cash the exit pays at the block the check
- * read, not the reviewed cash. The transaction list describes the request by that cash too.
+ * stops one that does not. The lifecycle keeps the exit as the check found it, at the block the
+ * check read, and checks it against the draft before the wallet is asked.
  */
 export type WrappedWithdrawalCheck = { ok: true; rechecked: RecheckedWithdrawal } | WrappedStepRefusal;
 
@@ -116,6 +116,11 @@ export type WrappedActionDraft = {
   steps: readonly WrappedStep[];
   /** A withdrawal's quote, which its review shows. It must be for the draft's shares. */
   withdrawal?: WithdrawalReview;
+  /**
+   * Whether the draft only approves the wrapper for a supply of `amount`, as Approve & Add asks.
+   * The supply itself is a separate draft, which Submit Transaction starts.
+   */
+  isApprovalOnly?: boolean;
 };
 
 /** The live session a wrapper action is checked against. */
@@ -380,11 +385,12 @@ function approvedAmount(step: WrappedStep): bigint {
 }
 
 /**
- * Checks a draft's steps as a whole. Its amount is positive and never the unlimited sentinel. A
- * supply is one `supplyAndWrap`, after either no approval, an approval of exactly its amount, or a
- * reset to zero and then that approval. A withdrawal is one `unwrapAndWithdraw`, and its quote is
- * for the shares that call burns, so the review shows the cash of the shares that are signed. Step
- * ids are unique, since hashes are stored under them.
+ * Checks a draft's steps as a whole. Its amount is positive and never the unlimited sentinel. An
+ * approval draft is only for a supply, and is either an approval of exactly its amount or a reset
+ * to zero and then that approval. A supply is one `supplyAndWrap` and nothing else, so the wallet
+ * is never asked for an approval when the user submits. A withdrawal is one `unwrapAndWithdraw`,
+ * and its quote is for the shares that call burns. Step ids are unique, since hashes are stored
+ * under them.
  */
 export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem | undefined {
   if (draft.amount <= 0n || draft.amount >= MAX_UINT256) return 'wrong-amount';
@@ -393,25 +399,26 @@ export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem
     if (problem !== undefined) return problem;
   }
   const kinds = draft.steps.map((step) => step.kind);
-  const finalKind = draft.identity.type === 'supply' ? 'supply-and-wrap' : 'unwrap-and-withdraw';
-  const isOrdered =
-    kinds.length > 0 && kinds[kinds.length - 1] === finalKind && kinds.slice(0, -1).every((kind) => kind === 'approve');
   const isUnique = new Set(draft.steps.map((step) => step.id)).size === draft.steps.length;
-  if (!isOrdered || !isUnique) return 'bad-sequence';
-  const approvals = draft.steps.filter((step) => step.kind === 'approve').map(approvedAmount);
-  const isApprovalSequence =
-    approvals.length === 0 ||
-    (approvals.length === 1 && approvals[0] === draft.amount) ||
-    (approvals.length === 2 && approvals[0] === 0n && approvals[1] === draft.amount);
-  if (!isApprovalSequence) return 'bad-sequence';
+  if (!isUnique) return 'bad-sequence';
+  if (draft.isApprovalOnly === true) {
+    if (draft.identity.type !== 'supply' || !kinds.every((kind) => kind === 'approve')) return 'bad-sequence';
+    const approvals = draft.steps.map(approvedAmount);
+    const isApprovalSequence =
+      (approvals.length === 1 && approvals[0] === draft.amount) ||
+      (approvals.length === 2 && approvals[0] === 0n && approvals[1] === draft.amount);
+    return isApprovalSequence ? undefined : 'bad-sequence';
+  }
+  const finalKind = draft.identity.type === 'supply' ? 'supply-and-wrap' : 'unwrap-and-withdraw';
+  if (kinds.length !== 1 || kinds[0] !== finalKind) return 'bad-sequence';
   if (draft.identity.type === 'withdraw' && draft.withdrawal?.quote.shares !== draft.amount) return 'quote-mismatch';
   return undefined;
 }
 
 /**
  * Checks a withdrawal as its check found it against the draft. It must quote the draft's kind of
- * exit for the shares the draft's call burns. Otherwise the dialog and the transaction list
- * describe other shares than the wallet signs. It must also be read at the review's block or a
+ * exit for the shares the draft's call burns. Otherwise the check passes for other shares than the
+ * wallet signs. It must also be read at the review's block or a
  * later one. A read of an older block cannot show what changed after the review, such as a
  * donation to the wrapper.
  */

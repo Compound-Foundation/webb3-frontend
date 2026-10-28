@@ -235,7 +235,7 @@ describe('wrappedEntryBlockLabel', () => {
       );
     }
     expect(wrappedEntryBlockLabel(routeWith({ isEligible: false, reason: 'screening' }), 'supply')).toBe(
-      'Address Not Cleared By Screening'
+      'Unavailable For This Market'
     );
     expect(wrappedEntryBlockLabel(routeWith({ isEligible: false, reason: 'validation-pending' }), 'withdraw')).toBe(
       'Checking Your Wallet And This Market'
