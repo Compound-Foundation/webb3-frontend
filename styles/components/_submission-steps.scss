@@ -53,7 +53,8 @@
   }
 }
 
-.masthead__notice {
+.masthead__notice,
+.position-card__notice {
   align-items: center;
   display: flex;
   flex-wrap: wrap;

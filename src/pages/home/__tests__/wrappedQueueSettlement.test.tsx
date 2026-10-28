@@ -487,17 +487,26 @@ describe('a queued wrapper action sent before a change of network', () => {
     act(() => live.queue.addOrUpdateAction(supply));
 
     await sendThenSwitchNetwork(wallet, show, /^Supply 100\.000000 USDC$/);
-    // The submission was dropped, so only the sent supply holds the queue.
+    // The submission was dropped, so only the sent supply holds the queue. The position card says
+    // which network holds it.
     expectQueueHeld(supply);
+    expect(positionCard().queueNotice).toEqual({
+      message:
+        'Your USDC supply is pending on Ethereum. The queue stays as it is until it settles. Switch your wallet to Ethereum to follow it.',
+    });
     // Back on the market's network, the receipt is still pending: the entry is held, and nothing
     // more is sent.
     show({ walletChainId: 1 });
     await submitAndConfirmEverything();
     expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(1);
     expectQueueHeld(supply);
+    expect(positionCard().queueNotice).toEqual({
+      message: 'Your USDC supply is pending on Ethereum. The queue stays as it is until it settles.',
+    });
 
     wallet.releaseReceipts();
     await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
+    await waitFor(() => expect(positionCard().queueNotice).toBeUndefined());
     await submitAndConfirmEverything();
 
     expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(1);

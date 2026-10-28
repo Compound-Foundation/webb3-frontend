@@ -1,6 +1,6 @@
 import { ReactNode, useContext, useEffect, useRef, useState } from 'react';
 
-import { isUnwrappedCollateralAsset } from '@constants/chains';
+import { CHAINS, isUnwrappedCollateralAsset } from '@constants/chains';
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
@@ -34,7 +34,7 @@ import {
 } from '@helpers/queuedExecution';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { SendWithdrawnError } from '@helpers/walletErrors';
-import { isDirectExecution, WrappedExecutionError } from '@helpers/wrappedActions';
+import { isDirectExecution, WrappedActionType, WrappedExecutionError } from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
   isSubmissionRefused,
@@ -73,7 +73,7 @@ import QueuedSubmissionModal from './components/ActionModal/QueuedSubmissionModa
 import AssetRow from './components/AssetRow';
 import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadNotice, MastheadState } from './components/Masthead';
-import PositionCard, { PositionCardState } from './components/PositionCard';
+import PositionCard, { PositionCardNotice, PositionCardState } from './components/PositionCard';
 
 const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.name ? 1 : a.name === b.name ? 0 : -1);
 
@@ -346,6 +346,24 @@ const Home = ({
       setSubmissionRecord({ ...submission, mayHaveExecuted: true });
     }
   }, [submission, submissionState]);
+
+  // The submission dialog shows the submission of this visit. While a step is being signed, the
+  // user can hide it. It returns when the lifecycle moves to another step or stops.
+  const hiddenWhileSigning = submission?.hiddenWhileSigning;
+  const isHidden =
+    hiddenWhileSigning !== undefined &&
+    submissionState.phase === 'signing' &&
+    submissionState.draft === hiddenWhileSigning.draft &&
+    submissionState.stepIndex === hiddenWhileSigning.stepIndex;
+  // Submit, or the position card's notice, shows a submission hidden while a step is signed.
+  const showSubmission = () => {
+    if (isFromEarlierVisit()) return;
+    submissionStore.setRecord((current) =>
+      current?.scope === visitIdentity && current.hiddenWhileSigning !== undefined
+        ? { ...current, hiddenWhileSigning: undefined }
+        : current
+    );
+  };
 
   let assetRows: ReactNode[];
   let otherAssetRows: ReactNode[] = [];
@@ -728,6 +746,28 @@ const Home = ({
     // if you're just approving an ERC token)
     const blockingTransaction = bulkerTransaction || cometTransaction || rewardTransaction || wrapperTransaction;
 
+    // Why the queue is held while no submission dialog shows it. A wrapper action sent before a
+    // change of network holds it until its transaction settles on the market's network, where the
+    // receipt is followed.
+    let queueNotice: PositionCardNotice | undefined;
+    const actionNoun = (type: WrappedActionType) =>
+      `${directBaseAsset.symbol} ${type === 'supply' ? 'supply' : 'withdrawal'}`;
+    if (submission !== undefined && isHidden) {
+      const noun = actionNoun(submission.wrapper.type);
+      queueNotice = {
+        message: `Your ${noun} is in progress. The queue stays as it is until it finishes.`,
+        actionLabel: 'Show Progress',
+        onAction: showSubmission,
+      };
+    } else if (submission === undefined && sent !== undefined) {
+      const network = CHAINS[sent.chainId]?.name ?? `network ${sent.chainId}`;
+      const switchBack = web3.write.chainId === sent.chainId ? '' : ` Switch your wallet to ${network} to follow it.`;
+      const noun = actionNoun(sent.type);
+      queueNotice = {
+        message: `Your ${noun} is pending on ${network}. The queue stays as it is until it settles.${switchBack}`,
+      };
+    }
+
     mastheadState = [
       StateType.Hydrated,
       {
@@ -791,6 +831,7 @@ const Home = ({
         theme,
         isRewardsLoading,
         transaction: blockingTransaction,
+        queueNotice,
         onClearClicked: () => {
           if (isQueueLocked()) return;
           clearActions();
@@ -868,6 +909,11 @@ const Home = ({
           if (isFromEarlierVisit()) return;
           // One submission at a time: a submission in progress, one whose dialog is hidden while a
           // step is signed, or a wrapper action whose last step may still execute holds back another.
+          // Submit shows a hidden submission again, and starts nothing.
+          if (liveSubmission.current?.hiddenWhileSigning !== undefined) {
+            showSubmission();
+            return;
+          }
           if (isQueueLocked()) return;
           setPendingAction(undefined);
           submitQueue();
@@ -1010,14 +1056,6 @@ const Home = ({
     });
   }
 
-  // The submission dialog shows the submission of this visit. While a step is being signed, the
-  // user can hide it. It returns when the lifecycle moves to another step or stops.
-  const hiddenWhileSigning = submission?.hiddenWhileSigning;
-  const isHidden =
-    hiddenWhileSigning !== undefined &&
-    submissionState.phase === 'signing' &&
-    submissionState.draft === hiddenWhileSigning.draft &&
-    submissionState.stepIndex === hiddenWhileSigning.stepIndex;
   const closeSubmission = () => {
     if (submission === undefined) return;
     if (submissionState.phase === 'signing') {

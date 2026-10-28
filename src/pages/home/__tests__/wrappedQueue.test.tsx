@@ -681,6 +681,37 @@ describe('Home on the wrapped route', () => {
       expect(queue.clearActions).not.toHaveBeenCalled();
       expect(queue.setPendingAction).not.toHaveBeenCalled();
     });
+    it('says the queue is held while the dialog is hidden, and Submit or Show Progress shows it again', () => {
+      const lending = lendingWith(controller());
+      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      const { rerenderHome } = renderHome(lending, { queue });
+      act(() => positionCard().onSubmitClicked());
+      const signing = lendingWith(
+        controller(supplyState('signing', [APPROVE_STEP, SUPPLY_STEP], [{ status: 'checking' }, { status: 'waiting' }]))
+      );
+      rerenderHome(signing, { queue });
+      expect(positionCard().queueNotice).toBeUndefined();
+
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(positionCard().queueNotice).toEqual({
+        message: 'Your USDC supply is in progress. The queue stays as it is until it finishes.',
+        actionLabel: 'Show Progress',
+        onAction: expect.any(Function),
+      });
+
+      act(() => positionCard().onSubmitClicked());
+      expect(dialog()).toBeInTheDocument();
+      expect(positionCard().queueNotice).toBeUndefined();
+
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }));
+      act(() => positionCard().queueNotice?.onAction?.());
+      expect(dialog()).toBeInTheDocument();
+      // Neither starts another supply.
+      expect(lending.write.supply).toHaveBeenCalledTimes(1);
+      expect(signing.write.supply).not.toHaveBeenCalled();
+    });
+
     it('holds both collateral row families still, and disables them, while a step is checked before its signature', () => {
       // stETH is listed apart from the market's collateral, as "Other Assets".
       const stETH = mockEthCollateralAsset({

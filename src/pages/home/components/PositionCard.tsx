@@ -62,6 +62,13 @@ type PositionCardNoWallet = [
     isRewardsLoading?: boolean;
   }
 ];
+/** Why the queue is held while no submission dialog shows it, with an action that shows its progress. */
+export type PositionCardNotice = {
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+};
+
 type PositionCardHydrated = [
   StateType.Hydrated,
   {
@@ -96,6 +103,7 @@ type PositionCardHydrated = [
     isInstitutional?: boolean;
     /** Extra rules every queued and entered action must meet, such as the wrapped route's. */
     actionRules?: ActionRules;
+    queueNotice?: PositionCardNotice;
   }
 ];
 
@@ -372,6 +380,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
     onSelectAction,
     onSubmitClicked,
     actionRules,
+    queueNotice,
   } = state[1];
   const { baseAssetPriceInDollars, symbol } = baseAsset;
   const borrowBalancePre: bigint = baseAsset.balance < 0n ? -baseAsset.balance : 0n;
@@ -580,6 +589,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
             onSelectAction,
             onSubmitClicked,
             actionRules,
+            queueNotice,
           }}
         />
         <ActionQueueView
@@ -598,6 +608,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
             onSelectAction,
             onSubmitClicked,
             actionRules,
+            queueNotice,
             mobile: true,
           }}
         />
@@ -708,6 +719,7 @@ type ActionQueueViewProps = {
   onSelectAction: (action: Action) => void;
   onSubmitClicked: () => void;
   actionRules?: ActionRules;
+  queueNotice?: PositionCardNotice;
 };
 
 const ActionQueueView = ({
@@ -726,6 +738,7 @@ const ActionQueueView = ({
   onSelectAction,
   onSubmitClicked,
   actionRules,
+  queueNotice,
 }: ActionQueueViewProps) => {
   const [expanded, setExpanded] = useState(false);
   let actionQueueItems: ReactNode = actions.map((action: Action, actionIndex) => {
@@ -765,6 +778,16 @@ const ActionQueueView = ({
   });
   let headerRow: ReactNode;
   let buttonRow: ReactNode;
+  const noticeElement = queueNotice !== undefined && (
+    <div className="position-card__notice" role="status">
+      <p className="meta text-color--2">{queueNotice.message}</p>
+      {queueNotice.actionLabel !== undefined && queueNotice.onAction !== undefined && (
+        <button className="button button--small" onClick={queueNotice.onAction}>
+          {queueNotice.actionLabel}
+        </button>
+      )}
+    </div>
+  );
 
   if (mobile) {
     headerRow = (
@@ -822,6 +845,7 @@ const ActionQueueView = ({
         <div className="position-card__actions">
           {headerRow}
           {actionQueueItems}
+          {noticeElement}
           {buttonRow}
         </div>
       </DetailSheet>
@@ -855,6 +879,7 @@ const ActionQueueView = ({
     <div className="position-card__actions">
       {headerRow}
       {actionQueueItems}
+      {noticeElement}
       {buttonRow}
     </div>
   );
