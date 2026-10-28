@@ -86,8 +86,8 @@ export const HARDCODED_WRAPPED_LENDING_SOURCE: WrappedLendingSource = Object.fre
       baseTokenAddress: USDC_ADDRESS,
       baseDecimals: 6,
       shareDecimals: SHARE_DECIMALS,
-      isDepositEnabled: false,
-      isExitEnabled: false,
+      isDepositEnabled: true,
+      isExitEnabled: true,
     }),
     Object.freeze({
       chainId: ETHEREUM_CHAIN_ID,
@@ -96,8 +96,8 @@ export const HARDCODED_WRAPPED_LENDING_SOURCE: WrappedLendingSource = Object.fre
       baseTokenAddress: USDT_ADDRESS,
       baseDecimals: 6,
       shareDecimals: SHARE_DECIMALS,
-      isDepositEnabled: false,
-      isExitEnabled: false,
+      isDepositEnabled: true,
+      isExitEnabled: true,
     }),
     // Institutional USDC: a separate Comet from the USDC market, with the same base token.
     Object.freeze({
@@ -107,8 +107,8 @@ export const HARDCODED_WRAPPED_LENDING_SOURCE: WrappedLendingSource = Object.fre
       baseTokenAddress: USDC_ADDRESS,
       baseDecimals: 6,
       shareDecimals: SHARE_DECIMALS,
-      isDepositEnabled: false,
-      isExitEnabled: false,
+      isDepositEnabled: true,
+      isExitEnabled: true,
     }),
   ]),
 });
