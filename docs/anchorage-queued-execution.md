@@ -1,6 +1,6 @@
 # Queued execution on the wrapped route
 
-With the Anchorage connector, the Ethereum USDC, USDT and institutional USDC markets lend through each market's `WrappedCometERC4626` wrapper. COM-309 removed the separate wrapped panel. These markets now use the normal dashboard: the masthead's Supply and Withdraw buttons, the amount form, the position card, the action queue and its before and after comparison. This document describes how such a queue is submitted. Other wallets, and other markets, are unchanged.
+With the Anchorage connector, the Ethereum USDC, USDT and institutional USDC markets lend through each market's `WrappedCometERC4626` wrapper. These markets use the normal dashboard, with no separate wrapped panel: the masthead's Supply and Withdraw buttons, the amount form, the position card, the action queue and its before and after comparison. This document describes how such a queue is submitted. Other wallets, and other markets, are unchanged.
 
 The route is decided by `resolveLendingRoute` (`src/helpers/lendingRoute.ts`): it is wrapped only when the selected connector's id is `com.anchorage.connect` and the wrapper registry (`src/constants/wrappedMarkets.ts`) maps the selected market. Each market keeps one entry in the market list and selector, and its detail page shows no wrapped notice.
 
@@ -47,7 +47,7 @@ The Bulker has no wrapper action, so a wrapper call never goes through it. The p
 
 ## The submission dialog
 
-Submit starts the wrapper action through `useWriteWrappedState`, which reads the balance, allowance or position again and builds the steps. `useWrappedAction` runs them. This change does not modify either hook, so their safeguards hold:
+Submit starts the wrapper action through `useWriteWrappedState`, which reads the balance, allowance or position again and builds the steps. `useWrappedAction` runs them, with these safeguards:
 
 - every step is signed only after the user confirms it in the dialog
 - before each signature the step checks the identity it was reviewed under, the route's eligibility (signer, chain, screening, connector conflicts, wrapper validation and the release control), Comet's pause, the step's own read and simulation, the wallet session, and other pending wrapper transactions
@@ -61,16 +61,18 @@ When the wrapper action confirms, it leaves the queue. If direct actions remain,
 
 ## When a step fails
 
-Nothing that did not complete leaves the queue, except a last step that can still go through:
+Nothing that did not complete leaves the queue, except a last step that can have executed or can still:
 
-| What happens                                                                      | Queue                                                                                                                                 |
-| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| The start is refused, for example `transaction-pending`                           | Unchanged. The dialog says why and offers Stop waiting for an interrupted earlier request.                                            |
-| The read or a check before signing fails                                          | Unchanged                                                                                                                             |
-| The user rejects a step, or the wallet refuses or fails                           | Unchanged. An approval that already confirmed stays on chain, and the next review reads the new allowance.                            |
-| A step reverts or is replaced                                                     | Unchanged                                                                                                                             |
-| The wrapper action confirms                                                       | The wrapper action leaves. The direct actions stay until they are submitted.                                                          |
-| The last step fails in the wallet, or can no longer be followed after it was sent | The wrapper action leaves, and the dialog says it may still go through. This keeps it from being sent twice. The direct actions stay. |
+| What happens                                                                      | Queue                                                                                                                                                                                                   |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The start is refused, for example `transaction-pending`                           | Unchanged. The dialog says why and offers Stop waiting for an interrupted earlier request.                                                                                                              |
+| The read or a check before signing fails                                          | Unchanged                                                                                                                                                                                               |
+| The user rejects a step, or the wallet refuses or fails                           | Unchanged. An approval that already confirmed stays on chain, and the next review reads the new allowance.                                                                                              |
+| An approval reverts or is replaced                                                | Unchanged                                                                                                                                                                                               |
+| The last step reverts                                                             | Unchanged                                                                                                                                                                                               |
+| The wrapper action confirms                                                       | The wrapper action leaves. The direct actions stay until they are submitted.                                                                                                                            |
+| The last step fails in the wallet, or can no longer be followed after it was sent | The wrapper action leaves, and the dialog says it can still go through. This keeps it from being sent twice. The direct actions stay.                                                                   |
+| Another transaction takes the last step's nonce (`replaced`)                      | The wrapper action leaves, and the dialog says it can have gone through as another transaction. A sped-up copy of the same call takes the nonce under a new hash and executes. The direct actions stay. |
 
 Closing the dialog while a step is being signed only hides it. Nothing more is sent without a confirmation, and the dialog returns when the step settles or stops. Closing it at any other time discards the review.
 
@@ -84,13 +86,13 @@ The wallet network can change while the last wrapper step is in the wallet or pe
 
 Until the record is settled, Home holds the whole queue as it does during a submission: Submit and every edit do nothing, and the collateral rows are disabled. `useSubmissionStore` links the record to the transaction manager's record of the last step (`supplyAndWrap` or `unwrapAndWithdraw`, by step id, account, chain and wrapper) once that step reaches the manager, and then follows it (`sentActionStatus`):
 
-| What became of the last step                                                         | Queue                                                                                          |
-| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| In the wallet, or pending                                                            | Held                                                                                           |
-| Confirmed                                                                            | The wrapper action leaves, on whichever page and network the wallet is. The record is dropped. |
-| The wallet answered with an error after it may have sent it (an interrupted request) | The wrapper action leaves, as it does when the dialog says it may still go through.            |
-| Reverted or replaced, or forgotten unsent (declined, refused, withdrawn or not sent) | Released: the wrapper action stays queued and can be submitted again.                          |
-| Never reached the manager, and the submission ended or was dropped                   | Released. The manager records a step before it asks the wallet, so nothing of it was sent.     |
+| What became of the last step                                                                                                | Queue                                                                                          |
+| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| In the wallet, or pending                                                                                                   | Held                                                                                           |
+| Confirmed                                                                                                                   | The wrapper action leaves, on whichever page and network the wallet is. The record is dropped. |
+| The wallet answered with an error after it can have sent it (an interrupted request), or another transaction took its nonce | The wrapper action leaves, as it does when the dialog says it can have gone through.           |
+| Reverted, or forgotten unsent (declined, refused, withdrawn or not sent)                                                    | Released: the wrapper action stays queued and can be submitted again.                          |
+| Never reached the manager, and the submission ended or was dropped                                                          | Released. The manager records a step before it asks the wallet, so nothing of it was sent.     |
 
 A pending receipt on the market's network is looked up only while the wallet is on that network, so a return to it settles the record.
 
