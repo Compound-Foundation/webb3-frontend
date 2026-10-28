@@ -269,8 +269,8 @@ describe('the wrapped route through the normal form, queue and comparison', () =
 
   it('shows what a full exit pays on a Max withdrawal row, or that every share is withdrawn while that is not known', async () => {
     const user = userEvent.setup();
-    // 10 USDC supplied to Comet directly beside the wrapped position: the dashboard shows 260 USDC
-    // supplied, but a full exit through the wrapper pays only the wrapped 249.999997 USDC.
+    // 10 USDC supplied to Comet directly beside the wrapped position. The dashboard shows 260 USDC
+    // supplied, and a full exit through the wrapper pays 249.999997 USDC.
     const mixed = [
       COMET_STATE[0],
       { ...COMET_STATE[1], baseAsset: { ...BASE_ASSET, balance: 10_000_000n } },
