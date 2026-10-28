@@ -459,6 +459,21 @@ async function sendThenSwitchNetwork(wallet: Wallet, show: (changes: Partial<Das
   expect(live.action.state.phase).toBe('discarded');
 }
 
+/**
+ * Tries every change the dashboard offers to the queue: select, delete and clear in the position
+ * card, and a new amount from the masthead. None of them may change it.
+ */
+function expectQueueHeld(entry: Action) {
+  act(() => positionCard().onSelectAction(entry));
+  act(() => positionCard().onDeleteAction(entry));
+  act(() => positionCard().onClearClicked());
+  act(() => mockLastProps.Masthead.state[1].onSupplyAction([ActionType.Supply, BASE_ASSET, undefined]));
+  act(() => mockLastProps.Masthead.state[1].onWithdrawAction([ActionType.Withdraw, BASE_ASSET, undefined]));
+
+  expect(queued()).toEqual([entry]);
+  expect(live.queue.getPendingAction(BASE_ASSET, [])).toBeUndefined();
+}
+
 describe('a queued wrapper action sent before a change of network', () => {
   beforeEach(() => {
     mockNextId = 0;
@@ -468,15 +483,18 @@ describe('a queued wrapper action sent before a change of network', () => {
     const chain = chainFor({ allowance: AMOUNT });
     const { wallet, show } = renderDashboard(chain);
     await waitFor(() => expect(live.action.blockedReason('supply')).toBeUndefined());
-    act(() => live.queue.addOrUpdateAction([ActionType.Supply, BASE_ASSET, AMOUNT]));
+    const supply: Action = [ActionType.Supply, BASE_ASSET, AMOUNT];
+    act(() => live.queue.addOrUpdateAction(supply));
 
     await sendThenSwitchNetwork(wallet, show, /^Supply 100\.000000 USDC$/);
+    // The submission was dropped, so only the sent supply holds the queue.
+    expectQueueHeld(supply);
     // Back on the market's network, the receipt is still pending: the entry is held, and nothing
     // more is sent.
     show({ walletChainId: 1 });
     await submitAndConfirmEverything();
     expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(1);
-    expect(queued()).toHaveLength(1);
+    expectQueueHeld(supply);
 
     wallet.releaseReceipts();
     await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
