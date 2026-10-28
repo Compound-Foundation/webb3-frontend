@@ -772,6 +772,19 @@ describe('Home on the wrapped route', () => {
 
       expect(queue.removeAction).not.toHaveBeenCalled();
     });
+
+    it('leaves the queue when another transaction took the nonce of its last step, as a sped-up copy does', () => {
+      const steps = [APPROVE_STEP, SUPPLY_STEP];
+      const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      const { rerenderHome } = renderHome(lendingWith(controller()), { queue });
+      act(() => positionCard().onSubmitClicked());
+      const replaced: WrappedStepState = { status: 'replaced', hash: HASH };
+      rerenderHome(lendingWith(controller(supplyState('stopped', steps, [confirmed(), replaced], 1))), { queue });
+
+      expect(queue.removeAction).toHaveBeenCalledTimes(1);
+      expect(dialog()).toHaveTextContent(/may have gone through as another transaction/);
+      expect(dialog()).toHaveTextContent(/taken out of your queue to keep it from being sent twice/);
+    });
   });
 
   describe('submits a queued base withdrawal through the wrapper', () => {

@@ -95,13 +95,21 @@ describe('sentActionStatus', () => {
     });
   });
 
-  it('reports a linked step that reverted, was replaced, or was forgotten unsent as not executed', () => {
+  it('reports a linked step whose nonce another transaction took as possibly executed', () => {
+    // A sped-up copy of the same call takes the nonce under another hash, and executes.
+    const linked = { ...SENT, transactionId: 'transaction-1' };
+
+    expect(sentActionStatus(linked, false, [], [settled({ status: 'replaced' })])).toEqual({
+      kind: 'may-have-executed',
+    });
+  });
+
+  it('reports a linked step that reverted, or was forgotten unsent, as not executed', () => {
     const linked = { ...SENT, transactionId: 'transaction-1' };
 
     expect(sentActionStatus(linked, false, [], [settled({ status: 'reverted', receipt })])).toEqual({
       kind: 'not-executed',
     });
-    expect(sentActionStatus(linked, false, [], [settled({ status: 'replaced' })])).toEqual({ kind: 'not-executed' });
     expect(sentActionStatus(linked, false, [], [])).toEqual({ kind: 'not-executed' });
   });
 });

@@ -569,7 +569,11 @@ const QueuedSubmissionModal = ({
             {isStopped && (
               <p className="L4 meta text-color--2">
                 {mayHaveExecuted
-                  ? `This ${noun} may still go through, so it was taken out of your queue to keep it from being sent twice. Check your wallet and the explorer. Any other actions stay in the queue.`
+                  ? `This ${noun} ${
+                      steps[stepIndex]?.status === 'replaced'
+                        ? 'may have gone through as another transaction, such as a sped-up copy'
+                        : 'may still go through'
+                    }, so it was taken out of your queue to keep it from being sent twice. Check your wallet and the explorer. Any other actions stay in the queue.`
                   : STAYS_QUEUED}
               </p>
             )}

@@ -18,10 +18,12 @@ const LAST_STEP_IDS: Record<WrappedActionType, string> = {
  *   receipt. Its queue entry stays held.
  * - `linked`: its last step has just reached the transaction manager, under this id.
  * - `executed`: the last step confirmed.
- * - `may-have-executed`: the wallet answered the last step with an error after it may have sent it.
- *   As for a submission still shown, the entry leaves the queue so that it is not sent twice.
- * - `not-executed`: the last step reverted, was replaced, or never reached the chain: the wallet
- *   declined or refused it, it was withdrawn, or the submission ended before it.
+ * - `may-have-executed`: the last step can have executed without a receipt for its own hash. The
+ *   wallet answered it with an error after it can have sent it, or another transaction took its
+ *   nonce, which a sped-up copy of the same call also does. As for a submission still shown, the
+ *   entry leaves the queue so that it is not sent twice.
+ * - `not-executed`: the last step reverted, or never reached the chain: the wallet declined or
+ *   refused it, it was withdrawn, or the submission ended before it.
  */
 export type SentActionStatus =
   | { kind: 'pending' }
@@ -62,7 +64,14 @@ export function sentActionStatus(
     return isInterrupted ? { kind: 'may-have-executed' } : { kind: 'pending' };
   }
   const settled = settledTransactions.find((transaction) => transaction.id === sent.transactionId);
-  return settled?.outcome.status === 'confirmed' ? { kind: 'executed' } : { kind: 'not-executed' };
+  switch (settled?.outcome.status) {
+    case 'confirmed':
+      return { kind: 'executed' };
+    case 'replaced':
+      return { kind: 'may-have-executed' };
+    default:
+      return { kind: 'not-executed' };
+  }
 }
 
 export type UseSubmissionStoreOptions = {

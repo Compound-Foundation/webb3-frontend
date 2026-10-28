@@ -84,14 +84,17 @@ const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.nam
 const cometStateProvenance = new WeakMap<CometState, CometStateWithMarket>();
 
 /**
- * Whether a stopped wrapper action's last step can still go through: the wallet answered with an
- * error after it may have sent the request, or the transaction was sent and can no longer be
- * followed. A reverted or replaced step did not execute, and a refusal or a check sent nothing.
+ * Whether a stopped wrapper action's last step can have executed, or can still: the wallet answered
+ * with an error after it can have sent the request, the transaction was sent and can no longer be
+ * followed, or another transaction took its nonce, which a sped-up copy of the same call also does.
+ * A reverted step did not execute, and a refusal or a check sent nothing.
  */
 function mayStillExecute(state: Extract<WrappedActionState, { phase: 'stopped' }>): boolean {
   const lastIndex = state.draft.steps.length - 1;
   const status = state.steps[lastIndex]?.status;
-  return state.stepIndex === lastIndex && (status === 'provider-failure' || status === 'unresolved');
+  return (
+    state.stepIndex === lastIndex && (status === 'provider-failure' || status === 'unresolved' || status === 'replaced')
+  );
 }
 
 /** What the masthead says about a wrapped position it cannot show. */
