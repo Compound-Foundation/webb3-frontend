@@ -86,7 +86,7 @@ const POSITION: WrappedPosition = {
   snapshot: { totalSupply: 250n * 10n ** 18n, totalAssets: 250_000_000n, baseSupplyIndex: 10n ** 15n },
 };
 
-type Lending = WrappedLending & { write: { supply: jest.Mock; withdraw: jest.Mock } };
+type Lending = WrappedLending & { write: { approve: jest.Mock; supply: jest.Mock; withdraw: jest.Mock } };
 
 function lending(position: WrappedPosition | undefined): Lending {
   return {
@@ -94,10 +94,13 @@ function lending(position: WrappedPosition | undefined): Lending {
     position: position === undefined ? { status: 'loading' } : { status: 'loaded', position },
     retry: jest.fn(),
     action: IDLE_WRAPPED_ACTION,
-    write: { supply: jest.fn(() => undefined), withdraw: jest.fn(() => undefined) },
+    write: { approve: jest.fn(() => undefined), supply: jest.fn(() => undefined), withdraw: jest.fn(() => undefined) },
     submission: STANDARD_LENDING.submission,
   };
 }
+
+/** The position after the user approved the wrapper for `allowance`. */
+const approvedFor = (allowance: bigint): WrappedPosition => ({ ...POSITION, wrapperAllowance: allowance });
 
 // An empty Comet account with 1,000 USDC in the wallet and no allowance to Comet.
 const BASE_ASSET = mockBaseAsset({
@@ -197,9 +200,59 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     Object.values(mockWriteState).forEach((fn) => fn.mockReset());
   });
 
-  it('adds, edits, removes and clears a base supply, and submits it through the wrapper', async () => {
+  it("adds a supply with Approve & Add and production's approval hint, and submits it once the wrapper is approved", async () => {
     const user = userEvent.setup();
     const value = lending(POSITION);
+    const view = renderDashboard(value);
+
+    await user.click(screen.getByRole('button', { name: 'Supply USDC' }));
+    await user.type(amountInput(), '100');
+    // Production's hint, without its promise that one approval is enough: the exact approval is spent.
+    expect(
+      screen.getAllByText('You need to approve Compound on the USDC contract before you can use this asset.')[0]
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/You only need to do this once/)).toBeNull();
+    await user.click(formButton('Approve & Add'));
+
+    expect(value.write.approve).toHaveBeenCalledWith(100_000_000n);
+    expect(mockWriteState.approve).not.toHaveBeenCalled();
+    expect(within(desktopQueue()).getByText('Supply USDC')).toBeInTheDocument();
+    // Until the allowance covers it, the row says so and Submit waits, as production's does.
+    expect(within(desktopQueue()).getByText('Approval Failed')).toBeInTheDocument();
+    expect(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' })).toBeDisabled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // The approval confirms.
+    const approved = lending(approvedFor(100_000_000n));
+    view.rerender(<Dashboard value={approved} state={COMET_STATE} />);
+    expect(within(desktopQueue()).queryByText('Approval Failed')).toBeNull();
+
+    // Raising the amount above the allowance asks for an increase, as production's form does.
+    await user.click(within(desktopQueue()).getByText('Supply USDC'));
+    const input = amountInput();
+    await user.clear(input);
+    await user.type(input, '150');
+    expect(
+      screen.getAllByText(
+        'This amount exceeds the allowance you previously set for this asset. You will be asked to approve an increase when you add this action.'
+      )[0]
+    ).toBeInTheDocument();
+    expect(formButton('Approve & Add')).toBeEnabled();
+    await user.clear(input);
+    await user.type(input, '100');
+    await user.click(formButton('Update Action'));
+
+    await user.click(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' }));
+    expect(approved.write.supply).toHaveBeenCalledWith(100_000_000n);
+    expect(approved.write.approve).not.toHaveBeenCalled();
+    expect(mockWriteState.supply).not.toHaveBeenCalled();
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('adds, edits, removes and clears a base supply, and submits it through the wrapper', async () => {
+    const user = userEvent.setup();
+    const value = lending(approvedFor(1_000_000_000n));
     renderDashboard(value);
 
     // The wrapped position is the base balance, before any action.
@@ -210,6 +263,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     await user.type(amountInput(), '100');
     await user.click(formButton('Add Action'));
     expect(mockWriteState.approve).not.toHaveBeenCalled();
+    expect(value.write.approve).not.toHaveBeenCalled();
 
     expect(within(desktopQueue()).getByText('Supply USDC')).toBeInTheDocument();
     expect(within(desktopQueue()).getByText('100.0000')).toBeInTheDocument();
@@ -263,11 +317,11 @@ describe('the wrapped route through the normal form, queue and comparison', () =
 
     await user.click(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' }));
 
-    expect(value.write.withdraw).toHaveBeenCalledWith({ kind: 'full' }, POSITION.fullExitCash);
+    expect(value.write.withdraw).toHaveBeenCalledWith({ kind: 'full' });
     expect(mockWriteState.withdraw).not.toHaveBeenCalled();
   });
 
-  it('shows what a full exit pays on a Max withdrawal row, or that every share is withdrawn while that is not known', async () => {
+  it('shows what a full exit pays on a Max withdrawal row, and a spinner while that is not known', async () => {
     const user = userEvent.setup();
     // 10 USDC supplied to Comet directly beside the wrapped position. The dashboard shows 260 USDC
     // supplied, and a full exit through the wrapper pays 249.999997 USDC.
@@ -289,7 +343,8 @@ describe('the wrapped route through the normal form, queue and comparison', () =
 
     view.rerender(<Dashboard value={lending(undefined)} state={mixed} />);
 
-    expect(row).toHaveTextContent('All wrapper shares');
+    expect(row.querySelector('.action-queue-item__balance .load-spinner--new')).not.toBeNull();
+    expect(row).not.toHaveTextContent(/share/i);
     expect(row).not.toHaveTextContent('260.0000');
   });
 

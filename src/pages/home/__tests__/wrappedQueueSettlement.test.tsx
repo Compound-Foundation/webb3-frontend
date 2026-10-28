@@ -1,6 +1,6 @@
 import { Interface } from '@ethersproject/abi';
 import { TransactionReceipt } from '@ethersproject/providers';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { BigNumber } from 'ethers';
 
@@ -17,12 +17,13 @@ import { queueScope, submissionScope, WrappedLendingContext } from '@contexts/Wr
 import CometAbi from '@helpers/abis/Comet';
 import { LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
+import { MAX_UINT256 } from '@helpers/numbers';
 import { WrappedSession } from '@helpers/wrappedActions';
 import { useActionQueue } from '@hooks/useActionQueue';
 import { useSubmissionStore } from '@hooks/useSubmissionStore';
 import { Theme } from '@hooks/useThemeManager';
 import { useTransactionManager } from '@hooks/useTransactionManager';
-import { useWrappedAction } from '@hooks/useWrappedAction';
+import { useSignWhenReady, useWrappedAction } from '@hooks/useWrappedAction';
 import { useWriteWrappedState } from '@hooks/useWriteWrappedState';
 import { Action, ActionType, CometState, MarketData, StateType, TransactionState } from '@types';
 
@@ -34,7 +35,7 @@ import Home from '../index';
 let mockNextId = 0;
 jest.mock('uuid', () => ({ v4: () => `transaction-${++mockNextId}` }));
 
-// Home's children record their props. The submission dialog is real.
+// Home's children record their props.
 const mockLastProps: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
 function mockRecordProps(name: string) {
   return {
@@ -350,6 +351,7 @@ function Dashboard({ wallets, readProvider, walletChainId, state }: DashboardPro
   const manager = useTransactionManager(web3);
   const session = sessionFor(wallet, walletChainId);
   const action = useWrappedAction({ session, manager, readProvider });
+  useSignWhenReady(action);
   const write = useWriteWrappedState({
     action,
     route: session.route,
@@ -392,7 +394,7 @@ function Dashboard({ wallets, readProvider, walletChainId, state }: DashboardPro
             selectedMarketData={SELECTED as never}
             cometState={state}
             addTransaction={manager.addTransaction}
-            switchWriteNetwork={jest.fn()}
+            switchWriteNetwork={switchWriteNetwork}
             estimatedGasMap={new Map()}
             theme={Theme.Dark}
           />
@@ -402,29 +404,18 @@ function Dashboard({ wallets, readProvider, walletChainId, state }: DashboardPro
   );
 }
 
+const switchWriteNetwork = jest.fn(async () => true);
+
 const queued = () => live.queue.getActions(BASE_ASSET, [], [StateType.Loading]);
 const positionCard = () => mockLastProps.PositionCard.state[1];
-const CONFIRM = /^(Approve|Supply|Withdraw About)/;
 
 /** Lets the reads, the wallet and the receipt poll run. */
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 100)));
 
-/**
- * Submits the queue, and confirms each step the dialog offers, as a user who wants it done would.
- * Then closes the dialog, if one is shown.
- */
-async function submitAndConfirmEverything() {
+/** Presses Submit Transaction and lets whatever it starts run. */
+async function submit() {
   act(() => positionCard().onSubmitClicked());
-  for (let step = 0; step < 3; step++) {
-    await settle();
-    // A step being read or signed offers its next confirmation once it settles.
-    await waitFor(() => expect(['reading', 'signing']).not.toContain(live.action.state.phase));
-    const confirm = screen.queryByRole('button', { name: CONFIRM });
-    if (confirm === null) break;
-    fireEvent.click(confirm);
-  }
-  const dialog = screen.queryByRole('dialog');
-  if (dialog !== null) fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
+  await settle();
 }
 
 function renderDashboard(chain: Chain) {
@@ -444,19 +435,19 @@ function renderDashboard(chain: Chain) {
 }
 
 /**
- * Confirms the queued wrapper action's last step, then switches the wallet to Base while its
- * receipt is held back, as a user can while the transaction is pending.
+ * Submits the queued wrapper action, then switches the wallet to Base while its receipt is held
+ * back, as a user can while the transaction is pending. Submit asks the wallet at once, with no
+ * dialog, and the position card shows the transaction as production shows one to Comet.
  */
-async function sendThenSwitchNetwork(wallet: Wallet, show: (changes: Partial<DashboardProps>) => void, label: RegExp) {
-  act(() => positionCard().onSubmitClicked());
-  const confirm = await screen.findByRole('button', { name: label });
+async function sendThenSwitchNetwork(wallet: Wallet, show: (changes: Partial<DashboardProps>) => void) {
   wallet.holdReceipts();
-  fireEvent.click(confirm);
+  act(() => positionCard().onSubmitClicked());
   await waitFor(() => expect(live.manager.transactions[0]?.state).toBe(TransactionState.Pending));
+  expect(positionCard().transaction?.state).toBe(TransactionState.Pending);
+  expect(screen.queryByRole('dialog')).toBeNull();
 
   show({ walletChainId: 8453 });
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(live.action.state.phase).toBe('discarded');
+  await waitFor(() => expect(live.action.state.phase).toBe('discarded'));
 }
 
 /**
@@ -479,39 +470,40 @@ describe('a queued wrapper action sent before a change of network', () => {
     mockNextId = 0;
   });
 
-  it('is supplied once: it is held while its receipt is pending, and leaves the queue once it confirms', async () => {
+  it('is supplied once: Submit on another network asks for the switch and sends nothing, and the supply leaves the queue once it confirms', async () => {
     const chain = chainFor({ allowance: AMOUNT });
     const { wallet, show } = renderDashboard(chain);
     await waitFor(() => expect(live.action.blockedReason('supply')).toBeUndefined());
     const supply: Action = [ActionType.Supply, BASE_ASSET, AMOUNT];
     act(() => live.queue.addOrUpdateAction(supply));
 
-    await sendThenSwitchNetwork(wallet, show, /^Supply 100\.000000 USDC$/);
-    // The submission was dropped, so only the sent supply holds the queue. The position card says
-    // which network holds it.
+    await sendThenSwitchNetwork(wallet, show);
+    // The run was dropped with the network, and only the sent supply holds the queue. The card
+    // still shows the pending transaction, as it shows one to Comet, and says nothing more.
     expectQueueHeld(supply);
-    expect(positionCard().queueNotice).toEqual({
-      message:
-        'Your USDC supply is pending on Ethereum. The queue stays as it is until it settles. Switch your wallet to Ethereum to follow it.',
-    });
-    // Back on the market's network, the receipt is still pending: the entry is held, and nothing
-    // more is sent.
+    expect(positionCard().transaction?.state).toBe(TransactionState.Pending);
+    expect(positionCard().actionRules.wrappedBase.stopped).toBeUndefined();
+    // Submit on Base asks the wallet to switch to Ethereum, as production does, and sends nothing.
+    switchWriteNetwork.mockClear();
+    await submit();
+    expect(switchWriteNetwork).toHaveBeenCalledWith(1);
+    expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(1);
+
+    // Back on the market's network, the receipt is still pending: the entry is held, and Submit
+    // sends nothing more.
     show({ walletChainId: 1 });
-    await submitAndConfirmEverything();
+    await submit();
     expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(1);
     expectQueueHeld(supply);
-    expect(positionCard().queueNotice).toEqual({
-      message: 'Your USDC supply is pending on Ethereum. The queue stays as it is until it settles.',
-    });
+    expect(positionCard().transaction?.state).toBe(TransactionState.Pending);
 
     wallet.releaseReceipts();
     await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
-    await waitFor(() => expect(positionCard().queueNotice).toBeUndefined());
-    await submitAndConfirmEverything();
+    await waitFor(() => expect(queued()).toEqual([]));
+    await settle();
 
     expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(1);
     expect(chain.balance).toBe(10_000_000_000n - AMOUNT);
-    expect(queued()).toEqual([]);
   });
 
   it('withdraws once: a partial withdrawal leaves the queue once it confirms', async () => {
@@ -520,11 +512,12 @@ describe('a queued wrapper action sent before a change of network', () => {
     await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
     act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, AMOUNT]));
 
-    await sendThenSwitchNetwork(wallet, show, /^Withdraw About/);
+    await sendThenSwitchNetwork(wallet, show);
     wallet.releaseReceipts();
     show({ walletChainId: 1 });
     await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
-    await submitAndConfirmEverything();
+    await waitFor(() => expect(queued()).toEqual([]));
+    await submit();
 
     expect(sentCalls(wallet, 'unwrapAndWithdraw')).toHaveLength(1);
     expect(chain.balance).toBe(10_000_000_000n + AMOUNT);
@@ -539,17 +532,119 @@ describe('a queued wrapper action sent before a change of network', () => {
     act(() => live.queue.addOrUpdateAction(supply));
     chain.shouldRevertNext = true;
 
-    await sendThenSwitchNetwork(wallet, show, /^Supply 100\.000000 USDC$/);
+    await sendThenSwitchNetwork(wallet, show);
     wallet.releaseReceipts();
     show({ walletChainId: 1 });
     await waitFor(() => expect(live.manager.settledTransactions[0]?.outcome.status).toBe('reverted'));
     await settle();
 
+    // It is queued again, and Submit sends it again, with no dialog.
     expect(queued()).toHaveLength(1);
+    await submit();
+    await waitFor(() => expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(2));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(queued()).toEqual([]));
+    expect(chain.balance).toBe(10_000_000_000n - AMOUNT);
+  });
+});
+
+describe('the wrapped route through the real hooks, in the production order', () => {
+  beforeEach(() => {
+    mockNextId = 0;
+  });
+
+  it('Approve & Add asks the wallet for the exact approval at once and queues the supply; Submit then asks for the supply alone', async () => {
+    const chain = chainFor();
+    const { wallet } = renderDashboard(chain);
+    await waitFor(() => expect(live.action.blockedReason('supply')).toBeUndefined());
+    wallet.holdReceipts();
+
+    act(() => live.queue.setPendingAction([ActionType.Supply, BASE_ASSET, undefined]));
+    act(() => positionCard().onPendingActionConfirm(AMOUNT));
+    expect(queued()).toEqual([[ActionType.Supply, expect.anything(), AMOUNT]]);
+
+    // The approval reaches the wallet with no other press, and its row shows Approval Pending.
+    await waitFor(() => expect(sentCalls(wallet, 'approve')).toHaveLength(1));
+    expect(CALLS.parseTransaction(sentCalls(wallet, 'approve')[0][0]).args.map(String)).toEqual([
+      MARKET.wrapperAddress,
+      String(AMOUNT),
+    ]);
+    await waitFor(() =>
+      expect(positionCard().approvalTransactions).toEqual([
+        expect.objectContaining({ key: BASE_ASSET.address, state: TransactionState.Pending }),
+      ])
+    );
+    // An approval does not hold the dashboard.
+    expect(positionCard().transaction).toBeUndefined();
+    expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(0);
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    wallet.releaseReceipts();
+    await waitFor(() => expect(live.action.state.phase).toBe('complete'));
+    await waitFor(() => expect(positionCard().approvalTransactions).toEqual([]));
+    expect(chain.allowance).toBe(AMOUNT);
+
+    await submit();
+    await waitFor(() => expect(queued()).toEqual([]));
+    expect(wallet.sendUncheckedTransaction.mock.calls.map(([request]) => CALLS.parseTransaction(request).name)).toEqual(
+      ['approve', 'supplyAndWrap']
+    );
+    expect(chain.balance).toBe(10_000_000_000n - AMOUNT);
+    expect(chain.allowance).toBe(0n);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('returns the queue to Submit after a rejection in the wallet, and Submit sends the supply again', async () => {
+    const chain = chainFor({ allowance: AMOUNT });
+    const { wallet } = renderDashboard(chain);
+    await waitFor(() => expect(live.action.blockedReason('supply')).toBeUndefined());
+    const supply: Action = [ActionType.Supply, BASE_ASSET, AMOUNT];
+    act(() => live.queue.addOrUpdateAction(supply));
+    wallet.sendUncheckedTransaction.mockRejectedValueOnce({ code: 4001, message: 'User rejected the request.' });
+
+    await submit();
+    await waitFor(() => expect(live.action.state.phase).toBe('stopped'));
+    await settle();
+
+    expect(queued()).toEqual([supply]);
+    expect(positionCard().transaction).toBeUndefined();
+    expect(positionCard().actionRules.wrappedBase.stopped).toBeUndefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    await submit();
+    await waitFor(() => expect(queued()).toEqual([]));
+    expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(2);
+    expect(chain.balance).toBe(10_000_000_000n - AMOUNT);
+  });
+
+  it('withdraws everything for a Max withdrawal with Confirm Transaction then Transaction Pending..., and clears it on the receipt', async () => {
+    const chain = chainFor({ shares: 250n * 10n ** 18n });
+    const { wallet } = renderDashboard(chain);
+    await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, MAX_UINT256]));
+    wallet.holdReceipts();
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    const send = wallet.sendUncheckedTransaction.getMockImplementation();
+    if (send === undefined) throw new Error('the wallet must send');
+    wallet.sendUncheckedTransaction.mockImplementationOnce(async (request) => {
+      await answered;
+      return send(request);
+    });
+
     act(() => positionCard().onSubmitClicked());
-    expect(await screen.findByRole('button', { name: /^Supply 100\.000000 USDC$/ })).toBeInTheDocument();
-    expect(within(screen.getByRole('dialog')).queryByText(/may still go through/)).toBeNull();
-    expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(1);
-    expect(chain.balance).toBe(10_000_000_000n);
+    // From the press until the wallet answers.
+    expect(positionCard().transaction?.state).toBe(TransactionState.AwaitingConfirmation);
+    await waitFor(() => expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1));
+    expect(positionCard().transaction?.state).toBe(TransactionState.AwaitingConfirmation);
+    answer();
+    await waitFor(() => expect(positionCard().transaction?.state).toBe(TransactionState.Pending));
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    wallet.releaseReceipts();
+    await waitFor(() => expect(queued()).toEqual([]));
+    expect(positionCard().transaction).toBeUndefined();
+    expect(sentCalls(wallet, 'unwrapAndWithdraw')).toHaveLength(1);
+    expect(chain.shares).toBe(0n);
   });
 });

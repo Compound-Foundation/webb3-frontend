@@ -30,7 +30,7 @@ import {
   wrappedActionIdentity,
 } from '@helpers/wrappedActions';
 import type { WithdrawalReview } from '@helpers/wrappedWithdrawals';
-import { SettledTransaction, Transaction, TransactionOutcome, TransactionState } from '@types';
+import { SettledTransaction, Transaction, TransactionOutcome } from '@types';
 
 import type { TransactionManager } from './useTransactionManager';
 
@@ -124,36 +124,27 @@ export type WrappedActionState =
       isWalletRequestOpen: boolean;
     };
 
-/** Reads what a wrapper action needs and builds its steps, for the identity given. A withdrawal also returns its quote. */
-export type PrepareWrappedAction = (
-  identity: WrappedActionIdentity
-) => Promise<{ amount: bigint; steps: readonly WrappedStep[]; withdrawal?: WithdrawalReview }>;
+/**
+ * Reads what a wrapper action needs and builds its steps, for the identity given. A withdrawal also
+ * returns its quote. An approval for a later supply says so with `isApprovalOnly`.
+ */
+export type PrepareWrappedAction = (identity: WrappedActionIdentity) => Promise<{
+  amount: bigint;
+  steps: readonly WrappedStep[];
+  withdrawal?: WithdrawalReview;
+  isApprovalOnly?: boolean;
+}>;
 
 export type WrappedActionController = {
   state: WrappedActionState;
   session: WalletSessionHealth;
-  /** This account's wrapper transactions on this chain: still pending, and settled this session. */
+  /**
+   * This account's wrapper transactions on this chain: still pending, and settled this session. A
+   * pending one holds back a fresh review. One whose wallet request was interrupted, by a reload or
+   * an ambiguous answer, stays until the user clears the list of transactions after checking the
+   * wallet, since the wallet can still send it.
+   */
   recovered: { pending: readonly Transaction[]; settled: readonly SettledTransaction[] };
-  /**
-   * Whether the wallet answered an interrupted request in `recovered.pending` by saying it still
-   * holds it, so the user can still approve or reject it there. Only the notice's wording reads it.
-   */
-  isRecoveredRequestPendingInWallet: boolean;
-  /** Whether an interrupted wallet request holds back a fresh review, with no draft in progress. */
-  canDismissRecovered: boolean;
-  /**
-   * Whether a wallet request that has had no answer holds back a fresh review, with no draft in
-   * progress. A wallet can drop a request without answering. Then only a reload lets the user stop
-   * waiting for the request, because the reload marks it interrupted.
-   */
-  hasUnansweredWalletRequest: boolean;
-  /**
-   * The wallet's answer when it refused this wallet session's last wrapper request before it
-   * handled it, or undefined. Nothing was sent, and the session can refuse again until the user
-   * reconnects the wallet. The next review that starts clears it. Another wallet provider, account
-   * or chain does not show it.
-   */
-  walletRefusalMessage: string | undefined;
   /** Why `start(type)` refuses now, or undefined if it starts. */
   blockedReason: (type: WrappedActionType) => WrappedBlockReason | undefined;
   /** Starts a fresh review. Returns why it was refused, if it was. */
@@ -163,15 +154,8 @@ export type WrappedActionController = {
    * `confirm` applies only to the draft and step that were in review in the render that returned it.
    */
   confirm: () => void;
-  /** Clears the draft, or the notice left by one. Nothing already sent is cancelled. */
+  /** Clears the draft. Nothing already sent is cancelled. */
   discard: () => void;
-  /**
-   * Stops waiting for this account's interrupted wallet requests on this chain: requests open at a
-   * reload, or answered with an ambiguous error, whose result nothing can follow. Only for the user
-   * to call after checking their wallet, because a dismissed request can still go through. A
-   * broadcast transaction is not dismissed: it holds back a fresh review until it settles.
-   */
-  dismissRecovered: () => void;
 };
 
 /** The controller outside the wrapped route. */
@@ -179,27 +163,17 @@ export const IDLE_WRAPPED_ACTION: WrappedActionController = Object.freeze<Wrappe
   state: { phase: 'idle' },
   session: { status: 'not-applicable' },
   recovered: { pending: [], settled: [] },
-  isRecoveredRequestPendingInWallet: false,
-  canDismissRecovered: false,
-  hasUnansweredWalletRequest: false,
-  walletRefusalMessage: undefined,
   blockedReason: () => 'not-wrapped',
   start: () => 'not-wrapped',
   confirm: () => undefined,
   discard: () => undefined,
-  dismissRecovered: () => undefined,
 });
 
 export type UseWrappedActionOptions = {
   session: WrappedSession;
   manager: Pick<
     TransactionManager,
-    | 'transactions'
-    | 'settledTransactions'
-    | 'walletFailure'
-    | 'restoredSession'
-    | 'submitTransaction'
-    | 'dismissTransaction'
+    'transactions' | 'settledTransactions' | 'walletFailure' | 'restoredSession' | 'submitTransaction'
   >;
   /** The configured chain's public provider, for the market restriction read. */
   readProvider: Pick<JsonRpcProvider, 'call'> | undefined;
@@ -224,25 +198,6 @@ function hasProgress(state: WrappedActionState): state is Extract<WrappedActionS
 function identityOf(state: WrappedActionState): WrappedActionIdentity | undefined {
   if (hasProgress(state)) return state.draft.identity;
   return state.phase === 'reading' || state.phase === 'read-failed' ? state.identity : undefined;
-}
-
-/** A wallet request whose result nothing can follow: it has no hash to look up. */
-function isInterrupted(transaction: Transaction): boolean {
-  return transaction.state === TransactionState.AwaitingConfirmation && transaction.isInterrupted === true;
-}
-
-/** A wallet request this session sent that the wallet has answered with neither a hash nor an error. */
-function isUnanswered(transaction: Transaction): boolean {
-  return transaction.state === TransactionState.AwaitingConfirmation && transaction.isInterrupted !== true;
-}
-
-/** An interrupted wallet request that the wallet said it still holds. */
-function isInterruptedPendingInWallet(transaction: Transaction): boolean {
-  return (
-    transaction.state === TransactionState.AwaitingConfirmation &&
-    transaction.isInterrupted === true &&
-    transaction.isPendingInWallet === true
-  );
 }
 
 function isInProgress(state: WrappedActionState): boolean {
@@ -389,7 +344,8 @@ function frozenDraft(
   identity: WrappedActionIdentity,
   amount: bigint,
   steps: readonly WrappedStep[],
-  withdrawal: WithdrawalReview | undefined
+  withdrawal: WithdrawalReview | undefined,
+  isApprovalOnly: boolean
 ): WrappedActionDraft {
   return Object.freeze({
     kind: WRAPPED_ACTION,
@@ -413,6 +369,7 @@ function frozenDraft(
             quote: Object.freeze({ ...withdrawal.quote }),
           }),
         }),
+    ...(isApprovalOnly ? { isApprovalOnly: true } : {}),
   });
 }
 
@@ -431,8 +388,6 @@ function frozenRecheck(rechecked: RecheckedWithdrawal): RecheckedWithdrawal {
 
 type ProbeTarget = { provider: object; key: string; chainId: number };
 type HealthRecord = { provider: object; key: string; result: SessionProbeResult };
-/** The wallet's answer to a wrapper request it refused, and the wallet session it refused it in. */
-type RefusalRecord = { provider: object; key: string; message: string };
 
 /** Whether `record` was read through the wallet session `target`: the same provider, account and chain. */
 function isTarget<T extends { provider: object; key: string }>(
@@ -471,7 +426,6 @@ export function useWrappedAction({
 }: UseWrappedActionOptions): WrappedActionController {
   const [lifecycle, dispatch] = useReducer(lifecycleReducer, { phase: 'idle' });
   const [healthRecord, setHealthRecord] = useState<HealthRecord | undefined>(undefined);
-  const [refusalRecord, setRefusalRecord] = useState<RefusalRecord | undefined>(undefined);
   // Bumped whenever a draft is started, confirmed, discarded or stopped. A continuation of an
   // earlier run changes nothing.
   const runId = useRef(0);
@@ -497,10 +451,6 @@ export function useWrappedAction({
   } else {
     health = { status: 'checking' };
   }
-  // A refusal describes the wallet session that refused, so no other session shows it.
-  const walletRefusalMessage =
-    probeTarget !== undefined && isTarget(refusalRecord, probeTarget) ? refusalRecord.message : undefined;
-
   // A draft whose identity no longer holds is discarded in this render, before the effect below
   // records it, so no render shows it for review. A complete or stopped draft sends nothing more,
   // so it stays, with what became of each step, until the user closes it or starts another.
@@ -580,13 +530,6 @@ export function useWrappedAction({
     );
   };
 
-  const recordRefusal = (target: ProbeTarget, message: string) => {
-    // Like a session check, a refusal that arrives after the live session changed is dropped.
-    if (isTarget(live.current.probeTarget, target)) {
-      setRefusalRecord({ provider: target.provider, key: target.key, message });
-    }
-  };
-
   useEffect(() => {
     if (probeTarget === undefined) return;
     let isCurrent = true;
@@ -628,8 +571,6 @@ export function useWrappedAction({
     const identity = wrappedActionIdentity(type, live.current.session);
     if (reason !== undefined || identity === undefined) return reason ?? 'no-signer';
     const run = ++runId.current;
-    // The new review is the user's next try, so it clears the last refusal.
-    setRefusalRecord(undefined);
     dispatch({ type: 'reading', identity });
     let reading: ReturnType<PrepareWrappedAction>;
     try {
@@ -639,9 +580,10 @@ export function useWrappedAction({
     }
     reading
       .then(
-        ({ amount, steps, withdrawal }) => {
+        ({ amount, steps, withdrawal, isApprovalOnly }) => {
           if (runId.current !== run) return;
-          const draft = frozenDraft(`wrapped-action-${++draftCount.current}`, identity, amount, steps, withdrawal);
+          const id = `wrapped-action-${++draftCount.current}`;
+          const draft = frozenDraft(id, identity, amount, steps, withdrawal, isApprovalOnly === true);
           const problem = checkWrappedDraft(draft);
           if (problem === undefined) dispatch({ type: 'drafted', draft });
           else dispatch({ type: 'read-failed', message: `The prepared transactions are not allowed (${problem}).` });
@@ -753,7 +695,6 @@ export function useWrappedAction({
       },
     });
     if (result.status === 'session-broken') recordProbe(target, { status: 'unusable', reason: 'provider-broken' });
-    if (result.status === 'refused') recordRefusal(target, result.message);
     if (!isCurrentRun()) return;
     switch (result.status) {
       case 'submitted':
@@ -810,26 +751,28 @@ export function useWrappedAction({
     else dispatch({ type: 'reset' });
   };
 
-  const dismissRecovered = () => {
-    const current = live.current;
-    if (isInProgress(current.state)) return;
-    current.recovered.pending.filter(isInterrupted).forEach((transaction) => {
-      current.manager.dismissTransaction(transaction.id);
-    });
-  };
-
   return {
     state,
     session: health,
     recovered,
-    isRecoveredRequestPendingInWallet: recovered.pending.some(isInterruptedPendingInWallet),
-    canDismissRecovered: recovered.pending.some(isInterrupted) && !isInProgress(state),
-    hasUnansweredWalletRequest: recovered.pending.some(isUnanswered) && !isInProgress(state),
-    walletRefusalMessage,
     blockedReason,
     start,
     confirm,
     discard,
-    dismissRecovered,
   };
+}
+
+/**
+ * Signs each step of `action`'s draft as soon as it is ready for its signature. On the dashboard a
+ * wrapper action starts from the user's press of Approve & Add or Submit Transaction, as a direct
+ * action does, and that press is the confirmation: no screen asks for another. Each step is still
+ * signed only after `confirm` has checked it against the live session, and a step after another
+ * waits for the one before it to confirm.
+ */
+export function useSignWhenReady(action: Pick<WrappedActionController, 'state' | 'confirm'>): void {
+  const { state, confirm } = action;
+  const reviewed = state.phase === 'review' ? state : undefined;
+  useEffect(() => {
+    if (reviewed !== undefined) confirm();
+  }, [reviewed?.draft, reviewed?.stepIndex]);
 }

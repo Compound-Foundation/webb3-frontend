@@ -20,10 +20,10 @@ const LAST_STEP_IDS: Record<WrappedActionType, string> = {
  * - `executed`: the last step confirmed.
  * - `may-have-executed`: the last step can have executed without a receipt for its own hash. The
  *   wallet answered it with an error after it can have sent it, or another transaction took its
- *   nonce, which a sped-up copy of the same call also does. As for a submission still shown, the
- *   entry leaves the queue so that it is not sent twice.
+ *   nonce, which a sped-up copy of the same call also does. The entry leaves the queue so that it
+ *   is not sent twice.
  * - `not-executed`: the last step reverted, or never reached the chain: the wallet declined or
- *   refused it, it was withdrawn, or the submission ended before it.
+ *   refused it, it was withdrawn, or the run ended before it.
  */
 export type SentActionStatus =
   | { kind: 'pending' }
@@ -34,12 +34,12 @@ export type SentActionStatus =
 
 /**
  * What became of a sent wrapper action, from the transaction manager's records. `isSubmissionOpen`
- * is whether the submission that started it is still open in its scope.
+ * is whether the run that started it is still running in its scope.
  *
  * The lifecycle starts a wrapper action only when no other wrapper transaction of the account is
  * pending on the chain, so the only record of the last step for the account, chain and wrapper is
  * this action's. The manager records the step before it asks the wallet, and asks only while the
- * submission's draft is current: a submission dropped or closed with no record never sends one.
+ * run's draft is current: a run dropped or stopped with no record never sends one.
  */
 export function sentActionStatus(
   sent: SentWrapperAction,
@@ -75,7 +75,7 @@ export function sentActionStatus(
 }
 
 export type UseSubmissionStoreOptions = {
-  /** The `submissionScope` now. The submission belongs to the scope it started in. */
+  /** The `submissionScope` now. The wrapped run belongs to the scope it started in. */
   scope: string;
   /** The `queueScope` now. The sent wrapper action belongs to the scope it started in. */
   queueScope: string;
@@ -86,9 +86,9 @@ export type UseSubmissionStoreOptions = {
 };
 
 /**
- * The queued submission and the wrapper action it started, as App keeps them. A change of
- * `submissionScope`, the wallet's network included, drops the submission, so no callback of it
- * signs another step. The sent wrapper action is followed until its last step's outcome is known,
+ * The wrapped run and the queued wrapper action it submitted, as App keeps them. A change of
+ * `submissionScope`, the wallet's network included, drops the run, so no callback of it signs
+ * another step. The sent wrapper action is followed until its last step's outcome is known,
  * across a change of network: an entry whose last step confirmed leaves the queue, and one whose
  * last step did not execute is released. A change of `queueScope` drops it with the queue itself.
  */
@@ -111,7 +111,8 @@ export function useSubmissionStore({
   const submission = record?.scope === scope ? record : undefined;
   const sent = sentRecord?.scope === queueScope ? sentRecord : undefined;
 
-  const isSubmissionOpen = submission !== undefined;
+  // Only a supply or withdrawal still running can still hand its last step to the manager.
+  const isSubmissionOpen = submission?.kind === 'execute' && submission.status.kind === 'running';
   useEffect(() => {
     if (sent === undefined) return;
     const status = sentActionStatus(sent, isSubmissionOpen, transactions, settledTransactions);

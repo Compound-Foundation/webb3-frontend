@@ -166,16 +166,17 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
       measured.onChainExitRevert = revertName(await revertDataOf(account, exitOf(await sharesOf(account))));
       expect(measured.onChainExitRevert).toBe('Paused');
 
+      // The supply is approved, as Approve & Add leaves it, before Comet pauses supplies.
+      await sendFrom(account, {
+        to: market.baseTokenAddress,
+        data: ERC20.encodeFunctionData('approve', [market.wrapperAddress, units(100)]),
+      });
       await pauseComet(market, { supply: true });
       await withApp(async (app) => {
         expect(await app.startSupply(units(100))).toBeUndefined();
         const step = await expectStoppedBeforeSignature(app);
         measured.reviewedSupplyStop = step.status === 'blocked' ? step.reason : step.status;
         expect(step).toMatchObject({ status: 'blocked', reason: 'supply-paused' });
-      });
-      await sendFrom(account, {
-        to: market.baseTokenAddress,
-        data: ERC20.encodeFunctionData('approve', [market.wrapperAddress, units(100)]),
       });
       const supply = { to: market.wrapperAddress, data: WRAPPER.encodeFunctionData('supplyAndWrap', [units(100)]) };
       measured.onChainSupplyRevert = revertName(await revertDataOf(account, supply));
@@ -202,8 +203,8 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     onSnapshot(async () => {
       await setUp();
       await withApp(async (app) => {
-        const panel = await app.refreshPosition();
-        expect(await app.startWithdraw({ kind: 'full' }, panel.fullExitCash)).toBeUndefined();
+        await app.refreshPosition();
+        expect(await app.startWithdraw({ kind: 'full' })).toBeUndefined();
         expect(app.state().phase).toBe('review');
         const drain = await drainCash(market, forkAccount('borrower', forkMarket), units(50));
         Object.assign(measured, { borrowed: drain.borrowed, wethCollateral: drain.weth, cashLeft: drain.cashLeft });
@@ -211,7 +212,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         measured.reviewedExitStop = blockedMessage(step);
         expect(measured.reviewedExitStop).toMatch(/The market now holds only 50\.000000/);
 
-        expect(await app.startWithdraw({ kind: 'full' }, panel.fullExitCash)).toBeUndefined();
+        expect(await app.startWithdraw({ kind: 'full' })).toBeUndefined();
         const refusal = app.readFailure() ?? '';
         measured.fullExitRefusal = refusal;
         const most = /Withdraw at most ([\d,]+\.\d+)/.exec(refusal);
@@ -399,9 +400,9 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         measured.cashFellStop = blockedMessage(await expectStoppedBeforeSignature(app));
         expect(measured.cashFellStop).toMatch(/now pays about .*, less than the .* you reviewed/);
 
-        // A supply whose allowance changes before its approval is signed.
-        expect(await app.startSupply(units(500))).toBeUndefined();
-        expect(app.draft().steps.map((step) => step.kind)).toEqual(['approve', 'supply-and-wrap']);
+        // An approval for a supply, whose allowance changes before it is signed.
+        expect(await app.startApproval(units(500))).toBeUndefined();
+        expect(app.draft().steps.map((step) => step.kind)).toEqual(['approve']);
         await sendFrom(account, {
           to: market.baseTokenAddress,
           data: ERC20.encodeFunctionData('approve', [market.wrapperAddress, units(123)]),
@@ -409,11 +410,14 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         measured.allowanceChangedStop = blockedMessage(await expectStoppedBeforeSignature(app));
         expect(measured.allowanceChangedStop).toMatch(/allowance is now 123\.000000 .*not what this review expected/);
 
-        // A supply whose wallet balance falls below it before the supply is signed.
-        await sendFrom(account, {
-          to: market.baseTokenAddress,
-          data: ERC20.encodeFunctionData('approve', [market.wrapperAddress, 0]),
-        });
+        // An approved supply whose wallet balance falls below it before the supply is signed. USDT
+        // refuses to change one nonzero allowance to another, so the allowance goes to zero first.
+        for (const allowance of [0n, units(500)]) {
+          await sendFrom(account, {
+            to: market.baseTokenAddress,
+            data: ERC20.encodeFunctionData('approve', [market.wrapperAddress, allowance]),
+          });
+        }
         expect(await app.startSupply(units(500))).toBeUndefined();
         const wallet = await readBigInt(market.baseTokenAddress, ERC20, 'balanceOf', [account]);
         await sendFrom(account, {

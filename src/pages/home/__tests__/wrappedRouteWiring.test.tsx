@@ -294,12 +294,12 @@ describe('Home on the wrapped route', () => {
     const supply = jest.fn(() => undefined);
     const withdraw = jest.fn(() => undefined);
     const state = cometState(EMPTY_ACCOUNT);
-    const usdc = { ...wrappedLending(), write: { supply, withdraw } };
+    const usdc = { ...wrappedLending(), write: { approve: jest.fn(), supply, withdraw } };
     const { rerender } = render(homeElement({ lending: usdc, state, queue: actionQueue([action]) }));
     const keptSubmit = mockLastProps.PositionCard.state[1].onSubmitClicked;
 
     // The user switches to the USDT market: the submit callback from before belongs to USDC.
-    const usdt = { ...wrappedLending(USDT_COMET), write: { supply, withdraw } };
+    const usdt = { ...wrappedLending(USDT_COMET), write: { approve: jest.fn(), supply, withdraw } };
     const usdtAction = [action[0], { ...EMPTY_ACCOUNT, address: USDT }, action[2]] as Action;
     rerender(homeElement({ lending: usdt, market: USDT_MARKET, state, queue: actionQueue([usdtAction]) }));
 

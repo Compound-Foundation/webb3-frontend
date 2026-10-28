@@ -1,6 +1,6 @@
 import { ReactNode, useContext, useEffect, useRef, useState } from 'react';
 
-import { CHAINS, isUnwrappedCollateralAsset } from '@constants/chains';
+import { isUnwrappedCollateralAsset } from '@constants/chains';
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
@@ -14,6 +14,7 @@ import {
 } from '@contexts/WrappedLendingContext';
 import {
   ActionRules,
+  isSameAction,
   isSameToken,
   calculateUpdatedBalances,
   getActionFromPendingAction,
@@ -34,7 +35,7 @@ import {
 } from '@helpers/queuedExecution';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { SendWithdrawnError } from '@helpers/walletErrors';
-import { isDirectExecution, WrappedActionType, WrappedExecutionError } from '@helpers/wrappedActions';
+import { isDirectExecution, WrappedExecutionError } from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
   isSubmissionRefused,
@@ -49,6 +50,7 @@ import { Theme } from '@hooks/useThemeManager';
 import { AddTransaction } from '@hooks/useTransactionManager';
 import type { WrappedActionState } from '@hooks/useWrappedAction';
 import { useWriteCometState, WriteCometState } from '@hooks/useWriteCometState';
+import { WRAPPED_SUPPLY_STEP_IDS } from '@hooks/useWriteWrappedState';
 import {
   Action,
   ActionModalBulker,
@@ -66,14 +68,14 @@ import {
   Token,
   TokenWithAccountState,
   Transaction,
+  TransactionState,
 } from '@types';
 
 import ActionModal from './components/ActionModal';
-import QueuedSubmissionModal from './components/ActionModal/QueuedSubmissionModal';
 import AssetRow from './components/AssetRow';
 import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadNotice, MastheadState } from './components/Masthead';
-import PositionCard, { PositionCardNotice, PositionCardState } from './components/PositionCard';
+import PositionCard, { PositionCardState } from './components/PositionCard';
 
 const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.name ? 1 : a.name === b.name ? 0 : -1);
 
@@ -95,6 +97,44 @@ function mayStillExecute(state: Extract<WrappedActionState, { phase: 'stopped' }
   return (
     state.stepIndex === lastIndex && (status === 'provider-failure' || status === 'unresolved' || status === 'replaced')
   );
+}
+
+/** The label a queued wrapper action's row shows after a check stopped it before anything was sent. */
+const NOT_SENT_LABEL = 'Not Sent, Try Again';
+
+/**
+ * The label a submitted wrapper action's queue row shows once it stopped with the action still
+ * queued, or undefined for none. A rejection in the wallet returns the queue as a direct action's
+ * does, with nothing said. An action that can still execute has left the queue.
+ */
+function stoppedLabel(state: Extract<WrappedActionState, { phase: 'stopped' }>): string | undefined {
+  const step = state.steps[state.stepIndex];
+  switch (step?.status) {
+    case 'blocked':
+      return NOT_SENT_LABEL;
+    case 'refused':
+      return 'Reconnect Your Wallet';
+    case 'reverted':
+      return 'Transaction Failed';
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * A wrapper action's place in the transaction list while its checks run, before the manager tracks
+ * its wallet request, so the dashboard shows it as it shows a direct action from the press on.
+ */
+function inFlightTransaction(key: string, description: string, networkId: number): Transaction {
+  return {
+    id: `in-flight-${key}`,
+    key,
+    networkId,
+    networkName: '',
+    description,
+    nonce: 0,
+    state: TransactionState.AwaitingConfirmation,
+  };
 }
 
 /** What the masthead says about a wrapped position it cannot show. */
@@ -288,33 +328,36 @@ const Home = ({
     if (openDialog !== undefined && openDialog.key !== visitKey) setOpenDialog(undefined);
   }, [openDialog, visitKey]);
 
-  // A queue submitted through the wrapper belongs to its scope: the account, connector, connection
-  // status, wallet network and market. App keeps it beside the wrapper action lifecycle, so it
-  // survives a visit to another page. A change of scope drops it in the same render, and the
-  // lifecycle discards its draft for the same change.
+  // A wrapped run, Approve & Add's approval or Submit's supply or withdrawal, belongs to its scope:
+  // the account, connector, connection status, wallet network and market. App keeps it beside the
+  // wrapper action lifecycle, so it survives a visit to another page. A change of scope drops it in
+  // the same render, and the lifecycle discards its draft for the same change.
   const submissionStore = wrappedLending.submission;
   const submission = submissionStore.record?.scope === visitIdentity ? submissionStore.record : undefined;
   const setSubmissionRecord = (record: SubmissionRecord | undefined) => submissionStore.setRecord(() => record);
   const liveSubmission = useRef(submission);
   liveSubmission.current = submission;
-  // The wrapper action a submission started belongs to the queue's scope, which leaves out the
-  // wallet's network. App follows it until its last step's outcome is known, after the submission
-  // itself is dropped or closed.
+  // The wrapper action a run submitted belongs to the queue's scope, which leaves out the wallet's
+  // network. App follows it until its last step's outcome is known, after the run itself is dropped.
   const sentScope = queueScope(web3.write, selectedMarketIdentity);
   const sent = submissionStore.sent?.scope === sentScope ? submissionStore.sent : undefined;
   const liveSent = useRef(sent);
   liveSent.current = sent;
-  // While a submission is in progress, the queue it was planned from cannot change. Nor can it while
-  // the wrapper action it started may still be carried out, so the action is never offered again
-  // before it is known whether it executed.
-  const isQueueLocked = () => liveSubmission.current !== undefined || liveSent.current !== undefined;
-  // The lifecycle's state, when it belongs to this submission. Until the submission's review
-  // starts, the lifecycle can still show an earlier review, which this submission never acts on.
+  // While a supply or withdrawal runs, the queue it was planned from cannot change. Nor can it while
+  // the wrapper action it submitted may still be carried out, so the action is never sent again
+  // before it is known whether it executed. The dashboard shows this as it shows a direct action
+  // awaiting confirmation or pending. These checks keep callbacks kept from earlier renders in step.
+  const isQueueLocked = () => {
+    const current = liveSubmission.current;
+    return (current?.kind === 'execute' && current.status.kind === 'running') || liveSent.current !== undefined;
+  };
+  // The lifecycle's state, when it belongs to this run. Until the run's draft starts, the lifecycle
+  // can still show an earlier one, which this run never acts on.
   const lifecycleState = wrappedAction.state;
   const isSubmissionState = (() => {
-    if (submission === undefined || submission.refusal !== undefined) return false;
+    if (submission === undefined || submission.status.kind !== 'running') return false;
     if (lifecycleState === submission.stateBefore) return false;
-    const type = submission.wrapper.type;
+    const type = submission.kind === 'approve' ? 'supply' : submission.wrapper.type;
     switch (lifecycleState.phase) {
       case 'idle':
         return false;
@@ -332,46 +375,48 @@ const Home = ({
     }
   })();
   const submissionState: WrappedActionState = isSubmissionState ? lifecycleState : { phase: 'idle' };
-  // Once the wrapper action confirms, it leaves the queue. The direct actions stay until they are
-  // submitted. A wrapper action that stops before its last step was sent, or is closed, stays queued.
-  // One that stops at its last step in a state where it can still go through leaves the queue too,
-  // so it is not submitted twice.
+  const isRunInFlight =
+    submissionState.phase === 'reading' || submissionState.phase === 'review' || submissionState.phase === 'signing';
+  // An approval ends when it confirms or stops, and its queued supply stays as it is: the row says
+  // whether the allowance now covers it. A supply or withdrawal that confirms leaves the queue, and
+  // the direct actions are submitted next. One that stops with nothing sent stays queued, with a
+  // label on its row unless the wallet declined it. One that stops at its last step in a state where
+  // it can still go through leaves the queue too, so it is not submitted twice.
   useEffect(() => {
-    if (submission === undefined || submission.isWrapperDone || submission.mayHaveExecuted) return;
-    if (submissionState.phase === 'complete') {
+    if (submission === undefined || submission.status.kind !== 'running') return;
+    const { phase } = submissionState;
+    if (phase === 'idle' || phase === 'reading' || phase === 'review' || phase === 'signing') return;
+    if (submission.kind === 'approve') {
+      setSubmissionRecord(undefined);
+      return;
+    }
+    if (phase === 'complete') {
       removeAction(submission.wrapper.action);
-      setSubmissionRecord({ ...submission, isWrapperDone: true });
-    } else if (submissionState.phase === 'stopped' && mayStillExecute(submissionState)) {
-      removeAction(submission.wrapper.action);
-      setSubmissionRecord({ ...submission, mayHaveExecuted: true });
+      setSubmissionRecord({ ...submission, status: { kind: 'executed' } });
+    } else if (phase === 'stopped') {
+      if (mayStillExecute(submissionState)) removeAction(submission.wrapper.action);
+      const step = submissionState.steps[submissionState.stepIndex];
+      if (step?.status === 'blocked')
+        console.warn('The wrapped transaction was not sent:', step.message ?? step.reason);
+      const label = mayStillExecute(submissionState) ? undefined : stoppedLabel(submissionState);
+      setSubmissionRecord(label === undefined ? undefined : { ...submission, status: { kind: 'stopped', label } });
+    } else if (phase === 'read-failed') {
+      console.warn('The wrapped transaction was not sent:', submissionState.message);
+      setSubmissionRecord({ ...submission, status: { kind: 'stopped', label: NOT_SENT_LABEL } });
+    } else {
+      setSubmissionRecord(undefined);
     }
   }, [submission, submissionState]);
-
-  // The submission dialog shows the submission of this visit. While a step is being signed, the
-  // user can hide it. It returns when the lifecycle moves to another step or stops.
-  const hiddenWhileSigning = submission?.hiddenWhileSigning;
-  const isHidden =
-    hiddenWhileSigning !== undefined &&
-    submissionState.phase === 'signing' &&
-    submissionState.draft === hiddenWhileSigning.draft &&
-    submissionState.stepIndex === hiddenWhileSigning.stepIndex;
-  // Submit, or the position card's notice, shows a submission hidden while a step is signed.
-  const showSubmission = () => {
-    if (isFromEarlierVisit()) return;
-    submissionStore.setRecord((current) =>
-      current?.scope === visitIdentity && current.hiddenWhileSigning !== undefined
-        ? { ...current, hiddenWhileSigning: undefined }
-        : current
-    );
-  };
+  // Submits the direct actions once the wrapper action before them confirmed. Set while the
+  // dashboard is hydrated.
+  const continueAfterWrapper = useRef<(executed: Action) => void>();
+  continueAfterWrapper.current = undefined;
 
   let assetRows: ReactNode[];
   let otherAssetRows: ReactNode[] = [];
   let mastheadState: MastheadState;
   let positionCardState: PositionCardState;
   let isBulkerAllowed = false;
-  // What the submission dialog needs from the dashboard's hydrated state.
-  let submissionControls: { continueSubmission: () => void; symbol: string } | undefined;
   // The amount form keeps its confirm callback, so the callback reads the rules of the latest render.
   liveActionRules.current = {};
   // The market's wrapper sends every step of a wrapper action, approvals included, under its own address.
@@ -482,6 +527,11 @@ const Home = ({
           canWithdrawAll: limits?.canExitFully ?? false,
           // The cash the submission asks the wrapper for on a full exit.
           fullExitCash: wrappedPosition?.fullExitCash,
+          supplyAllowance: wrappedPosition?.wrapperAllowance,
+          stopped:
+            submission?.kind === 'execute' && submission.status.kind === 'stopped'
+              ? { action: submission.wrapper.action, label: submission.status.label }
+              : undefined,
         },
       };
     }
@@ -661,39 +711,33 @@ const Home = ({
      * action is never passed to Comet or the Bulker: the plan holds it apart, and the direct part
      * is checked again before it is sent.
      */
-    const planQueue = (): QueuedExecutionPlan | undefined => {
+    const planQueue = (actionsToPlan: Action[] = queuedActions): QueuedExecutionPlan | undefined => {
       try {
-        return planQueuedExecution(liveSession.current.route, directBaseAsset, collateralAssets, queuedActions);
+        return planQueuedExecution(liveSession.current.route, directBaseAsset, collateralAssets, actionsToPlan);
       } catch (error) {
         if (error instanceof WrappedExecutionError) return undefined;
         throw error;
       }
     };
 
-    // Starts the wrapper action, which goes first. Its steps are confirmed one at a time in the
-    // submission dialog. The direct actions wait until it confirms.
+    // Starts the wrapper action, which goes first. The press of Submit Transaction confirms it: the
+    // lifecycle checks it and asks the wallet with no other screen. The direct actions wait until
+    // it confirms.
     const startWrapperAction = (wrapper: QueuedWrapperAction, directCount: number) => {
       const { write, action } = liveWrappedLending.current;
       const stateBefore = action.state;
-      const refusal =
-        wrapper.type === 'supply'
-          ? write.supply(wrapper.amount)
-          : write.withdraw(
-              wrapper.request,
-              wrapper.request.kind === 'full' ? wrappedPosition?.fullExitCash : undefined
-            );
-      setSubmissionRecord({
-        scope: visitIdentity,
-        wrapper,
-        directCount,
-        refusal,
-        isWrapperDone: false,
-        stateBefore,
-      });
+      const refusal = wrapper.type === 'supply' ? write.supply(wrapper.amount) : write.withdraw(wrapper.request);
+      const run = { kind: 'execute' as const, wrapper, directCount, scope: visitIdentity, stateBefore };
+      if (refusal !== undefined) {
+        console.warn('The wrapped transaction was not sent:', refusal);
+        setSubmissionRecord({ ...run, status: { kind: 'stopped', label: NOT_SENT_LABEL } });
+        return;
+      }
+      setSubmissionRecord({ ...run, status: { kind: 'running' } });
       const { route } = liveSession.current;
       const account = web3.write.account?.toLowerCase();
       const chainId = web3.write.chainId;
-      if (refusal !== undefined || route.kind !== 'wrapped' || route.market === undefined) return;
+      if (route.kind !== 'wrapped' || route.market === undefined) return;
       if (account === undefined || chainId === undefined) return;
       const started: SentWrapperAction = {
         scope: sentScope,
@@ -706,6 +750,16 @@ const Home = ({
       submissionStore.setSent(started);
     };
 
+    // Approve & Add's approval of the wrapper for a base supply, for exactly the amount.
+    const startApproval = (action: Action, amount: bigint) => {
+      const { write, action: lifecycle } = liveWrappedLending.current;
+      const stateBefore = lifecycle.state;
+      if (write.approve(amount) !== undefined) return;
+      setSubmissionRecord({ kind: 'approve', action, scope: visitIdentity, stateBefore, status: { kind: 'running' } });
+    };
+
+    // A wallet on another network is asked to switch first, as for direct actions, and nothing is
+    // sent. A wrapper action that may still execute holds back another submission.
     const submitQueue = () => {
       if (web3.read.chainId === undefined || web3.write.chainId === undefined) return;
       const plan = planQueue();
@@ -713,6 +767,8 @@ const Home = ({
       if (plan.direct.length > 0 && isBlockedOnLiveRoute(plan.direct)) return;
       if (web3.write.chainId !== web3.read.chainId) {
         switchWriteNetwork(web3.read.chainId);
+      } else if (isQueueLocked()) {
+        return;
       } else if (plan.wrapper !== undefined) {
         startWrapperAction(plan.wrapper, plan.direct.length);
       } else if (plan.direct.length > 0) {
@@ -720,53 +776,54 @@ const Home = ({
       }
     };
 
-    // The submission dialog's Continue: the direct actions, once the wrapper action left the queue.
-    const continueSubmission = () => {
+    // The direct actions, once the wrapper action confirmed and left the queue. They go to Comet or
+    // the Bulker as a queue without a wrapper action does, through the Bulker's own dialogs.
+    continueAfterWrapper.current = (executed: Action) => {
       if (isFromEarlierVisit()) return;
-      const plan = planQueue();
       setSubmissionRecord(undefined);
+      // The executed action leaves the queue in the same update, which this render may not show yet.
+      const plan = planQueue(queuedActions.filter((queued) => !isSameAction(queued, executed)));
       if (plan === undefined || plan.wrapper !== undefined || plan.direct.length === 0) return;
-      if (isBlockedOnLiveRoute(plan.direct)) return;
+      if (isBlockedOnLiveRoute(plan.direct) || web3.write.chainId !== web3.read.chainId) return;
       submitDirectActions(plan.direct);
     };
 
-    const approvalTransactions = transactions.filter(
-      (transaction) =>
-        transaction.key !== market.bulkerAddress &&
-        transaction.key !== market.marketAddress &&
-        transaction.key !== market.rewardsAddress &&
-        !isWrapperTransaction(transaction)
-    );
+    // A wrapper approval shows on its supply's queue row as Approval Pending, as an approval of
+    // Comet does, and does not hold the dashboard. Every other wrapper transaction does, as a
+    // transaction to Comet does.
+    const isWrapperApproval = (transaction: Transaction) =>
+      isWrapperTransaction(transaction) &&
+      (transaction.step === WRAPPED_SUPPLY_STEP_IDS.approve || transaction.step === WRAPPED_SUPPLY_STEP_IDS.reset);
+    const wrapperApprovals = transactions.filter(isWrapperApproval);
+    if (submission?.kind === 'approve' && isRunInFlight && wrapperApprovals.length === 0 && wrapperAddress) {
+      wrapperApprovals.push(
+        inFlightTransaction(wrapperAddress, `Enable ${directBaseAsset.symbol}`, market.chainInformation.chainId)
+      );
+    }
+    const approvalTransactions = [
+      ...transactions.filter(
+        (transaction) =>
+          transaction.key !== market.bulkerAddress &&
+          transaction.key !== market.marketAddress &&
+          transaction.key !== market.rewardsAddress &&
+          !isWrapperTransaction(transaction)
+      ),
+      ...wrapperApprovals.map((transaction) => ({ ...transaction, key: directBaseAsset.address })),
+    ];
     const bulkerTransaction = transactions.find((transaction) => transaction.key === market.bulkerAddress);
     const cometTransaction = transactions.find((transaction) => transaction.key === market.marketAddress);
     const rewardTransaction = transactions.find((transaction) => transaction.key === market.rewardsAddress);
-    const wrapperTransaction = transactions.find(isWrapperTransaction);
+    let wrapperTransaction = transactions.find(
+      (transaction) => isWrapperTransaction(transaction) && !isWrapperApproval(transaction)
+    );
+    if (wrapperTransaction === undefined && submission?.kind === 'execute' && isRunInFlight && wrapperAddress) {
+      const description = `${submission.wrapper.type === 'supply' ? 'Supply' : 'Withdraw'} ${directBaseAsset.symbol}`;
+      wrapperTransaction = inFlightTransaction(wrapperAddress, description, market.chainInformation.chainId);
+    }
     // block the UI when there is a bulker transaction, or a single action to
     // Comet, the Rewards contract or the market's wrapper (i.e. do not block
     // if you're just approving an ERC token)
     const blockingTransaction = bulkerTransaction || cometTransaction || rewardTransaction || wrapperTransaction;
-
-    // Why the queue is held while no submission dialog shows it. A wrapper action sent before a
-    // change of network holds it until its transaction settles on the market's network, where the
-    // receipt is followed.
-    let queueNotice: PositionCardNotice | undefined;
-    const actionNoun = (type: WrappedActionType) =>
-      `${directBaseAsset.symbol} ${type === 'supply' ? 'supply' : 'withdrawal'}`;
-    if (submission !== undefined && isHidden) {
-      const noun = actionNoun(submission.wrapper.type);
-      queueNotice = {
-        message: `Your ${noun} is in progress. The queue stays as it is until it finishes.`,
-        actionLabel: 'Show Progress',
-        onAction: showSubmission,
-      };
-    } else if (submission === undefined && sent !== undefined) {
-      const network = CHAINS[sent.chainId]?.name ?? `network ${sent.chainId}`;
-      const switchBack = web3.write.chainId === sent.chainId ? '' : ` Switch your wallet to ${network} to follow it.`;
-      const noun = actionNoun(sent.type);
-      queueNotice = {
-        message: `Your ${noun} is pending on ${network}. The queue stays as it is until it settles.${switchBack}`,
-      };
-    }
 
     mastheadState = [
       StateType.Hydrated,
@@ -831,7 +888,6 @@ const Home = ({
         theme,
         isRewardsLoading,
         transaction: blockingTransaction,
-        queueNotice,
         onClearClicked: () => {
           if (isQueueLocked()) return;
           clearActions();
@@ -864,14 +920,25 @@ const Home = ({
               setPendingAction(undefined);
               addOrUpdateAction(action);
             };
-            // The wrapper's approval is requested at submission, for exactly the amount, so a base
-            // supply or withdrawal on the wrapped route is queued as it is. A form kept from before
-            // the release controls closed queues nothing.
+            // A base supply on the wrapped route spends the allowance to the wrapper. As for a direct
+            // supply, an allowance that does not cover it is approved when the supply is added, here
+            // for exactly the amount. A form kept from before the release controls closed queues
+            // nothing.
             if (isWrapperRouted(liveSession.current.route, action)) {
               const rules = liveActionRules.current.wrappedBase;
               const blockedReason =
                 action[0] === ActionType.Supply ? rules?.supplyBlockedReason : rules?.withdrawBlockedReason;
-              if (rules !== undefined && blockedReason === undefined) confirmAction();
+              if (rules === undefined || blockedReason !== undefined) return;
+              const others = queuedActions.filter((queued) => !isSameAction(queued, action));
+              const supplied = sanitizedAmountForAction(directBaseAsset, collateralAssets, others, action);
+              if (action[0] === ActionType.Withdraw || supplied <= (rules.supplyAllowance ?? 0n)) {
+                confirmAction();
+              } else if (web3.read.chainId && web3.write.chainId !== web3.read.chainId) {
+                switchWriteNetwork(web3.read.chainId);
+              } else if (!liveWalletUnusable.current) {
+                startApproval(action, supplied);
+                confirmAction();
+              }
               return;
             }
             const asset = action[1] as BaseAssetWithAccountState | TokenWithAccountState;
@@ -907,20 +974,11 @@ const Home = ({
         },
         onSubmitClicked: () => {
           if (isFromEarlierVisit()) return;
-          // One submission at a time: a submission in progress, one whose dialog is hidden while a
-          // step is signed, or a wrapper action whose last step may still execute holds back another.
-          // Submit shows a hidden submission again, and starts nothing.
-          if (liveSubmission.current?.hiddenWhileSigning !== undefined) {
-            showSubmission();
-            return;
-          }
-          if (isQueueLocked()) return;
           setPendingAction(undefined);
           submitQueue();
         },
       },
     ];
-    submissionControls = { continueSubmission, symbol: directBaseAsset.symbol };
 
     const [unwrappedAdditionalCollateralAssets, onlyActualCollateralAssets] = arrayPartition(
       collateralAssets,
@@ -965,7 +1023,6 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
-              isLocked: isQueueLocked(),
               unwrappedAssetSupplyAction: stEthWrapSupplyAction,
               onDripClicked: () => {
                 if (isFromEarlierVisit()) return;
@@ -1027,7 +1084,6 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
-              isLocked: isQueueLocked(),
               wrappedAsset: matchingWrappedAsset,
               onCancelClicked: () => {
                 if (isFromEarlierVisit() || isQueueLocked()) return;
@@ -1056,46 +1112,18 @@ const Home = ({
     });
   }
 
-  const closeSubmission = () => {
-    if (submission === undefined) return;
-    if (submissionState.phase === 'signing') {
-      const { draft, stepIndex } = submissionState;
-      setSubmissionRecord({ ...submission, hiddenWhileSigning: { draft, stepIndex } });
-      return;
-    }
-    // Nothing more is sent from a closed submission. Its wrapper action stays queued unless it confirmed.
-    if (isSubmissionState) wrappedAction.discard();
-    setSubmissionRecord(undefined);
-  };
-  // A confirmation belongs to this submission's review. One kept from an earlier visit does nothing.
-  const confirmSubmissionStep = () => {
-    if (isFromEarlierVisit() || submissionState.phase !== 'review') return;
-    wrappedAction.confirm();
-  };
-  const submissionModal = submission !== undefined && submissionControls !== undefined && !isHidden && (
-    <QueuedSubmissionModal
-      submission={submission}
-      state={submissionState}
-      symbol={submissionControls.symbol}
-      decimals={lendingRoute.kind === 'wrapped' ? lendingRoute.market?.baseDecimals : undefined}
-      recovery={{
-        canDismissRecovered: wrappedAction.canDismissRecovered,
-        isRecoveredRequestPendingInWallet: wrappedAction.isRecoveredRequestPendingInWallet,
-        hasUnansweredWalletRequest: wrappedAction.hasUnansweredWalletRequest,
-        walletRefusalMessage: wrappedAction.walletRefusalMessage,
-        sessionInstruction: wrappedAction.session.status === 'unusable' ? wrappedAction.session.instruction : undefined,
-      }}
-      onConfirm={confirmSubmissionStep}
-      onClose={closeSubmission}
-      onContinue={submissionControls.continueSubmission}
-      onDismissRecovered={wrappedAction.dismissRecovered}
-    />
-  );
+  // A supply or withdrawal that confirmed hands over to the direct actions queued with it, once the
+  // dashboard is hydrated.
+  const canContinue = continueAfterWrapper.current !== undefined;
+  useEffect(() => {
+    if (submission?.kind !== 'execute' || submission.status.kind !== 'executed') return;
+    if (submission.directCount === 0) setSubmissionRecord(undefined);
+    else continueAfterWrapper.current?.(submission.wrapper.action);
+  }, [submission, canContinue]);
 
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
-      {submissionModal}
       <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
       <div className="home__content grid-container">

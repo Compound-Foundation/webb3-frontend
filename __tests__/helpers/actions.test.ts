@@ -318,17 +318,46 @@ describe('validateAddingAction with base lending through the wrapper', () => {
   };
   const OPEN: ActionRules = { wrappedBase: OPEN_BASE };
   const collateralAssetsPre = () => [mockEthCollateralAsset()];
-  // An account with no allowance to Comet: the wrapper's approval is requested at submission.
+  // An account with no allowance to Comet. A wrapped supply spends its allowance to the wrapper.
   const noAllowance = (overrides: Partial<BaseAssetWithAccountState> = {}) =>
     mockBaseAsset({ allowance: 0n, walletBalance: 5_000_000_000n, ...overrides });
   const supply = (amount: bigint) => mockBaseAction({ actionType: ActionType.Supply, amount });
   const withdraw = (amount: bigint) => mockBaseAction({ actionType: ActionType.Withdraw, amount });
 
-  it('queues a base supply without an allowance to Comet', () => {
+  it("checks a base supply against the allowance to the wrapper, not Comet's", () => {
     const action = supply(1_000_000_000n);
+    const withWrapperAllowance = (supplyAllowance: bigint | undefined): ActionRules => ({
+      wrappedBase: { ...OPEN_BASE, supplyAllowance },
+    });
 
     expect(validateAddingAction(noAllowance(), collateralAssetsPre(), [], action, OPEN)).toBe('ok');
-    expect(validateAllowanceForAction(noAllowance(), collateralAssetsPre(), [], action, OPEN)).toBe('ok');
+    expect(
+      validateAllowanceForAction(noAllowance(), collateralAssetsPre(), [], action, withWrapperAllowance(1_000_000_000n))
+    ).toBe('ok');
+    // An allowance to the wrapper below the amount, or not read yet, fails as an allowance to Comet does.
+    for (const supplyAllowance of [999_999_999n, undefined]) {
+      expect(
+        validateAllowanceForAction(
+          noAllowance(),
+          collateralAssetsPre(),
+          [],
+          action,
+          withWrapperAllowance(supplyAllowance)
+        )
+      ).toEqual([false, 'Approval Failed']);
+    }
+    // A full allowance to Comet does not cover a wrapped supply.
+    expect(
+      validateAllowanceForAction(noAllowance({ allowance: MAX_UINT256 }), collateralAssetsPre(), [], action, OPEN)
+    ).toEqual([false, 'Approval Failed']);
+    // Max supplies the wallet balance, so the allowance must cover that.
+    const max = supply(MAX_UINT256);
+    expect(
+      validateAllowanceForAction(noAllowance(), collateralAssetsPre(), [], max, withWrapperAllowance(5_000_000_000n))
+    ).toBe('ok');
+    expect(
+      validateAllowanceForAction(noAllowance(), collateralAssetsPre(), [], max, withWrapperAllowance(4_999_999_999n))
+    ).toEqual([false, 'Approval Failed']);
     // On the standard route the same supply still needs its approval first.
     expect(validateAllowanceForAction(noAllowance(), collateralAssetsPre(), [], action)).toEqual([
       false,
@@ -438,11 +467,11 @@ describe('validateAddingAction with base lending through the wrapper', () => {
 
     expect(validateAddingAction(borrower, collateralAssetsPre(), [], supply(1_000_000n), OPEN)).toEqual([
       false,
-      'Repay Your Borrow First, Separately',
+      'Must Repay Borrow First',
     ]);
     expect(validateAddingAction(borrower, collateralAssetsPre(), [repayAll], supply(1_000_000n), OPEN)).toEqual([
       false,
-      'Repay Your Borrow First, Separately',
+      'Must Repay Borrow First',
     ]);
   });
 

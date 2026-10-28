@@ -48,8 +48,6 @@ export type WithdrawalQuote = {
 export type WithdrawalReview = {
   request: WithdrawalRequest;
   quote: WithdrawalQuote;
-  /** The cash the page showed for a full exit before the review read the position again, if it showed one. */
-  shownCash: bigint | undefined;
   blockNumber: number;
 };
 

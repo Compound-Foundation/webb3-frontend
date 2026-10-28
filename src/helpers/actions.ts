@@ -187,9 +187,9 @@ function excessRepayProblem(baseAsset: BaseAssetWithAccountState, amount: bigint
 }
 
 /**
- * The selected market's base supply and withdrawal go through its wrapper for this session. The
- * wrapper's approval is requested at submission, for exactly the amount, so a base supply needs no
- * allowance when it is queued.
+ * The selected market's base supply and withdrawal go through its wrapper for this session. A base
+ * supply needs the base token's allowance to the wrapper, which Approve & Add asks for, for exactly
+ * the amount.
  */
 export type WrappedBaseRules = {
   /** Why a base supply cannot be queued now, as the amount form shows it, or undefined. */
@@ -208,6 +208,16 @@ export type WrappedBaseRules = {
    * Undefined until the position is read.
    */
   fullExitCash?: bigint;
+  /**
+   * The base token's allowance to the wrapper, which a base supply spends instead of the Comet
+   * allowance. Undefined until the position is read, and then treated as zero.
+   */
+  supplyAllowance?: bigint;
+  /**
+   * The queued wrapper action that stopped before anything was sent when it was last submitted, and
+   * the label its queue row shows. It stays submittable.
+   */
+  stopped?: { action: Action; label: string };
 };
 
 export type ActionRules = {
@@ -235,7 +245,7 @@ function wrappedBaseProblem(
   switch (actionType) {
     case ActionType.Supply:
       if (rules.supplyBlockedReason !== undefined) return rules.supplyBlockedReason;
-      if (baseAssetPre.balance < 0n || hasQueued(ActionType.Repay)) return 'Repay Your Borrow First, Separately';
+      if (baseAssetPre.balance < 0n || hasQueued(ActionType.Repay)) return 'Must Repay Borrow First';
       return hasQueued(ActionType.Withdraw) ? 'Submit Supply And Withdrawal Separately' : undefined;
     case ActionType.Withdraw:
       if (rules.withdrawBlockedReason !== undefined) return rules.withdrawBlockedReason;
@@ -414,9 +424,10 @@ export function validateAllowanceForAction(
   const { baseAsset, collateralAssets } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions);
 
   const [actionType] = actionToAdd;
-  // The wrapper's approval is requested at submission, for exactly the supplied amount.
+  // A base supply on the wrapped route spends the allowance to the wrapper, not to Comet.
   if (rules.wrappedBase !== undefined && actionType === ActionType.Supply) {
-    return 'ok';
+    const amount = sanitizedAmountForAction(baseAssetPre, collateralAssetsPre, actions, actionToAdd);
+    return amount > (rules.wrappedBase.supplyAllowance ?? 0n) ? [false, 'Approval Failed'] : 'ok';
   }
 
   switch (actionType) {

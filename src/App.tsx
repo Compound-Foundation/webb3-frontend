@@ -27,7 +27,7 @@ import { useSelectedMarketState } from '@hooks/useSelectedMarket';
 import { useSubmissionStore } from '@hooks/useSubmissionStore';
 import { useThemeManager } from '@hooks/useThemeManager';
 import { useTransactionManager } from '@hooks/useTransactionManager';
-import { useWrappedAction } from '@hooks/useWrappedAction';
+import { useSignWhenReady, useWrappedAction } from '@hooks/useWrappedAction';
 import { positionRefreshToken, useWrappedPosition } from '@hooks/useWrappedPosition';
 import { newestReceiptBlock, useWriteWrappedState } from '@hooks/useWriteWrappedState';
 import { Action, MarketDataLoaded, StateType } from '@types';
@@ -55,7 +55,6 @@ function App({ Component, pageProps }: any) {
     addTransaction,
     submitTransaction,
     clearTransactions,
-    dismissTransaction,
   } = useTransactionManager(web3);
   const rewardsState = useRewardsState(web3, transactions);
   const { theme, setTheme } = useThemeManager();
@@ -116,10 +115,12 @@ function App({ Component, pageProps }: any) {
       walletFailure,
       restoredSession,
       submitTransaction,
-      dismissTransaction,
     },
     readProvider: wrappedChainProvider,
   });
+  // A wrapper action starts from the user's press of Approve & Add or Submit Transaction, which
+  // confirms it, so each step is signed once it is ready, after its checks.
+  useSignWhenReady(wrappedAction);
   const wrappedPosition = useWrappedPosition({
     route: lendingRoute,
     account: web3.write.account,

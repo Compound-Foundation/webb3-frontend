@@ -70,20 +70,22 @@ const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
   const action = actions[actionIndex];
   const [actionType, asset] = action;
   const { currency } = useCurrencyContext();
-  // A maximum withdrawal on the wrapped route redeems every wrapper share, and pays the full exit's
-  // cash: the position less the wrapper's rounding buffer. The row shows that cash, or says that
-  // every share is withdrawn while the cash is not known.
+  // A maximum withdrawal on the wrapped route pays the full exit's cash: the position less the
+  // wrapper's rounding buffer. The row shows that cash, and a spinner while it is not known.
   const isWrappedFullExit =
     actionRules?.wrappedBase !== undefined && actionType === ActionType.Withdraw && action[2] === MAX_UINT256;
   const fullExitCash = isWrappedFullExit ? actionRules?.wrappedBase?.fullExitCash : undefined;
   const sanitizedAmount =
     fullExitCash ?? sanitizedAmountForAction(baseAsset, collateralAssets, actions.slice(0, actionIndex), action);
   const isAmountUnknown = isWrappedFullExit && fullExitCash === undefined;
-  const amount = isAmountUnknown ? 'All wrapper shares' : formatValue(asset.decimals, sanitizedAmount);
+  const amount = formatValue(asset.decimals, sanitizedAmount);
   const earlierActions = actions.slice(0, actionIndex);
   const actionValid = validateAddingAction(baseAsset, collateralAssets, earlierActions, action, actionRules);
   const allowanceValid = validateAllowanceForAction(baseAsset, collateralAssets, earlierActions, action, actionRules);
-  const error = allowanceValid !== 'ok' ? allowanceValid[1] : actionValid !== 'ok' ? actionValid[1] : undefined;
+  // A wrapper action that stopped before anything was sent says why, and can be submitted again.
+  const stopped = actionRules?.wrappedBase?.stopped;
+  const stoppedLabel = stopped !== undefined && stopped.action === action ? stopped.label : undefined;
+  const error = allowanceValid !== 'ok' ? allowanceValid[1] : actionValid !== 'ok' ? actionValid[1] : stoppedLabel;
 
   const baseAssetDenominated = shouldShowValueInBaseAsset(symbol as Currency, currency);
   let currencyValue;
@@ -147,7 +149,7 @@ const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
         </div>
       </div>
       <div className="action-queue-item__balance">
-        <p className="body">{amount}</p>
+        {isAmountUnknown ? <LoadSpinnerNew /> : <p className="body">{amount}</p>}
         <p className="L4 meta text-color--2">{currencyValue}</p>
       </div>
       <div
