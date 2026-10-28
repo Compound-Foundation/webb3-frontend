@@ -59,7 +59,7 @@ const UNUSABLE_INSTRUCTIONS: Record<UnusableReason, string> = {
 
 /** Where one step of a draft stands. */
 export type WrappedStepState =
-  /** Waiting for the user to confirm it. */
+  /** Waiting for its turn. The dashboard confirms it once the step before it settled. */
   | { status: 'waiting' }
   /** Confirmed, and being checked against the live session before the wallet is asked. */
   | { status: 'checking' }
@@ -90,18 +90,19 @@ export type WrappedStepState =
 type DraftProgress = {
   draft: WrappedActionDraft;
   steps: readonly WrappedStepState[];
-  /** The step the user confirms next, or the one in progress or that stopped the draft. */
+  /** The step confirmed next, or the one in progress or that stopped the draft. */
   stepIndex: number;
   /**
    * A withdrawal as its step's check found it just before the signature, once that check passes.
-   * The draft keeps the review the user confirmed.
+   * The draft keeps what Approve & Add or Submit authorized.
    */
   rechecked?: RecheckedWithdrawal;
 };
 
 /**
- * A wrapper action's lifecycle. A draft is read, then reviewed, then signed one step at a time,
- * each step after its own confirmation. A change of identity discards the draft in the same
+ * A wrapper action's lifecycle. A draft is read, then checked, then signed one step at a time.
+ * Approve & Add or Submit authorized the whole draft; the dashboard confirms each step in turn
+ * once the step before it settled, and every check runs again before each signature. A change of identity discards the draft in the same
  * render. Discarding a draft does not cancel a request open in the wallet or a broadcast
  * transaction: `submittedHashes` lists what was already sent.
  */
@@ -147,11 +148,11 @@ export type WrappedActionController = {
   recovered: { pending: readonly Transaction[]; settled: readonly SettledTransaction[] };
   /** Why `start(type)` refuses now, or undefined if it starts. */
   blockedReason: (type: WrappedActionType) => WrappedBlockReason | undefined;
-  /** Starts a fresh review. Returns why it was refused, if it was. */
+  /** Starts a fresh draft. Returns why it was refused, if it was. */
   start: (type: WrappedActionType, prepare: PrepareWrappedAction) => WrappedBlockReason | undefined;
   /**
-   * Signs the step in review, after checking everything again. Each step needs its own call. A
-   * `confirm` applies only to the draft and step that were in review in the render that returned it.
+   * Signs the step whose turn it is, after checking everything again. Each step needs its own call.
+   * A `confirm` applies only to the draft and step that were current in the render that returned it.
    */
   confirm: () => void;
   /** Clears the draft. Nothing already sent is cancelled. */
