@@ -28,8 +28,6 @@ const approveAssetHelperText = (symbol: string) =>
 const CONFIRM_BUTTON_TEXT_APPROVE = 'Approve & Add';
 const UPDATE_ALLOWANCE_STRING =
   'This amount exceeds the allowance you previously set for this asset. You will be asked to approve an increase when you add this action.';
-const WRAPPED_SUPPLY_APPROVAL_STRING =
-  'If an approval is needed, you will be asked to approve exactly this amount when you submit.';
 
 type ActionInputViewProps = {
   actions: Action[];
@@ -301,13 +299,13 @@ function getContent(
         };
       }
 
-      if (actionRules?.wrappedBase !== undefined) {
-        // The wrapper's approval is requested at submission, for exactly the supplied amount.
-        actionHintString = WRAPPED_SUPPLY_APPROVAL_STRING;
-      } else if (baseAsset.allowance === 0n) {
+      // The Comet allowance does not apply on the wrapped route: the wrapper's approval is requested
+      // at submission, so the form shows no allowance hint there.
+      const usesDirectAllowance = actionRules?.wrappedBase === undefined;
+      if (usesDirectAllowance && baseAsset.allowance === 0n) {
         actionHintString = approveAssetHelperText(baseAsset.symbol);
         confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
-      } else if (maybeBigIntInputValue && baseAsset.allowance < maybeBigIntInputValue) {
+      } else if (usesDirectAllowance && maybeBigIntInputValue && baseAsset.allowance < maybeBigIntInputValue) {
         actionHintString = UPDATE_ALLOWANCE_STRING;
         confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
       }
