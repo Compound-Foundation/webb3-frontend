@@ -2087,7 +2087,7 @@ describe('useWriteWrappedState', () => {
         'more than the shares pay',
         {},
         { kind: 'partial', cash: FULL_EXIT_CASH + 1n },
-        [/^250\.124998 USDC is more than your wrapped position pays now/, /at most 250\.124997 USDC/, /Everything/],
+        [/^250\.124998 USDC is more than your wrapped position pays now/, /at most 250\.124997 USDC/, /Max/],
       ],
       [
         "more than the market's cash",

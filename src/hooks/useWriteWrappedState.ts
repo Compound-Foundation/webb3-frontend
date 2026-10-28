@@ -573,7 +573,7 @@ function describeExitRevert(data: string, symbol: string): string {
   }
   switch (exitErrorName(data)) {
     case 'ZeroAssetsTransferred':
-      return "these shares are worth no more than the wrapper's rounding buffer, so the wrapper refuses to withdraw them (ZeroAssetsTransferred). Withdraw a larger amount, or choose Everything";
+      return "these shares are worth no more than the wrapper's rounding buffer, so the wrapper refuses to withdraw them (ZeroAssetsTransferred). Withdraw a larger amount, or choose Max";
     case 'ExcessiveAssetsDebited':
       return 'Comet would take more from the wrapper than these shares cover, and the wrapper refuses that so that its other holders do not pay for it (ExcessiveAssetsDebited). Try again in a few minutes, or with a different amount';
     case 'ZeroSharesBurned':
@@ -673,7 +673,7 @@ function revisionMessage(
       return 'Enter an amount greater than 0.';
     case 'exceeds-position': {
       const fullExit = limits.canExitFully
-        ? ` Or choose Everything to withdraw your whole position, about ${formatAmount(limits.fullExitCash)}.`
+        ? ` Or choose Max to withdraw your whole position, about ${formatAmount(limits.fullExitCash)}.`
         : '';
       // Only an amount the user entered can be more than the position pays. A full exit asks for its value.
       const asked = request.kind === 'partial' ? formatAmount(request.cash) : 'This amount';

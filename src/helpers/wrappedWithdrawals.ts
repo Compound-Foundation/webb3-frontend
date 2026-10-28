@@ -212,7 +212,7 @@ export function planWrappedWithdrawal(request: WithdrawalRequest, snapshot: With
     // this check cannot fail. It keeps a quote from review if a later change breaks the rounding.
     if (quote.cash < request.cash || getExitCash(shares - 1n, snapshot) >= request.cash) {
       throw new WithdrawalQuoteError(
-        'This amount could not be quoted exactly, so it was not reviewed. Enter another amount, or choose Everything.'
+        'This amount could not be quoted exactly, so it was not reviewed. Enter another amount, or choose Max.'
       );
     }
   }
