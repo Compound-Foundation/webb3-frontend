@@ -18,13 +18,13 @@ So the first production release that contains this stack changes Anchorage sessi
 
 Do not merge the stack to `main` before Adam and Leo sign off Stage 0. The merge puts the stack into the next production release, whoever runs that release. Without a `cid` input, "Release Production" releases the newest successful `main` build (`.github/workflows/release-prod.yaml:41-49`).
 
-| Setting               | `isDepositEnabled` | `isExitEnabled` | Anchorage session on the market                                              | Other wallets and watch-only |
-| --------------------- | ------------------ | --------------- | ---------------------------------------------------------------------------- | ---------------------------- |
+| Setting               | `isDepositEnabled` | `isExitEnabled` | Anchorage session on the market                                                                    | Other wallets and watch-only |
+| --------------------- | ------------------ | --------------- | -------------------------------------------------------------------------------------------------- | ---------------------------- |
 | Stage 0, as committed | `false`            | `false`         | Holdings shown. No base supply or withdrawal. Borrow, repay and collateral actions stay available. | unchanged                    |
-| Stage 1               | `false`            | `true`          | Holdings shown and exits open                                                | unchanged                    |
-| Stage 2               | `true`             | `true`          | Holdings shown, supply and exits open                                        | unchanged                    |
-| Rollback R1           | `false`            | `true`          | the same as Stage 1                                                          | unchanged                    |
-| Rollback R2           | `false`            | `false`         | the same as Stage 0. Holders exit [directly](#direct-wrapper-exit)           | unchanged                    |
+| Stage 1               | `false`            | `true`          | Holdings shown and exits open                                                                      | unchanged                    |
+| Stage 2               | `true`             | `true`          | Holdings shown, supply and exits open                                                              | unchanged                    |
+| Rollback R1           | `false`            | `true`          | the same as Stage 1                                                                                | unchanged                    |
+| Rollback R2           | `false`            | `false`         | the same as Stage 0. Holders exit [directly](#direct-wrapper-exit)                                 | unchanged                    |
 
 Do not ship deposits on with exits off. Otherwise holders can enter through the app but cannot leave through it. The registry accepts that combination (`src/constants/wrappedMarkets.ts:157`), so the review of each release-control PR must refuse it.
 
