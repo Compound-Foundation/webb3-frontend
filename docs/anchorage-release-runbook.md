@@ -20,7 +20,7 @@ Do not merge the stack to `main` before Adam and Leo sign off Stage 0. The merge
 
 | Setting               | `isDepositEnabled` | `isExitEnabled` | Anchorage session on the market                                              | Other wallets and watch-only |
 | --------------------- | ------------------ | --------------- | ---------------------------------------------------------------------------- | ---------------------------- |
-| Stage 0, as committed | `false`            | `false`         | Holdings shown. Supply and Withdraw refused. Nothing goes to Comet directly. | unchanged                    |
+| Stage 0, as committed | `false`            | `false`         | Holdings shown. No base supply or withdrawal. Borrow, repay and collateral actions stay available. | unchanged                    |
 | Stage 1               | `false`            | `true`          | Holdings shown and exits open                                                | unchanged                    |
 | Stage 2               | `true`             | `true`          | Holdings shown, supply and exits open                                        | unchanged                    |
 | Rollback R1           | `false`            | `true`          | the same as Stage 1                                                          | unchanged                    |
