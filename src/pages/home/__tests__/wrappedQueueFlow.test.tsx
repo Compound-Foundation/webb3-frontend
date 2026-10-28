@@ -267,6 +267,32 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     expect(mockWriteState.withdraw).not.toHaveBeenCalled();
   });
 
+  it('shows what a full exit pays on a Max withdrawal row, or that every share is withdrawn while that is not known', async () => {
+    const user = userEvent.setup();
+    // 10 USDC supplied to Comet directly beside the wrapped position: the dashboard shows 260 USDC
+    // supplied, but a full exit through the wrapper pays only the wrapped 249.999997 USDC.
+    const mixed = [
+      COMET_STATE[0],
+      { ...COMET_STATE[1], baseAsset: { ...BASE_ASSET, balance: 10_000_000n } },
+    ] as unknown as CometState;
+    const value = lending(POSITION);
+    const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
+    view.rerender(<Dashboard value={value} state={mixed} />);
+
+    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    await user.click(formButton('Max'));
+    await user.click(formButton('Add Action'));
+
+    const row = within(desktopQueue()).getByText('Withdraw USDC').closest('.action-queue-item') as HTMLElement;
+    expect(row).toHaveTextContent('250.0000');
+    expect(row).not.toHaveTextContent('260.0000');
+
+    view.rerender(<Dashboard value={lending(undefined)} state={mixed} />);
+
+    expect(row).toHaveTextContent('All wrapper shares');
+    expect(row).not.toHaveTextContent('260.0000');
+  });
+
   it('refuses a partial withdrawal above what the wrapper pays now', async () => {
     const user = userEvent.setup();
     renderDashboard(lending(POSITION));

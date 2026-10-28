@@ -15,6 +15,7 @@ import {
 import { assetIconForAssetSymbol } from '@helpers/assets';
 import { noop } from '@helpers/functions';
 import {
+  MAX_UINT256,
   PRICE_PRECISION,
   formatValue,
   shouldShowValueInBaseAsset,
@@ -69,8 +70,16 @@ const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
   const action = actions[actionIndex];
   const [actionType, asset] = action;
   const { currency } = useCurrencyContext();
-  const sanitizedAmount = sanitizedAmountForAction(baseAsset, collateralAssets, actions.slice(0, actionIndex), action);
-  const amount = formatValue(asset.decimals, sanitizedAmount);
+  // A maximum withdrawal on the wrapped route redeems every wrapper share, and pays the full exit's
+  // cash: the position less the wrapper's rounding buffer. The row shows that cash, or says that
+  // every share is withdrawn while the cash is not known.
+  const isWrappedFullExit =
+    actionRules?.wrappedBase !== undefined && actionType === ActionType.Withdraw && action[2] === MAX_UINT256;
+  const fullExitCash = isWrappedFullExit ? actionRules?.wrappedBase?.fullExitCash : undefined;
+  const sanitizedAmount =
+    fullExitCash ?? sanitizedAmountForAction(baseAsset, collateralAssets, actions.slice(0, actionIndex), action);
+  const isAmountUnknown = isWrappedFullExit && fullExitCash === undefined;
+  const amount = isAmountUnknown ? 'All wrapper shares' : formatValue(asset.decimals, sanitizedAmount);
   const earlierActions = actions.slice(0, actionIndex);
   const actionValid = validateAddingAction(baseAsset, collateralAssets, earlierActions, action, actionRules);
   const allowanceValid = validateAllowanceForAction(baseAsset, collateralAssets, earlierActions, action, actionRules);
@@ -78,7 +87,9 @@ const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
 
   const baseAssetDenominated = shouldShowValueInBaseAsset(symbol as Currency, currency);
   let currencyValue;
-  if (actionType === ActionType.ClaimRewards) {
+  if (isAmountUnknown) {
+    currencyValue = null;
+  } else if (actionType === ActionType.ClaimRewards) {
     currencyValue = formatTokenBalance(
       asset.decimals + PRICE_PRECISION,
       sanitizedAmount * asset.price,

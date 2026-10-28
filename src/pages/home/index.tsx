@@ -462,6 +462,8 @@ const Home = ({
           withdrawBlockedReason: wrappedEntryBlockLabel(lendingRoute, 'withdraw'),
           maxPartialWithdrawal: limits?.maxPartialCash,
           canWithdrawAll: limits?.canExitFully ?? false,
+          // The cash the submission asks the wrapper for on a full exit.
+          fullExitCash: wrappedPosition?.fullExitCash,
         },
       };
     }

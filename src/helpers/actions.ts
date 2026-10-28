@@ -203,6 +203,11 @@ export type WrappedBaseRules = {
   maxPartialWithdrawal: bigint | undefined;
   /** Whether a full exit can pay now. A maximum withdrawal is a full exit. */
   canWithdrawAll: boolean;
+  /**
+   * What a full exit pays, in base units: the position less the wrapper's rounding buffer.
+   * Undefined until the position is read.
+   */
+  fullExitCash?: bigint;
 };
 
 export type ActionRules = {
