@@ -87,8 +87,9 @@ export type UseSubmissionStoreOptions = {
 
 /**
  * The wrapped run and the queued wrapper action it submitted, as App keeps them. A change of
- * `submissionScope`, the wallet's network included, drops the run, so no callback of it signs
- * another step. The sent wrapper action is followed until its last step's outcome is known,
+ * `submissionScope`, the wallet's network included, drops the run, so Home no longer follows it.
+ * The lifecycle, which signs its steps, discards its draft when its own identity changes, and checks
+ * every step against the live session before it is signed. The sent wrapper action is followed until its last step's outcome is known,
  * across a change of network: an entry whose last step confirmed leaves the queue, and one whose
  * last step did not execute is released. A change of `queueScope` drops it with the queue itself.
  */

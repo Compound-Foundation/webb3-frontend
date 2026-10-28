@@ -8,6 +8,7 @@ import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import {
   ActionRules,
   displayTextForActionType,
+  isSameAction,
   sanitizedAmountForAction,
   validateAddingAction,
   validateAllowanceForAction,
@@ -82,9 +83,10 @@ const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
   const earlierActions = actions.slice(0, actionIndex);
   const actionValid = validateAddingAction(baseAsset, collateralAssets, earlierActions, action, actionRules);
   const allowanceValid = validateAllowanceForAction(baseAsset, collateralAssets, earlierActions, action, actionRules);
-  // A wrapper action that stopped before anything was sent says why, and can be submitted again.
+  // A wrapper action that stopped before anything was sent says why, and can be submitted again. The
+  // queue builds its entries afresh on every render, so the entry is matched by its type and token.
   const stopped = actionRules?.wrappedBase?.stopped;
-  const stoppedLabel = stopped !== undefined && stopped.action === action ? stopped.label : undefined;
+  const stoppedLabel = stopped !== undefined && isSameAction(stopped.action, action) ? stopped.label : undefined;
   const error = allowanceValid !== 'ok' ? allowanceValid[1] : actionValid !== 'ok' ? actionValid[1] : stoppedLabel;
 
   const baseAssetDenominated = shouldShowValueInBaseAsset(symbol as Currency, currency);

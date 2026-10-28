@@ -13,6 +13,7 @@ import { Web3 } from '@contexts/Web3Context';
 import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
 import { LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
+import { WrappedBlockReason } from '@helpers/wrappedActions';
 import { WrappedPosition } from '@helpers/wrappedPositions';
 import { useActionQueue } from '@hooks/useActionQueue';
 import { Theme } from '@hooks/useThemeManager';
@@ -301,6 +302,26 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     expect(value.write.supply).toHaveBeenCalledWith(200_000_000n);
     expect(mockWriteState.supply).not.toHaveBeenCalled();
     expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+  });
+
+  it.each<[WrappedBlockReason, string]>([
+    ['transaction-pending', 'Earlier Request Still Pending'],
+    ['session-unusable', 'Not Sent, Try Again'],
+  ])('labels the real queue row when Submit is refused with %s, and keeps Submit enabled', async (refusal, label) => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    const value = lending(approvedFor(1_000_000_000n));
+    value.write.supply.mockReturnValue(refusal);
+    renderDashboard(value);
+
+    await user.click(screen.getByRole('button', { name: 'Supply USDC' }));
+    await user.type(amountInput(), '100');
+    await user.click(formButton('Add Action'));
+    await user.click(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' }));
+
+    expect(within(desktopQueue()).getByText(label)).toBeInTheDocument();
+    expect(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' })).toBeEnabled();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('queues a full withdrawal of the wrapped position with Max and submits it as a full exit', async () => {

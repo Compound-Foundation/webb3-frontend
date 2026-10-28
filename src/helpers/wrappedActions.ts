@@ -47,8 +47,8 @@ export type WrappedSupplyCheck = { ok: true } | WrappedStepRefusal;
 
 /**
  * The result of a withdrawal's own check. A check that passes gives `rechecked`, and the lifecycle
- * stops one that does not. The dialog then shows the cash the exit pays at the block the check
- * read, not the reviewed cash. The transaction list describes the request by that cash too.
+ * stops one that does not. The lifecycle keeps the exit as the check found it, at the block the
+ * check read, and checks it against the draft before the wallet is asked.
  */
 export type WrappedWithdrawalCheck = { ok: true; rechecked: RecheckedWithdrawal } | WrappedStepRefusal;
 
@@ -417,8 +417,8 @@ export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem
 
 /**
  * Checks a withdrawal as its check found it against the draft. It must quote the draft's kind of
- * exit for the shares the draft's call burns. Otherwise the dialog and the transaction list
- * describe other shares than the wallet signs. It must also be read at the review's block or a
+ * exit for the shares the draft's call burns. Otherwise the check passes for other shares than the
+ * wallet signs. It must also be read at the review's block or a
  * later one. A read of an older block cannot show what changed after the review, such as a
  * donation to the wrapper.
  */

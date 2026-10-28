@@ -470,7 +470,7 @@ describe('a queued wrapper action sent before a change of network', () => {
     mockNextId = 0;
   });
 
-  it('is supplied once: Submit on another network asks for the switch and sends nothing, and the supply leaves the queue once it confirms', async () => {
+  it('is supplied once: it is held while its receipt is pending on either network, and leaves the queue once it confirms', async () => {
     const chain = chainFor({ allowance: AMOUNT });
     const { wallet, show } = renderDashboard(chain);
     await waitFor(() => expect(live.action.blockedReason('supply')).toBeUndefined());
@@ -483,10 +483,9 @@ describe('a queued wrapper action sent before a change of network', () => {
     expectQueueHeld(supply);
     expect(positionCard().transaction?.state).toBe(TransactionState.Pending);
     expect(positionCard().actionRules.wrappedBase.stopped).toBeUndefined();
-    // Submit on Base asks the wallet to switch to Ethereum, as production does, and sends nothing.
+    // The card's Submit is disabled meanwhile. A Submit callback kept from before sends nothing.
     switchWriteNetwork.mockClear();
     await submit();
-    expect(switchWriteNetwork).toHaveBeenCalledWith(1);
     expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(1);
 
     // Back on the market's network, the receipt is still pending: the entry is held, and Submit
@@ -646,5 +645,21 @@ describe('the wrapped route through the real hooks, in the production order', ()
     expect(positionCard().transaction).toBeUndefined();
     expect(sentCalls(wallet, 'unwrapAndWithdraw')).toHaveLength(1);
     expect(chain.shares).toBe(0n);
+  });
+
+  it('asks the wallet to switch network on Submit from another network, as production does, and sends nothing', async () => {
+    const chain = chainFor({ allowance: AMOUNT });
+    const { wallet, show } = renderDashboard(chain);
+    await waitFor(() => expect(live.action.blockedReason('supply')).toBeUndefined());
+    act(() => live.queue.addOrUpdateAction([ActionType.Supply, BASE_ASSET, AMOUNT]));
+    show({ walletChainId: 8453 });
+    switchWriteNetwork.mockClear();
+
+    await submit();
+
+    expect(switchWriteNetwork).toHaveBeenCalledWith(1);
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(positionCard().transaction).toBeUndefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

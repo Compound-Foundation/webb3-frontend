@@ -559,7 +559,7 @@ describe('Home submission guards', () => {
 
     act(() => positionCard().onSubmitClicked());
 
-    expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Not Sent, Try Again');
+    expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Earlier Request Still Pending');
     expect(screen.queryByRole('dialog')).toBeNull();
     Object.values(mockWriteState).forEach((fn) => expect(fn).not.toHaveBeenCalled());
   });

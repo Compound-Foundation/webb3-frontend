@@ -81,7 +81,7 @@ export type WrappedStepState =
   | { status: 'refused'; message: string }
   /**
    * The wallet reported another error. Whether it reached the chain is unknown. `isPendingInWallet`
-   * marks the wallet's answer that it still holds the request. Only the step's wording reads it.
+   * marks the wallet's answer that it still holds the request. The manager's record keeps it too.
    */
   | { status: 'provider-failure'; message: string; isPendingInWallet?: boolean }
   /** A check refused it before the wallet was asked. Nothing was sent. */
@@ -233,7 +233,8 @@ function withStep(state: WrappedActionState, index: number, step: WrappedStepSta
     case 'submitted':
       return { ...state, phase: 'signing', steps, stepIndex: index };
     case 'confirmed':
-      // The next step waits for the user, so nothing is sent without a fresh confirmation.
+      // The next step waits in review until it is confirmed: by `useSignWhenReady` on the dashboard,
+      // and then only after its own checks against the live session.
       return index === state.draft.steps.length - 1
         ? { ...state, phase: 'complete', steps, stepIndex: index }
         : { ...state, phase: 'review', steps, stepIndex: index + 1 };
@@ -337,7 +338,7 @@ const GAS_LIMIT_PERCENT = 120;
 /**
  * The draft's own copy of the calls `prepare` returned, and of a withdrawal's quote. It is frozen,
  * so the call that was checked is the call that is sent, and the quote that was checked is the one
- * the review shows, whatever later happens to the objects `prepare` built.
+ * the step's check compares with, whatever later happens to the objects `prepare` built.
  */
 function frozenDraft(
   id: string,
@@ -375,8 +376,8 @@ function frozenDraft(
 
 /**
  * The lifecycle's own frozen copy of a withdrawal as its check found it. The quote that was checked
- * against the draft is then the one the dialog shows, whatever later happens to the object the check
- * returned.
+ * against the draft is then the one the lifecycle keeps, whatever later happens to the object the
+ * check returned.
  */
 function frozenRecheck(rechecked: RecheckedWithdrawal): RecheckedWithdrawal {
   return Object.freeze({
@@ -415,7 +416,8 @@ function isTarget<T extends { provider: object; key: string }>(
  * It checks the identity, the eligibility and the other pending transactions again after those
  * reads. It checks the identity and the eligibility once more after the gas estimate, immediately
  * before the wallet is asked. A change of identity at any point discards the draft and drops every
- * late result, so a later step is never sent without a fresh review and confirmation.
+ * late result. A later step is sent only after its own checks pass again, immediately before it is
+ * signed: the press that started the draft confirms each step (`useSignWhenReady`).
  */
 export function useWrappedAction({
   session,
@@ -452,8 +454,8 @@ export function useWrappedAction({
     health = { status: 'checking' };
   }
   // A draft whose identity no longer holds is discarded in this render, before the effect below
-  // records it, so no render shows it for review. A complete or stopped draft sends nothing more,
-  // so it stays, with what became of each step, until the user closes it or starts another.
+  // records it, so no render offers it for signing. A complete or stopped draft sends nothing more,
+  // so it stays, with what became of each step, until another starts.
   const activeIdentity =
     lifecycle.phase === 'complete' || lifecycle.phase === 'stopped' ? undefined : identityOf(lifecycle);
   const isStale =
@@ -651,9 +653,8 @@ export function useWrappedAction({
         const rechecked = frozenRecheck(found);
         const problem = checkRecheckedWithdrawal(draft, rechecked);
         if (problem !== undefined) return block(problem);
-        // The dialog shows the exit as the check found it before the wallet is asked, and the
-        // transaction list describes the request by it. Both show the cash the exit pays at the block
-        // the check read.
+        // The lifecycle keeps the exit as the check found it before the wallet is asked, and the
+        // transaction list describes the request by the check's description.
         dispatch({ type: 'rechecked', rechecked });
         description = rechecked.description;
       }

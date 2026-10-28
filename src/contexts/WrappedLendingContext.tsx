@@ -12,7 +12,8 @@ import type { Action } from '@types';
  * A wrapper action the dashboard started, and what became of it:
  * - `approve`: Approve & Add's approval for a queued base supply. It never locks the queue.
  * - `execute`: Submit Transaction's supply or withdrawal, before the direct actions queued with it.
- *   Once it confirms, it leaves the queue and the direct actions are submitted as before.
+ *   Once it confirms, it leaves the queue, the run ends, and the direct actions are submitted as
+ *   before.
  */
 export type WrappedRun =
   | { kind: 'approve'; action: Action }
@@ -27,8 +28,6 @@ export type WrappedRun =
 export type WrappedRunStatus =
   /** Being read, checked, signed or followed to its receipt. */
   | { kind: 'running' }
-  /** The wrapper action confirmed and left the queue. The direct actions are submitted next. */
-  | { kind: 'executed' }
   /** It stopped with nothing sent. Its queue row shows `label`, and it can be submitted again. */
   | { kind: 'stopped'; label: string };
 

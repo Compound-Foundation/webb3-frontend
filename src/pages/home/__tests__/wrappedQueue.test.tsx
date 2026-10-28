@@ -556,6 +556,20 @@ describe('Home on the wrapped route', () => {
       expect(lending.write.approve).toHaveBeenCalledWith(AMOUNT + 1n);
     });
 
+    it('queues nothing and leaves the form open when the approval cannot start, as while an earlier one is pending', () => {
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const lending = lendingWith(controller(), { position: POSITION });
+      lending.write.approve.mockReturnValue('action-in-progress');
+      const queue = actionQueue([], [ActionType.Supply, BASE_ASSET, undefined]);
+      renderHome(lending, { queue });
+
+      act(() => positionCard().onPendingActionConfirm(AMOUNT));
+
+      expect(lending.write.approve).toHaveBeenCalledWith(AMOUNT);
+      expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
+      expect(queue.setPendingAction).not.toHaveBeenCalled();
+    });
+
     it('asks the wallet to switch network first, as production does, and queues nothing', () => {
       const lending = lendingWith(controller(), { position: POSITION });
       const queue = actionQueue([], [ActionType.Supply, BASE_ASSET, undefined]);
@@ -745,14 +759,19 @@ describe('Home on the wrapped route', () => {
       }
     );
 
-    it('labels the row when the start is refused, and opens no dialog', () => {
+    it.each<[WrappedBlockReason, string]>([
+      // An earlier request can still go through, so the row does not ask for another try.
+      ['transaction-pending', 'Earlier Request Still Pending'],
+      ['action-in-progress', 'Earlier Request Still Pending'],
+      ['session-unusable', 'Not Sent, Try Again'],
+    ])('labels the row when the start is refused with %s, and opens no dialog', (refusal, label) => {
       jest.spyOn(console, 'warn').mockImplementation(() => undefined);
       const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      renderHome(lendingWith(controller(), { supplyRefusal: 'transaction-pending' }), { queue });
+      renderHome(lendingWith(controller(), { supplyRefusal: refusal }), { queue });
 
       act(() => positionCard().onSubmitClicked());
 
-      expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Not Sent, Try Again');
+      expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe(label);
       expect(positionCard().transaction).toBeUndefined();
       expectNoDialog();
     });
@@ -1006,6 +1025,7 @@ describe('Home on the wrapped route', () => {
       const options = { queue, state: cometState(BASE_ASSET, false) };
       const { rerenderHome } = renderHome(lendingWith(), options);
       act(() => positionCard().onSubmitClicked());
+      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), options);
       rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()]))), options);
 
       expect(mockLastProps.ActionModal.state[0]).toBe('bulker-approve');
@@ -1024,11 +1044,34 @@ describe('Home on the wrapped route', () => {
       const options = { queue, state: withComp };
       const { rerenderHome } = renderHome(lendingWith(), options);
       act(() => positionCard().onSubmitClicked());
+      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), options);
       rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()]))), options);
 
       expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
       expect(mockWriteState.supply.mock.calls[0][1]).toBe(comp.address);
       expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+      expectNoDialog();
+    });
+
+    it('leaves the direct actions queued for the next Submit when the wrapper action confirmed while another page was shown', () => {
+      const queue = actionQueue([supplyCollateral, withdrawCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
+      const { rerenderHome } = renderHome(lendingWith(), { queue });
+      act(() => positionCard().onSubmitClicked());
+      const draft = draftFor('supply', [SUPPLY_STEP]);
+      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }], 0, draft))), {
+        queue,
+      });
+
+      // The user opens another page, and the supply confirms there.
+      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()], 0, draft))), {
+        queue,
+        isDashboard: false,
+      });
+      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()], 0, draft))), { queue });
+
+      expect(queue.removeAction).toHaveBeenCalledTimes(1);
+      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+      expect(mockWriteState.supply).not.toHaveBeenCalled();
       expectNoDialog();
     });
 

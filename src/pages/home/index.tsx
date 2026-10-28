@@ -35,7 +35,7 @@ import {
 } from '@helpers/queuedExecution';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { SendWithdrawnError } from '@helpers/walletErrors';
-import { isDirectExecution, WrappedExecutionError } from '@helpers/wrappedActions';
+import { isDirectExecution, WrappedBlockReason, WrappedExecutionError } from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
   isSubmissionRefused,
@@ -101,6 +101,17 @@ function mayStillExecute(state: Extract<WrappedActionState, { phase: 'stopped' }
 
 /** The label a queued wrapper action's row shows after a check stopped it before anything was sent. */
 const NOT_SENT_LABEL = 'Not Sent, Try Again';
+/**
+ * The label instead, when the check was that an earlier wrapper request of the account is still
+ * pending or open in the wallet. That request can still go through, so the row does not ask for
+ * another try.
+ */
+const EARLIER_PENDING_LABEL = 'Earlier Request Still Pending';
+
+/** The row's label for a wrapper action refused before anything was sent, by why it was refused. */
+function notSentLabel(reason: WrappedBlockReason): string {
+  return reason === 'transaction-pending' || reason === 'action-in-progress' ? EARLIER_PENDING_LABEL : NOT_SENT_LABEL;
+}
 
 /**
  * The label a submitted wrapper action's queue row shows once it stopped with the action still
@@ -111,7 +122,7 @@ function stoppedLabel(state: Extract<WrappedActionState, { phase: 'stopped' }>):
   const step = state.steps[state.stepIndex];
   switch (step?.status) {
     case 'blocked':
-      return NOT_SENT_LABEL;
+      return notSentLabel(step.reason);
     case 'refused':
       return 'Reconnect Your Wallet';
     case 'reverted':
@@ -377,9 +388,14 @@ const Home = ({
   const submissionState: WrappedActionState = isSubmissionState ? lifecycleState : { phase: 'idle' };
   const isRunInFlight =
     submissionState.phase === 'reading' || submissionState.phase === 'review' || submissionState.phase === 'signing';
+  // The last run this dashboard saw in flight. The direct actions follow only a supply or withdrawal
+  // the dashboard followed to its receipt.
+  const runSeenInFlight = useRef<SubmissionRecord>();
+  if (isRunInFlight) runSeenInFlight.current = submission;
   // An approval ends when it confirms or stops, and its queued supply stays as it is: the row says
   // whether the allowance now covers it. A supply or withdrawal that confirms leaves the queue, and
-  // the direct actions are submitted next. One that stops with nothing sent stays queued, with a
+  // the direct actions are submitted next. One that confirmed while another page was shown leaves
+  // them queued for the next Submit, so no wallet request opens when the user returns. One that stops with nothing sent stays queued, with a
   // label on its row unless the wallet declined it. One that stops at its last step in a state where
   // it can still go through leaves the queue too, so it is not submitted twice.
   useEffect(() => {
@@ -392,7 +408,10 @@ const Home = ({
     }
     if (phase === 'complete') {
       removeAction(submission.wrapper.action);
-      setSubmissionRecord({ ...submission, status: { kind: 'executed' } });
+      setSubmissionRecord(undefined);
+      if (submission.directCount > 0 && runSeenInFlight.current === submission) {
+        continueAfterWrapper.current?.(submission.wrapper.action);
+      }
     } else if (phase === 'stopped') {
       if (mayStillExecute(submissionState)) removeAction(submission.wrapper.action);
       const step = submissionState.steps[submissionState.stepIndex];
@@ -730,7 +749,13 @@ const Home = ({
       const run = { kind: 'execute' as const, wrapper, directCount, scope: visitIdentity, stateBefore };
       if (refusal !== undefined) {
         console.warn('The wrapped transaction was not sent:', refusal);
-        setSubmissionRecord({ ...run, status: { kind: 'stopped', label: NOT_SENT_LABEL } });
+        // An approval still running keeps its record, so its row keeps showing Approval Pending.
+        const stopped: SubmissionRecord = { ...run, status: { kind: 'stopped', label: notSentLabel(refusal) } };
+        submissionStore.setRecord((current) =>
+          current?.kind === 'approve' && current.status.kind === 'running' && current.scope === visitIdentity
+            ? current
+            : stopped
+        );
         return;
       }
       setSubmissionRecord({ ...run, status: { kind: 'running' } });
@@ -750,12 +775,18 @@ const Home = ({
       submissionStore.setSent(started);
     };
 
-    // Approve & Add's approval of the wrapper for a base supply, for exactly the amount.
-    const startApproval = (action: Action, amount: bigint) => {
+    // Approve & Add's approval of the wrapper for a base supply, for exactly the amount. Returns
+    // whether the approval started.
+    const startApproval = (action: Action, amount: bigint): boolean => {
       const { write, action: lifecycle } = liveWrappedLending.current;
       const stateBefore = lifecycle.state;
-      if (write.approve(amount) !== undefined) return;
+      const refusal = write.approve(amount);
+      if (refusal !== undefined) {
+        console.warn('The approval was not requested:', refusal);
+        return false;
+      }
       setSubmissionRecord({ kind: 'approve', action, scope: visitIdentity, stateBefore, status: { kind: 'running' } });
+      return true;
     };
 
     // A wallet on another network is asked to switch first, as for direct actions, and nothing is
@@ -935,8 +966,10 @@ const Home = ({
                 confirmAction();
               } else if (web3.read.chainId && web3.write.chainId !== web3.read.chainId) {
                 switchWriteNetwork(web3.read.chainId);
-              } else if (!liveWalletUnusable.current) {
-                startApproval(action, supplied);
+              } else if (!liveWalletUnusable.current && startApproval(action, supplied)) {
+                // As in production, the press both asks for the approval and queues the supply. An
+                // approval that cannot start now, as while an earlier one is pending, changes nothing,
+                // and the form stays open to be pressed again.
                 confirmAction();
               }
               return;
@@ -1111,15 +1144,6 @@ const Home = ({
       );
     });
   }
-
-  // A supply or withdrawal that confirmed hands over to the direct actions queued with it, once the
-  // dashboard is hydrated.
-  const canContinue = continueAfterWrapper.current !== undefined;
-  useEffect(() => {
-    if (submission?.kind !== 'execute' || submission.status.kind !== 'executed') return;
-    if (submission.directCount === 0) setSubmissionRecord(undefined);
-    else continueAfterWrapper.current?.(submission.wrapper.action);
-  }, [submission, canContinue]);
 
   return (
     <div className="page home">

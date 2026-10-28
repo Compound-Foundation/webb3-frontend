@@ -139,7 +139,9 @@ describe('the position card queue on the wrapped route', () => {
   });
 
   it('labels a wrapper action that stopped with nothing sent, and leaves Submit enabled to send it again', () => {
-    const { desktop, submit } = renderCard({ rules: { stopped: { action: SUPPLY, label: 'Not Sent, Try Again' } } });
+    // The queue builds its entries afresh on every render, so the record holds another copy of the entry.
+    const recorded: Action = [ActionType.Supply, { ...BASE_ASSET }, 100_000_000n];
+    const { desktop, submit } = renderCard({ rules: { stopped: { action: recorded, label: 'Not Sent, Try Again' } } });
 
     expect(desktop).toHaveTextContent('Not Sent, Try Again');
     expect(submit()).toBeEnabled();

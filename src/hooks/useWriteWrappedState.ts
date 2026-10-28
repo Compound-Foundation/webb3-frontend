@@ -748,7 +748,7 @@ export type PrepareWrappedWithdrawalInput = {
  * the review's. `recheckWithdrawal` then stops it when the share balance, the pause, the cash the
  * shares pay or the market's cash no longer allows the reviewed exit. The step then simulates the
  * exit from the account at that block. A check that passes gives the reviewed shares
- * quoted at that block, so the dialog and the transaction list show the cash the exit pays there.
+ * quoted at that block, which the lifecycle keeps.
  * The method has no minimum amount and no deadline, and the simulation enforces neither: the
  * wrapper computes the cash when the transaction runs.
  */
@@ -895,7 +895,7 @@ export function useWriteWrappedState({
   baseSymbol,
   blockWait = DEFAULT_BLOCK_WAIT,
 }: UseWriteWrappedStateOptions): WriteWrappedState {
-  // A form or dialog can keep `supply` from an earlier render, and steps read when they are
+  // A form or callback can keep `supply` from an earlier render, and steps read when they are
   // confirmed, so both read the live values.
   const live = useRef({ action, route, readProvider, baseSymbol, blockWait });
   live.current = { action, route, readProvider, baseSymbol, blockWait };
