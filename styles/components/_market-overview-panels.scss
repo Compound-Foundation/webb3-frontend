@@ -168,6 +168,14 @@
     }
   }
 
+  // Breathing room between adjacent institutional rows, whose painted outlines
+  // would otherwise touch
+  &__table-spacer-row td {
+    padding: 0;
+    height: 0.375rem;
+    background: none;
+  }
+
   &__table-divider-row td {
     padding: 0;
 
