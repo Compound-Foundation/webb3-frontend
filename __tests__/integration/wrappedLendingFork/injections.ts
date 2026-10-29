@@ -110,8 +110,8 @@ const LAST_ACCRUAL_SHIFT = 208n;
  * the stored index, and the wrapper's buffer uses it. A real market accrues on every interaction,
  * so its stored index trails by far less. Fork-only: no transaction can do this.
  *
- * Returns undefined, and writes nothing, when the market's supply rate is too low for that lag
- * after the epoch. The caller can raise the rate first.
+ * Returns undefined, and writes nothing, when the market's supply rate is zero or too low for that
+ * lag after the epoch. The caller can raise the rate first.
  */
 export async function backdateAccrual(market: WrappedMarket) {
   const slot = await anvil.getStorageAt(market.cometAddress, TOTALS_SLOT);
@@ -123,6 +123,8 @@ export async function backdateAccrual(market: WrappedMarket) {
   const storedIndex = BigInt(totals.baseSupplyIndex.toString());
   const utilization = await readBigInt(market.cometAddress, COMET, 'getUtilization');
   const supplyRate = await readBigInt(market.cometAddress, COMET, 'getSupplyRate', [utilization]);
+  // A market with no supply rate accrues nothing, however far back its last accrual is.
+  if (supplyRate === 0n) return undefined;
   // The accrued index is storedIndex × (1 + supplyRate × elapsed ÷ 1e18). Aim 5% of a unit past
   // two whole units above the stored index's own whole units.
   const targetIndex = ((storedIndex / 10n ** 15n + 2n) * 100n + 5n) * 10n ** 13n;
