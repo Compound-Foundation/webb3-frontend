@@ -289,11 +289,59 @@ describe('Home on the wrapped route across a wallet change', () => {
     read: { ...mockWeb3.read, account },
     write: { ...mockWeb3.write, account, connector: { uid: connector } as Web3['write']['connector'] },
   });
+  const WALLET_A = walletSession(ACCOUNT_A, 'connector-a');
   const WALLET_B = walletSession(ACCOUNT_B, 'connector-b');
   const borrower = { ...EMPTY_ACCOUNT, balance: -100_000_000n };
+  // Two actions go through the Bulker, which these accounts have not yet allowed.
+  const repays = actionQueue([
+    [ActionType.Repay, borrower, 50_000_000n],
+    [ActionType.Repay, borrower, 50_000_000n],
+  ]);
 
   beforeEach(() => {
     Object.values(mockWriteState).forEach((fn) => fn.mockReset());
+  });
+
+  function openBulkerApproval() {
+    const state = cometState(borrower, { account: ACCOUNT_A, isBulkerAllowed: false });
+    const view = render(homeElement({ lending: wrappedLending(), state, queue: repays, web3: WALLET_A }));
+    act(() => mockLastProps.PositionCard.state[1].onSubmitClicked());
+    const [, dialog] = mockLastProps.ActionModal.state;
+    return { ...view, completeTransaction: dialog.onCompleteClicked as () => void };
+  }
+
+  it('completes a kept Bulker approval dialog in the session that opened it', () => {
+    const { rerender, completeTransaction } = openBulkerApproval();
+
+    // The approval settles and the account's balances load again.
+    const approved = cometState(borrower, { account: ACCOUNT_A });
+    rerender(homeElement({ lending: wrappedLending(), state: approved, queue: repays, web3: WALLET_A }));
+    act(() => completeTransaction());
+
+    expect(mockWriteState.invokeBulker).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a kept Bulker approval dialog once another wallet is connected', () => {
+    const { rerender, completeTransaction } = openBulkerApproval();
+
+    // Wallet B connects, its balances load and allow the same repayments, and it allows the Bulker.
+    const walletB = cometState(borrower, { account: ACCOUNT_B });
+    rerender(homeElement({ lending: wrappedLending(), state: walletB, queue: repays, web3: WALLET_B }));
+    act(() => completeTransaction());
+
+    // The dialog's callback would sign with wallet A's session, so nothing is submitted.
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+  });
+
+  it('refuses a kept dialog once the same account connects through another connector', () => {
+    const { rerender, completeTransaction } = openBulkerApproval();
+
+    const sameAccount = walletSession(ACCOUNT_A, 'connector-b');
+    const approved = cometState(borrower, { account: ACCOUNT_A });
+    rerender(homeElement({ lending: wrappedLending(), state: approved, queue: repays, web3: sameAccount }));
+    act(() => completeTransaction());
+
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
   });
 
   it('refuses balances read for the previous account on a return to the dashboard', () => {

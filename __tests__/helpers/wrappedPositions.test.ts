@@ -4,6 +4,7 @@ import { WRAPPED_MARKET_REGISTRY, WrappedMarket } from '@constants/wrappedMarket
 import { LendingRoute } from '@helpers/lendingRoute';
 import {
   CometStateWithMarket,
+  isSameWalletSession,
   isSubmissionRefused,
   getFullExitCash,
   getGrossAssets,
@@ -216,6 +217,28 @@ describe('supplyIncentivesForRoute', () => {
 
   it('keeps the market incentives on the standard route', () => {
     expect(supplyIncentivesForRoute(false, 0n, incentives)).toEqual(incentives);
+  });
+});
+
+describe('isSameWalletSession', () => {
+  const SESSION = { account: ACCOUNT, connector: 'connector-a', chainId: 1 };
+
+  it('accepts the same session, with the account in any case', () => {
+    expect(isSameWalletSession(SESSION, { ...SESSION })).toBe(true);
+    expect(isSameWalletSession(SESSION, { ...SESSION, account: ACCOUNT.toUpperCase().replace('0X', '0x') })).toBe(true);
+  });
+
+  it('refuses another account, connector or wallet network', () => {
+    expect(isSameWalletSession(SESSION, { ...SESSION, account: '0x0000000000000000000000000000000000000bb2' })).toBe(
+      false
+    );
+    expect(isSameWalletSession(SESSION, { ...SESSION, connector: 'connector-b' })).toBe(false);
+    expect(isSameWalletSession(SESSION, { ...SESSION, chainId: 10 })).toBe(false);
+  });
+
+  it('refuses a session without an account', () => {
+    const disconnected = { account: undefined, connector: undefined, chainId: undefined };
+    expect(isSameWalletSession(disconnected, disconnected)).toBe(false);
   });
 });
 

@@ -22,10 +22,12 @@ import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
 import {
   CometStateWithMarket,
+  isSameWalletSession,
   isSubmissionRefused,
   LiveSubmissionState,
   MarketIdentity,
   supplyIncentivesForRoute,
+  WalletSession,
 } from '@helpers/wrappedPositions';
 import { Theme } from '@hooks/useThemeManager';
 import { AddTransaction } from '@hooks/useTransactionManager';
@@ -105,6 +107,15 @@ const Home = ({
     selectedMarket[1] === undefined
       ? undefined
       : { chainId: selectedMarket[1].chainInformation.chainId, cometAddress: selectedMarket[1].marketAddress };
+  // The wallet session this render's writes sign in. The callbacks made below keep it, and are
+  // refused once another session is live.
+  const walletSession: WalletSession = {
+    account: web3.write.account,
+    connector: web3.write.connector?.uid,
+    chainId: web3.write.chainId,
+  };
+  const liveWalletSession = useRef(walletSession);
+  liveWalletSession.current = walletSession;
   // The app keeps its Comet state across a change of market or account until the next read
   // arrives, including while another page is shown. So the state is labelled with the market and
   // account useCometState read it for, never with the ones selected when this page renders it.
@@ -200,7 +211,9 @@ const Home = ({
         liveSession.current,
         { chainId: market.chainInformation.chainId, cometAddress: market.marketAddress },
         actionsToSubmit
-      );
+      ) ||
+      // A kept callback writes through the session it was made in, whatever the live balances allow.
+      !isSameWalletSession(walletSession, liveWalletSession.current);
 
     const actions = getActions(baseAsset, collateralAssets, rewards);
     const actionsForCompare = compare ? [] : actions;

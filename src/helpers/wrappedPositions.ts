@@ -184,6 +184,24 @@ export function supplyIncentivesForRoute(
 }
 
 export type MarketIdentity = { chainId: number; cometAddress: string };
+/**
+ * The wallet session a write is signed in: the account, the wallet's connector and the wallet's
+ * network. A write made in one session signs with that session's provider and sender.
+ */
+export type WalletSession = { account: string | undefined; connector: string | undefined; chainId: number | undefined };
+
+/**
+ * Whether a callback made in wallet session `kept` can write in session `live`. It cannot once the
+ * account, connector or wallet network has changed, or without an account.
+ */
+export function isSameWalletSession(kept: WalletSession, live: WalletSession): boolean {
+  return (
+    kept.account !== undefined &&
+    kept.account.toLowerCase() === live.account?.toLowerCase() &&
+    kept.connector === live.connector &&
+    kept.chainId === live.chainId
+  );
+}
 /** Comet state with the market and account it was read for. */
 export type CometStateWithMarket = {
   market: MarketIdentity | undefined;
