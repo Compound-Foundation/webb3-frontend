@@ -10,6 +10,7 @@ import baseMainnetWETHRoots from 'comet/deployments/base/weth/roots.json';
 import lineaMainnetUSDCRoots from 'comet/deployments/linea/usdc/roots.json';
 import lineaWETHRoots from 'comet/deployments/linea/weth/roots.json';
 import mainnetInstitutionalUSDCRoots from 'comet/deployments/mainnet/institutional_usdc/roots.json';
+import mainnetInstitutionalUSDGRoots from 'comet/deployments/mainnet/institutional_usdg/roots.json';
 import mainnetUSDCRoots from 'comet/deployments/mainnet/usdc/roots.json';
 import mainnetUSDSRoots from 'comet/deployments/mainnet/usds/roots.json';
 import mainnetUSDTRoots from 'comet/deployments/mainnet/usdt/roots.json';
@@ -101,6 +102,13 @@ export const MARKETS: MarketData[] = [
         'USDC Institutional',
         mainnetInstitutionalUSDCRoots,
         { slug: 'usdc-institutional', institutional: true, isNew: true },
+      ],
+      [
+        1,
+        'USDG',
+        'USDG Institutional',
+        mainnetInstitutionalUSDGRoots,
+        { slug: 'usdg-institutional', institutional: true, isNew: true },
       ],
       [137, 'USDC.e', 'USD Coin (Bridged)', polygonUSDCRoots],
       [137, 'USDT0', 'Tether', polygonUSDTRoots],
