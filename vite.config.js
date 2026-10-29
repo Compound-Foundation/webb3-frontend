@@ -56,8 +56,13 @@ export default defineConfig({
       comet: resolve(__dirname, 'node_modules/comet'),
       '/fonts': resolve(__dirname, 'node_modules/compound-styles/public/fonts'),
       // Redirect the (transitive) WalletConnect provider to its self-contained UMD
-      // bundle. The ESM entry has bare imports of @msgpack/msgpack and blakejs, which
-      // aren't in the tree and break esbuild dep pre-bundling in dev.
+      // bundle, which carries its own WalletConnect 2.21.1 packages. package.json
+      // resolves the separately installed WalletConnect packages to 2.21.10 so the
+      // audit passes, and ethereum-provider 2.21.1 was never released against those
+      // versions. Without this alias, the dev server and the production build would
+      // load that untested mix on the pairing and signing path. Keep the alias at
+      // least until wagmi depends on @walletconnect/ethereum-provider 2.22.0 or
+      // later and those resolutions are removed.
       '@walletconnect/ethereum-provider': resolve(
         __dirname,
         'node_modules/@walletconnect/ethereum-provider/dist/index.umd.js'
