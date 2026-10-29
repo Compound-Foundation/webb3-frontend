@@ -62,7 +62,7 @@ export const getMarketRewardsAPRs = (
   if (market?.institutional) {
     return {
       borrowRewardsAPR: 0n,
-      supplyRewardsAPR: institutionalSupplyRewardRate(totalBaseSupplyInDollars),
+      supplyRewardsAPR: institutionalSupplyRewardRate(totalBaseSupplyInDollars, market.slug),
       isInstitutional: true,
     };
   }
