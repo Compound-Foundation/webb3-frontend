@@ -929,6 +929,52 @@ describe('WrappedWithdraw', () => {
       expect(within(dialog).getByRole('button', { name: 'Close' })).toBeEnabled();
     });
 
+    it('keeps the estimate change and the missing minimum in view while the wallet still holds the request', () => {
+      const message = 'The request can still complete. (4900)';
+      renderModal({
+        ...inReview(),
+        phase: 'stopped',
+        steps: [{ status: 'provider-failure', message, isPendingInWallet: true }],
+        rechecked: PARTIAL_RECHECKED,
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/withdrawal stopped/i);
+      const alert = within(dialog).getByRole('alert');
+      expect(alert).toHaveTextContent(
+        /now 100\.049975 USDC, 0\.049975 USDC more than the 100\.000000 USDC you reviewed/
+      );
+      expect(alert).toHaveTextContent(
+        /if you do not want to withdraw about this amount, reject the request in your wallet/i
+      );
+      expect(dialog).toHaveTextContent(/the transaction has no minimum amount and no deadline/i);
+    });
+
+    it("keeps a full exit's change since the panel showed it in view while the wallet still holds the request", () => {
+      renderModal({
+        ...inReview({ ...FULL_REVIEW, shownCash: 250_000_000n }),
+        phase: 'stopped',
+        steps: [{ status: 'provider-failure', message: 'Still pending. (-32005)', isPendingInWallet: true }],
+      });
+
+      const dialog = screen.getByRole('dialog');
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        /now 250\.124997 USDC, 0\.124997 USDC more than the 250\.000000 USDC shown before/
+      );
+      expect(dialog).toHaveTextContent(/the transaction has no minimum amount and no deadline/i);
+    });
+
+    it.each<[string, WrappedStepState]>([
+      ['the user rejected it', { status: 'rejected' }],
+      ['the wallet reported another error', { status: 'provider-failure', message: 'Internal error (-32603)' }],
+    ])('drops the estimate notices from a stopped withdrawal when %s', (_name, step) => {
+      renderModal({ ...inReview(), phase: 'stopped', steps: [step], rechecked: PARTIAL_RECHECKED });
+
+      const dialog = screen.getByRole('dialog');
+      expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+      expect(dialog).not.toHaveTextContent(/no minimum amount/i);
+    });
+
     it('says the wallet refused the request before handling it, names its code, and says to reconnect', () => {
       renderModal({
         ...inReview(),
