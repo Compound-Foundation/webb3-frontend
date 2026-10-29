@@ -29,7 +29,7 @@ yarn test          # Jest in UTC; CI does not run it, so run it locally
 yarn build         # the production build CI publishes to IPFS
 ```
 
-Format with Prettier under `.prettierrc`, as the README's editor setup does. Prettier is not a dependency and CI does not check formatting, so format the files you change. Tests live in `__tests__/` and in `__tests__` directories beside the code. Mock API responses come from the `msw` handlers in `handlers/`. A change to behaviour gets a test, and a bugfix gets a regression test observed failing before the fix.
+Format with Prettier under `.prettierrc`, as the README's editor setup does. Prettier is not a dependency and CI does not check formatting, so format the files you change. Tests live in `__tests__/` and in `__tests__` directories beside the code. Mock API responses come from the `msw` handlers in `handlers/`. `.gitattributes` marks test files outside `e2e/` as `linguist-generated`, so GitHub collapses them in pull request diffs. Reviewers expand them when a change to test coverage matters. A change to behaviour gets a test, and a bugfix gets a regression test observed failing before the fix.
 
 ## Review standards
 

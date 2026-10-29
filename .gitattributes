@@ -1,0 +1,13 @@
+# Test files are marked linguist-generated on purpose, although nobody generates
+# them. GitHub then collapses them in pull request diffs, so the app code that
+# ships is easy to find, and leaves them out of the language statistics. Git,
+# Jest, the build and the review agents ignore the attribute. A reviewer expands
+# a collapsed file with one click.
+**/__tests__/** linguist-generated
+*.test.ts linguist-generated
+*.test.tsx linguist-generated
+*.test.js linguist-generated
+
+# The browser harness handles keys and impersonates accounts, so every change to
+# it, tests included, stays expanded. This rule comes last so that it wins.
+e2e/** -linguist-generated
