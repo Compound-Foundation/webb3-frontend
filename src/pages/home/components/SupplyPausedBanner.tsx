@@ -6,10 +6,11 @@ const SupplyPausedBanner = () => (
   <div className="extension-banner L4 body text-color--3">
     <p>
       New supplies to affected Compound markets are temporarily paused as a precaution following the reported security
-      incident on Ethereum mainnet. Follow updates on the Compound forum:{' '}
+      incident on Ethereum mainnet. Follow updates on the{' '}
       <a className="text-color--supply" target="_blank" rel="noopener noreferrer" href={FORUM_URL}>
-        {FORUM_URL}
+        Compound forum
       </a>
+      .
     </p>
   </div>
 );
