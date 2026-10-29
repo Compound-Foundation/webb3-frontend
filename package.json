@@ -111,7 +111,12 @@
     "**/postcss/nanoid": "^3.3.18",
     "kubo-rpc-client/nanoid": "^5.1.16",
     "source-map-js": "^1.2.2",
-    "**/@reown/appkit-wallet/zod": "^4.6.6"
+    "**/@reown/appkit-wallet/zod": "^4.6.6",
+    "@walletconnect/core": "2.21.10",
+    "@walletconnect/sign-client": "2.21.10",
+    "@walletconnect/types": "2.21.10",
+    "@walletconnect/universal-provider": "2.21.10",
+    "@walletconnect/utils": "2.21.10"
   },
   "volta": {
     "node": "22.22.0"
