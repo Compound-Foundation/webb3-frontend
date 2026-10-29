@@ -153,6 +153,9 @@ function QuoteFigures({ review, formatAmount }: { review: WithdrawalReview; form
  * Once the check before the signature passes, the dialog shows the exit as that check found it,
  * and says when its estimate changed since the review. The wallet's request then pays what the
  * dialog shows at the block the check read.
+ *
+ * A stopped exit whose request the wallet still holds keeps the estimate change and the notice of
+ * no minimum amount or deadline, because the user can still approve the request.
  */
 const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: WrappedWithdrawModalProps) => {
   const isOpen = isWrappedWithdrawModalState(state);
@@ -228,6 +231,10 @@ const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: W
       const isBeforeSignature = phase === 'review' || phase === 'signing';
       const step = draft.steps[stepIndex];
       const stepState = steps[stepIndex];
+      // A request the wallet still holds can still be approved, and then pays what the market pays.
+      const isPendingInWallet = stepState.status === 'provider-failure' && stepState.isPendingInWallet === true;
+      const isWalletRequestOpen = stepState.status === 'awaiting-signature' || isPendingInWallet;
+      const showsEstimateWarnings = isBeforeSignature || (isStopped && isPendingInWallet);
 
       content = (
         <>
@@ -236,12 +243,12 @@ const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: W
           <p className="L4 meta text-color--2">
             Your wallet may show the shares in their base units: {quote.shares.toString()}.
           </p>
-          {isBeforeSignature &&
+          {showsEstimateWarnings &&
             (isRecheckedCashChanged ? (
               <RecheckedChange
                 reviewedCash={reviewed.quote.cash}
                 recheckedCash={quote.cash}
-                canReject={stepState.status === 'awaiting-signature'}
+                canReject={isWalletRequestOpen}
                 formatAmount={formatAmount}
               />
             ) : (
@@ -260,7 +267,7 @@ const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: W
               cannot be withdrawn on its own. To withdraw it too, close this and choose Everything.
             </p>
           )}
-          {isBeforeSignature && (
+          {showsEstimateWarnings && (
             <>
               <p className="L4 meta text-color--2">
                 The wrapper works out the amount when the transaction runs. This page simulates the withdrawal from your
