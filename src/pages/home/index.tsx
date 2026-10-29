@@ -13,6 +13,7 @@ import {
   getActionFromPendingAction,
   sanitizedAmountForAction,
 } from '@helpers/actions';
+import { withCometStateSource } from '@helpers/cometStateSource';
 import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
@@ -104,16 +105,12 @@ const Home = ({
     selectedMarket[1] === undefined
       ? undefined
       : { chainId: selectedMarket[1].chainInformation.chainId, cometAddress: selectedMarket[1].marketAddress };
-  // Comet state names no market or account, and it trails a change of either by a render. Each
-  // new state is recorded with the market and account current when it arrived, so a stale one
-  // keeps the old ones.
-  const cometStateMarket = useRef<CometStateWithMarket>({
-    market: selectedMarketIdentity,
-    account: web3.read.account,
-    state,
-  });
+  // The app keeps its Comet state across a change of market or account until the next read
+  // arrives, including while another page is shown. So the state is labelled with the market and
+  // account useCometState read it for, never with the ones selected when this page renders it.
+  const cometStateMarket = useRef<CometStateWithMarket>(withCometStateSource(state));
   if (cometStateMarket.current.state !== state) {
-    cometStateMarket.current = { market: selectedMarketIdentity, account: web3.read.account, state };
+    cometStateMarket.current = withCometStateSource(state);
   }
   // Submissions can start from a callback a dialog kept from an earlier render, so they are
   // judged by the session as it is now, not as it was when the callback was made.
