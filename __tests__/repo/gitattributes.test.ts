@@ -1,6 +1,9 @@
 import { execFileSync } from 'child_process';
 
-const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+  cwd: __dirname,
+  encoding: 'utf8',
+}).trim();
 
 const git = (args: string[], input?: string) =>
   execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 });
@@ -19,13 +22,17 @@ const linguistGenerated = (paths: string[]): Map<string, string> => {
   for (let index = 0; index + 2 < fields.length; index += 3) {
     values.set(fields[index], fields[index + 2]);
   }
+  expect([...values.keys()].sort()).toEqual([...paths].sort());
   return values;
 };
 
 const trackedFiles = git(['ls-files', '-z']).split('\0').filter(Boolean);
 
-// Paths the harness in the open wrapped-lending stack adds. They are not on main
-// yet; git check-attr reads the attribute rules for a path whether or not it exists.
+// git check-attr matches the attribute rules against a path whether or not the
+// file exists, so these paths test rules that no tracked file reaches.
+const testProbePaths = ['src/probe.test.ts', 'src/components/probe.test.tsx', 'scripts/probe.test.js'];
+
+// Paths in the browser harness under e2e/, including its own tests.
 const harnessProbePaths = [
   'e2e/harness/__tests__/secrets.test.ts',
   'e2e/harness/secrets.ts',
@@ -35,7 +42,7 @@ const harnessProbePaths = [
 
 describe('gitattributes', () => {
   it('marks every test file as linguist-generated', () => {
-    const testFiles = trackedFiles.filter(isTestFile);
+    const testFiles = [...trackedFiles.filter(isTestFile), ...testProbePaths];
     expect(testFiles).toContain('__tests__/repo/gitattributes.test.ts');
 
     const values = linguistGenerated(testFiles);
