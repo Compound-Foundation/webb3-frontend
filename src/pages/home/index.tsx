@@ -159,8 +159,18 @@ const Home = ({
   const visitKey = `${visitIdentity}#${visit.current.count}`;
   const liveVisitKey = useRef(visitKey);
   liveVisitKey.current = visitKey;
+  // Leaving Home also ends the visit. An unmounted Home renders no more, so its refs keep the last
+  // visit forever, and Home mounted again has refs of its own that cannot end it.
+  const isMounted = useRef(true);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+  const isLiveVisit = (key: string) => isMounted.current && liveVisitKey.current === key;
   // Dialogs and the position card keep the callbacks of the render that made them.
-  const isFromEarlierVisit = () => liveVisitKey.current !== visitKey;
+  const isFromEarlierVisit = () => !isLiveVisit(visitKey);
   // On the wrapped route, a wallet session found unusable stops direct writes as well.
   const liveWalletUnusable = useRef(false);
   liveWalletUnusable.current = wrappedLending.action.session.status === 'unusable';
@@ -172,8 +182,9 @@ const Home = ({
   liveEstimatedGasMap.current = estimatedGasMap;
 
   // The manager reads the network and nonce, and can estimate gas, before it asks the wallet. If
-  // the write's visit ends or the session is found unusable in that time, the write is withdrawn.
-  // Otherwise the wallet is asked to sign for a session or market the user has left.
+  // the write's visit ends, Home unmounts or the session is found unusable in that time, the write
+  // is withdrawn. Otherwise the wallet is asked to sign for a session, market or page the user has
+  // left. A write the wallet was already asked for stays with the manager, which tracks it.
   const addTransactionWhileCurrent: AddTransaction = (
     key,
     description,
@@ -186,7 +197,7 @@ const Home = ({
   ) => {
     const visitKeyBefore = liveVisitKey.current;
     const sendWhileCurrent: typeof trxFn = (...args) =>
-      liveVisitKey.current === visitKeyBefore && !liveWalletUnusable.current
+      isLiveVisit(visitKeyBefore) && !liveWalletUnusable.current
         ? trxFn(...args)
         : Promise.reject(new SendWithdrawnError());
     return addTransaction(key, description, sendWhileCurrent, estimatedGas, trxEstimateGasFn, fnArgs, value, callback);

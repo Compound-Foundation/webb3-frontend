@@ -483,6 +483,53 @@ describe('Home submission guards', () => {
       expect(manager.outcomes).toEqual(['sent']);
     });
 
+    it('withdraws an approval when the user leaves Home before the wallet is asked, even after Home mounts again', async () => {
+      const manager = preparingManager();
+      const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
+      const { unmount } = render(
+        homeElement({ queue: actionQueue([], pendingSupply), addTransaction: manager.addTransaction })
+      );
+      act(() => positionCard().onPendingActionConfirm(10n ** 18n));
+      expect(manager.addTransaction).toHaveBeenCalledTimes(1);
+
+      // Navigation unmounts Home. Home for another account mounts with refs of its own.
+      unmount();
+      render(
+        homeElement({
+          queue: actionQueue([]),
+          addTransaction: manager.addTransaction,
+          web3: web3For({ account: OTHER_ACCOUNT }),
+        })
+      );
+      await act(async () => manager.finishPreparing());
+
+      expect(walletApprove).not.toHaveBeenCalled();
+      expect(manager.outcomes).toEqual(['withdrawn']);
+    });
+
+    it('keeps an approval the wallet was asked for before the user left Home', async () => {
+      const manager = preparingManager();
+      let answerWallet: () => void = () => undefined;
+      walletApprove.mockImplementationOnce(
+        () =>
+          new Promise<TransactionResponse>(
+            (resolve) => (answerWallet = () => resolve({ hash: '0xapproval' } as unknown as TransactionResponse))
+          )
+      );
+      const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
+      const { unmount } = render(
+        homeElement({ queue: actionQueue([], pendingSupply), addTransaction: manager.addTransaction })
+      );
+      act(() => positionCard().onPendingActionConfirm(10n ** 18n));
+      await act(async () => manager.finishPreparing());
+      expect(walletApprove).toHaveBeenCalledTimes(1);
+
+      unmount();
+      await act(async () => answerWallet());
+
+      expect(manager.outcomes).toEqual(['sent']);
+    });
+
     it('withdraws an approval once the wallet session is found unusable while it is prepared', async () => {
       const manager = preparingManager();
       const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
