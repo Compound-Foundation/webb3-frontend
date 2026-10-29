@@ -107,7 +107,13 @@ Build the app locally with the controls open:
    git status --porcelain   # expect no output
    ```
 
-2. Copy `.env.local` from the main checkout if you use one. Reads need `VITE_V3_RPC_PROVIDER_HOST`, and history needs `VITE_V3_API_HOST` (README, "Required Environment Variables").
+2. Create `.env.local` in the worktree, or copy it from the main checkout. Git ignores it. Reads need `VITE_V3_RPC_PROVIDER_HOST`, and history needs `VITE_V3_API_HOST` (README, "Required Environment Variables"). Without a local backend, use the public hosts that the production bundle uses:
+
+   ```bash
+   VITE_V3_API_HOST=https://v3-api.compound.xyz
+   VITE_V3_RPC_PROVIDER_HOST=node-provider-v3-app.compound.xyz
+   ```
+
 3. Open the release controls in this working copy only:
 
    ```bash
@@ -117,17 +123,99 @@ Build the app locally with the controls open:
 
    If fewer markets are authorized, edit only their entries by hand.
 
-4. Build and serve the app, and record the choice. Both servers bind to loopback only (`vite.config.js:18-26`).
-   - Preferred: run `yarn build && yarn preview`, then open `http://127.0.0.1:4173`. This is the production build. It screens every address and fails closed, so set `VITE_SCREENING_ENDPOINT` to a worker that allows that origin (README).
-   - Fallback: run `yarn dev`, then open `http://127.0.0.1:5173`. With no `VITE_SCREENING_ENDPOINT`, it skips screening and treats the address as allowed (`envVars.ts:38`, `src/hooks/useAddressScreening.ts:36-42`). It also runs React's development build and the dev-only code in `src/init.ts:12-17`. Record "dev build, screening bypassed". The run is then no evidence for screening or for the production build.
-5. After the run, restore the file and check the working copy:
+4. Make a certificate and an HTTPS proxy, outside the worktree. The Anchorage Digital extension 1.1.16 injects its provider on `https://` pages only (see the open question after the build identity table). Both Vite servers serve HTTP and bind to loopback only (`vite.config.js:18-26`). Do not add `--host`. A small Node proxy on loopback serves the app over HTTPS instead:
+
+   ```bash
+   mkdir -p ~/.porto-https && cd ~/.porto-https
+   openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj /CN=localhost \
+     -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' -keyout key.pem -out cert.pem
+   ```
+
+   The certificate is self-signed, so Chrome shows a warning on the first visit. To avoid the warning, `mkcert -install && mkcert -key-file key.pem -cert-file cert.pem localhost 127.0.0.1` makes a certificate that Chrome trusts. `mkcert -install` adds a local certificate authority to the system trust store, so run `mkcert -uninstall` after the run. The runs did not use mkcert.
+
+   Save this script as `~/.porto-https/proxy.mjs`. It listens on `127.0.0.1:<listen port>`, forwards each request to `http://127.0.0.1:<target port>`, and passes the websocket upgrade through, which the dev server's hot reload uses. It needs no packages.
+
+   ```js
+   // Loopback HTTPS front: https://localhost:<listen> -> http://127.0.0.1:<target>.
+   import { readFileSync } from 'node:fs';
+   import http from 'node:http';
+   import https from 'node:https';
+   import net from 'node:net';
+
+   const [listenPort = '5174', targetPort = '5173'] = process.argv.slice(2);
+   const target = { host: '127.0.0.1', port: Number(targetPort) };
+   const tls = {
+     key: readFileSync(new URL('key.pem', import.meta.url)),
+     cert: readFileSync(new URL('cert.pem', import.meta.url)),
+   };
+
+   const server = https.createServer(tls, (req, res) => {
+     const upstream = http.request({ ...target, method: req.method, path: req.url, headers: req.headers }, (answer) => {
+       res.writeHead(answer.statusCode, answer.headers);
+       answer.pipe(res);
+     });
+     upstream.on('error', (error) => (res.headersSent ? res.destroy() : res.writeHead(502).end(String(error))));
+     req.pipe(upstream);
+   });
+
+   // Vite's hot-reload websocket: replay the upgrade request to the target, then join the two sockets.
+   server.on('upgrade', (req, socket, head) => {
+     const upstream = net.connect(target, () => {
+       const lines = [`${req.method} ${req.url} HTTP/1.1`];
+       for (let i = 0; i < req.rawHeaders.length; i += 2) lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+       upstream.write(`${lines.join('\r\n')}\r\n\r\n`);
+       upstream.write(head);
+       upstream.pipe(socket).pipe(upstream);
+     });
+     upstream.on('error', () => socket.destroy());
+     socket.on('error', () => upstream.destroy());
+   });
+
+   server.listen(Number(listenPort), '127.0.0.1', () => {
+     console.log(`https://localhost:${listenPort} -> http://127.0.0.1:${targetPort}`);
+   });
+   ```
+
+5. Build and serve the app, start the proxy, and record the choice. Run the server in the worktree and the proxy in a second terminal. Pass `--strictPort`: if the port is taken, Vite otherwise moves to the next free port, and the proxy then serves another checkout's server.
+
+   - Preferred: the production build. It screens every connected address and fails closed. Vite embeds `VITE_SCREENING_ENDPOINT` in the bundle at build time (`envVars.ts:20-22`), so set it before you build. A build without it screens against a placeholder URL and blocks every wallet. The screening worker answers only origins on its CORS allowlist (`src/helpers/screening.ts:18-19`). On 2026-10-29, the production worker answered a preflight from `https://app.compound.xyz` and refused, with `403`, every `localhost` origin tried. So ask the worker's owner to allow `https://localhost:4174`, or use a worker that allows it, and check the preflight first:
+
+     ```bash
+     curl -si -X OPTIONS '<screening endpoint>' -H 'Origin: https://localhost:4174' \
+       -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' \
+       | grep -i '^HTTP\|access-control-allow-origin'
+     # expect: a 204 status and access-control-allow-origin: https://localhost:4174
+     ```
+
+     Then add `VITE_SCREENING_ENDPOINT=<screening endpoint>` to `.env.local`, and run:
+
+     ```bash
+     yarn build && grep -l '<screening endpoint host>' dist/assets/main-*.js   # expect one file
+     yarn preview --strictPort                                                 # http://127.0.0.1:4173
+     node ~/.porto-https/proxy.mjs 4174 4173                                   # second terminal
+     ```
+
+     Open `https://localhost:4174`.
+
+   - Fallback: the dev server, with no `VITE_SCREENING_ENDPOINT`. It skips screening and treats the address as allowed (`envVars.ts:38`, `src/hooks/useAddressScreening.ts:36-42`). It also runs React's development build and the dev-only code in `src/init.ts:12-17`. Record "dev build, screening bypassed". The run is then no evidence for screening or for the production build. Run:
+
+     ```bash
+     yarn dev --strictPort                     # http://127.0.0.1:5173
+     node ~/.porto-https/proxy.mjs 5174 5173   # second terminal
+     ```
+
+     Open `https://localhost:5174`. The browser console shows `[vite] connected.` once the hot-reload websocket connects through the proxy.
+
+   Open the `localhost` URL, not `https://127.0.0.1:…`. The node proxy at `VITE_V3_RPC_PROVIDER_HOST` answers `401 host not authorized` to an `Origin` of `https://127.0.0.1:5174`, and serves `https://localhost:5174` and `https://localhost:4174` (checked on 2026-10-29). With the self-signed certificate, Chrome shows "Your connection is not private" once. Choose Advanced, then "Proceed to localhost". Before P1, `curl -sk https://localhost:<listen port> | grep -c '<title>Compound Dashboard'` prints `1`.
+
+6. After the run, stop the proxy and the server, restore the file and check the working copy:
 
    ```bash
    git checkout -- src/constants/wrappedMarkets.ts
    git status --porcelain   # expect no output
    ```
 
-   Then remove the worktree with `git worktree remove ../webb3-frontend-porto-run`.
+   Then remove the worktree with `git worktree remove ../webb3-frontend-porto-run`. Delete `~/.porto-https` when no run needs the certificate.
 
 Do not commit the opened controls, and do not push them on any branch. Otherwise `build.yaml` publishes a public build with wrapped deposits and exits open. For the same reason, do not run the "Preview PR" workflow on a PR that holds them.
 
@@ -143,7 +231,7 @@ Do not commit the opened controls, and do not push them on any branch. Otherwise
 | Porto mobile app version                                         | Not recorded                                                                                             |
 | CID                                                              | None. A local build has no CID. COM-292 releases a CID.                                                  |
 
-Open question, owner Adam, answered on 2026-10-26. COM-284 ran against `app.compound.xyz`. Read from the manifest of extension 1.1.16: the `content_scripts` that inject its provider match `https://` pages only. Expected from that manifest: on an `http://` origin, such as `http://127.0.0.1:4173`, the extension does not announce itself. So P1 fails on the `http://` URLs of step 4, and the run stops there. The runs served `yarn dev` through a loopback HTTPS proxy and opened `https://localhost:5174`, where P1 passed. Another origin, such as a private staging host that screening allows, is Adam's and Leo's decision.
+Open question, owner Adam, answered on 2026-10-26. COM-284 ran against `app.compound.xyz`. Read from the manifest of extension 1.1.16: the `content_scripts` that inject its provider match `https://` pages only. Expected from that manifest: on an `http://` origin, such as `http://127.0.0.1:4173`, the extension does not announce itself. So P1 fails on the servers' own `http://` URLs, and the run stops there. The runs served `yarn dev` through a loopback HTTPS proxy and opened `https://localhost:5174`, where P1 passed. Steps 4 and 5 rebuild that setup. Their proxy script is a rewrite of the runs' script, which was not kept. On 2026-10-29 it served the dev server and a production build over HTTPS, and passed the dev server's websocket through, with no wallet connected. Another origin, such as a private staging host that screening allows, is Adam's and Leo's decision.
 
 ## Before the first signature
 
