@@ -15,6 +15,7 @@ import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { getBlockExplorerUrl } from '@helpers/urls';
@@ -217,8 +218,8 @@ function lendingWith(action: Controller, registry = OPEN): Lending {
 
 const BASE_ASSET = mockBaseAsset({ address: USDC, symbol: 'USDC', decimals: 6 });
 
-function cometState(baseAsset: BaseAssetWithAccountState): CometState {
-  return [
+function cometState(baseAsset: BaseAssetWithAccountState, cometAddress = USDC_COMET, account = ACCOUNT): CometState {
+  const state = [
     StateType.Hydrated,
     {
       baseAsset,
@@ -236,6 +237,9 @@ function cometState(baseAsset: BaseAssetWithAccountState): CometState {
       totalBaseSupplyUsd: 0n,
     },
   ] as unknown as CometState;
+  // As useCometState records it: read for the given market and account.
+  recordCometStateSource(state, { chainId: 1, cometAddress }, account);
+  return state;
 }
 
 function actionQueue(actions: Action[] = []): ActionQueue & { setPendingAction: jest.Mock } {
@@ -381,7 +385,7 @@ describe('WrappedSupply', () => {
     });
 
     it("warns without an amount while the direct position shown is still the previous market's", () => {
-      const state = cometState(BORROWER);
+      const state = cometState(BORROWER, USDT_COMET);
       const usdt = { ...lendingWith(controller()), route: routeFor(OPEN, USDT_COMET) };
       const { rerender } = render(homeElement(usdt, state, actionQueue(), USDT_MARKET));
 
@@ -402,7 +406,8 @@ describe('WrappedSupply', () => {
     });
 
     it("warns without an amount when the direct position read is another account's", () => {
-      const otherAccount = { ...WEB3, read: { ...WEB3.read, account: '0x0000000000000000000000000000000000000bb2' } };
+      const other = '0x0000000000000000000000000000000000000bb2';
+      const otherAccount = { ...WEB3, read: { ...WEB3.read, account: other } };
       const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
       const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
       const selectedMarketData = {
@@ -418,7 +423,7 @@ describe('WrappedSupply', () => {
                 transactions={[]}
                 web3={otherAccount}
                 selectedMarketData={selectedMarketData as never}
-                cometState={cometState(BORROWER)}
+                cometState={cometState(BORROWER, USDC_COMET, other)}
                 addTransaction={jest.fn()}
                 switchWriteNetwork={jest.fn()}
                 estimatedGasMap={new Map()}
