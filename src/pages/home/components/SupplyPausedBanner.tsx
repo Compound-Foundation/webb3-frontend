@@ -5,8 +5,8 @@ const FORUM_URL = 'https://www.comp.xyz/t/compound-v3-supply-paused-across-major
 const SupplyPausedBanner = () => (
   <div className="extension-banner L4 body text-color--3">
     <p>
-      New supplies to affected Compound markets are temporarily paused as a precaution following the reported security
-      incident on Ethereum mainnet. Follow updates on the{' '}
+      All Compound V3 markets on Ethereum except WBTC Comet are now unpaused and fully operational. Supply, borrowing,
+      and repayments are working as normal. Follow updates on the{' '}
       <a className="text-color--supply" target="_blank" rel="noopener noreferrer" href={FORUM_URL}>
         Compound forum
       </a>
