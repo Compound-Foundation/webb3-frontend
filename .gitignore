@@ -13,6 +13,9 @@
 
 # testing
 /coverage
+# browser suite (yarn test:browser) runs and reports
+/test-results/
+/playwright-report/
 
 # vite
 /dist/
