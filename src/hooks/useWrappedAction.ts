@@ -517,6 +517,16 @@ export function useWrappedAction({
    */
   const isEarlierTransactionPending = () => !live.current.isRestored || live.current.recovered.pending.length > 0;
 
+  // Unmounting ends the run. The refs above stop updating once the owner unmounts, so a step the
+  // manager is still preparing would otherwise pass its checks against the last rendered session.
+  // A step the wallet was already asked for stays with the manager, which tracks it.
+  useEffect(
+    () => () => {
+      runId.current++;
+    },
+    []
+  );
+
   useEffect(() => {
     if (!isStale) return;
     runId.current++;
