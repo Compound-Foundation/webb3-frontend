@@ -204,7 +204,7 @@ const POSITION: WrappedPosition = {
   snapshot: { totalSupply: 0n, totalAssets: 0n, baseSupplyIndex: 0n },
 };
 
-type Lending = WrappedLending & { write: { supply: jest.Mock } };
+type Lending = WrappedLending & { write: { supply: jest.Mock; withdraw: jest.Mock } };
 
 function lendingWith(action: Controller, registry = OPEN): Lending {
   return {
@@ -212,7 +212,7 @@ function lendingWith(action: Controller, registry = OPEN): Lending {
     position: { status: 'loaded', position: POSITION },
     retry: jest.fn(),
     action,
-    write: { supply: jest.fn(() => undefined) },
+    write: { supply: jest.fn(() => undefined), withdraw: jest.fn(() => undefined) },
   };
 }
 

@@ -39,6 +39,27 @@
     margin-top: 1rem;
   }
 
+  &__choice {
+    border: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    margin: 0.5rem 0;
+    padding: 0;
+
+    legend {
+      margin-bottom: 0.5rem;
+      width: 100%;
+    }
+
+    label {
+      align-items: center;
+      cursor: pointer;
+      display: flex;
+      gap: 0.5rem;
+    }
+  }
+
   @media (max-width: $device--sm) {
     &__figures {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -59,7 +80,7 @@
   padding: 1rem 1.25rem;
 }
 
-.wrapped-supply-modal {
+.wrapped-action-modal {
   &__close {
     background: none;
     border: 0;
@@ -72,6 +93,20 @@
     border-radius: 0.75rem;
     margin-top: 1.25rem;
     padding: 1rem 1.25rem;
+  }
+
+  &__figures {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 1.25rem 0 0.5rem;
+  }
+
+  &__figure {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    overflow-wrap: anywhere;
   }
 
   &__steps {
