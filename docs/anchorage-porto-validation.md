@@ -520,6 +520,12 @@ The PRs below this one already record these limitations. The run confirms, corre
 - A USDT supply over a nonzero allowance needs three mobile approvals (#65).
 - The wallet button counts an interrupted request as "1 Pending" on every page. Only the wrapped panel of its own market offers "Stop waiting" (#64).
 - Transaction history leaves out wrapped deposits and their approvals, and shows wrapped exits as ordinary withdrawals. The runs of 2026-10-26 observed this, as expected from code ([COM-291](anchorage-history-decision.md#observed-filled-from-com-290)).
+- On the wrapped route, a repay is signed as a fixed amount. The exception is a Max repay that the wallet balance covered when the user clicked Max. A typed amount, a Max the user then edited, and a Max limited to the wallet balance are fixed amounts.
+- Before the wallet is asked, the app refuses a repay above the debt in its latest Comet read. Another repayment or a liquidation can lower the debt after that read, for example while the custody approval is pending. In a queue with a wrapped withdrawal, the repay is sent only after the withdrawal confirms, so the debt has longer to change. If the debt falls below the fixed amount before execution, Comet credits the excess as a direct Comet supply, outside the wrapper.
+- The app cannot withdraw a direct supply on this route ([Limits](anchorage-queued-execution.md#limits), and preflight item 11 of the [release runbook](anchorage-release-runbook.md#preflight)). The user recovers it through another interface or the Extensions page.
+- A Max repay that the wallet covered is signed as `MAX_UINT256`. Comet resolves it to the whole debt at execution, so it leaves no excess. It reverts if interest accrued during the approval takes the debt above the wallet balance.
+- Comet and the Bulker offer no repay of the smaller of the amount and the debt. A Bulker repay followed by a base withdrawal of `MAX_UINT256` returns any excess in the same transaction. Comet resolves a base withdrawal of `MAX_UINT256` to `balanceOf(src)`, which is 0 while debt remains. That sequence reverts when the remaining debt is below the minimum borrow, when the account is not collateralized for borrowing, or when withdrawals are paused. It also needs the Bulker allowed as an operator.
+- The wrapped route refuses that sequence's withdrawal, because it sends every base withdrawal to the wrapper. The app does not use the sequence, and the risk is accepted (COM-330).
 
 ## Cases this run cannot exercise
 
