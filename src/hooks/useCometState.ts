@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
 import { adjustCollateralPrice, getBaseAssetDollarPrice, getBaseAssetPriceFeed } from '@helpers/baseAssetPrice';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import { shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
 import { getCapacity, getCollateralValue, MAX_UINT256, REFRESH_INTERVAL } from '@helpers/numbers';
@@ -41,6 +42,8 @@ export function useCometState(
   const [state, setState] = useState<CometState>([StateType.Loading, undefined]);
   const { waitFor } = useWaiter<Transaction[]>(transactions);
   const marketRef = useRef(marketState);
+  const accountRef = useRef(web3.read.account);
+  accountRef.current = web3.read.account;
 
   // When network is changed, immediately set state to loading and update the chainIdRef
   useEffect(() => {
@@ -72,14 +75,26 @@ export function useCometState(
           const cometResponse = await queryCometData(web3.read.provider.connection, marketStateData);
           newState = formatCometStateNoWallet(cometResponse, marketStateData, rewards);
         }
+        // The app keeps this state across an account switch until the next read arrives, so it
+        // carries the market and account it was read for.
+        recordCometStateSource(
+          newState,
+          { chainId: marketStateData.chainInformation.chainId, cometAddress: marketStateData.marketAddress },
+          account
+        );
 
-        // Only update state if chainId has not changed since the start of this callback
+        // Only update state if the market has not changed since the start of this callback
         // We compare to a ref because the `marketState` in the callback can be stale
-        if (marketState[1]?.marketAddress === marketRef.current[1]?.marketAddress) {
+        const requestedMarketAddress = marketState[1]?.marketAddress;
+        if (requestedMarketAddress === marketRef.current[1]?.marketAddress) {
           waitFor(
             (transactions) => transactions.length === 0,
             async () => {
-              setState(newState);
+              // The update can be held back until transactions settle, and the user can pick
+              // another market or account meanwhile, so both are checked again when it is applied.
+              if (requestedMarketAddress === marketRef.current[1]?.marketAddress && account === accountRef.current) {
+                setState(newState);
+              }
             },
             transactions
           );

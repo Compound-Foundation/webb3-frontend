@@ -166,15 +166,48 @@ export function sanitizedAmountForAction(
 
 type Validity = 'ok' | [false, string];
 
+/**
+ * Why `action` adds to the account's direct Comet base supply, given the base balance the
+ * earlier actions leave: a base supply always does, and so does a repay larger than the debt.
+ * A full repay (`MAX_UINT256`) repays the debt exactly.
+ */
+function directBaseSupplyProblem(baseAsset: BaseAssetWithAccountState, action: Action): string | undefined {
+  const [actionType, , amount] = action;
+  if (actionType === ActionType.Supply) {
+    return 'Direct Supply Unavailable With This Wallet';
+  }
+  if (actionType === ActionType.Repay) {
+    const borrowBalance = baseAsset.balance < 0n ? -baseAsset.balance : 0n;
+    if (amount !== MAX_UINT256 && amount > borrowBalance) {
+      return 'Amount Exceeds Borrow Balance';
+    }
+  }
+  return undefined;
+}
+
+export type ActionRules = {
+  /**
+   * The market's base supply goes through a wrapper for this session, so no action may add to
+   * the account's direct Comet supply: neither a base supply nor a repay larger than the debt.
+   */
+  blockDirectBaseSupply?: boolean;
+};
+
 export function validateAddingAction(
   baseAssetPre: BaseAssetWithAccountState,
   collateralAssetsPre: TokenWithAccountState[],
   actions: Action[],
-  actionToAdd: Action
+  actionToAdd: Action,
+  rules: ActionRules = {}
 ): Validity {
   const { baseAsset, collateralAssets } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions);
 
   const [actionType] = actionToAdd;
+  const directSupplyProblem = rules.blockDirectBaseSupply ? directBaseSupplyProblem(baseAsset, actionToAdd) : undefined;
+  if (directSupplyProblem !== undefined) {
+    return [false, directSupplyProblem];
+  }
+
   switch (actionType) {
     case ActionType.Borrow: {
       const amount = actionToAdd[2];
@@ -283,6 +316,21 @@ export function validateAddingAction(
     }
   }
   return 'ok';
+}
+
+/**
+ * Whether any action in the queue adds to the account's direct Comet base supply: a base
+ * supply, or a repay larger than the debt the earlier actions leave.
+ */
+export function addsDirectBaseSupply(
+  baseAssetPre: BaseAssetWithAccountState,
+  collateralAssetsPre: TokenWithAccountState[],
+  actions: Action[]
+): boolean {
+  return actions.some((action, index) => {
+    const { baseAsset } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions.slice(0, index));
+    return directBaseSupplyProblem(baseAsset, action) !== undefined;
+  });
 }
 
 export function validateAllowanceForAction(
