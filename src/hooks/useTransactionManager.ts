@@ -136,9 +136,9 @@ function updateStoredTransactions(change: (stored: Transaction[]) => Transaction
 
 /**
  * Whether the record is a step of a wrapper action. While such a step can still be live, the next
- * review of its action waits, so neither a reload nor clearing the list drops it. Only records
- * keyed to a configured wrapper qualify, so a record written to storage by anyone else cannot
- * hold any other contract's buttons.
+ * review of its action waits, so a reload does not drop it. Only records keyed to a configured
+ * wrapper qualify, so a record written to storage by anyone else cannot hold any other contract's
+ * buttons.
  */
 function isWrapperStep(transaction: Transaction): boolean {
   return transaction.step !== undefined && isWrapperAddress(transaction.key);
@@ -160,6 +160,18 @@ export function delaysCometRefresh(transaction: Transaction): boolean {
     transaction.isInterrupted === true &&
     !('hash' in transaction && transaction.hash !== undefined);
   return !isInterruptedWrapperStep;
+}
+
+/**
+ * Whether clearing the list keeps the record: a wrapper step whose result can still be followed,
+ * because it has a hash or its wallet request is open in this session. A wrapper step interrupted
+ * by a reload or an ambiguous answer has neither, so nothing can follow it. Clearing the list is
+ * how the user stops waiting for it, after checking the wallet, as for any other transaction.
+ */
+function isKeptByClear(transaction: Transaction): boolean {
+  const isInterrupted =
+    transaction.state === TransactionState.AwaitingConfirmation && transaction.isInterrupted === true;
+  return isWrapperStep(transaction) && !isInterrupted;
 }
 
 function txReducer(currentTransactions: Transaction[], action: Action): Transaction[] {
@@ -193,8 +205,8 @@ function txReducer(currentTransactions: Transaction[], action: Action): Transact
       break;
     }
     case ActionType.Clear: {
-      updatedTransactions = currentTransactions.filter(isWrapperStep);
-      const clearedIds = new Set(currentTransactions.filter((tx) => !isWrapperStep(tx)).map((tx) => tx.id));
+      updatedTransactions = currentTransactions.filter(isKeptByClear);
+      const clearedIds = new Set(currentTransactions.filter((tx) => !isKeptByClear(tx)).map((tx) => tx.id));
       storedChange = (stored) => stored.filter((tx) => !clearedIds.has(tx.id));
       break;
     }
@@ -362,10 +374,8 @@ export type TransactionManager = {
   restoredSession: RestoredSession | undefined;
   addTransaction: AddTransaction;
   submitTransaction: SubmitTransaction;
-  /** Clears the list, except wrapper steps, which stay until they settle or are dismissed. */
+  /** Clears the list, except wrapper steps that can still be followed, which stay until they settle. */
   clearTransactions: () => void;
-  /** Stops tracking one transaction, with no outcome and no callback. */
-  dismissTransaction: (id: string) => void;
 };
 
 export function useTransactionManager(web3: Web3): TransactionManager {
@@ -378,8 +388,8 @@ export function useTransactionManager(web3: Web3): TransactionManager {
   // so no record carries its callback. `settle` runs once for each id, so each callback runs once.
   const callbacks = useRef(new Map<string, (outcome: TransactionOutcome) => void>());
   // The transactions as of the last render. The reducer writes storage only when it runs, in the
-  // next render, so storage can still hold a transaction that this session has since settled,
-  // dismissed or cleared.
+  // next render, so storage can still hold a transaction that this session has since settled or
+  // cleared.
   const trackedTransactions = useRef(transactions);
   trackedTransactions.current = transactions;
   const { provider, account } = web3.write;
@@ -427,7 +437,7 @@ export function useTransactionManager(web3: Web3): TransactionManager {
           const isOwn = (tx: Transaction) => tx.networkId === chainId && tx.account?.toLowerCase() === sender;
           // A record with no sender cannot be tied to an account, and a wallet request with no hash
           // cannot be looked up. A wrapper step stays, though: its wallet request can still be open,
-          // so the next review of its action waits until the user dismisses it.
+          // so the next review of its action waits until the user clears it from the list.
           const isRestorable = (tx: Transaction) => tx.state === TransactionState.Pending || isWrapperStep(tx);
           // A transaction this session settled is dropped, even when storage holds it again, as after
           // another tab writes it back. `settle` ignores an id it has settled, so a copy tracked
@@ -437,7 +447,7 @@ export function useTransactionManager(web3: Web3): TransactionManager {
             stored.filter((tx) => tx.account !== undefined && !isSettled(tx) && (!isOwn(tx) || isRestorable(tx)))
           );
           // A transaction the last render tracked is skipped as well, because its stored record can be
-          // stale until the next render. Otherwise a wallet request dismissed or forgotten since that
+          // stale until the next render. Otherwise a wallet request cleared or forgotten since that
           // render comes back as interrupted, and holds back the next wrapper review.
           const isTracked = (tx: Transaction) => trackedTransactions.current.some((tracked) => tracked.id === tx.id);
           storedTransactions
@@ -609,7 +619,7 @@ export function useTransactionManager(web3: Web3): TransactionManager {
           return { status: 'refused', message: describeWalletRefusal(error) };
         }
         // The wallet had the request and can still send it. A wrapper step stays, marked
-        // interrupted, so the next review of its action waits until the user dismisses it.
+        // interrupted, so the next review of its action waits until the user clears it from the list.
         if (record !== undefined && isWrapperStep(record)) {
           const interrupted = { ...record, isInterrupted: true };
           updateTransactions([
@@ -649,11 +659,6 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     updateTransactions([ActionType.Clear]);
   };
 
-  const dismissTransaction = useCallback((id: string) => {
-    updateTransactions([ActionType.Remove, id]);
-    callbacks.current.delete(id);
-  }, []);
-
   return {
     transactions,
     settledTransactions,
@@ -662,6 +667,5 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     addTransaction,
     submitTransaction,
     clearTransactions,
-    dismissTransaction,
   };
 }

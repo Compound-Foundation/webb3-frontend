@@ -414,7 +414,7 @@ describe('useTransactionManager', () => {
       expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('sent')]: 'replaced' });
     });
 
-    it('stays tracked when its wallet request was open at a reload, until it is dismissed', async () => {
+    it('stays tracked when its wallet request was open at a reload, until the list is cleared', async () => {
       store([
         {
           ...storedRecord('', { key: WRAPPER, step: 'supply' }),
@@ -435,10 +435,8 @@ describe('useTransactionManager', () => {
       );
       expect(JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]')).toHaveLength(1);
 
+      // Nothing can follow it, so clearing the list is how the user stops waiting for it.
       act(() => result.current.clearTransactions());
-      expect(result.current.transactions).toHaveLength(1);
-
-      act(() => result.current.dismissTransaction(result.current.transactions[0].id));
       expect(result.current.transactions).toEqual([]);
       expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
     });
@@ -519,7 +517,7 @@ describe('useTransactionManager', () => {
       expect(outcomes(result.current.settledTransactions)).toEqual({ [tx('repay')]: 'replaced' });
     });
 
-    it('stays in the list when the list is cleared, while other transactions go', async () => {
+    it('stays in the list while it can be followed when the list is cleared, while other transactions go', async () => {
       const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
       await act(async () => {
         await result.current.addTransaction(COMET, 'Borrow USDC', sent(tx('sent'), 7), 1, jest.fn(), []);
