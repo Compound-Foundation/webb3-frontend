@@ -1,6 +1,6 @@
 import { Interface } from '@ethersproject/abi';
 import { TransactionReceipt } from '@ethersproject/providers';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import {
@@ -18,19 +18,29 @@ import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { getBlockExplorerUrl } from '@helpers/urls';
+import { SessionProbeResult } from '@helpers/walletErrors';
 import {
   RecheckedWithdrawal,
   WRAPPED_ACTION,
   WrappedActionDraft,
   WrappedActionType,
   WrappedBlockReason,
+  WrappedSession,
   WrappedStep,
   wrappedActionIdentity,
+  WrappedWithdrawalCheck,
 } from '@helpers/wrappedActions';
 import { WrappedPosition } from '@helpers/wrappedPositions';
 import { WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import { Theme } from '@hooks/useThemeManager';
-import { WrappedActionController, WrappedActionState, WrappedStepState } from '@hooks/useWrappedAction';
+import type { SendResult, TransactionRequest } from '@hooks/useTransactionManager';
+import {
+  useWrappedAction,
+  UseWrappedActionOptions,
+  WrappedActionController,
+  WrappedActionState,
+  WrappedStepState,
+} from '@hooks/useWrappedAction';
 import { ActionQueue, BaseAssetWithAccountState, CometState, MarketData, StateType } from '@types';
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
@@ -1111,6 +1121,170 @@ describe('WrappedWithdraw', () => {
       render(homeElement(lendingWith(controller(state)), cometState(BASE_ASSET)));
 
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('review dialog after the lifecycle stops the exit', () => {
+    type Manager = UseWrappedActionOptions['manager'];
+    type Request = { request: TransactionRequest; resolve: (result: SendResult) => void };
+
+    const SESSION_PROBE = async (): Promise<SessionProbeResult> => ({ status: 'usable' });
+
+    /**
+     * The real lifecycle for an exit of `review`, with a transaction manager that holds each request
+     * until the test answers it. The manager never calls `send`, so the wallet is never asked to sign.
+     */
+    function liveExit(review: WithdrawalReview, check: () => Promise<WrappedWithdrawalCheck>) {
+      const requests: Request[] = [];
+      const manager: Manager = {
+        transactions: [],
+        settledTransactions: [],
+        walletFailure: undefined,
+        restoredSession: { provider: WALLET, account: ACCOUNT, chainId: 1 },
+        dismissTransaction: jest.fn(),
+        submitTransaction: jest.fn(
+          (request: TransactionRequest) => new Promise<SendResult>((resolve) => requests.push({ request, resolve }))
+        ),
+      };
+      const session: WrappedSession = {
+        route: routeFor(OPEN),
+        account: ACCOUNT,
+        chainId: 1,
+        screeningStatus: 'allowed',
+        provider: WALLET,
+      };
+      const hook = renderHook(
+        ({ manager: current }: { manager: Manager }) =>
+          useWrappedAction({
+            session,
+            manager: current,
+            readProvider: undefined,
+            probe: SESSION_PROBE,
+            checkRestriction: async () => undefined,
+          }),
+        { initialProps: { manager } }
+      );
+      const step = { ...exitStep(review), check };
+      const reachReview = async () => {
+        act(() => {
+          hook.result.current.start('withdraw', async () => ({
+            amount: review.quote.shares,
+            steps: [step],
+            withdrawal: review,
+          }));
+        });
+        await waitFor(() => expect(hook.result.current.state.phase).toBe('review'));
+      };
+      /** Another write through the same wallet finds the wallet session broken. */
+      const breakSession = () =>
+        hook.rerender({ manager: { ...manager, walletFailure: { provider: WALLET, message: 'sendMessage' } } });
+      return { hook, manager, requests, reachReview, breakSession };
+    }
+
+    /** Confirms the exit and waits until the wallet has its request. */
+    async function reachWallet(exit: ReturnType<typeof liveExit>) {
+      await exit.reachReview();
+      act(() => exit.hook.result.current.confirm());
+      await waitFor(() => expect(exit.requests).toHaveLength(1));
+      expect(exit.hook.result.current.state).toMatchObject({
+        phase: 'signing',
+        steps: [{ status: 'awaiting-signature' }],
+      });
+    }
+
+    const passes = (rechecked: RecheckedWithdrawal) => async (): Promise<WrappedWithdrawalCheck> => ({
+      ok: true,
+      rechecked,
+    });
+
+    it('keeps the estimate change, its advice to reject, and the missing minimum in view when the wallet session fails while the wallet has the request', async () => {
+      const exit = liveExit(PARTIAL_REVIEW, passes(PARTIAL_RECHECKED));
+      await reachWallet(exit);
+
+      exit.breakSession();
+      await waitFor(() => expect(exit.hook.result.current.state.phase).toBe('stopped'));
+      renderModal(exit.hook.result.current.state);
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/withdrawal stopped/i);
+      const alert = within(dialog).getByRole('alert');
+      expect(alert).toHaveTextContent(
+        /now 100\.049975 USDC, 0\.049975 USDC more than the 100\.000000 USDC you reviewed/
+      );
+      expect(alert).toHaveTextContent(
+        /if you do not want to withdraw about this amount, reject the request in your wallet/i
+      );
+      expect(dialog).toHaveTextContent(/the transaction has no minimum amount and no deadline/i);
+      // The step keeps the wording of a wallet error. The message is the page's own, so the dialog
+      // does not present it as the wallet's answer.
+      expect(
+        within(dialog).getByText(
+          'Your wallet reported an error (The wallet stopped responding while it had the request. The request can ' +
+            'still be approved in the wallet.). The request may still go through, so check your wallet before you ' +
+            'try again.'
+        )
+      ).toBeInTheDocument();
+      expect(dialog).not.toHaveTextContent(/Anchorage app/);
+      expect(exit.manager.submitTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a full exit's change since the panel showed it in view when the wallet session fails while the wallet has the request", async () => {
+      const review = { ...FULL_REVIEW, shownCash: 250_000_000n };
+      const exit = liveExit(
+        review,
+        passes({ quote: review.quote, blockNumber: 101, description: exitStep(review).description })
+      );
+      await reachWallet(exit);
+
+      exit.breakSession();
+      await waitFor(() => expect(exit.hook.result.current.state.phase).toBe('stopped'));
+      renderModal(exit.hook.result.current.state);
+
+      const dialog = screen.getByRole('dialog');
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        /now 250\.124997 USDC, 0\.124997 USDC more than the 250\.000000 USDC shown before/
+      );
+      expect(dialog).toHaveTextContent(/the transaction has no minimum amount and no deadline/i);
+    });
+
+    it.each<[string, SendResult]>([
+      ['the user rejected it', { status: 'rejected' }],
+      ['the wallet refused it before handling it', { status: 'refused', message: 'Unauthorized (4100)' }],
+      ['the wallet reported another error', { status: 'provider-failure', message: 'Internal error (-32603)' }],
+    ])('drops the estimate notices once the wallet no longer holds the request: %s', async (_name, answer) => {
+      const exit = liveExit(PARTIAL_REVIEW, passes(PARTIAL_RECHECKED));
+      await reachWallet(exit);
+
+      await act(async () => exit.requests[0].resolve(answer));
+      expect(exit.hook.result.current.state.phase).toBe('stopped');
+      renderModal(exit.hook.result.current.state);
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/withdrawal stopped/i);
+      expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+      expect(dialog).not.toHaveTextContent(/no minimum amount/i);
+    });
+
+    it('drops the estimate notices when the wallet session fails before the wallet is asked', async () => {
+      const review = { ...FULL_REVIEW, shownCash: 250_000_000n };
+      // The check before the signature is still reading when the session fails.
+      const exit = liveExit(review, () => new Promise<WrappedWithdrawalCheck>(() => undefined));
+      await exit.reachReview();
+      act(() => exit.hook.result.current.confirm());
+      expect(exit.hook.result.current.state).toMatchObject({ phase: 'signing', steps: [{ status: 'checking' }] });
+
+      exit.breakSession();
+      await waitFor(() => expect(exit.hook.result.current.state.phase).toBe('stopped'));
+      expect(exit.hook.result.current.state).toMatchObject({
+        steps: [{ status: 'blocked', reason: 'session-unusable' }],
+      });
+      renderModal(exit.hook.result.current.state);
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/nothing was sent/i);
+      expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+      expect(dialog).not.toHaveTextContent(/no minimum amount/i);
+      expect(exit.manager.submitTransaction).not.toHaveBeenCalled();
     });
   });
 
