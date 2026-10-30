@@ -462,6 +462,23 @@ describe('useTransactionManager', () => {
       );
     });
 
+    it('holds Comet refreshes when its stored wallet request carries a hash', async () => {
+      store([
+        {
+          ...storedRecord(tx('supply'), { key: WRAPPER, step: 'supply' }),
+          state: TransactionState.AwaitingConfirmation,
+        },
+      ]);
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
+
+      await waitFor(() =>
+        expect(result.current.transactions).toEqual([
+          expect.objectContaining({ hash: tx('supply'), isInterrupted: true }),
+        ])
+      );
+      expect(holdsCometRefresh(result.current.transactions[0])).toBe(true);
+    });
+
     it('is an ordinary transaction when it is not keyed to a wrapper', async () => {
       store([
         {
@@ -1208,6 +1225,10 @@ describe('holdsCometRefresh', () => {
     [
       'a broadcast wrapper transaction carrying an interrupted flag',
       { ...interruptedWrapperRequest, state: TransactionState.Pending, hash: tx('wrapper') } as Transaction,
+    ],
+    [
+      'an interrupted wrapper request carrying a hash',
+      { ...interruptedWrapperRequest, hash: tx('wrapper') } as Transaction,
     ],
   ])('holds refreshes for %s', (_name, transaction) => {
     expect(holdsCometRefresh(transaction)).toBe(true);

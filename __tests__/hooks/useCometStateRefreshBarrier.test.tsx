@@ -159,6 +159,7 @@ describe('useCometState refresh barrier', () => {
       { ...INTERRUPTED_WRAPPER_REQUEST, key: COMET },
     ],
     ['a wrapper record with no step, marked interrupted', { ...INTERRUPTED_WRAPPER_REQUEST, step: undefined }],
+    ['an interrupted wrapper request carrying a hash', { ...INTERRUPTED_WRAPPER_REQUEST, hash: HASH } as Transaction],
   ])('holds the refresh until %s settles', async (_name, transaction) => {
     mockQueryCometData.mockResolvedValue(cometResponse(111));
     const { result, rerender } = renderCometState({
@@ -170,6 +171,28 @@ describe('useCometState refresh barrier', () => {
 
     await act(async () => {
       rerender({ market: [StateType.Hydrated, MARKET_A], transactions: [] });
+    });
+
+    expect(result.current[0]).toBe(StateType.NoWallet);
+    expect(result.current[1]?.earnAPR).toBe(111n);
+  });
+
+  it('applies a held refresh once a live wrapper request is marked interrupted', async () => {
+    mockQueryCometData.mockResolvedValue(cometResponse(111));
+    const liveRequest: Transaction = { ...INTERRUPTED_WRAPPER_REQUEST, isInterrupted: false };
+    const { result, rerender } = renderCometState({
+      market: [StateType.Hydrated, MARKET_A],
+      transactions: [liveRequest],
+    });
+    await runFirstRead();
+    expect(result.current[0]).toBe(StateType.Loading);
+
+    // The manager replaces the record in place, keeping its id, when the wallet's answer is ambiguous.
+    await act(async () => {
+      rerender({
+        market: [StateType.Hydrated, MARKET_A],
+        transactions: [{ ...liveRequest, isInterrupted: true }],
+      });
     });
 
     expect(result.current[0]).toBe(StateType.NoWallet);
