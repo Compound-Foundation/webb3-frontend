@@ -4,7 +4,7 @@ import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
-import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
 import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
@@ -25,6 +25,7 @@ import {
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
+import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
 
 // Child components are replaced with stand-ins that record the props Home passes them.
@@ -40,7 +41,6 @@ function mockRecordProps(name: string) {
 }
 jest.mock('../components/Masthead', () => mockRecordProps('Masthead'));
 jest.mock('../components/PositionCard', () => mockRecordProps('PositionCard'));
-jest.mock('../components/WrappedPositionPanel', () => mockRecordProps('WrappedPositionPanel'));
 jest.mock('../components/ActionModal', () => mockRecordProps('ActionModal'));
 jest.mock('../components/AssetRow', () => mockRecordProps('AssetRow'));
 jest.mock('../components/InstitutionalBanner', () => mockRecordProps('InstitutionalBanner'));
@@ -58,6 +58,7 @@ jest.mock('@hooks/useWriteCometState', () => ({ useWriteCometState: () => mockWr
 
 const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
 const USDT_COMET = '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840';
+const USDT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
 const USDC_MARKET = getMarket(1, USDC_COMET) as MarketData;
 const USDT_MARKET = getMarket(1, USDT_COMET) as MarketData;
 
@@ -81,20 +82,21 @@ function wrappedLending(cometAddress = USDC_COMET): WrappedLending {
     retry: jest.fn(),
     action: IDLE_WRAPPED_ACTION,
     write: IDLE_WRITE_WRAPPED_STATE,
+    submission: STANDARD_LENDING.submission,
   };
 }
 
 const LOADED: WrappedLending['position'] = {
   status: 'loaded',
   position: {
-    shares: 1n,
+    shares: 7n * 10n ** 18n,
     shareDecimals: 18,
-    grossAssets: 0n,
+    grossAssets: 7_000_000n,
     baseDecimals: 6,
     baseWalletBalance: 0n,
     wrapperAllowance: 0n,
     redeemBuffer: 3n,
-    fullExitCash: 0n,
+    fullExitCash: 6_999_997n,
     isWithdrawPaused: false,
     snapshot: { totalSupply: 0n, totalAssets: 0n, baseSupplyIndex: 0n },
   },
@@ -106,6 +108,7 @@ const STANDARD: WrappedLending = {
   retry: jest.fn(),
   action: IDLE_WRAPPED_ACTION,
   write: IDLE_WRITE_WRAPPED_STATE,
+  submission: STANDARD_LENDING.submission,
 };
 
 type CometRead = { market?: MarketData; account?: string; isBulkerAllowed?: boolean };
@@ -164,7 +167,7 @@ function homeElement({ lending, market = USDC_MARKET, state, queue, web3 = mockW
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
   return (
-    <WrappedLendingContext.Provider value={lending}>
+    <TestLendingProvider value={lending} web3={web3} market={market}>
       <SelectedMarketContext.Provider
         value={{
           selectedMarket: [StateType.Hydrated, market],
@@ -189,7 +192,7 @@ function homeElement({ lending, market = USDC_MARKET, state, queue, web3 = mockW
           />
         </ActionQueueContext.Provider>
       </SelectedMarketContext.Provider>
-    </WrappedLendingContext.Provider>
+    </TestLendingProvider>
   );
 }
 
@@ -201,16 +204,23 @@ describe('Home on the wrapped route', () => {
     Object.values(mockWriteState).forEach((fn) => fn.mockReset());
   });
 
-  it('offers no direct base supply and shows no supply incentives', () => {
+  it("shows no supply incentives, and gives the form the route's rules", () => {
     render(homeElement({ lending: wrappedLending(), state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
 
     const [, masthead] = mockLastProps.Masthead.state;
-    expect(masthead.isDirectBaseSupplyBlocked).toBe(true);
     expect(masthead.earnRewardsAPR).toBe(0n);
     expect(masthead.isInstitutional).toBe(false);
 
     const [, positionCard] = mockLastProps.PositionCard.state;
-    expect(positionCard.actionRules).toEqual({ blockDirectBaseSupply: true });
+    // The committed release controls are closed, so the form shows why instead of queueing.
+    expect(positionCard.actionRules).toEqual({
+      wrappedBase: {
+        supplyBlockedReason: 'Supply Not Open Yet',
+        withdrawBlockedReason: 'Withdrawals Not Open Yet',
+        maxPartialWithdrawal: undefined,
+        canWithdrawAll: false,
+      },
+    });
     expect(positionCard.earnRewardsAPR).toBe(0n);
     expect(positionCard.isInstitutional).toBe(false);
   });
@@ -223,16 +233,16 @@ describe('Home on the wrapped route', () => {
     expect(positionCard.earnRewardsAPR).toBe(12_000_000_000_000_000n);
   });
 
-  it('ignores a request to start a base supply', () => {
+  it('opens the normal amount form for a base supply', () => {
     const queue = actionQueue([]);
     render(homeElement({ lending: wrappedLending(), state: cometState(EMPTY_ACCOUNT), queue }));
 
     const [, masthead] = mockLastProps.Masthead.state;
     masthead.onSupplyAction([ActionType.Supply, EMPTY_ACCOUNT, undefined] as PendingAction);
-    expect(queue.setPendingAction).not.toHaveBeenCalled();
+    expect(queue.setPendingAction).toHaveBeenCalledWith([ActionType.Supply, EMPTY_ACCOUNT, undefined]);
   });
 
-  it('refuses to submit a queued base supply', () => {
+  it('never sends a queued base supply to Comet or the Bulker, even when the wrapper cannot take it', () => {
     render(
       homeElement({
         lending: wrappedLending(),
@@ -262,7 +272,7 @@ describe('Home on the wrapped route', () => {
     expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
   });
 
-  it('refuses a submit callback kept from before the route became wrapped', () => {
+  it('sends no base supply to Comet from a submit callback kept from before the route became wrapped', () => {
     const queue = actionQueue([supplyAction(EMPTY_ACCOUNT)]);
     const state = cometState(EMPTY_ACCOUNT);
     const { rerender } = render(homeElement({ lending: STANDARD, state, queue }));
@@ -275,43 +285,30 @@ describe('Home on the wrapped route', () => {
     expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
   });
 
-  it('starts no wrapped supply review from a callback kept from an earlier visit', () => {
+  it.each<[string, Action]>([
+    ['supply', [ActionType.Supply, EMPTY_ACCOUNT, 1_000_000n]],
+    ['withdrawal', [ActionType.Withdraw, EMPTY_ACCOUNT, 1_000_000n]],
+  ])('starts no wrapped %s from a submit callback kept from an earlier visit', (_, action) => {
     const supply = jest.fn(() => undefined);
     const withdraw = jest.fn(() => undefined);
     const state = cometState(EMPTY_ACCOUNT);
-    const usdc = { ...wrappedLending(), write: { supply, withdraw } };
-    const { rerender } = render(homeElement({ lending: usdc, state, queue: actionQueue([]) }));
-    const keptReview = mockLastProps.WrappedPositionPanel.supply.onReview;
+    const usdc = { ...wrappedLending(), write: { approve: jest.fn(), supply, withdraw } };
+    const { rerender } = render(homeElement({ lending: usdc, state, queue: actionQueue([action]) }));
+    const keptSubmit = mockLastProps.PositionCard.state[1].onSubmitClicked;
 
-    // The user switches to the USDT market: the panel's review callback from before belongs to USDC.
-    const usdt = { ...wrappedLending(USDT_COMET), write: { supply, withdraw } };
-    rerender(homeElement({ lending: usdt, market: USDT_MARKET, state, queue: actionQueue([]) }));
+    // The user switches to the USDT market: the submit callback from before belongs to USDC.
+    const usdt = { ...wrappedLending(USDT_COMET), write: { approve: jest.fn(), supply, withdraw } };
+    const usdtAction = [action[0], { ...EMPTY_ACCOUNT, address: USDT }, action[2]] as Action;
+    rerender(homeElement({ lending: usdt, market: USDT_MARKET, state, queue: actionQueue([usdtAction]) }));
 
-    expect(keptReview(1_000_000n)).toBe('identity-changed');
+    keptSubmit();
     expect(supply).not.toHaveBeenCalled();
-    mockLastProps.WrappedPositionPanel.supply.onReview(1_000_000n);
-    expect(supply).toHaveBeenCalledWith(1_000_000n);
-  });
-
-  it('starts no wrapped withdrawal review from a callback kept from an earlier visit', () => {
-    const supply = jest.fn(() => undefined);
-    const withdraw = jest.fn(() => undefined);
-    const state = cometState(EMPTY_ACCOUNT);
-    const usdc = { ...wrappedLending(), write: { supply, withdraw } };
-    const { rerender } = render(homeElement({ lending: usdc, state, queue: actionQueue([]) }));
-    const keptReview = mockLastProps.WrappedPositionPanel.withdraw.onReview;
-
-    // The user switches to the USDT market: the panel's review callback from before belongs to USDC.
-    const usdt = { ...wrappedLending(USDT_COMET), write: { supply, withdraw } };
-    rerender(homeElement({ lending: usdt, market: USDT_MARKET, state, queue: actionQueue([]) }));
-
-    expect(keptReview({ kind: 'full' }, 1_000_000n)).toBe('identity-changed');
     expect(withdraw).not.toHaveBeenCalled();
-    mockLastProps.WrappedPositionPanel.withdraw.onReview({ kind: 'full' }, 1_000_000n);
-    expect(withdraw).toHaveBeenCalledWith({ kind: 'full' }, 1_000_000n);
+    mockLastProps.PositionCard.state[1].onSubmitClicked();
+    expect(supply.mock.calls.length + withdraw.mock.calls.length).toBe(1);
   });
 
-  it('shows the panel loading while the Comet state still belongs to the previous market', () => {
+  it('leaves the wrapped value out while the Comet state still belongs to the previous market', () => {
     const state = cometState(EMPTY_ACCOUNT, { market: USDT_MARKET });
     const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
     const { rerender } = render(
@@ -319,39 +316,53 @@ describe('Home on the wrapped route', () => {
     );
 
     rerender(homeElement({ lending: loaded, market: USDC_MARKET, state, queue: actionQueue([]) }));
-    expect(mockLastProps.WrappedPositionPanel.position).toEqual({ status: 'loading' });
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
+    expect(mockLastProps.Masthead.state[1].baseAsset.balance).toBe(0n);
+    expect(mockLastProps.PositionCard.state[1].actionRules.wrappedBase.maxPartialWithdrawal).toBeUndefined();
 
     rerender(
       homeElement({ lending: loaded, market: USDC_MARKET, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) })
     );
-    expect(mockLastProps.WrappedPositionPanel.position).toEqual(loaded.position);
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(loaded.position);
-  });
-
-  it('gives the masthead the position the panel shows', () => {
-    const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
-    render(homeElement({ lending: loaded, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
-
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toBe(mockLastProps.WrappedPositionPanel.position);
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
+    expect(mockLastProps.Masthead.state[1].baseAsset.balance).toBe(7_000_000n);
+    expect(mockLastProps.PositionCard.state[1].baseAsset.balance).toBe(7_000_000n);
   });
 
   it.each<[string, WrappedLending['position']]>([
     ['loading', { status: 'loading' }],
     ['failed to read', { status: 'error', message: 'Read failed.' }],
-  ])('gives the masthead a position that is %s, as the panel shows it', (_, position) => {
+  ])('shows the direct balance alone while the position is %s', (_, position) => {
     const lending = { ...wrappedLending(), position };
     render(homeElement({ lending, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
 
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(position);
+    expect(mockLastProps.Masthead.state[1].baseAsset.balance).toBe(0n);
+  });
+
+  it('shows a failed read of the position in the masthead, with Retry', () => {
+    const failed: WrappedLending = { ...wrappedLending(), position: { status: 'error', message: 'Read failed.' } };
+    render(homeElement({ lending: failed, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
+
+    const { notice } = mockLastProps.Masthead.state[1];
+    expect(notice.actionLabel).toBe('Retry');
+    expect(notice.onAction).toBe(failed.retry);
+  });
+
+  it('says why the position is unavailable when the wrapper check could not run', () => {
+    const unavailable: WrappedLending = {
+      ...wrappedLending(),
+      position: { status: 'unavailable', reason: 'validation-failed' },
+    };
+    render(homeElement({ lending: unavailable, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
+
+    expect(mockLastProps.Masthead.state[1].notice).toMatchObject({
+      message: expect.stringMatching(/could not be checked/),
+      actionLabel: 'Reload',
+    });
   });
 
   it('adds no wrapped value to Comet state read for another account', () => {
     const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
     const state = cometState(EMPTY_ACCOUNT);
     const { rerender } = render(homeElement({ lending: loaded, state, queue: actionQueue([]) }));
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
+    expect(mockLastProps.Masthead.state[1].baseAsset.balance).toBe(7_000_000n);
 
     // The wallet switched accounts, and the Comet state is still the previous account's.
     const otherAccount = '0x0000000000000000000000000000000000000bb2';
@@ -362,7 +373,7 @@ describe('Home on the wrapped route', () => {
     };
     rerender(homeElement({ lending: loaded, state, queue: actionQueue([]), web3: switched }));
 
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
+    expect(mockLastProps.Masthead.state[1].baseAsset.balance).toBe(0n);
   });
 
   it('adds the wrapped value to Comet state read for the connected account before the dashboard mounted', () => {
@@ -376,7 +387,7 @@ describe('Home on the wrapped route', () => {
     );
 
     // useCometState recorded the account it read the state for, so a remounted dashboard knows it.
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
+    expect(mockLastProps.Masthead.state[1].wrappedSupplyApart).toBe(7_000_000n);
     mockLastProps.PositionCard.state[1].onSubmitClicked();
     expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
   });
@@ -388,7 +399,7 @@ describe('Home on the wrapped route', () => {
       homeElement({ lending: { ...wrappedLending(), position: LOADED }, state: unrecorded, queue: actionQueue([]) })
     );
 
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
+    expect(mockLastProps.Masthead.state[1].baseAsset.balance).toBe(0n);
   });
 });
 
@@ -505,52 +516,21 @@ describe('Home on the wrapped route across a wallet change', () => {
   });
 });
 
-describe('Home on the wrapped route while Comet state loads', () => {
-  const LOADING: CometState = [StateType.Loading, undefined];
-
-  beforeEach(() => {
-    delete mockLastProps.WrappedPositionPanel;
-  });
-
-  it('still shows a wrapped read failure and its retry', () => {
-    const failed: WrappedLending = { ...wrappedLending(), position: { status: 'error', message: 'Read failed.' } };
-    render(homeElement({ lending: failed, state: LOADING, queue: actionQueue([]) }));
-
-    expect(mockLastProps.WrappedPositionPanel.position).toEqual(failed.position);
-    expect(mockLastProps.WrappedPositionPanel.onRetry).toBe(failed.retry);
-  });
-
-  it('still shows why wrapped reads are unavailable', () => {
-    const unavailable: WrappedLending = {
-      ...wrappedLending(),
-      position: { status: 'unavailable', reason: 'validation-failed' },
-    };
-    render(homeElement({ lending: unavailable, state: LOADING, queue: actionQueue([]) }));
-
-    expect(mockLastProps.WrappedPositionPanel.position).toEqual(unavailable.position);
-  });
-
-  it('holds back loaded figures until the Comet state for the market arrives', () => {
-    render(homeElement({ lending: { ...wrappedLending(), position: LOADED }, state: LOADING, queue: actionQueue([]) }));
-
-    expect(mockLastProps.WrappedPositionPanel.position).toEqual({ status: 'loading' });
-    expect(mockLastProps.WrappedPositionPanel.baseAsset.symbol).toBe('USDC');
-  });
-});
-
 describe('Home on the standard route', () => {
   it('keeps the direct supply and the market incentives', () => {
     render(homeElement({ lending: STANDARD, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
 
     const [, masthead] = mockLastProps.Masthead.state;
-    expect(masthead.isDirectBaseSupplyBlocked).toBe(false);
     expect(masthead.earnRewardsAPR).toBe(12_000_000_000_000_000n);
-    expect(mockLastProps.PositionCard.state[1].actionRules).toEqual({ blockDirectBaseSupply: false });
+    expect(mockLastProps.PositionCard.state[1].actionRules).toEqual({});
   });
 
-  it('gives the masthead no wrapped position', () => {
+  it('adds no wrapped value and shows no wrapped notice', () => {
     render(homeElement({ lending: STANDARD, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
 
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toBeUndefined();
+    const [, masthead] = mockLastProps.Masthead.state;
+    expect(masthead.baseAsset).toBe(EMPTY_ACCOUNT);
+    expect(masthead.wrappedSupplyApart).toBeUndefined();
+    expect(masthead.notice).toBeUndefined();
   });
 });

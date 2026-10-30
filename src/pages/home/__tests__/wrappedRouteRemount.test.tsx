@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
-import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
 import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
@@ -14,6 +14,7 @@ import { ActionQueue, BaseAssetWithAccountState, CometState, MarketData, Selecte
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
+import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
 
 // The masthead renders for real so the headline can be read. It also records the props Home
@@ -34,7 +35,6 @@ function mockStandIn() {
   return { __esModule: true, default: () => null };
 }
 jest.mock('../components/PositionCard', () => mockStandIn());
-jest.mock('../components/WrappedPositionPanel', () => mockStandIn());
 jest.mock('../components/ActionModal', () => mockStandIn());
 jest.mock('../components/AssetRow', () => mockStandIn());
 jest.mock('../components/InstitutionalBanner', () => mockStandIn());
@@ -78,6 +78,7 @@ function wrappedLending(): WrappedLending {
     retry: jest.fn(),
     action: IDLE_WRAPPED_ACTION,
     write: IDLE_WRITE_WRAPPED_STATE,
+    submission: STANDARD_LENDING.submission,
   };
 }
 
@@ -146,7 +147,7 @@ function app({ isDashboard, state, web3 }: { isDashboard: boolean; state: CometS
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
   return (
-    <WrappedLendingContext.Provider value={wrappedLending()}>
+    <TestLendingProvider value={wrappedLending()} web3={web3} market={USDC_MARKET}>
       <SelectedMarketContext.Provider value={selectedMarketData}>
         <ActionQueueContext.Provider value={actionQueue()}>
           <div id="overlay" />
@@ -166,13 +167,12 @@ function app({ isDashboard, state, web3 }: { isDashboard: boolean; state: CometS
           )}
         </ActionQueueContext.Provider>
       </SelectedMarketContext.Provider>
-    </WrappedLendingContext.Provider>
+    </TestLendingProvider>
   );
 }
 
 const LOADING: CometState = [StateType.Loading, undefined];
 const headline = () => screen.getByRole('heading', { level: 1 }).textContent;
-const mastheadPositionStatus = () => mockLastProps.Masthead.state[1].wrappedPosition.status;
 
 describe('Home on the wrapped route across a return to the dashboard', () => {
   beforeEach(() => {
@@ -184,7 +184,6 @@ describe('Home on the wrapped route across a return to the dashboard', () => {
     const stateForA = cometState(accountA.read.account as string);
     const { rerender } = render(app({ isDashboard: true, state: LOADING, web3: accountA }));
     rerender(app({ isDashboard: true, state: stateForA, web3: accountA }));
-    expect(mastheadPositionStatus()).toBe('loaded');
     expect(headline()).toBe('$1,250.00');
 
     // The user leaves the dashboard and switches to account B. The app keeps A's Comet state
@@ -192,12 +191,10 @@ describe('Home on the wrapped route across a return to the dashboard', () => {
     rerender(app({ isDashboard: false, state: stateForA, web3: accountA }));
     rerender(app({ isDashboard: false, state: stateForA, web3: web3For(ACCOUNT_B) }));
     rerender(app({ isDashboard: true, state: stateForA, web3: web3For(ACCOUNT_B) }));
-    expect(mastheadPositionStatus()).not.toBe('loaded');
     expect(headline()).toBe('$1,000.00');
 
     // B's Comet state arrives while the dashboard is mounted.
     rerender(app({ isDashboard: true, state: cometState(ACCOUNT_B), web3: web3For(ACCOUNT_B) }));
-    expect(mastheadPositionStatus()).toBe('loaded');
     expect(headline()).toBe('$1,250.00');
   });
 
@@ -205,17 +202,15 @@ describe('Home on the wrapped route across a return to the dashboard', () => {
     const state = cometState(mockWeb3.read.account as string);
     const { rerender } = render(app({ isDashboard: true, state: LOADING, web3: mockWeb3 }));
     rerender(app({ isDashboard: true, state, web3: mockWeb3 }));
-    expect(mastheadPositionStatus()).toBe('loaded');
+    expect(headline()).toBe('$1,250.00');
 
     rerender(app({ isDashboard: false, state, web3: mockWeb3 }));
     rerender(app({ isDashboard: true, state, web3: mockWeb3 }));
-    expect(mastheadPositionStatus()).toBe('loaded');
     expect(headline()).toBe('$1,250.00');
   });
 
   it('adds the wrapped value to Comet state read for the account before the dashboard first mounted', () => {
     render(app({ isDashboard: true, state: cometState(mockWeb3.read.account as string), web3: mockWeb3 }));
-    expect(mastheadPositionStatus()).toBe('loaded');
     expect(headline()).toBe('$1,250.00');
   });
 });

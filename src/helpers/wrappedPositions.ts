@@ -6,10 +6,10 @@ import { WRAPPED_MARKET_REGISTRY, WrappedMarket, WrappedMarketRegistry } from '@
 import CometAbi from '@helpers/abis/Comet';
 import ERC20Abi from '@helpers/abis/ERC20';
 import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
-import { addsDirectBaseSupply } from '@helpers/actions';
+import { lendsBaseDirectly } from '@helpers/actions';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { getTokenValue } from '@helpers/numbers';
-import { Action, CometState, Currency, StateType } from '@types';
+import { Action, BaseAssetWithAccountState, CometState, Currency, StateType } from '@types';
 
 /** The wrapper's divisor for Comet's supply index in its redeem buffer. */
 const BASE_INDEX_SCALE = 10n ** 15n;
@@ -272,12 +272,13 @@ function isSameMarket(a: MarketIdentity | undefined, b: MarketIdentity): boolean
 }
 
 /**
- * Whether to refuse submitting `actions` to `submittedMarket`, judged by the session as it is
- * now. A dialog can keep a submit callback, with its market, actions and balances, from an
- * earlier render. On the wrapped route, the actions must not add to the account's direct
- * Comet supply at the live balances. Without live balances for that market and account, the
- * submission is refused. Once another market is selected, the route of a kept dialog's market is
- * unknown. Such a dialog is refused if its market can route through a wrapper.
+ * Whether to refuse submitting `actions` to Comet or the Bulker for `submittedMarket`, judged by
+ * the session as it is now. A dialog can keep a submit callback, with its market, actions and
+ * balances, from an earlier render. On the wrapped route, the wrapper carries out base supply and
+ * withdrawal, so the actions must not lend or withdraw the base token directly at the live
+ * balances. Without live balances for that market and account, the submission is refused. Once
+ * another market is selected, the route of a kept dialog's market is unknown. Such a dialog is
+ * refused if its market can route through a wrapper.
  */
 export function isSubmissionRefused(
   live: LiveSubmissionState,
@@ -295,21 +296,20 @@ export function isSubmissionRefused(
   if (stateType !== StateType.Hydrated || !isSameMarket(live.comet.market, submittedMarket) || !isLiveAccount) {
     return true;
   }
-  return addsDirectBaseSupply(cometState.baseAsset, cometState.collateralAssets, actions);
+  return lendsBaseDirectly(cometState.baseAsset, cometState.collateralAssets, actions);
 }
 
-export type WithdrawableCash = { amount: bigint; limit: 'none' | 'paused' | 'liquidity' };
-
 /**
- * The cash a full exit can pay now. The wrapper pays through Comet's `withdrawTo`, so the exit
- * pays nothing while Comet withdrawals are paused and no more than the base token Comet holds.
+ * The base asset the dashboard shows on the wrapped route: the Comet base asset with the wrapped
+ * position's value added to a supply balance, so the masthead, the position card and the queue's
+ * before and after values show it as the account's supply. Borrow capacity, collateral and
+ * liquidation figures do not read the base balance, so wrapper shares stay out of them. A direct
+ * borrow is returned unchanged, so the wrapped value is never netted against the debt.
  */
-export function getWithdrawableCash(
-  fullExitCash: bigint,
-  isWithdrawPaused: boolean,
-  marketLiquidity: bigint
-): WithdrawableCash {
-  if (isWithdrawPaused) return { amount: 0n, limit: 'paused' };
-  if (fullExitCash > marketLiquidity) return { amount: marketLiquidity, limit: 'liquidity' };
-  return { amount: fullExitCash, limit: 'none' };
+export function withWrappedSupply(
+  baseAsset: BaseAssetWithAccountState,
+  wrappedValue: bigint
+): BaseAssetWithAccountState {
+  if (baseAsset.balance < 0n || wrappedValue <= 0n) return baseAsset;
+  return { ...baseAsset, balance: baseAsset.balance + wrappedValue };
 }

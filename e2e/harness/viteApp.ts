@@ -184,9 +184,12 @@ export async function serveProduction({ outDir }: { outDir: string }): Promise<S
 export async function startDevServer({
   envDir,
   environment,
+  plugins = [],
 }: {
   envDir: string;
   environment: AppEnvironment;
+  /** Plugins for the dev server only, such as `openWrappedReleaseControls`. */
+  plugins?: Plugin[];
 }): Promise<Served & { server: ViteDevServer; hmrOrigin: string; DEV: boolean }> {
   removeViteVariables();
   process.env.NODE_ENV = 'development';
@@ -202,7 +205,7 @@ export async function startDevServer({
     logLevel: 'warn',
     clearScreen: false,
     server: { middlewareMode: true, hmr: { server: httpServer }, host: '127.0.0.1' },
-    plugins: [recorder((config) => (DEV = Boolean(config.env.DEV)))],
+    plugins: [recorder((config) => (DEV = Boolean(config.env.DEV))), ...plugins],
   });
   httpServer.on('request', server.middlewares);
   return {
