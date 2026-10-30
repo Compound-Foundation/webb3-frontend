@@ -11,6 +11,7 @@
     "export:extra": "mkdir ./out/markets && cp ./out/markets.html ./out/markets/index.html",
     "sleuth": "forge build --via-ir --root ./src/helpers -C Sleuth -o sleuth/out",
     "test": "TZ=UTC jest",
+    "test:fork-runner": "node --test scripts/lib/__tests__/wrapped-fork-runner.test.js",
     "lint": "eslint . --ext .ts --ext .tsx",
     "test:browser": "playwright test -c e2e/playwright.config.ts",
     "test:browser:dev": "BROWSER_TEST_SKIP_PROD=1 playwright test -c e2e/playwright.config.ts --project=dev",
