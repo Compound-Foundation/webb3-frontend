@@ -11,6 +11,7 @@ import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { Theme } from '@hooks/useThemeManager';
 import { IDLE_WRAPPED_ACTION } from '@hooks/useWrappedAction';
+import { IDLE_WRITE_WRAPPED_STATE } from '@hooks/useWriteWrappedState';
 import {
   Action,
   ActionQueue,
@@ -74,7 +75,13 @@ function wrappedLending(cometAddress = USDC_COMET): WrappedLending {
     deposit: { isEligible: false, reason: 'deposits-disabled' },
     exit: { isEligible: false, reason: 'exits-disabled' },
   };
-  return { route, position: { status: 'loading' }, retry: jest.fn(), action: IDLE_WRAPPED_ACTION };
+  return {
+    route,
+    position: { status: 'loading' },
+    retry: jest.fn(),
+    action: IDLE_WRAPPED_ACTION,
+    write: IDLE_WRITE_WRAPPED_STATE,
+  };
 }
 
 const LOADED: WrappedLending['position'] = {
@@ -98,6 +105,7 @@ const STANDARD: WrappedLending = {
   position: { status: 'not-applicable' },
   retry: jest.fn(),
   action: IDLE_WRAPPED_ACTION,
+  write: IDLE_WRITE_WRAPPED_STATE,
 };
 
 type CometRead = { market?: MarketData; account?: string; isBulkerAllowed?: boolean };
@@ -265,6 +273,23 @@ describe('Home on the wrapped route', () => {
 
     expect(mockWriteState.supply).not.toHaveBeenCalled();
     expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+  });
+
+  it('starts no wrapped supply review from a callback kept from an earlier visit', () => {
+    const supply = jest.fn(() => undefined);
+    const state = cometState(EMPTY_ACCOUNT);
+    const usdc = { ...wrappedLending(), write: { supply } };
+    const { rerender } = render(homeElement({ lending: usdc, state, queue: actionQueue([]) }));
+    const keptReview = mockLastProps.WrappedPositionPanel.supply.onReview;
+
+    // The user switches to the USDT market: the panel's review callback from before belongs to USDC.
+    const usdt = { ...wrappedLending(USDT_COMET), write: { supply } };
+    rerender(homeElement({ lending: usdt, market: USDT_MARKET, state, queue: actionQueue([]) }));
+
+    expect(keptReview(1_000_000n)).toBe('identity-changed');
+    expect(supply).not.toHaveBeenCalled();
+    mockLastProps.WrappedPositionPanel.supply.onReview(1_000_000n);
+    expect(supply).toHaveBeenCalledWith(1_000_000n);
   });
 
   it('shows the panel loading while the Comet state still belongs to the previous market', () => {
