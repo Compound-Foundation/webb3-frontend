@@ -14,6 +14,7 @@ import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { getBlockExplorerUrl } from '@helpers/urls';
@@ -247,7 +248,7 @@ function lendingWith(action: Controller, registry = OPEN): Lending {
 const BASE_ASSET = mockBaseAsset({ address: USDC, symbol: 'USDC', decimals: 6 });
 
 function cometState(baseAsset: BaseAssetWithAccountState): CometState {
-  return [
+  const state = [
     StateType.Hydrated,
     {
       baseAsset,
@@ -265,6 +266,9 @@ function cometState(baseAsset: BaseAssetWithAccountState): CometState {
       totalBaseSupplyUsd: 0n,
     },
   ] as unknown as CometState;
+  // As useCometState records it: read for the USDC market and the connected account.
+  recordCometStateSource(state, { chainId: 1, cometAddress: USDC_COMET }, ACCOUNT);
+  return state;
 }
 
 function actionQueue(): ActionQueue {

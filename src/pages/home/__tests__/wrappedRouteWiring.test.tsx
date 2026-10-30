@@ -1,9 +1,11 @@
-import { render } from '@testing-library/react';
+import { act, render } from '@testing-library/react';
 
 import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
+import type { Web3 } from '@contexts/Web3Context';
 import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
@@ -45,6 +47,7 @@ jest.mock('../components/InstitutionalBanner', () => mockRecordProps('Institutio
 
 const mockWriteState = {
   approve: jest.fn(),
+  allowOperator: jest.fn(),
   supply: jest.fn(),
   withdraw: jest.fn(),
   invokeBulker: jest.fn(),
@@ -105,8 +108,12 @@ const STANDARD: WrappedLending = {
   write: IDLE_WRITE_WRAPPED_STATE,
 };
 
-function cometState(baseAsset: BaseAssetWithAccountState): CometState {
-  return [
+type CometRead = { market?: MarketData; account?: string; isBulkerAllowed?: boolean };
+
+// A Comet state as useCometState makes it: recorded with the market and account it was read for.
+function cometState(baseAsset: BaseAssetWithAccountState, read: CometRead = {}): CometState {
+  const { market = USDC_MARKET, account = mockWeb3.read.account, isBulkerAllowed = true } = read;
+  const state = [
     StateType.Hydrated,
     {
       baseAsset,
@@ -120,10 +127,16 @@ function cometState(baseAsset: BaseAssetWithAccountState): CometState {
       isInstitutional: true,
       rewardsAssetSymbol: 'COMP',
       isRewardsLoading: false,
-      isBulkerAllowed: true,
+      isBulkerAllowed,
       totalBaseSupplyUsd: 0n,
     },
   ] as unknown as CometState;
+  recordCometStateSource(
+    state,
+    { chainId: market.chainInformation.chainId, cometAddress: market.marketAddress },
+    account
+  );
+  return state;
 }
 
 function actionQueue(actions: Action[]): ActionQueue & { setPendingAction: jest.Mock } {
@@ -138,13 +151,7 @@ function actionQueue(actions: Action[]): ActionQueue & { setPendingAction: jest.
   };
 }
 
-type Setup = {
-  lending: WrappedLending;
-  market?: MarketData;
-  state: CometState;
-  queue: ActionQueue;
-  web3?: typeof mockWeb3;
-};
+type Setup = { lending: WrappedLending; market?: MarketData; state: CometState; queue: ActionQueue; web3?: Web3 };
 
 SelectedMarketContextHelpers.initializeContext({
   selectedMarket: [StateType.Hydrated, USDC_MARKET],
@@ -184,15 +191,6 @@ function homeElement({ lending, market = USDC_MARKET, state, queue, web3 = mockW
       </SelectedMarketContext.Provider>
     </WrappedLendingContext.Provider>
   );
-}
-
-// On the wrapped route, the masthead gets the loaded wrapped position only once Home knows the account
-// a hydrated Comet state was read for: one that arrived while the dashboard was mounted. These
-// renders deliver the state after the dashboard mounts, as the app does.
-function renderWithCometRead(setup: Setup) {
-  const view = render(homeElement({ ...setup, state: [StateType.Loading, undefined] }));
-  view.rerender(homeElement(setup));
-  return view;
 }
 
 const EMPTY_ACCOUNT = mockBaseAsset({ address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' });
@@ -314,14 +312,11 @@ describe('Home on the wrapped route', () => {
   });
 
   it('shows the panel loading while the Comet state still belongs to the previous market', () => {
-    const state = cometState(EMPTY_ACCOUNT);
+    const state = cometState(EMPTY_ACCOUNT, { market: USDT_MARKET });
     const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
-    const { rerender } = renderWithCometRead({
-      lending: wrappedLending(USDT_COMET),
-      market: USDT_MARKET,
-      state,
-      queue: actionQueue([]),
-    });
+    const { rerender } = render(
+      homeElement({ lending: wrappedLending(USDT_COMET), market: USDT_MARKET, state, queue: actionQueue([]) })
+    );
 
     rerender(homeElement({ lending: loaded, market: USDC_MARKET, state, queue: actionQueue([]) }));
     expect(mockLastProps.WrappedPositionPanel.position).toEqual({ status: 'loading' });
@@ -336,7 +331,7 @@ describe('Home on the wrapped route', () => {
 
   it('gives the masthead the position the panel shows', () => {
     const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
-    renderWithCometRead({ lending: loaded, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) });
+    render(homeElement({ lending: loaded, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
 
     expect(mockLastProps.Masthead.state[1].wrappedPosition).toBe(mockLastProps.WrappedPositionPanel.position);
     expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
@@ -355,7 +350,7 @@ describe('Home on the wrapped route', () => {
   it('adds no wrapped value to Comet state read for another account', () => {
     const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
     const state = cometState(EMPTY_ACCOUNT);
-    const { rerender } = renderWithCometRead({ lending: loaded, state, queue: actionQueue([]) });
+    const { rerender } = render(homeElement({ lending: loaded, state, queue: actionQueue([]) }));
     expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
 
     // The wallet switched accounts, and the Comet state is still the previous account's.
@@ -370,7 +365,7 @@ describe('Home on the wrapped route', () => {
     expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
   });
 
-  it('adds no wrapped value to Comet state read before the dashboard mounted, but still submits from it', () => {
+  it('adds the wrapped value to Comet state read for the connected account before the dashboard mounted', () => {
     const borrower = { ...EMPTY_ACCOUNT, balance: -5_000_000n };
     render(
       homeElement({
@@ -380,10 +375,132 @@ describe('Home on the wrapped route', () => {
       })
     );
 
-    // The account this state was read for is unknown, so the headline leaves out the wrapped value.
-    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
-    // A direct submission is judged as on any other visit.
+    // useCometState recorded the account it read the state for, so a remounted dashboard knows it.
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
     mockLastProps.PositionCard.state[1].onSubmitClicked();
+    expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds no wrapped value to Comet state with no record of the account it was read for', () => {
+    // A copy is a state useCometState never recorded.
+    const unrecorded = [...cometState(EMPTY_ACCOUNT)] as unknown as CometState;
+    render(
+      homeElement({ lending: { ...wrappedLending(), position: LOADED }, state: unrecorded, queue: actionQueue([]) })
+    );
+
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
+  });
+});
+
+describe('Home on the wrapped route across a wallet change', () => {
+  const ACCOUNT_A = '0x0000000000000000000000000000000000000aa1';
+  const ACCOUNT_B = '0x0000000000000000000000000000000000000bb2';
+  const walletSession = (account: string, connector: string): Web3 => ({
+    ...mockWeb3,
+    read: { ...mockWeb3.read, account },
+    write: { ...mockWeb3.write, account, connector: { uid: connector } as Web3['write']['connector'] },
+  });
+  const WALLET_A = walletSession(ACCOUNT_A, 'connector-a');
+  const WALLET_B = walletSession(ACCOUNT_B, 'connector-b');
+  const borrower = { ...EMPTY_ACCOUNT, balance: -100_000_000n };
+  // Two actions go through the Bulker, which these accounts have not yet allowed.
+  const repays = actionQueue([
+    [ActionType.Repay, borrower, 50_000_000n],
+    [ActionType.Repay, borrower, 50_000_000n],
+  ]);
+
+  beforeEach(() => {
+    Object.values(mockWriteState).forEach((fn) => fn.mockReset());
+  });
+
+  function openBulkerApproval() {
+    const state = cometState(borrower, { account: ACCOUNT_A, isBulkerAllowed: false });
+    const view = render(homeElement({ lending: wrappedLending(), state, queue: repays, web3: WALLET_A }));
+    act(() => mockLastProps.PositionCard.state[1].onSubmitClicked());
+    const [, dialog] = mockLastProps.ActionModal.state;
+    return {
+      ...view,
+      approveBulker: dialog.onActionClicked as () => void,
+      completeTransaction: dialog.onCompleteClicked as () => void,
+    };
+  }
+
+  it('completes a kept Bulker approval dialog in the session that opened it', () => {
+    const { rerender, completeTransaction } = openBulkerApproval();
+
+    // The approval settles and the account's balances load again.
+    const approved = cometState(borrower, { account: ACCOUNT_A });
+    rerender(homeElement({ lending: wrappedLending(), state: approved, queue: repays, web3: WALLET_A }));
+    act(() => completeTransaction());
+
+    expect(mockWriteState.invokeBulker).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a kept Bulker approval dialog once another wallet is connected', () => {
+    const { rerender, completeTransaction } = openBulkerApproval();
+
+    // Wallet B connects, its balances load and allow the same repayments, and it allows the Bulker.
+    const walletB = cometState(borrower, { account: ACCOUNT_B });
+    rerender(homeElement({ lending: wrappedLending(), state: walletB, queue: repays, web3: WALLET_B }));
+    act(() => completeTransaction());
+
+    // The dialog's callback would sign with wallet A's session, so nothing is submitted.
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+  });
+
+  it('asks for the Bulker approval from a kept dialog in the session that opened it', () => {
+    const { rerender, approveBulker } = openBulkerApproval();
+
+    const unchanged = cometState(borrower, { account: ACCOUNT_A, isBulkerAllowed: false });
+    rerender(homeElement({ lending: wrappedLending(), state: unchanged, queue: repays, web3: WALLET_A }));
+    act(() => approveBulker());
+
+    expect(mockWriteState.allowOperator).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a kept dialog's Bulker approval once another wallet is connected", () => {
+    const { rerender, approveBulker } = openBulkerApproval();
+
+    // Wallet B connects, and it has not allowed the Bulker either.
+    const walletB = cometState(borrower, { account: ACCOUNT_B, isBulkerAllowed: false });
+    rerender(homeElement({ lending: wrappedLending(), state: walletB, queue: repays, web3: WALLET_B }));
+    act(() => approveBulker());
+
+    // The dialog's approval would ask wallet A's session to sign, so nothing is requested.
+    expect(mockWriteState.allowOperator).not.toHaveBeenCalled();
+  });
+
+  it('refuses a kept dialog once the same account connects through another connector', () => {
+    const { rerender, completeTransaction } = openBulkerApproval();
+
+    const sameAccount = walletSession(ACCOUNT_A, 'connector-b');
+    const approved = cometState(borrower, { account: ACCOUNT_A });
+    rerender(homeElement({ lending: wrappedLending(), state: approved, queue: repays, web3: sameAccount }));
+    act(() => completeTransaction());
+
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+  });
+
+  it('refuses balances read for the previous account on a return to the dashboard', () => {
+    // Account A owes 100 USDC and account B owes nothing. Account B connected while another page
+    // was shown, and the app still holds account A's Comet state while B's read is pending.
+    const accountA = cometState(borrower, { account: ACCOUNT_A });
+    const repay = actionQueue([[ActionType.Repay, borrower, 100_000_000n]]);
+    render(homeElement({ lending: wrappedLending(), state: accountA, queue: repay, web3: WALLET_B }));
+
+    act(() => mockLastProps.PositionCard.state[1].onSubmitClicked());
+
+    expect(mockWriteState.supply).not.toHaveBeenCalled();
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+  });
+
+  it('submits from balances read for the connected account on a return to the dashboard', () => {
+    const accountB = cometState(borrower, { account: ACCOUNT_B });
+    const repay = actionQueue([[ActionType.Repay, borrower, 100_000_000n]]);
+    render(homeElement({ lending: wrappedLending(), state: accountB, queue: repay, web3: WALLET_B }));
+
+    act(() => mockLastProps.PositionCard.state[1].onSubmitClicked());
+
     expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
   });
 });

@@ -15,6 +15,7 @@ import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { getBlockExplorerUrl } from '@helpers/urls';
@@ -217,8 +218,8 @@ function lendingWith(action: Controller, registry = OPEN): Lending {
 
 const BASE_ASSET = mockBaseAsset({ address: USDC, symbol: 'USDC', decimals: 6 });
 
-function cometState(baseAsset: BaseAssetWithAccountState): CometState {
-  return [
+function cometState(baseAsset: BaseAssetWithAccountState, cometAddress = USDC_COMET, account = ACCOUNT): CometState {
+  const state = [
     StateType.Hydrated,
     {
       baseAsset,
@@ -236,6 +237,9 @@ function cometState(baseAsset: BaseAssetWithAccountState): CometState {
       totalBaseSupplyUsd: 0n,
     },
   ] as unknown as CometState;
+  // As useCometState records it: read for the given market and account.
+  recordCometStateSource(state, { chainId: 1, cometAddress }, account);
+  return state;
 }
 
 function actionQueue(actions: Action[] = []): ActionQueue & { setPendingAction: jest.Mock } {
@@ -296,20 +300,6 @@ function homeElement(
   );
 }
 
-// On the wrapped route, the supply dialog shows the direct borrow of a hydrated Comet state only once
-// Home knows the account it was read for: one that arrived while the dashboard was mounted. This
-// render delivers the state after the dashboard mounts, as the app does.
-function renderWithCometRead(
-  lending: WrappedLending,
-  state: CometState,
-  queue: ActionQueue = actionQueue(),
-  market: MarketData = USDC_MARKET
-) {
-  const view = render(homeElement(lending, [StateType.Loading, undefined], queue, market));
-  view.rerender(homeElement(lending, state, queue, market));
-  return view;
-}
-
 function renderModal(state: WrappedActionState, directBorrowBalance: bigint | undefined = 0n) {
   const onConfirm = jest.fn();
   const onClose = jest.fn();
@@ -348,7 +338,7 @@ describe('WrappedSupply', () => {
       const action = controller(inReview());
       const lending = lendingWith(action);
       const queue = actionQueue();
-      renderWithCometRead(lending, cometState(BORROWER), queue);
+      render(homeElement(lending, cometState(BORROWER), queue));
 
       const dialog = screen.getByRole('dialog');
       const warning = within(dialog).getByRole('alert');
@@ -395,9 +385,9 @@ describe('WrappedSupply', () => {
     });
 
     it("warns without an amount while the direct position shown is still the previous market's", () => {
-      const state = cometState(BORROWER);
+      const state = cometState(BORROWER, USDT_COMET);
       const usdt = { ...lendingWith(controller()), route: routeFor(OPEN, USDT_COMET) };
-      const { rerender } = renderWithCometRead(usdt, state, actionQueue(), USDT_MARKET);
+      const { rerender } = render(homeElement(usdt, state, actionQueue(), USDT_MARKET));
 
       // The user switches to USDC and reviews a supply before USDC's Comet state arrives.
       rerender(homeElement(lendingWith(controller(inReview())), state, actionQueue(), USDC_MARKET));
@@ -416,7 +406,8 @@ describe('WrappedSupply', () => {
     });
 
     it("warns without an amount when the direct position read is another account's", () => {
-      const otherAccount = { ...WEB3, read: { ...WEB3.read, account: '0x0000000000000000000000000000000000000bb2' } };
+      const other = '0x0000000000000000000000000000000000000bb2';
+      const otherAccount = { ...WEB3, read: { ...WEB3.read, account: other } };
       const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
       const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
       const selectedMarketData = {
@@ -424,7 +415,7 @@ describe('WrappedSupply', () => {
         selectMarket: jest.fn(),
         selectMarketByAddress: jest.fn(),
       };
-      const element = (state: CometState) => (
+      render(
         <WrappedLendingContext.Provider value={lendingWith(controller(inReview()))}>
           <SelectedMarketContext.Provider value={selectedMarketData as never}>
             <ActionQueueContext.Provider value={actionQueue()}>
@@ -432,7 +423,7 @@ describe('WrappedSupply', () => {
                 transactions={[]}
                 web3={otherAccount}
                 selectedMarketData={selectedMarketData as never}
-                cometState={state}
+                cometState={cometState(BORROWER, USDC_COMET, other)}
                 addTransaction={jest.fn()}
                 switchWriteNetwork={jest.fn()}
                 estimatedGasMap={new Map()}
@@ -442,10 +433,6 @@ describe('WrappedSupply', () => {
           </SelectedMarketContext.Provider>
         </WrappedLendingContext.Provider>
       );
-      // The state arrives after the dashboard mounts, as in the app, so Home records the read account
-      // and the warning omits the amount because that account is not the connected one.
-      const { rerender } = render(element([StateType.Loading, undefined]));
-      rerender(element(cometState(BORROWER)));
 
       const warning = within(screen.getByRole('dialog')).getByRole('alert');
       expect(warning).toHaveTextContent(/does not repay/i);
@@ -453,7 +440,7 @@ describe('WrappedSupply', () => {
     });
 
     it('shows no warning to an account without a direct borrow', () => {
-      renderWithCometRead(lendingWith(controller(inReview())), cometState({ ...BASE_ASSET, balance: 0n }));
+      render(homeElement(lendingWith(controller(inReview())), cometState({ ...BASE_ASSET, balance: 0n })));
 
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).not.toBeInTheDocument();
       // A borrow made elsewhere can be newer than this page's read, so the dialog still says it.
