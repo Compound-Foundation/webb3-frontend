@@ -147,9 +147,9 @@ function isWrapperStep(transaction: Transaction): boolean {
 /**
  * Whether the record delays Comet data refreshes until it settles. Every record does, except an
  * interrupted wrapper step with no hash. The manager has no hash to look up for it, so it never
- * settles the record, which leaves the list only when the user dismisses it. If it delayed
- * refreshes, no Comet data would apply until then. It stays tracked so that the next review of its
- * action still waits for it.
+ * settles the record, which leaves the list only when the user dismisses it. A record that
+ * delays refreshes and never settles stops every Comet data update, so this one does not delay
+ * them. It stays tracked so that the next review of its action still waits for it.
  */
 export function delaysCometRefresh(transaction: Transaction): boolean {
   // Storage validation accepts a wallet request record that carries a hash, and the type does not

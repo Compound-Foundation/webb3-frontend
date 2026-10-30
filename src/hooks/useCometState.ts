@@ -41,9 +41,9 @@ export function useCometState(
   rewards: RewardsState
 ): CometState {
   const [state, setState] = useState<CometState>([StateType.Loading, undefined]);
-  // The transactions a refresh waits for. Without the memo each render would pass a new list, so
-  // useWaiter would set a new queue and render again without end, and refreshData would be rebuilt
-  // every render.
+  // The transactions a refresh waits for. The list keeps its identity until `transactions` changes.
+  // A new list on every render makes useWaiter set a new queue and render again without end, and
+  // rebuilds refreshData on every render.
   const refreshDelayingTransactions = useMemo(() => transactions.filter(delaysCometRefresh), [transactions]);
   const { waitFor } = useWaiter<Transaction[]>(refreshDelayingTransactions);
   const marketRef = useRef(marketState);
