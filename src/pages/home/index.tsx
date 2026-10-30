@@ -127,6 +127,13 @@ const Home = ({
   if (cometStateMarket.current.state !== state) {
     cometStateMarket.current = withCometStateSource(state);
   }
+  // The wrapped route's headline addition and the supply dialog's direct borrow use a Comet state
+  // only if useCometState read it for the connected account. For a state read for another account,
+  // or with no record, the headline shows the direct balance alone and the dialog's direct borrow
+  // is unknown until the next Comet read.
+  const cometAccount = cometStateMarket.current.account;
+  const isCometStateVerifiedForAccount =
+    cometAccount !== undefined && cometAccount.toLowerCase() === web3.write.account?.toLowerCase();
   // Submissions can start from a callback a dialog kept from an earlier render, so they are
   // judged by the session as it is now, not as it was when the callback was made.
   const liveSession = useRef<LiveSubmissionState>({
@@ -281,7 +288,7 @@ const Home = ({
       supplyRewardsAPR,
       isInstitutional,
       rewardsAssetSymbol,
-      isRewardsLoading
+      isRewardsLoading,
     } = state[1];
     isBulkerAllowed = state[1].isBulkerAllowed;
     const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, baseAsset.balance, {
@@ -729,14 +736,9 @@ const Home = ({
       cometMarket.chainId === wrappedRoute.chainId &&
       cometMarket.cometAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase();
     const cometForRoute = cometState !== StateType.Loading && isCometStateForRoute ? state[1] : undefined;
-    // The borrow comes from the Comet state read for this market and the connected account only.
-    const cometAccount = cometStateMarket.current.account;
-    if (
-      state[0] === StateType.Hydrated &&
-      isCometStateForRoute &&
-      cometAccount !== undefined &&
-      cometAccount.toLowerCase() === web3.write.account?.toLowerCase()
-    ) {
+    // The borrow comes from the Comet state read for this market and known to be the connected
+    // account's only.
+    if (state[0] === StateType.Hydrated && isCometStateForRoute && isCometStateVerifiedForAccount) {
       const { balance } = state[1].baseAsset;
       directBorrowBalance = balance < 0n ? -balance : 0n;
     }
@@ -778,6 +780,15 @@ const Home = ({
         onRetry={wrappedLending.retry}
       />
     );
+    // The headline reads the panel's position state, so it adds no position the panel does not
+    // show. If the Comet state is not known to be the connected account's, the headline shows the
+    // direct balance alone. Without this guard, the headline can add one account's wrapped value to
+    // another account's direct balance.
+    if (mastheadState[0] === StateType.Hydrated) {
+      const wrappedPosition =
+        position.status === 'loaded' && !isCometStateVerifiedForAccount ? { status: 'loading' as const } : position;
+      mastheadState = [StateType.Hydrated, { ...mastheadState[1], wrappedPosition }];
+    }
   }
 
   // The supply and withdrawal dialogs describe their draft's own market. A completed or stopped
