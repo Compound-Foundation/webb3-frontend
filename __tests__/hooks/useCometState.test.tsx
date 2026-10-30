@@ -11,6 +11,9 @@ import { MarketData, MarketDataState, RewardsState, StateType, Transaction } fro
 import { mockMarket } from '../mocks/mockMarket';
 import { mockWeb3NoWallet } from '../mocks/mockWeb3';
 
+// uuid ships ESM only, which Jest does not load here.
+jest.mock('uuid', () => ({ v4: () => 'transaction' }));
+
 jest.mock('@hooks/useSelectedMarket', () => ({
   ...jest.requireActual('@hooks/useSelectedMarket'),
   queryCometData: jest.fn(),
