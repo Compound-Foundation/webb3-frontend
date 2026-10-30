@@ -29,7 +29,9 @@ yarn test          # Jest in UTC; CI does not run it, so run it locally
 yarn build         # the production build CI publishes to IPFS
 ```
 
-Format with Prettier under `.prettierrc`, as the README's editor setup does. Prettier is not a dependency and CI does not check formatting, so format the files you change. Tests live in `__tests__/` and in `__tests__` directories beside the code. Mock API responses come from the `msw` handlers in `handlers/`. A change to behaviour gets a test, and a bugfix gets a regression test observed failing before the fix.
+For a change to the browser harness (`e2e/`), wallet connection, transactions or screening, also run `yarn test:browser`, the browser suite on a local mainnet fork. CI does not run it. `docs/browser-fork-wallet.md` covers its prerequisites, commands and limits.
+
+Format with Prettier under `.prettierrc`, as the README's editor setup does. Prettier is not a dependency and CI does not check formatting, so format the files you change. Tests live in `__tests__/` and in `__tests__` directories beside the code. Mock API responses come from the `msw` handlers in `handlers/`. `.gitattributes` marks test files outside `e2e/` as `linguist-generated`, so GitHub collapses them in pull request diffs. Reviewers expand them when a change to test coverage matters. A change to behaviour gets a test, and a bugfix gets a regression test observed failing before the fix.
 
 ## Review standards
 
@@ -37,7 +39,7 @@ Code and reviews follow `cf-core`'s `code-review-checklist`, `naming-standards` 
 
 Treat these as security-sensitive. `.github/CODEOWNERS` lists them between the `security-sensitive` markers, and a PR that changes one also gets a security review:
 
-- Transactions: what the app asks a wallet to sign. Actions, bulker actions, contract addresses and ABIs are in `src/helpers/` and `src/constants/`. `useWriteCometState` and `useWriteVoteState` build the approve, allow, supply, withdraw, bulker, delegate and vote transactions, and `useTransactionManager` submits them. The home page chooses the approval spender. A wrong amount, token, market, chain, spender or recipient loses users' funds.
+- Transactions: what the app asks a wallet to sign. Actions, bulker actions, contract addresses and ABIs are in `src/helpers/` and `src/constants/`. `useWriteCometState` and `useWriteVoteState` build the approve, allow, supply, withdraw, bulker, delegate and vote transactions, and `useTransactionManager` submits them. `useWriteWrappedState` builds the wrapped supply's approve and `supplyAndWrap` steps and the wrapped withdrawal's `unwrapAndWithdraw` step, and `useWrappedAction` checks and submits them one at a time. The home page chooses the approval spender. A wrong amount, token, market, chain, spender or recipient loses users' funds.
 - Wallet connection and framing: EIP-6963 discovery, WalletConnect and Ledger, the wallet modal, Safe auto-connect and the Safe App parent-frame check in `src/helpers/safe.ts`. `src/main.tsx` sets the allowed Safe domains and turns off Wagmi's own reconnect. Extensions in `src/pages/extensions/` run third-party apps in frames, exchange messages with them and can ask users to allow an operator.
 - Sanctions and address checks: a deployed build screens every connected address and fails closed. A change must not let a blocked or unscreened address reach a signing flow, and the dev-server bypass must never apply to `vite build`.
 - Build and release: `.env` files, `envVars.ts`, `vite.config.js`, the HTML entry points, dependencies, CI workflows and the IPFS build, preview and release scripts. A committed `.env` file reaches the production build and can change the extension operator and frame sources. Fork PRs build without publishing credentials, and that separation must hold.
