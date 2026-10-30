@@ -38,6 +38,9 @@
 /*.html @Compound-Foundation/foundation-engineering
 /*/index.html @Compound-Foundation/foundation-engineering
 /*/ipfs-404.html @Compound-Foundation/foundation-engineering
+# The browser test harness: it holds per-run keys and the control token,
+# impersonates accounts on the fork, and controls the browser's network routes.
+/e2e/ @Compound-Foundation/foundation-engineering
 # Dependencies, CI, and the IPFS build, preview and release scripts.
 /package.json @Compound-Foundation/foundation-engineering
 /yarn.lock @Compound-Foundation/foundation-engineering
