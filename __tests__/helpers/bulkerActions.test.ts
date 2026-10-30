@@ -7,6 +7,7 @@ import {
   HARDCODED_WRAPPED_LENDING_SOURCE,
   WRAPPED_MARKET_REGISTRY,
 } from '@constants/wrappedMarkets';
+import { lendsBaseDirectly } from '@helpers/actions';
 import { getBulkerTrxData } from '@helpers/bulkerActions';
 import { resolveLendingRoute, wrappedRouteKey, LendingSession } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
@@ -154,28 +155,6 @@ describe('bulkerActions', () => {
       expect(bulkerCallValue).toBe(0n);
     });
 
-    it('encodes a repay and a collateral withdrawal', () => {
-      const actions: Action[] = [
-        [ActionType.Repay, BASE_ASSET, MAX_UINT256],
-        [ActionType.WithdrawCollateral, COMP, 10n ** 18n],
-      ];
-
-      const { bulkerActions, bulkerCallData } = getBulkerTrxData(
-        SENDER,
-        walletProvider(),
-        MARKET,
-        BASE_ASSET,
-        [COMP],
-        actions
-      );
-
-      expect(bulkerActions.map((action) => ethers.utils.parseBytes32String(action))).toEqual([
-        'ACTION_SUPPLY_ASSET',
-        'ACTION_WITHDRAW_ASSET',
-      ]);
-      expect(decodeCallData(bulkerCallData[0])[3]).toBe(MAX_UINT256.toString());
-    });
-
     it('sends the native token as value for a native collateral supply', () => {
       const actions: Action[] = [[ActionType.SupplyCollateral, ETH as TokenWithAccountState, 2n * 10n ** 18n]];
 
@@ -190,6 +169,41 @@ describe('bulkerActions', () => {
 
       expect(ethers.utils.parseBytes32String(bulkerActions[0])).toBe('ACTION_SUPPLY_NATIVE_TOKEN');
       expect(bulkerCallValue).toBe(2n * 10n ** 18n);
+    });
+  });
+
+  describe('with a queue the wrapped route accepts', () => {
+    // On the wrapped route a base supply goes to the wrapper, never the Bulker, so no supply follows the
+    // repay to fold it into.
+    it.each([
+      ['a full repay', 'MAX_UINT256', MAX_UINT256],
+      ['a typed repay equal to the debt', 'that fixed amount', -BASE_ASSET.balance],
+    ])('encodes %s before a collateral withdrawal as a supply of %s', (_name, _encoded, amount) => {
+      const actions: Action[] = [
+        [ActionType.Repay, BASE_ASSET, amount],
+        [ActionType.WithdrawCollateral, COMP, 10n ** 18n],
+      ];
+      expect(lendsBaseDirectly(BASE_ASSET, [COMP], actions)).toBe(false);
+
+      const { bulkerActions, bulkerCallData } = getBulkerTrxData(
+        SENDER,
+        walletProvider(),
+        MARKET,
+        BASE_ASSET,
+        [COMP],
+        actions
+      );
+
+      // Comet repays the borrow balance at execution for MAX_UINT256, so a full repay leaves no
+      // excess. A typed amount stays fixed even when it equals the debt.
+      expect(bulkerActions.map((action) => ethers.utils.parseBytes32String(action))).toEqual([
+        'ACTION_SUPPLY_ASSET',
+        'ACTION_WITHDRAW_ASSET',
+      ]);
+      expect(bulkerCallData.map((callData) => decodeCallData(callData).map((value) => value.toLowerCase()))).toEqual([
+        [MARKET.marketAddress, SENDER, BASE_ASSET.address, amount.toString()].map((value) => value.toLowerCase()),
+        [MARKET.marketAddress, SENDER, COMP.address, String(10n ** 18n)].map((value) => value.toLowerCase()),
+      ]);
     });
   });
 });
