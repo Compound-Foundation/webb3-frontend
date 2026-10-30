@@ -2,6 +2,7 @@ import { Interface } from '@ethersproject/abi';
 import { TransactionReceipt } from '@ethersproject/providers';
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { BigNumber } from 'ethers';
 
 import {
   ANCHORAGE_CONNECTOR_ID,
@@ -18,7 +19,7 @@ import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { getBlockExplorerUrl } from '@helpers/urls';
-import { SessionProbeResult } from '@helpers/walletErrors';
+import { SendWithdrawnError, SessionProbeResult } from '@helpers/walletErrors';
 import {
   RecheckedWithdrawal,
   WRAPPED_ACTION,
@@ -1126,24 +1127,49 @@ describe('WrappedWithdraw', () => {
 
   describe('review dialog after the lifecycle stops the exit', () => {
     type Manager = UseWrappedActionOptions['manager'];
-    type Request = { request: TransactionRequest; resolve: (result: SendResult) => void };
+    type Request = {
+      request: TransactionRequest;
+      resolve: (result: SendResult) => void;
+      /** The request's `send`, which the manager calls as soon as it has the request. */
+      sending: Promise<unknown>;
+    };
 
     const SESSION_PROBE = async (): Promise<SessionProbeResult> => ({ status: 'usable' });
 
     /**
-     * The real lifecycle for an exit of `review`, with a transaction manager that holds each request
-     * until the test answers it. The manager never calls `send`, so the wallet is never asked to sign.
+     * A wallet provider whose gas estimates resolve, and which never answers a request to sign, so a
+     * request handed to it stays with the wallet.
+     */
+    function holdingWallet() {
+      const sendUncheckedTransaction = jest.fn((): Promise<string> => new Promise(() => undefined));
+      return {
+        estimateGas: jest.fn(async (): Promise<BigNumber> => BigNumber.from(100_000)),
+        getSigner: jest.fn(() => ({ sendUncheckedTransaction })),
+        sendUncheckedTransaction,
+      };
+    }
+
+    /**
+     * The real lifecycle for an exit of `review`, with a transaction manager that calls each request's
+     * `send` at once and holds the request's result until the test answers it.
      */
     function liveExit(review: WithdrawalReview, check: () => Promise<WrappedWithdrawalCheck>) {
+      const wallet = holdingWallet();
       const requests: Request[] = [];
       const manager: Manager = {
         transactions: [],
         settledTransactions: [],
         walletFailure: undefined,
-        restoredSession: { provider: WALLET, account: ACCOUNT, chainId: 1 },
+        restoredSession: { provider: wallet, account: ACCOUNT, chainId: 1 },
         dismissTransaction: jest.fn(),
         submitTransaction: jest.fn(
-          (request: TransactionRequest) => new Promise<SendResult>((resolve) => requests.push({ request, resolve }))
+          (request: TransactionRequest) =>
+            new Promise<SendResult>((resolve) => {
+              const sending = request.send();
+              // A withdrawn send is awaited by the test that withdraws it.
+              sending.catch(() => undefined);
+              requests.push({ request, resolve, sending });
+            })
         ),
       };
       const session: WrappedSession = {
@@ -1151,7 +1177,7 @@ describe('WrappedWithdraw', () => {
         account: ACCOUNT,
         chainId: 1,
         screeningStatus: 'allowed',
-        provider: WALLET,
+        provider: wallet,
       };
       const hook = renderHook(
         ({ manager: current }: { manager: Manager }) =>
@@ -1177,15 +1203,15 @@ describe('WrappedWithdraw', () => {
       };
       /** Another write through the same wallet finds the wallet session broken. */
       const breakSession = () =>
-        hook.rerender({ manager: { ...manager, walletFailure: { provider: WALLET, message: 'sendMessage' } } });
-      return { hook, manager, requests, reachReview, breakSession };
+        hook.rerender({ manager: { ...manager, walletFailure: { provider: wallet, message: 'sendMessage' } } });
+      return { hook, wallet, manager, requests, reachReview, breakSession };
     }
 
-    /** Confirms the exit and waits until the wallet has its request. */
+    /** Confirms the exit and waits until the wallet has been asked to sign it. */
     async function reachWallet(exit: ReturnType<typeof liveExit>) {
       await exit.reachReview();
       act(() => exit.hook.result.current.confirm());
-      await waitFor(() => expect(exit.requests).toHaveLength(1));
+      await waitFor(() => expect(exit.wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1));
       expect(exit.hook.result.current.state).toMatchObject({
         phase: 'signing',
         steps: [{ status: 'awaiting-signature' }],
@@ -1265,7 +1291,7 @@ describe('WrappedWithdraw', () => {
       expect(dialog).not.toHaveTextContent(/no minimum amount/i);
     });
 
-    it('drops the estimate notices when the wallet session fails before the wallet is asked', async () => {
+    it('drops the estimate notices when the wallet session fails while the exit is checked', async () => {
       const review = { ...FULL_REVIEW, shownCash: 250_000_000n };
       // The check before the signature is still reading when the session fails.
       const exit = liveExit(review, () => new Promise<WrappedWithdrawalCheck>(() => undefined));
@@ -1285,6 +1311,39 @@ describe('WrappedWithdraw', () => {
       expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
       expect(dialog).not.toHaveTextContent(/no minimum amount/i);
       expect(exit.manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('drops the estimate notices, and never asks the wallet, when the wallet session fails while gas is estimated', async () => {
+      const exit = liveExit(PARTIAL_REVIEW, passes(PARTIAL_RECHECKED));
+      let finishEstimate: (gas: BigNumber) => void = () => undefined;
+      exit.wallet.estimateGas.mockImplementationOnce(() => new Promise((resolve) => (finishEstimate = resolve)));
+      await exit.reachReview();
+      act(() => exit.hook.result.current.confirm());
+      // The manager has the request and its send is estimating gas, so the wallet has not been asked.
+      await waitFor(() => expect(exit.wallet.estimateGas).toHaveBeenCalledTimes(1));
+      expect(exit.hook.result.current.state).toMatchObject({
+        phase: 'signing',
+        steps: [{ status: 'awaiting-signature' }],
+      });
+
+      exit.breakSession();
+      await waitFor(() => expect(exit.hook.result.current.state.phase).toBe('stopped'));
+      renderModal(exit.hook.result.current.state);
+
+      const dialog = screen.getByRole('dialog');
+      expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+      expect(dialog).not.toHaveTextContent(/reject the request in your wallet/i);
+      expect(dialog).not.toHaveTextContent(/no minimum amount/i);
+      expect(dialog).toHaveTextContent(/nothing was sent/i);
+      expect(exit.hook.result.current.state).toMatchObject({
+        steps: [{ status: 'blocked', reason: 'session-unusable' }],
+      });
+
+      // The estimate arrives after the session failed, and the send is withdrawn.
+      finishEstimate(BigNumber.from(100_000));
+      await expect(exit.requests[0].sending).rejects.toBeInstanceOf(SendWithdrawnError);
+      expect(exit.wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+      expect(exit.manager.submitTransaction).toHaveBeenCalledTimes(1);
     });
   });
 
