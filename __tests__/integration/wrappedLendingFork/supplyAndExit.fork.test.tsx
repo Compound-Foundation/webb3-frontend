@@ -105,18 +105,19 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
   scenario('supply-zero-allowance', label, async (measured) => {
     const amount = units(1_000);
     expect((await readAccount(market, account, await app.readProvider.getBlockNumber())).allowance).toBe(0n);
-    expect(await app.startSupply(amount)).toBeUndefined();
+    // Approve & Add asks for the approval alone, and Submit for the supply alone.
+    expect(await app.startApproval(amount)).toBeUndefined();
     const draft = app.draft();
-    measured.steps = draft.steps.map((step) => step.id).join(' > ');
-    expect(draft.steps.map((step) => step.id)).toEqual([
-      WRAPPED_SUPPLY_STEP_IDS.approve,
-      WRAPPED_SUPPLY_STEP_IDS.supply,
-    ]);
+    expect(draft.steps.map((step) => step.id)).toEqual([WRAPPED_SUPPLY_STEP_IDS.approve]);
     expect(decodeCall(draft.steps[0].request.data)).toEqual({
       method: 'approve',
       args: [BigInt(market.wrapperAddress), amount],
     });
-    const [approval, supply] = await confirmAll();
+    const [approval] = await confirmAll();
+    expect(await app.startSupply(amount)).toBeUndefined();
+    expect(app.draft().steps.map((step) => step.id)).toEqual([WRAPPED_SUPPLY_STEP_IDS.supply]);
+    measured.steps = [...draft.steps, ...app.draft().steps].map((step) => step.id).join(' > ');
+    const [supply] = await confirmAll();
     measured.allowanceAfterApproval = await readBigInt(
       market.baseTokenAddress,
       ERC20,
@@ -166,21 +167,20 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
     measured.nonzeroToNonzeroRevertData = refusal ?? 'none';
     expect(measured.nonzeroToNonzeroApproveReverts).toBe(symbol === 'USDT');
 
-    expect(await app.startSupply(amount)).toBeUndefined();
+    expect(await app.startApproval(amount)).toBeUndefined();
     const ids = app.draft().steps.map((step) => step.id);
-    measured.steps = ids.join(' > ');
     const expectedIds =
       symbol === 'USDT'
-        ? [WRAPPED_SUPPLY_STEP_IDS.reset, WRAPPED_SUPPLY_STEP_IDS.approve, WRAPPED_SUPPLY_STEP_IDS.supply]
-        : [WRAPPED_SUPPLY_STEP_IDS.approve, WRAPPED_SUPPLY_STEP_IDS.supply];
+        ? [WRAPPED_SUPPLY_STEP_IDS.reset, WRAPPED_SUPPLY_STEP_IDS.approve]
+        : [WRAPPED_SUPPLY_STEP_IDS.approve];
     expect(ids).toEqual(expectedIds);
-    const approvals = app
-      .draft()
-      .steps.filter((step) => step.kind === 'approve')
-      .map((step) => decodeCall(step.request.data).args[1]);
+    const approvals = app.draft().steps.map((step) => decodeCall(step.request.data).args[1]);
     expect(approvals).toEqual(symbol === 'USDT' ? [0n, amount] : [amount]);
 
     const receipts = await confirmAll();
+    expect(await app.startSupply(amount)).toBeUndefined();
+    measured.steps = [...ids, ...app.draft().steps.map((step) => step.id)].join(' > ');
+    receipts.push(...(await confirmAll()));
     if (symbol === 'USDT') {
       measured.allowanceAfterReset = await readBigInt(
         market.baseTokenAddress,
@@ -406,14 +406,13 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
 
   scenario('full-exit', label, async (measured) => {
     const panel = await app.refreshPosition();
-    expect(await app.startWithdraw({ kind: 'full' }, panel.fullExitCash)).toBeUndefined();
+    expect(await app.startWithdraw({ kind: 'full' })).toBeUndefined();
     const review = app.draft().withdrawal;
     if (review === undefined) throw new Error('The withdrawal draft has no quote.');
     const quoteBlock = await anvil.latestBlock();
     const sharesHeld = await readBigInt(market.wrapperAddress, WRAPPER, 'balanceOf', [account]);
     expect(review.quote.kind).toBe('full');
     expect(review.quote.shares).toBe(sharesHeld);
-    expect(review.shownCash).toBe(panel.fullExitCash);
     await anvil.setNextBlockTimestamp(quoteBlock.timestamp);
     const receipt = app.receiptOf(await app.confirmStep());
     const effects = await receiptEffects(market, account, receipt);

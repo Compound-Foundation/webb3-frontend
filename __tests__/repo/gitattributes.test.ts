@@ -51,7 +51,8 @@ describe('gitattributes', () => {
   });
 
   it('marks no app, config, script or harness file', () => {
-    const otherFiles = [...trackedFiles.filter((path) => !isTestFile(path)), ...harnessProbePaths];
+    // A branch that carries the harness tracks some of the probe paths too, so each path is checked once.
+    const otherFiles = [...new Set([...trackedFiles.filter((path) => !isTestFile(path)), ...harnessProbePaths])];
     expect(otherFiles).toEqual(expect.arrayContaining(['.gitattributes', 'AGENTS.md', 'src/main.tsx']));
 
     const values = linguistGenerated(otherFiles);
