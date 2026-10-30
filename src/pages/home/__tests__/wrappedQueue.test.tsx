@@ -1009,7 +1009,7 @@ describe('Home on the wrapped route', () => {
       renderHome(lendingWith(), { queue: actionQueue([supply]) });
       const { actionRules, baseAsset, collateralAssets } = positionCard();
 
-      expect(actionRules.singleAction).toBe(true);
+      expect(actionRules.isSingleAction).toBe(true);
       expect(validateAddingAction(baseAsset, collateralAssets, [supply], supplyCollateral, actionRules)).toEqual([
         false,
         QUEUED_ACTION_FIRST,

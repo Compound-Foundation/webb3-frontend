@@ -215,7 +215,7 @@ describe('Home on the wrapped route', () => {
     const [, positionCard] = mockLastProps.PositionCard.state;
     // The committed release controls are closed, so the form shows why instead of queueing.
     expect(positionCard.actionRules).toEqual({
-      singleAction: true,
+      isSingleAction: true,
       wrappedBase: {
         supplyBlockedReason: 'Supply Not Open Yet',
         withdrawBlockedReason: 'Withdrawals Not Open Yet',

@@ -508,7 +508,8 @@ export type Action =
 export type ActionQueue = {
   /**
    * Adds `action`, or updates the queued action of its kind and asset. Returns false, and changes
-   * nothing, when the queue is limited to one action and already holds another.
+   * nothing, when the queue is limited to one action and already holds another, or when the
+   * callback was kept from an earlier session or market.
    */
   addOrUpdateAction: (action: Action) => boolean;
   clearActions: () => void;

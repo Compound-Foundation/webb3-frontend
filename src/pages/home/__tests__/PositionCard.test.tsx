@@ -51,15 +51,15 @@ function renderCard({
   rules = {},
   approvalTransactions = [],
   blocking,
-  singleAction,
+  isSingleAction,
 }: {
   actions?: Action[];
   rules?: Partial<WrappedBaseRules>;
   approvalTransactions?: Transaction[];
   blocking?: Transaction;
-  singleAction?: boolean;
+  isSingleAction?: boolean;
 } = {}) {
-  const actionRules: ActionRules = { singleAction, wrappedBase: { ...WRAPPED, ...rules } };
+  const actionRules: ActionRules = { isSingleAction, wrappedBase: { ...WRAPPED, ...rules } };
   const view = render(
     <>
       <PositionCard
@@ -167,7 +167,7 @@ describe('the position card queue limited to one action', () => {
   const BORROW: Action = [ActionType.Borrow, BASE_ASSET, 1_000_000_000n];
 
   it('lets one queued action be submitted', () => {
-    const { submit } = renderCard({ singleAction: true });
+    const { submit } = renderCard({ isSingleAction: true });
 
     expect(submit()).toBeEnabled();
   });
@@ -176,7 +176,7 @@ describe('the position card queue limited to one action', () => {
     ['a supply then a borrow', [SUPPLY, BORROW]],
     ['a borrow then a supply', [BORROW, SUPPLY]],
   ])('disables Submit, and says why, for a queue of %s kept from before the limit', (_name, actions) => {
-    const { desktop, submit } = renderCard({ actions, singleAction: true });
+    const { desktop, submit } = renderCard({ actions, isSingleAction: true });
 
     expect(desktop).toHaveTextContent('Submit Or Remove The Queued Action First');
     expect(submit()).toBeDisabled();

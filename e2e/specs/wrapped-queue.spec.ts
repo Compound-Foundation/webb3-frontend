@@ -8,8 +8,8 @@
 // maximum withdrawal is `unwrapAndWithdraw` of every share. Each request is checked before it is approved
 // and each receipt on the fork. Nothing is sent to Comet or the Bulker directly.
 //
-// COM-342: the queue holds one action at a time. While the withdrawal is queued, the supply form says to
-// submit or remove it first and adds nothing.
+// The queue holds one action at a time. While the withdrawal is queued, the form for an ETH collateral
+// supply says to submit or remove it first, and adds nothing.
 import { decodeFunctionData, getAddress, type Address, type Hash } from 'viem';
 
 import { COMET_USDC, ERC20_ABI, USDC, WRAPPER_ABI, WRAPPER_USDC } from '../harness/contracts';
@@ -129,10 +129,12 @@ test.describe('Anchorage on Ethereum USDC through the normal queue', { tag: ['@C
     await page.getByRole('button', { name: 'Max' }).first().click();
     await page.getByRole('button', { name: 'Add Action' }).first().click();
 
-    // One action at a time: a supply cannot join the queued withdrawal, and no request is made for it.
-    await page.getByRole('button', { name: 'Supply USDC' }).click();
+    // One action at a time: a collateral supply cannot join the queued withdrawal, and nothing is asked
+    // of the wallet for it. The account holds ETH for gas, so the ETH row's Supply is the open entry.
+    const etherRow = page.locator('.asset-row').filter({ has: page.getByText('Ether', { exact: true }) });
+    await etherRow.getByRole('button').first().click();
     await expect(page.getByText('Submit Or Remove The Queued Action First').first()).toBeVisible();
-    await page.getByRole('textbox', { name: '0' }).first().fill('10');
+    await page.getByRole('textbox', { name: '0' }).first().fill('0.1');
     await expect(page.getByRole('button', { name: 'Add Action' }).first()).toBeDisabled();
     await page.getByRole('button', { name: 'Cancel' }).first().click();
     await expect(page.getByText('Submit Or Remove The Queued Action First')).toHaveCount(0);

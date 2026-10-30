@@ -741,7 +741,7 @@ describe('ActionInputView', () => {
   });
 
   describe('on a queue limited to one action', () => {
-    const SINGLE: ActionRules = { singleAction: true };
+    const SINGLE: ActionRules = { isSingleAction: true };
 
     beforeEach(() => {
       baseAsset = mockBaseAsset({ balance: 0n, walletBalance: 20_000_000_000n });

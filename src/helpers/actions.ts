@@ -16,8 +16,8 @@ export function isSameAction(action1: Action | PendingAction, action2: Action | 
 }
 
 /**
- * Whether adding `action` to `queued` would leave a queue limited to one action with two distinct
- * actions. The queued action itself, edited or added again, is not a second action.
+ * Whether adding `action` to `queued` gives the queue a second, distinct action. The queued action
+ * itself, edited or added again, is not a second action.
  */
 export function addsSecondAction(queued: readonly Action[], action: Action | PendingAction): boolean {
   return queued.some((queuedAction) => !isSameAction(queuedAction, action));
@@ -235,10 +235,10 @@ export type ActionRules = {
   /** Set on the wrapped route, where the market's wrapper carries out base supply and withdrawal. */
   wrappedBase?: WrappedBaseRules;
   /**
-   * Set when the queue holds at most one action, as on the wrapped route: the Bulker cannot carry
-   * a wrapper call, so the queue's actions would otherwise go to the wallet as separate transactions.
+   * Set when the queue holds at most one action, as on the wrapped route. The Bulker cannot call the
+   * wrapper, so each action there is its own wallet transaction.
    */
-  singleAction?: boolean;
+  isSingleAction?: boolean;
 };
 
 /**
@@ -287,7 +287,7 @@ export function validateAddingAction(
   if (isWrappedActionEntry(actionToAdd)) {
     return [false, 'Wrapped Actions Are Submitted Separately'];
   }
-  if (rules.singleAction && addsSecondAction(actions, actionToAdd)) {
+  if (rules.isSingleAction && addsSecondAction(actions, actionToAdd)) {
     return [false, QUEUED_ACTION_FIRST];
   }
   const { baseAsset, collateralAssets } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions);

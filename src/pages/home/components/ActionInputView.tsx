@@ -490,7 +490,7 @@ function getContent(
 
   // A queue limited to one action takes no second one, whatever the amount, so the form says so
   // before an amount is typed, and asks for no approval.
-  if (actionRules?.singleAction && addsSecondAction(actionsToUse, pendingAction)) {
+  if (actionRules?.isSingleAction && addsSecondAction(actionsToUse, pendingAction)) {
     modifier = 'error';
     titleAdditionalContent = QUEUED_ACTION_FIRST;
     actionHintString = SINGLE_ACTION_HINT;

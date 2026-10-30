@@ -3,7 +3,14 @@ import { act, renderHook } from '@testing-library/react';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { WRAPPED_ACTION, WrappedExecutionError } from '@helpers/wrappedActions';
-import { QueueSession, useActionQueue } from '@hooks/useActionQueue';
+import {
+  emptyQueue,
+  QueueActionType,
+  queueReducer,
+  QueueSession,
+  useActionQueue,
+  visitKey,
+} from '@hooks/useActionQueue';
 import { Action, ActionQueue, ActionType, MarketData, PendingAction, RewardsState, StateType } from '@types';
 
 import { mockBaseAsset } from '../mocks/mockBaseAsset';
@@ -400,5 +407,48 @@ describe('useActionQueue limited to one action', () => {
 
     expect(accepted).toEqual([true, true]);
     expect(visibleActions(result.current)).toEqual([SUPPLY, SUPPLY_COMP]);
+  });
+});
+
+describe('queueReducer limited to one action', () => {
+  const identity = { session: 'session', market: 'market' };
+
+  it('keeps a distinct second action out, whatever dispatches it', () => {
+    const empty = emptyQueue(identity);
+    const visit = visitKey(empty);
+    const one = queueReducer(empty, [QueueActionType.AddOrUpdate, visit, BORROW, true]);
+
+    expect(one.actions).toEqual([BORROW]);
+    expect(queueReducer(one, [QueueActionType.AddOrUpdate, visit, SUPPLY_COMP, true])).toBe(one);
+    const larger: Action = [ActionType.Borrow, BASE_ASSET, 2_000_000_000n];
+    expect(queueReducer(one, [QueueActionType.AddOrUpdate, visit, larger, true]).actions).toEqual([larger]);
+  });
+
+  it('adds a second action when the queue is not limited to one', () => {
+    const empty = emptyQueue(identity);
+    const visit = visitKey(empty);
+    const one = queueReducer(empty, [QueueActionType.AddOrUpdate, visit, BORROW, false]);
+
+    expect(queueReducer(one, [QueueActionType.AddOrUpdate, visit, SUPPLY_COMP, false]).actions).toEqual([
+      BORROW,
+      SUPPLY_COMP,
+    ]);
+  });
+});
+
+describe('useActionQueue callbacks kept from an earlier visit', () => {
+  it('report that they added nothing, and leave the limit of the current visit intact', () => {
+    const single: Props = { market: MAINNET_USDC, session: SESSION, isSingleAction: true };
+    const { result, rerender } = renderQueue(single);
+    const kept = result.current;
+    rerender({ ...single, market: MAINNET_ETH });
+
+    let accepted: boolean[] = [];
+    act(() => {
+      accepted = [kept.addOrUpdateAction(SUPPLY_COMP), result.current.addOrUpdateAction(BORROW)];
+    });
+
+    expect(accepted).toEqual([false, true]);
+    expect(visibleActions(result.current)).toEqual([BORROW]);
   });
 });

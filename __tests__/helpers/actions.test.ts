@@ -527,7 +527,7 @@ describe('validateAddingAction with base lending through the wrapper', () => {
 
 describe('validateAddingAction on a single-action queue', () => {
   const SINGLE: ActionRules = {
-    singleAction: true,
+    isSingleAction: true,
     wrappedBase: {
       supplyBlockedReason: undefined,
       withdrawBlockedReason: undefined,
@@ -582,7 +582,7 @@ describe('validateAddingAction on a single-action queue', () => {
   });
 
   it('allows several actions when the queue is not limited to one', () => {
-    const { singleAction: _limit, ...batching } = SINGLE;
+    const batching: ActionRules = { ...SINGLE, isSingleAction: false };
     const supply = mockBaseAction({ actionType: ActionType.Supply, amount: 1_000_000n });
     const supplyCollateral = mockCollateralAction({ actionType: ActionType.SupplyCollateral, amount: 10n ** 16n });
 
