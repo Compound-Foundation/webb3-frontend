@@ -9,6 +9,28 @@
 export const BINDING_NAME = '__compoundHarnessWallet';
 export const PROVIDER_NAME = 'MetaMask (harness)';
 export const PROVIDER_RDNS = 'io.metamask';
+
+/**
+ * What the provider announces, and the row the app's wallet list shows for it. The app names a listed wallet
+ * by its RDNS (`KNOWN_WALLETS`), never by the announced name.
+ */
+export type HarnessWallet = { rdns: string; name: string; label: string };
+
+export const METAMASK_WALLET: HarnessWallet = Object.freeze({
+  rdns: PROVIDER_RDNS,
+  name: PROVIDER_NAME,
+  label: 'MetaMask',
+});
+
+/**
+ * The Anchorage Digital extension's RDNS. The app's wagmi connector takes its id from it, so the app lends
+ * through the wrappers on the three wrapped markets (`ANCHORAGE_CONNECTOR_ID`).
+ */
+export const ANCHORAGE_WALLET: HarnessWallet = Object.freeze({
+  rdns: 'com.anchorage.connect',
+  name: 'Anchorage Digital (harness)',
+  label: 'Anchorage Digital',
+});
 /** A plain grey square, as a data URI, because the app drops any icon that is not one. */
 export const PROVIDER_ICON =
   'data:image/svg+xml;base64,' +

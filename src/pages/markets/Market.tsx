@@ -22,7 +22,6 @@ import MarketRatesPanel from './components/MarketRatesPanel';
 import MarketStatsPanel from './components/MarketStatsPanel';
 import RateModelPanel from './components/RateModelPanel';
 import WhitelistStatusBanner from './components/WhitelistStatusBanner';
-import WrappedRouteNotice from './components/WrappedRouteNotice';
 import { useMarketsState } from './hooks/useMarketsState';
 
 type MarketsProps = {
@@ -345,7 +344,6 @@ const Market = ({ web3 }: MarketsProps) => {
         {marketStatsPanel}
         {v2Markets ? marketOverviewPanel : marketRatesPanel}
         {interestRateModelPanel}
-        {isWrappedRoute && market !== undefined && <WrappedRouteNotice baseSymbol={market.baseAsset.symbol} />}
         {whitelistStatusBanner}
         {assetRows}
         {!configMarket?.institutional && additionalMarketDataPanel}
