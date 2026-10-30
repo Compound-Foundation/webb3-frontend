@@ -221,6 +221,13 @@ function stepStatuses(result: Result): string[] {
   return 'steps' in state ? state.steps.map((step) => step.status) : [];
 }
 
+/** Identity changes after a draft has ended. */
+const CHANGES_AFTER_THE_END: [string, (wallet: Wallet) => WrappedSession][] = [
+  ['reconnect', (wallet) => sessionFor(wallet, { status: 'reconnecting' })],
+  ['account', (wallet) => sessionFor(wallet, { account: OTHER_ACCOUNT })],
+  ['market', (wallet) => sessionFor(wallet, { cometAddress: USDT_COMET })],
+];
+
 describe('useWrappedAction', () => {
   let wallet: Wallet;
 
@@ -319,6 +326,26 @@ describe('useWrappedAction', () => {
 
       expect(phases.length).toBeGreaterThan(0);
       expect(phases.every((phase) => phase === 'discarded')).toBe(true);
+    });
+
+    it('names the action and the chain of a discarded draft, so what it sent can be found', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+      await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xapproval' }));
+
+      // The wallet moves to Base. The approval was sent on Ethereum.
+      rerender({ session: sessionFor(wallet, { chainId: 8453 }), manager });
+
+      expect(result.current.state).toEqual({
+        phase: 'discarded',
+        reason: 'identity-changed',
+        type: 'supply',
+        chainId: 1,
+        submittedHashes: ['0xapproval'],
+        isWalletRequestOpen: false,
+      });
     });
 
     it('drops a late read even when the session returns to the one it started in', async () => {
@@ -1277,6 +1304,49 @@ describe('useWrappedAction', () => {
       expect(Object.isFrozen(state.draft.steps[0].request)).toBe(true);
     });
 
+    it.each(CHANGES_AFTER_THE_END)(
+      'keeps a completed or stopped draft, which sends nothing more, after a change of %s',
+      async (_change, changedSession) => {
+        const { manager, requests } = fakeManager(wallet);
+        const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+        act(() => {
+          result.current.start('supply', async () => ({ amount: 1_000_000n, steps: [SUPPLY] }));
+        });
+        await waitFor(() => expect(result.current.state.phase).toBe('review'));
+        await confirmAndWaitForWallet(result, requests, 1);
+        await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xsupply' }));
+        act(() => requests[0].request.onSettled?.({ status: 'confirmed', receipt: receipt('0xsupply') }));
+        expect(result.current.state.phase).toBe('complete');
+
+        rerender({ session: changedSession(wallet), manager });
+
+        // What became of the supply stays on screen. Nothing can be sent from it.
+        expect(result.current.state).toMatchObject({ phase: 'complete', steps: [{ status: 'confirmed' }] });
+        act(() => result.current.confirm());
+        await act(async () => undefined);
+        expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
+      }
+    );
+
+    it('keeps a stopped draft and its reason after an identity change', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+      await act(async () => requests[0].resolve({ status: 'rejected' }));
+      expect(result.current.state).toMatchObject({
+        phase: 'stopped',
+        steps: [{ status: 'rejected' }, { status: 'waiting' }],
+      });
+
+      rerender({ session: sessionFor(wallet, { status: 'reconnecting' }), manager });
+
+      expect(result.current.state).toMatchObject({
+        phase: 'stopped',
+        steps: [{ status: 'rejected' }, { status: 'waiting' }],
+      });
+    });
+
     it('clears a draft without cancelling what the wallet already has', async () => {
       const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });
@@ -1287,6 +1357,8 @@ describe('useWrappedAction', () => {
       expect(result.current.state).toEqual({
         phase: 'discarded',
         reason: 'cleared',
+        type: 'supply',
+        chainId: 1,
         submittedHashes: [],
         isWalletRequestOpen: true,
       });
@@ -1380,10 +1452,43 @@ describe('useWrappedAction', () => {
 
       expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
       expect(result.current.canDismissRecovered).toBe(true);
+      expect(result.current.hasUnansweredWalletRequest).toBe(false);
       act(() => result.current.dismissRecovered());
 
       expect(manager.dismissTransaction).toHaveBeenCalledWith('interrupted');
       expect(manager.submitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('says when the wallet has not answered a request of this account, once no draft is in progress', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+      // The manager tracks the step's own request, with no hash and not interrupted, until the
+      // wallet answers it.
+      const unanswered: Transaction = {
+        id: 'unanswered',
+        key: USDC_WRAPPER,
+        networkId: 1,
+        networkName: 'homestead',
+        description: 'Approve USDC for the wrapper',
+        nonce: 7,
+        account: ACCOUNT,
+        step: 'approve',
+        state: TransactionState.AwaitingConfirmation,
+      };
+      rerender({ session: sessionFor(wallet), manager: { ...manager, transactions: [unanswered] } });
+      expect(result.current.state.phase).toBe('signing');
+      expect(result.current.hasUnansweredWalletRequest).toBe(false);
+
+      act(() => result.current.discard());
+
+      expect(result.current.hasUnansweredWalletRequest).toBe(true);
+      expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
+      // The user can stop waiting for the request only after a reload.
+      expect(result.current.canDismissRecovered).toBe(false);
+      act(() => result.current.dismissRecovered());
+      expect(manager.dismissTransaction).not.toHaveBeenCalled();
     });
 
     it.each<[string, Transaction, boolean, boolean]>([
@@ -1470,6 +1575,7 @@ describe('useWrappedAction', () => {
 
       expect(result.current.start('supply', prepareSupply)).toBe('transaction-pending');
       expect(result.current.canDismissRecovered).toBe(false);
+      expect(result.current.hasUnansweredWalletRequest).toBe(false);
       act(() => result.current.dismissRecovered());
 
       expect(manager.dismissTransaction).not.toHaveBeenCalled();
