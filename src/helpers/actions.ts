@@ -2,6 +2,7 @@ import { Action, ActionType, BaseAssetWithAccountState, PendingAction, Token, To
 
 import { MAX_UINT256, getCapacity, getCollateralValue, takePercentage, BORROW_MAX_SCALE, formatValue } from './numbers';
 import { isStETH } from './steth';
+import { isWrappedActionEntry } from './wrappedActions';
 
 export function isSameToken(token1: Token, token2: Token): boolean {
   return token1.address === token2.address && token1.symbol === token2.symbol;
@@ -200,6 +201,10 @@ export function validateAddingAction(
   actionToAdd: Action,
   rules: ActionRules = {}
 ): Validity {
+  // A wrapper action has its own review and is never queued with direct actions.
+  if (isWrappedActionEntry(actionToAdd)) {
+    return [false, 'Wrapped Actions Are Submitted Separately'];
+  }
   const { baseAsset, collateralAssets } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions);
 
   const [actionType] = actionToAdd;

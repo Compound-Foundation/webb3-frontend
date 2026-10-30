@@ -1,8 +1,10 @@
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useReducer } from 'react';
 
+import type { WriteWeb3 } from '@contexts/Web3Context';
 import { isSameAction, isSameToken } from '@helpers/actions';
 import { filterMap } from '@helpers/functions';
 import { getRewardsForMarket } from '@helpers/rewards';
+import { assertDirectActions } from '@helpers/wrappedActions';
 import {
   Action,
   ActionType,
@@ -14,92 +16,172 @@ import {
   TokenWithAccountState,
 } from '@types';
 
+/**
+ * The wallet session a queue belongs to. The wallet's network is not part of it, so a queue made
+ * while the wallet is on another network survives the switch to the market's network and can then
+ * be submitted.
+ */
+export type QueueSession = {
+  account: string | undefined;
+  /** The wallet connection: the wagmi connector's `uid`, which is different for each connector. */
+  connector: string | undefined;
+  /** wagmi's connection status. A reconnect with the same account and connector changes it. */
+  status: WriteWeb3['status'];
+};
+
+const NO_SESSION: QueueSession = { account: undefined, connector: undefined, status: 'disconnected' };
+
+/** The session and market a queue was built for, each as a key. */
+type QueueIdentity = { session: string; market: string };
+
+type QueueState = {
+  identity: QueueIdentity;
+  /** Counts resets, so a return to an earlier session and market is a new visit. */
+  visit: number;
+  actions: Action[];
+  pendingAction: PendingAction | undefined;
+  /** Actions to queue when a market is next selected, by market key. They belong to `identity`. */
+  deferred: Record<string, Action[]>;
+};
+
 enum QueueActionType {
   AddOrUpdate = 'add-or-update',
   Clear = 'clear',
   Remove = 'remove',
+  SetPending = 'set-pending',
+  Defer = 'defer',
+  Reset = 'reset',
 }
 
-type AddOrUpdateAction = [QueueActionType.AddOrUpdate, Action];
-type ClearAction = [QueueActionType.Clear];
-type RemoveAction = [QueueActionType.Remove, Action];
+// Every change except a reset carries the visit key its caller rendered with. It applies only
+// during that visit, so a callback kept from an earlier session or market, or from an earlier visit
+// to the same ones, changes nothing.
+type AddOrUpdateAction = [QueueActionType.AddOrUpdate, string, Action];
+type ClearAction = [QueueActionType.Clear, string];
+type RemoveAction = [QueueActionType.Remove, string, Action];
+type SetPendingAction = [QueueActionType.SetPending, string, PendingAction | undefined];
+type DeferAction = [QueueActionType.Defer, string, string, Action[]];
+type ResetAction = [QueueActionType.Reset, QueueIdentity];
 
-type QueueAction = AddOrUpdateAction | ClearAction | RemoveAction;
+type QueueAction = AddOrUpdateAction | ClearAction | RemoveAction | SetPendingAction | DeferAction | ResetAction;
 
-function actionReducer(currentActions: Action[], queueAction: QueueAction): Action[] {
-  const [type] = queueAction;
-  let actions: Action[];
-  switch (type) {
-    case QueueActionType.AddOrUpdate: {
-      const actionIndex = currentActions.findIndex((action) => isSameAction(action, queueAction[1]));
+function sessionKey({ account, connector, status }: QueueSession): string {
+  return `${account?.toLowerCase() ?? ''}|${connector ?? ''}|${status}`;
+}
 
-      if (actionIndex === -1) {
-        actions = [...currentActions, queueAction[1]];
-      } else {
-        actions = currentActions.map((action, index) => (index === actionIndex ? queueAction[1] : action));
-      }
-      break;
-    }
+/** A market is its chain and Comet address. One Comet address can be listed on two chains. */
+function marketKey(chainId: number, marketAddress: string): string {
+  return `${chainId}:${marketAddress.toLowerCase()}`;
+}
+
+function identityKey({ session, market }: QueueIdentity): string {
+  return `${session}#${market}`;
+}
+
+function emptyQueue(identity: QueueIdentity, visit = 0): QueueState {
+  return { identity, visit, actions: [], pendingAction: undefined, deferred: {} };
+}
+
+function visitKey(state: QueueState): string {
+  return `${identityKey(state.identity)}@${state.visit}`;
+}
+
+function addOrUpdate(actions: Action[], action: Action): Action[] {
+  const actionIndex = actions.findIndex((queued) => isSameAction(queued, action));
+  if (actionIndex === -1) return [...actions, action];
+  return actions.map((queued, index) => (index === actionIndex ? action : queued));
+}
+
+function queueReducer(state: QueueState, queueAction: QueueAction): QueueState {
+  if (queueAction[0] === QueueActionType.Reset) {
+    const identity = queueAction[1];
+    if (identityKey(identity) === identityKey(state.identity)) return state;
+    // Nothing queued, open or deferred carries over to a new session or market. When only the
+    // market changed, the actions deferred for that market are queued.
+    const replay = identity.session === state.identity.session ? state.deferred[identity.market] ?? [] : [];
+    return { ...emptyQueue(identity, state.visit + 1), actions: replay.reduce(addOrUpdate, []) };
+  }
+
+  if (queueAction[1] !== visitKey(state)) return state;
+  switch (queueAction[0]) {
+    case QueueActionType.AddOrUpdate:
+      return { ...state, actions: addOrUpdate(state.actions, queueAction[2]) };
     case QueueActionType.Clear:
-      actions = [];
-      break;
-    case QueueActionType.Remove:
-      actions = currentActions.filter((currentAction) => !isSameAction(currentAction, queueAction[1]));
-      break;
+      return { ...state, actions: [] };
+    case QueueActionType.Remove: {
+      const removed = queueAction[2];
+      return { ...state, actions: state.actions.filter((action) => !isSameAction(action, removed)) };
+    }
+    case QueueActionType.SetPending:
+      return { ...state, pendingAction: queueAction[2] };
+    case QueueActionType.Defer:
+      return { ...state, deferred: { ...state.deferred, [queueAction[2]]: queueAction[3] } };
     default:
       throw new Error();
   }
-  return actions;
 }
 
 /**
  * useActionQueue is a hook that keeps track of pending bulker actions.
+ *
+ * The queue, the open amount form and deferred actions belong to the session (account, connector
+ * and connection status) and the market (chain and Comet) they were made for. A change of either
+ * clears them all in the same render. A market change then queues the actions deferred for the new
+ * market.
  */
 export function useActionQueue(
   market: MarketDataState,
   onActionsChanged: (actions: Action[]) => void,
-  account?: string
+  session: QueueSession = NO_SESSION
 ): ActionQueue {
-  const [actions, updateActions] = useReducer(actionReducer, []);
-  const [pendingAction, setPendingAction] = useState<PendingAction | undefined>(undefined);
-  const [actionsToAdd, setActionsToAdd] = useState<{ [key: string]: Action[] }>({});
-  const marketRef = useRef(market[1]?.marketAddress);
+  const selectedMarket = market[1];
+  const identity: QueueIdentity = {
+    session: sessionKey(session),
+    market:
+      selectedMarket === undefined
+        ? ''
+        : marketKey(selectedMarket.chainInformation.chainId, selectedMarket.marketAddress),
+  };
+  const key = identityKey(identity);
+  const [state, updateQueue] = useReducer(queueReducer, identity, emptyQueue);
+
+  // React discards this render and renders again with the reset applied, so no committed render
+  // shows the previous session's or market's queue.
+  if (identityKey(state.identity) !== key) {
+    updateQueue([QueueActionType.Reset, identity]);
+  }
+  const isCurrent = identityKey(state.identity) === key;
+  const actions = isCurrent ? state.actions : [];
+  const pendingAction = isCurrent ? state.pendingAction : undefined;
+  // What the callbacks below carry: this visit to this session and market.
+  const currentVisit = visitKey(state);
 
   useEffect(() => {
-    if (market[1] !== undefined && marketRef.current !== market[1].marketAddress) {
-      marketRef.current = market[1]?.marketAddress;
-      clearActions();
-      actionsToAdd[marketRef.current]?.forEach((action: Action) => {
-        addOrUpdateAction(action);
-      });
-      setActionsToAdd({
-        ...actionsToAdd,
-        [marketRef.current]: [],
-      });
-    }
-  }, [market[1]?.marketAddress, account, actionsToAdd, setActionsToAdd]);
+    onActionsChanged(state.actions);
+  }, [state.actions]);
 
-  useEffect(() => {
-    onActionsChanged(actions);
-  }, [actions]);
-
+  // A wrapper action has its own review and lifecycle. Refusing one here, with a typed error,
+  // keeps the queue and the Bulker from ever holding one.
   const addOrUpdateAction = (action: Action) => {
-    updateActions([QueueActionType.AddOrUpdate, action]);
+    assertDirectActions([action]);
+    updateQueue([QueueActionType.AddOrUpdate, currentVisit, action]);
   };
 
   const clearActions = () => {
-    updateActions([QueueActionType.Clear]);
+    updateQueue([QueueActionType.Clear, currentVisit]);
   };
 
-  const queueActions = (market: string, actions: Action[]) => {
-    setActionsToAdd({
-      ...actionsToAdd,
-      [market]: actions,
-    });
+  const queueActions = (chainId: number, marketAddress: string, actionsToQueue: Action[]) => {
+    assertDirectActions(actionsToQueue);
+    updateQueue([QueueActionType.Defer, currentVisit, marketKey(chainId, marketAddress), actionsToQueue]);
   };
 
   const removeAction = (action: Action) => {
-    updateActions([QueueActionType.Remove, action]);
+    updateQueue([QueueActionType.Remove, currentVisit, action]);
+  };
+
+  const setPendingAction = (pendingAction?: PendingAction) => {
+    updateQueue([QueueActionType.SetPending, currentVisit, pendingAction]);
   };
 
   const getActions = (
@@ -125,6 +207,9 @@ export function useActionQueue(
           if (rewards === undefined) return undefined;
           return [action[0], rewards.rewardAsset, rewards.amountOwed, rewards];
         }
+        default:
+          // Kept, not dropped, so that submission refuses the whole queue instead of sending the rest.
+          return action;
       }
     });
   };

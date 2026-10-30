@@ -190,6 +190,7 @@ function setSession(setup: SessionSetup = {}) {
       chainId,
       account,
       isActive: true,
+      status: setup.status ?? 'connected',
       provider: 'provider' in setup ? setup.provider : new Web3Provider(client?.transport ?? transport, 1),
     },
   };
