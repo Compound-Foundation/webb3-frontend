@@ -353,6 +353,56 @@ describe('ActionInputView', () => {
       expect(onCancel).toHaveBeenCalled();
     });
 
+    it('confirms a max limited by the wallet balance as that fixed amount', async () => {
+      const user = userEvent.setup();
+      const onConfirm = jest.fn();
+
+      const { getByText, getByPlaceholderText } = render(
+        <WrappedActionInputView
+          actions={actions}
+          baseAsset={{ ...baseAsset, walletBalance: 4_000_000_000n }}
+          collateralAssets={collateralAssets}
+          initialValue={undefined}
+          pendingAction={pendingAction}
+          market={market}
+          onCancel={jest.fn()}
+          onConfirm={onConfirm}
+        />
+      );
+
+      await user.click(getByText('Max'));
+      expect(getByPlaceholderText('0')).toHaveValue('4,000');
+
+      await user.click(getByText('Add Action'));
+      expect(onConfirm).toHaveBeenCalledWith(4_000_000_000n, 'Repay 4,000 USDC');
+    });
+
+    it('confirms a max the user then edits as the edited fixed amount', async () => {
+      const user = userEvent.setup();
+      const onConfirm = jest.fn();
+
+      const { getByText, getByPlaceholderText } = render(
+        <WrappedActionInputView
+          actions={actions}
+          baseAsset={baseAsset}
+          collateralAssets={collateralAssets}
+          initialValue={undefined}
+          pendingAction={pendingAction}
+          market={market}
+          onCancel={jest.fn()}
+          onConfirm={onConfirm}
+        />
+      );
+
+      await user.click(getByText('Max'));
+      expect(getByPlaceholderText('0')).toHaveValue('10,000');
+      await user.clear(getByPlaceholderText('0'));
+      await user.type(getByPlaceholderText('0'), '9000');
+
+      await user.click(getByText('Add Action'));
+      expect(onConfirm).toHaveBeenCalledWith(9_000_000_000n, 'Repay 9,000 USDC');
+    });
+
     it('shows an error message as expected', async () => {
       const user = userEvent.setup();
       const onConfirm = jest.fn();
