@@ -16,6 +16,11 @@
 /src/constants/ @Compound-Foundation/foundation-engineering
 /src/hooks/ @Compound-Foundation/foundation-engineering
 /src/pages/home/index.tsx @Compound-Foundation/foundation-engineering
+# What users review and confirm before the wallet is asked: the action and
+# bulker dialogs, the wrapped supply and withdrawal dialogs, and the wrapped
+# position panel, which sets a withdrawal's amount and its partial or full exit.
+/src/pages/home/components/ActionModal/ @Compound-Foundation/foundation-engineering
+/src/pages/home/components/WrappedPositionPanel.tsx @Compound-Foundation/foundation-engineering
 # Wallet connection, Safe App framing and the screening gate. main.tsx sets the
 # allowed Safe domains and turns off Wagmi's own reconnect.
 /src/main.tsx @Compound-Foundation/foundation-engineering
