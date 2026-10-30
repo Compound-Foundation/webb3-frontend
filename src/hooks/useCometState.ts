@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
 import { adjustCollateralPrice, getBaseAssetDollarPrice, getBaseAssetPriceFeed } from '@helpers/baseAssetPrice';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import { shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
 import { getCapacity, getCollateralValue, MAX_UINT256, REFRESH_INTERVAL } from '@helpers/numbers';
@@ -74,6 +75,13 @@ export function useCometState(
           const cometResponse = await queryCometData(web3.read.provider.connection, marketStateData);
           newState = formatCometStateNoWallet(cometResponse, marketStateData, rewards);
         }
+        // The app keeps this state across an account switch until the next read arrives, so it
+        // carries the market and account it was read for.
+        recordCometStateSource(
+          newState,
+          { chainId: marketStateData.chainInformation.chainId, cometAddress: marketStateData.marketAddress },
+          account
+        );
 
         // Only update state if the market has not changed since the start of this callback
         // We compare to a ref because the `marketState` in the callback can be stale

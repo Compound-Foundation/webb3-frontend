@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { BigNumber } from 'ethers';
 
 import { Web3 } from '@contexts/Web3Context';
+import { withCometStateSource } from '@helpers/cometStateSource';
 import { useCometState } from '@hooks/useCometState';
 import { queryCometData } from '@hooks/useSelectedMarket';
 import { MarketData, MarketDataState, RewardsState, StateType, Transaction } from '@types';
@@ -25,10 +26,11 @@ jest.mock('@hooks/useWaiter', () => ({
   }),
 }));
 
-// The per-account query goes through Sleuth. It never answers here, so only the queries the
-// tests resolve can update the state.
+// The per-account query goes through Sleuth. It never answers unless a test sets an answer, so
+// only the queries the tests resolve can update the state.
+const mockSleuthFetch = jest.fn();
 jest.mock('@helpers/sleuth/sleuth', () => {
-  const Sleuth = jest.fn().mockImplementation(() => ({ fetch: () => new Promise(() => undefined) }));
+  const Sleuth = jest.fn().mockImplementation(() => ({ fetch: (...args: unknown[]) => mockSleuthFetch(...args) }));
   return { Sleuth: Object.assign(Sleuth, { querySol: jest.fn(() => 'query') }) };
 });
 
@@ -53,6 +55,21 @@ const cometResponse = (earnAPR: number) => ({
   },
 });
 
+const cometResponseWithAccount = (baseBalance: number) => {
+  const response = cometResponse(0);
+  return {
+    ...response,
+    bulkerAllowance: BigNumber.from(0),
+    baseAsset: {
+      ...response.baseAsset,
+      allowance: BigNumber.from(0),
+      balance: BigNumber.from(baseBalance),
+      bulkerAllowance: BigNumber.from(0),
+      walletBalance: BigNumber.from(0),
+    },
+  };
+};
+
 const MARKET_A: MarketData = mockMarket({ marketAddress: '0x00000000000000000000000000000000000000aa' });
 const MARKET_B: MarketData = mockMarket({ marketAddress: '0x00000000000000000000000000000000000000bb' });
 const WEB3: Web3 = {
@@ -72,6 +89,8 @@ describe('useCometState', () => {
     jest.useFakeTimers();
     heldUpdates.length = 0;
     mockQueryCometData.mockReset();
+    mockSleuthFetch.mockReset();
+    mockSleuthFetch.mockReturnValue(new Promise(() => undefined));
   });
 
   afterEach(() => {
@@ -135,5 +154,53 @@ describe('useCometState', () => {
     });
 
     expect(result.current[0]).toBe(StateType.Loading);
+  });
+
+  it('records the market and account each state was read for', async () => {
+    const accountA = '0x00000000000000000000000000000000000000a1';
+    const accountB = '0x00000000000000000000000000000000000000b2';
+    mockSleuthFetch.mockResolvedValueOnce(cometResponseWithAccount(-100_000_000));
+    const withAccount = (account: string): Web3 => ({ ...WEB3, read: { ...WEB3.read, account } });
+    const { result, rerender } = renderHook(
+      ({ web3 }: { web3: Web3 }) => useCometState(web3, [StateType.Hydrated, MARKET_A], PENDING, REWARDS),
+      { initialProps: { web3: withAccount(accountA) } }
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await heldUpdates[0]();
+    });
+    const stateA = result.current;
+    expect(stateA[0]).toBe(StateType.Hydrated);
+    expect(withCometStateSource(stateA)).toEqual({
+      market: { chainId: MARKET_A.chainInformation.chainId, cometAddress: MARKET_A.marketAddress },
+      account: accountA,
+      state: stateA,
+    });
+
+    // Account B connects. Its read is still pending, so the hook keeps account A's state, which
+    // still names account A.
+    rerender({ web3: withAccount(accountB) });
+    expect(result.current).toBe(stateA);
+    expect(withCometStateSource(result.current).account).toBe(accountA);
+  });
+
+  it('records no account for a state read without one', async () => {
+    mockQueryCometData.mockResolvedValue(cometResponse(111));
+    const { result } = renderHook(() => useCometState(WEB3, [StateType.Hydrated, MARKET_A], PENDING, REWARDS));
+
+    await act(async () => {
+      jest.advanceTimersByTime(500);
+    });
+    await act(async () => {
+      await heldUpdates[0]();
+    });
+
+    expect(withCometStateSource(result.current)).toMatchObject({
+      market: { chainId: MARKET_A.chainInformation.chainId, cometAddress: MARKET_A.marketAddress },
+      account: undefined,
+    });
   });
 });
