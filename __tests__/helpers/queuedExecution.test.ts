@@ -37,6 +37,14 @@ const OPEN: WrappedMarketRegistry = buildWrappedMarketRegistry({
     isExitEnabled: true,
   })),
 });
+// Both release controls closed, as a rollback leaves them.
+const CLOSED: WrappedMarketRegistry = buildWrappedMarketRegistry({
+  markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({
+    ...market,
+    isDepositEnabled: false,
+    isExitEnabled: false,
+  })),
+});
 
 const session = (connectorId: string): LendingSession => ({
   connector: { id: connectorId, uid: 'uid-1' },
@@ -116,8 +124,7 @@ describe('isWrapperRouted and planQueuedExecution', () => {
   });
 
   it('routes a base supply through the wrapper even while deposits are closed, so it never falls back to Comet', () => {
-    const closed = buildWrappedMarketRegistry(HARDCODED_WRAPPED_LENDING_SOURCE);
-    const route = routeFor(WRAPPED_MARKETS[0].comet, ANCHORAGE_CONNECTOR_ID, closed);
+    const route = routeFor(WRAPPED_MARKETS[0].comet, ANCHORAGE_CONNECTOR_ID, CLOSED);
     const supply: Action = [ActionType.Supply, baseFor(USDC), 1_000_000n];
 
     expect(route.kind).toBe('wrapped');
@@ -201,11 +208,7 @@ describe('wrappedEntryBlockLabel', () => {
   });
 
   it('names closed release controls', () => {
-    const closed = routeFor(
-      WRAPPED_MARKETS[0].comet,
-      ANCHORAGE_CONNECTOR_ID,
-      buildWrappedMarketRegistry(HARDCODED_WRAPPED_LENDING_SOURCE)
-    ) as WrappedRoute;
+    const closed = routeFor(WRAPPED_MARKETS[0].comet, ANCHORAGE_CONNECTOR_ID, CLOSED) as WrappedRoute;
 
     expect(wrappedEntryBlockLabel(closed, 'supply')).toBe('Supply Not Open Yet');
     expect(wrappedEntryBlockLabel(closed, 'withdraw')).toBe('Withdrawals Not Open Yet');
@@ -213,14 +216,14 @@ describe('wrappedEntryBlockLabel', () => {
 
   it('names closed release controls for a wallet on another network too', () => {
     const live = { ...session(ANCHORAGE_CONNECTOR_ID), chainId: 8453 };
-    const lookup = buildWrappedMarketRegistry(HARDCODED_WRAPPED_LENDING_SOURCE).lookup(1, WRAPPED_MARKETS[1].comet);
+    const lookup = CLOSED.lookup(1, WRAPPED_MARKETS[1].comet);
     if (lookup.status !== 'valid') throw new Error('the mapping must be valid');
     const route = resolveLendingRoute({
       market: { chainId: 1, cometAddress: WRAPPED_MARKETS[1].comet },
       session: live,
       conflictedRdns: new Set(),
       validation: { key: wrappedRouteKey(lookup.market, live), status: 'matched' },
-      registry: buildWrappedMarketRegistry(HARDCODED_WRAPPED_LENDING_SOURCE),
+      registry: CLOSED,
     }) as WrappedRoute;
 
     expect(route.deposit).toMatchObject({ isEligible: false, reason: 'wrong-chain' });

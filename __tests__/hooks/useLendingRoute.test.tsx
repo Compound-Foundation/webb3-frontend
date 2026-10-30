@@ -258,15 +258,15 @@ describe('useLendingRoute', () => {
     expect(factoryCall?.[0].to).toBe(FACTORY_ADDRESS);
   });
 
-  it('enables reads but no write with the shipped registry', async () => {
+  it('enables reads, deposits and exits with the shipped registry', async () => {
     const chain = chainProvider();
     mockUseEthersProvider.mockReturnValue(chain.provider);
 
     const { result } = renderRoute(USDC_MARKET);
     await chain.finish();
     await waitFor(() => expect(wrapped(result.current).reads).toEqual(ELIGIBLE));
-    expect(wrapped(result.current).deposit).toEqual(blocked('deposits-disabled'));
-    expect(wrapped(result.current).exit).toEqual(blocked('exits-disabled'));
+    expect(wrapped(result.current).deposit).toEqual(ELIGIBLE);
+    expect(wrapped(result.current).exit).toEqual(ELIGIBLE);
   });
 
   describe('fails closed on missing mapping, loading, RPC rejection and asset mismatch without direct fallback', () => {

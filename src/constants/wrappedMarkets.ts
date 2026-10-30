@@ -73,9 +73,9 @@ export const WRAPPER_FACTORY_BY_CHAIN_ID: Readonly<Record<number, string>> = Obj
 });
 
 /**
- * The three Ethereum wrappers, as the factory's `getWrapper(comet)` returns them. The
- * evidence, and the release checks that keep both controls off, are in
- * docs/anchorage-wrapper-registry.md.
+ * The three Ethereum wrappers, as the factory's `getWrapper(comet)` returns them, with
+ * wrapped deposits and exits open. The evidence and the release checks are in
+ * docs/anchorage-wrapper-registry.md, and the rollback in docs/anchorage-release-runbook.md.
  */
 export const HARDCODED_WRAPPED_LENDING_SOURCE: WrappedLendingSource = Object.freeze({
   markets: Object.freeze([
@@ -86,8 +86,8 @@ export const HARDCODED_WRAPPED_LENDING_SOURCE: WrappedLendingSource = Object.fre
       baseTokenAddress: USDC_ADDRESS,
       baseDecimals: 6,
       shareDecimals: SHARE_DECIMALS,
-      isDepositEnabled: false,
-      isExitEnabled: false,
+      isDepositEnabled: true,
+      isExitEnabled: true,
     }),
     Object.freeze({
       chainId: ETHEREUM_CHAIN_ID,
@@ -96,8 +96,8 @@ export const HARDCODED_WRAPPED_LENDING_SOURCE: WrappedLendingSource = Object.fre
       baseTokenAddress: USDT_ADDRESS,
       baseDecimals: 6,
       shareDecimals: SHARE_DECIMALS,
-      isDepositEnabled: false,
-      isExitEnabled: false,
+      isDepositEnabled: true,
+      isExitEnabled: true,
     }),
     // Institutional USDC: a separate Comet from the USDC market, with the same base token.
     Object.freeze({
@@ -107,8 +107,8 @@ export const HARDCODED_WRAPPED_LENDING_SOURCE: WrappedLendingSource = Object.fre
       baseTokenAddress: USDC_ADDRESS,
       baseDecimals: 6,
       shareDecimals: SHARE_DECIMALS,
-      isDepositEnabled: false,
-      isExitEnabled: false,
+      isDepositEnabled: true,
+      isExitEnabled: true,
     }),
   ]),
 });
