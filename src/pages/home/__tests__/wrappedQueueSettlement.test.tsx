@@ -663,3 +663,124 @@ describe('the wrapped route through the real hooks, in the production order', ()
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
+
+/**
+ * Another write through the same wallet provider fails as a provider broken by an extension update
+ * does, so the transaction manager marks the wallet session unusable.
+ */
+async function breakSessionByAnotherWrite() {
+  await act(async () => {
+    await live.manager.submitTransaction({
+      key: '0x0000000000000000000000000000000000000bb2',
+      description: 'Another write',
+      send: async () => {
+        throw new Error("Cannot read properties of undefined (reading 'sendMessage')");
+      },
+    });
+  });
+  expect(live.action.session.status).toBe('unusable');
+}
+
+/** A promise the test resolves. */
+function held<T>() {
+  let release: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolve) => (release = resolve));
+  return { promise, release };
+}
+
+describe('a queued wrapper action when the wallet session breaks while it is being sent', () => {
+  // The lifecycle warns of a step it stopped, and the manager logs the other write's error.
+  let quiet: jest.SpyInstance[] = [];
+  beforeEach(() => {
+    mockNextId = 0;
+    quiet = [
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined),
+      jest.spyOn(console, 'log').mockImplementation(() => undefined),
+    ];
+  });
+
+  afterEach(() => {
+    quiet.forEach((spy) => spy.mockRestore());
+  });
+
+  it.each<[string, ActionType.Supply | ActionType.Withdraw, 'estimateGas' | 'getTransactionCount']>([
+    ['a withdrawal whose gas is being estimated', ActionType.Withdraw, 'estimateGas'],
+    ['a withdrawal whose nonce the manager is reading', ActionType.Withdraw, 'getTransactionCount'],
+    ['a supply whose gas is being estimated', ActionType.Supply, 'estimateGas'],
+  ])('keeps %s queued as not sent, and never asks the wallet to sign it', async (_name, type, heldRead) => {
+    const isWithdraw = type === ActionType.Withdraw;
+    const chain = isWithdraw ? chainFor({ shares: 250n * 10n ** 18n }) : chainFor({ allowance: AMOUNT });
+    const { wallet } = renderDashboard(chain);
+    await waitFor(() => expect(live.action.blockedReason(isWithdraw ? 'withdraw' : 'supply')).toBeUndefined());
+    const entry: Action = [type, BASE_ASSET, AMOUNT];
+    act(() => live.queue.addOrUpdateAction(entry));
+    // The read the request waits on before the wallet is asked to sign it.
+    const read = held<unknown>();
+    let isReadStarted = false;
+    const readNow = wallet[heldRead].getMockImplementation() as (...args: unknown[]) => Promise<unknown>;
+    (wallet[heldRead] as jest.Mock).mockImplementationOnce(async (...args: unknown[]) => {
+      isReadStarted = true;
+      await read.promise;
+      return readNow(...args);
+    });
+
+    act(() => positionCard().onSubmitClicked());
+    await waitFor(() => expect(isReadStarted).toBe(true));
+    const { state } = live.action;
+    expect(state.phase === 'signing' && state.steps[state.stepIndex]).toEqual({ status: 'awaiting-signature' });
+
+    await breakSessionByAnotherWrite();
+    await waitFor(() => expect(live.action.state.phase).toBe('stopped'));
+    await settle();
+
+    // Nothing reached the wallet, so the action stays queued, and its row asks for another try.
+    expect(queued()).toEqual([entry]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({ action: entry, label: 'Not Sent, Try Again' });
+    const stopped = live.action.state;
+    if (stopped.phase !== 'stopped') throw new Error('the action must be stopped');
+    expect(stopped.steps[stopped.stepIndex]).toEqual({ status: 'blocked', reason: 'session-unusable' });
+
+    // The read answers late. The request is withdrawn at its next check, before the wallet.
+    read.release(undefined);
+    await settle();
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(live.manager.transactions).toEqual([]);
+
+    // Submit again is refused while the session stays unusable, and sends nothing.
+    await submit();
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(queued()).toEqual([entry]);
+  });
+
+  it('takes a withdrawal the wallet was asked to sign out of the queue, and asks for it only once', async () => {
+    const chain = chainFor({ shares: 250n * 10n ** 18n });
+    const { wallet } = renderDashboard(chain);
+    await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, AMOUNT];
+    act(() => live.queue.addOrUpdateAction(entry));
+    // The wallet holds the request and never answers.
+    wallet.sendUncheckedTransaction.mockImplementationOnce(() => new Promise<string>(() => undefined));
+
+    act(() => positionCard().onSubmitClicked());
+    await waitFor(() => expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1));
+
+    await breakSessionByAnotherWrite();
+    await waitFor(() => expect(live.action.state.phase).toBe('stopped'));
+    await settle();
+
+    // The wallet can still send it, so it leaves the queue, as any stop that can still execute does.
+    expect(queued()).toEqual([]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toBeUndefined();
+    await submit();
+    expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
+
+    const stopped = live.action.state;
+    if (stopped.phase !== 'stopped') throw new Error('the action must be stopped');
+    expect(stopped.steps[stopped.stepIndex]).toEqual({
+      status: 'provider-failure',
+      message:
+        'The wallet stopped responding while it had the request. The request can still be approved in the wallet.',
+      isStoppedBySessionFailure: true,
+    });
+  });
+});
