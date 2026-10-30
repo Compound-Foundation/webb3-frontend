@@ -132,7 +132,15 @@ interface ERC20 {
 }
 
 contract CometQuery {
-  uint internal constant SECONDS_PER_YEAR = 60 * 60 * 24 * 365;
+  // Interest rate model parameters, per second at factorScale precision. The app computes the APRs
+  // from them because service-patched Comets return a zero rate from getBorrowRate/getSupplyRate
+  // while the market has no borrows.
+  struct RateModel {
+    uint kink;
+    uint perSecondInterestRateBase;
+    uint perSecondInterestRateSlopeLow;
+    uint perSecondInterestRateSlopeHigh;
+  }
 
   struct BaseAsset {
     address baseAsset;
@@ -197,14 +205,16 @@ contract CometQuery {
     uint baseMinForRewards;
     uint baseTrackingBorrowSpeed;
     uint baseTrackingSupplySpeed;
-    uint borrowAPR;
-    uint earnAPR;
+    RateModel borrowRateModel;
+    uint factorScale;
     uint nativeAssetInDollars;
+    RateModel supplyRateModel;
     uint totalBorrow;
     uint totalBorrowPrincipal;
     uint totalSupply;
     uint totalSupplyPrincipal;
     uint trackingIndexScale;
+    uint utilization;
   }
 
   struct CometState {
@@ -212,15 +222,17 @@ contract CometQuery {
     uint baseMinForRewards;
     uint baseTrackingBorrowSpeed;
     uint baseTrackingSupplySpeed;
-    uint borrowAPR;
+    RateModel borrowRateModel;
     CollateralAsset[] collateralAssets;
-    uint earnAPR;
+    uint factorScale;
     uint nativeAssetInDollars;
+    RateModel supplyRateModel;
     uint totalBorrow;
     uint totalBorrowPrincipal;
     uint totalSupply;
     uint totalSupplyPrincipal;
     uint trackingIndexScale;
+    uint utilization;
   }
 
   struct CometStateWithAccountState {
@@ -228,17 +240,19 @@ contract CometQuery {
     uint baseMinForRewards;
     uint baseTrackingBorrowSpeed;
     uint baseTrackingSupplySpeed;
-    uint borrowAPR;
+    RateModel borrowRateModel;
     uint bulkerAllowance;
     CollateralAssetWithAccountState[] collateralAssets;
-    uint earnAPR;
+    uint factorScale;
     uint nativeAssetInDollars;
     uint nativeAssetWalletBalance;
+    RateModel supplyRateModel;
     uint totalBorrow;
     uint totalBorrowPrincipal;
     uint totalSupply;
     uint totalSupplyPrincipal;
     uint trackingIndexScale;
+    uint utilization;
   }
 
   function query(Comet comet, address nativeTokenToUsd, bool checkDeprecatedwUSDM) public view returns (CometState memory) {
@@ -256,15 +270,17 @@ contract CometQuery {
         baseMinForRewards: response.baseMinForRewards,
         baseTrackingBorrowSpeed: response.baseTrackingBorrowSpeed,
         baseTrackingSupplySpeed: response.baseTrackingSupplySpeed,
-        borrowAPR: response.borrowAPR,
+        borrowRateModel: response.borrowRateModel,
         collateralAssets: tokens,
-        earnAPR: response.earnAPR,
+        factorScale: response.factorScale,
         nativeAssetInDollars: response.nativeAssetInDollars,
+        supplyRateModel: response.supplyRateModel,
         totalBorrow: response.totalBorrow,
         totalBorrowPrincipal: response.totalBorrowPrincipal,
         totalSupply: response.totalSupply,
         totalSupplyPrincipal: response.totalSupplyPrincipal,
-        trackingIndexScale: response.trackingIndexScale
+        trackingIndexScale: response.trackingIndexScale,
+        utilization: response.utilization
       });
   }
 
@@ -315,17 +331,19 @@ contract CometQuery {
         baseMinForRewards: response.baseMinForRewards,
         baseTrackingBorrowSpeed: response.baseTrackingBorrowSpeed,
         baseTrackingSupplySpeed: response.baseTrackingSupplySpeed,
-        borrowAPR: response.borrowAPR,
+        borrowRateModel: response.borrowRateModel,
         bulkerAllowance: comet.allowance(account, bulker),
         collateralAssets: tokens,
-        earnAPR: response.earnAPR,
+        factorScale: response.factorScale,
         nativeAssetInDollars: response.nativeAssetInDollars,
         nativeAssetWalletBalance: account.balance,
+        supplyRateModel: response.supplyRateModel,
         totalBorrow: response.totalBorrow,
         totalBorrowPrincipal: response.totalBorrowPrincipal,
         totalSupply: response.totalSupply,
         totalSupplyPrincipal: response.totalSupplyPrincipal,
-        trackingIndexScale: response.trackingIndexScale
+        trackingIndexScale: response.trackingIndexScale,
+        utilization: response.utilization
       });
   }
 
@@ -342,8 +360,18 @@ contract CometQuery {
     uint totalSupply = comet.totalSupply();
     uint totalBorrow = comet.totalBorrow();
     Comet.TotalsBasic memory totalsBasic = comet.totalsBasic();
-    uint borrowRatePerSecond = comet.getBorrowRate(utilization);
-    uint supplyRatePerSecond = comet.getSupplyRate(utilization);
+    RateModel memory borrowRateModel = RateModel({
+      kink: comet.borrowKink(),
+      perSecondInterestRateBase: comet.borrowPerSecondInterestRateBase(),
+      perSecondInterestRateSlopeLow: comet.borrowPerSecondInterestRateSlopeLow(),
+      perSecondInterestRateSlopeHigh: comet.borrowPerSecondInterestRateSlopeHigh()
+    });
+    RateModel memory supplyRateModel = RateModel({
+      kink: comet.supplyKink(),
+      perSecondInterestRateBase: comet.supplyPerSecondInterestRateBase(),
+      perSecondInterestRateSlopeLow: comet.supplyPerSecondInterestRateSlopeLow(),
+      perSecondInterestRateSlopeHigh: comet.supplyPerSecondInterestRateSlopeHigh()
+    });
 
     BaseAsset memory baseAsset = BaseAsset({
       baseAsset: baseToken,
@@ -362,14 +390,16 @@ contract CometQuery {
         baseMinForRewards: baseMinForRewards,
         baseTrackingBorrowSpeed: baseTrackingBorrowSpeed,
         baseTrackingSupplySpeed: baseTrackingSupplySpeed,
-        borrowAPR: borrowRatePerSecond * SECONDS_PER_YEAR,
-        earnAPR: supplyRatePerSecond * SECONDS_PER_YEAR,
+        borrowRateModel: borrowRateModel,
+        factorScale: comet.factorScale(),
         nativeAssetInDollars: nativeAssetInDollars,
+        supplyRateModel: supplyRateModel,
         totalBorrow: totalBorrow,
         totalBorrowPrincipal: totalsBasic.totalBorrowBase,
         totalSupply: totalSupply,
         totalSupplyPrincipal: totalsBasic.totalSupplyBase,
-        trackingIndexScale: trackingIndexScale
+        trackingIndexScale: trackingIndexScale,
+        utilization: utilization
       });
   }
 
