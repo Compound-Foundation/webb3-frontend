@@ -403,3 +403,20 @@ describe('addsDirectBaseSupply', () => {
     expect(addsDirectBaseSupply(mockBaseAsset({ balance: -10000000000n }), collateralAssetsPre(), actions)).toBe(false);
   });
 });
+
+describe('validateAddingAction with a wrapper action', () => {
+  const USDC_WRAPPER = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73';
+
+  it.each([ActionType.Supply, ActionType.SupplyCollateral, ActionType.WithdrawCollateral])(
+    'refuses a %s naming wrapper shares, whatever the rules',
+    (actionType) => {
+      const shares = { ...mockEthCollateralAsset(), address: USDC_WRAPPER, symbol: 'wcUSDCv3' };
+      const action = [actionType, shares, 1n] as Action;
+
+      expect(validateAddingAction(mockBaseAsset(), [mockEthCollateralAsset()], [], action)).toEqual([
+        false,
+        'Wrapped Actions Are Submitted Separately',
+      ]);
+    }
+  );
+});
