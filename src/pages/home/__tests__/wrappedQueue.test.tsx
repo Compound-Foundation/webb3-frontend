@@ -1066,6 +1066,43 @@ describe('Home on the wrapped route', () => {
       expectNoDialog();
     });
 
+    it('sends a full repay queued before a wrapped withdrawal to Comet as a repay of the whole debt at execution', () => {
+      const borrower = { ...BASE_ASSET, balance: -AMOUNT };
+      const repay: Action = [ActionType.Repay, borrower, MAX_UINT256];
+      const withdraw: Action = [ActionType.Withdraw, borrower, 400_000_000n];
+      const options = { queue: actionQueue([repay, withdraw]), state: cometState(borrower) };
+      const lending = lendingWith();
+      const { rerenderHome } = renderHome(lending, options);
+      // The form accepts the withdrawal once the queued repay clears the debt.
+      const { actionRules, baseAsset, collateralAssets } = positionCard();
+      expect(validateAddingAction(baseAsset, collateralAssets, [], repay, actionRules)).toBe('ok');
+      expect(validateAddingAction(baseAsset, collateralAssets, [repay], withdraw, actionRules)).toBe('ok');
+
+      act(() => positionCard().onSubmitClicked());
+      expect(lending.write.withdraw).toHaveBeenCalledWith({ kind: 'partial', cash: 400_000_000n });
+      expect(mockWriteState.supply).not.toHaveBeenCalled();
+
+      const draft = draftFor('withdraw', [WITHDRAW_STEP], SHARES);
+      rerenderHome(
+        lendingWith(controller({ phase: 'signing', draft, steps: [{ status: 'checking' }], stepIndex: 0 })),
+        options
+      );
+      expect(mockWriteState.supply).not.toHaveBeenCalled();
+      rerenderHome(lendingWith(controller({ phase: 'complete', draft, steps: [confirmed()], stepIndex: 0 })), options);
+
+      // Comet repays the borrow balance at execution for MAX_UINT256, so the repay leaves no excess.
+      expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
+      expect(mockWriteState.supply).toHaveBeenCalledWith(
+        USDC_MARKET,
+        USDC,
+        MAX_UINT256,
+        `Repay ${borrower.name}`,
+        0,
+        expect.any(Function)
+      );
+      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+    });
+
     it('leaves the direct actions queued for the next Submit when the wrapper action confirmed while another page was shown', () => {
       const queue = actionQueue([supplyCollateral, withdrawCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
       const { rerenderHome } = renderHome(lendingWith(), { queue });
