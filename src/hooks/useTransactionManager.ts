@@ -150,10 +150,13 @@ function isWrapperStep(transaction: Transaction): boolean {
  * that the next review of its action still waits for it.
  */
 export function holdsCometRefresh(transaction: Transaction): boolean {
+  // Storage validation accepts a wallet request record that carries a hash, and the type does not
+  // declare one, so the field is read at runtime. Any hash value keeps the record holding refreshes.
   const isInterruptedWrapperStep =
     isWrapperStep(transaction) &&
     transaction.state === TransactionState.AwaitingConfirmation &&
-    transaction.isInterrupted === true;
+    transaction.isInterrupted === true &&
+    !('hash' in transaction && transaction.hash !== undefined);
   return !isInterruptedWrapperStep;
 }
 
