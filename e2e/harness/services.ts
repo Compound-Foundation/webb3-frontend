@@ -44,6 +44,7 @@ import {
 } from './fork';
 import { BINDING_NAME, installHarnessProvider, PROVIDER_ICON, PROVIDER_NAME, PROVIDER_RDNS } from './injectedProvider';
 import { RUNS_DIR } from './paths';
+import { openWrappedReleaseControls } from './releaseControls';
 import { startRpcProxy } from './rpcProxy';
 import { cleanUpSynchronously, recoverKilledRuns, type ProcessRecord } from './runRecords';
 import { startScreeningStub } from './screeningStub';
@@ -78,6 +79,11 @@ export type Manifest = {
     devResolved: { DEV: boolean };
     environment: Record<string, string>;
     removedViteVariables: string[];
+    /**
+     * The wrapper release controls the dev server serves. Its plugin opens them, so the wrapped specs can
+     * run. The production builds keep the committed, closed controls.
+     */
+    wrappedReleaseControls: 'open';
   };
   production:
     | { isSkipped: true; reason: string }
@@ -417,7 +423,11 @@ export async function startServices({
       VITE_EXTRA_EXTENSIONS: EXTENSION_ID,
       [`VITE_${EXTENSION_ID.toUpperCase()}_SOURCE`]: screening.extensionUrl,
     };
-    const dev = await startDevServer({ envDir, environment: devEnvironment });
+    const dev = await startDevServer({
+      envDir,
+      environment: devEnvironment,
+      plugins: [openWrappedReleaseControls()],
+    });
     addStop({ name: 'dev server', run: () => dev.close() });
     ensureRunning();
     appOrigins.add(dev.origin);
@@ -463,6 +473,7 @@ export async function startServices({
         devResolved: { DEV: dev.DEV },
         environment: devEnvironment,
         removedViteVariables,
+        wrappedReleaseControls: 'open',
       },
       production,
       services: {

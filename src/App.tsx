@@ -14,18 +14,20 @@ import { CurrencyContextProvider } from '@contexts/CurrencyContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { initializeContext, getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { useWeb3Context } from '@contexts/Web3Context';
-import { WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { queueScope, submissionScope, WrappedLendingContext } from '@contexts/WrappedLendingContext';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { estimateGasForActions, getKeyForActions } from '@helpers/gasEstimator';
+import { directActionsForRoute } from '@helpers/queuedExecution';
 import { QueueSession, useActionQueue } from '@hooks/useActionQueue';
 import { useCometState } from '@hooks/useCometState';
 import { useGasEstimates } from '@hooks/useGasEstimates';
 import { useLendingRoute } from '@hooks/useLendingRoute';
 import { useRewardsState } from '@hooks/useRewardsState';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
+import { useSubmissionStore } from '@hooks/useSubmissionStore';
 import { useThemeManager } from '@hooks/useThemeManager';
 import { useTransactionManager } from '@hooks/useTransactionManager';
-import { useWrappedAction } from '@hooks/useWrappedAction';
+import { useSignWhenReady, useWrappedAction } from '@hooks/useWrappedAction';
 import { positionRefreshToken, useWrappedPosition } from '@hooks/useWrappedPosition';
 import { newestReceiptBlock, useWriteWrappedState } from '@hooks/useWriteWrappedState';
 import { Action, MarketDataLoaded, StateType } from '@types';
@@ -53,7 +55,6 @@ function App({ Component, pageProps }: any) {
     addTransaction,
     submitTransaction,
     clearTransactions,
-    dismissTransaction,
   } = useTransactionManager(web3);
   const rewardsState = useRewardsState(web3, transactions);
   const { theme, setTheme } = useThemeManager();
@@ -114,10 +115,12 @@ function App({ Component, pageProps }: any) {
       walletFailure,
       restoredSession,
       submitTransaction,
-      dismissTransaction,
     },
     readProvider: wrappedChainProvider,
   });
+  // A wrapper action starts from the user's press of Approve & Add or Submit Transaction, which
+  // confirms it, so each step is signed once it is ready, after its checks.
+  useSignWhenReady(wrappedAction);
   const wrappedPosition = useWrappedPosition({
     route: lendingRoute,
     account: web3.write.account,
@@ -133,13 +136,6 @@ function App({ Component, pageProps }: any) {
     readProvider: wrappedChainProvider,
     baseSymbol: selectedMarketState.selectedMarket[1]?.baseAsset.symbol,
   });
-  const wrappedLending = {
-    route: lendingRoute,
-    position: wrappedPosition.state,
-    retry: wrappedPosition.retry,
-    action: wrappedAction,
-    write: wrappedWrite,
-  };
 
   const handleRequestNetworkSwitch = (fromChainId: number, toChainId: number, description?: string) => {
     setNetworkSwitchState({
@@ -176,8 +172,11 @@ function App({ Component, pageProps }: any) {
   });
 
   // Wallet connect for mobile requires that we pre-estimate gas for
-  // transactions before they are submitted for better UX.
-  const preEstimateGas = (actions: Action[]) => {
+  // transactions before they are submitted for better UX. On the wrapped route
+  // only the actions sent to Comet or the Bulker are estimated here: the
+  // wrapper action estimates each of its own steps just before it is signed.
+  const preEstimateGas = (queuedActions: Action[]) => {
+    const actions = directActionsForRoute(lendingRoute, queuedActions);
     if (
       actions.length > 0 &&
       selectedMarketState.selectedMarket[0] == StateType.Hydrated &&
@@ -226,6 +225,32 @@ function App({ Component, pageProps }: any) {
       preEstimateGas(actionsInQueue);
     }
   }, [transactions, selectedMarketState.selectedMarket[0], cometState[0], rewardsState[0], web3.write.chainId]);
+
+  // The queued submission and the wrapper action it started live here, with the lifecycle, so they
+  // survive the dashboard's unmount. The submission belongs to its scope, the wallet's network
+  // included, and a change of scope drops it whichever page is shown. The wrapper action it started
+  // is followed until its last step's outcome is known, across a change of network, and its queue
+  // entry is held until then.
+  const selectedMarket = selectedMarketState.selectedMarket[1];
+  const marketIdentity =
+    selectedMarket === undefined
+      ? undefined
+      : { chainId: selectedMarket.chainInformation.chainId, cometAddress: selectedMarket.marketAddress };
+  const submissionStore = useSubmissionStore({
+    scope: submissionScope(web3.write, marketIdentity),
+    queueScope: queueScope(web3.write, marketIdentity),
+    transactions,
+    settledTransactions,
+    removeAction: actionQueue.removeAction,
+  });
+  const wrappedLending = {
+    route: lendingRoute,
+    position: wrappedPosition.state,
+    retry: wrappedPosition.retry,
+    action: wrappedAction,
+    write: wrappedWrite,
+    submission: submissionStore,
+  };
 
   ActionQueueContextHelpers.initializeContext(actionQueue);
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
