@@ -144,6 +144,19 @@ function isWrapperStep(transaction: Transaction): boolean {
   return transaction.step !== undefined && isWrapperAddress(transaction.key);
 }
 
+/**
+ * Whether the record holds back Comet data refreshes until it settles. Every record does, except
+ * an interrupted wrapper step: it has no hash to follow, so it never settles. It stays tracked so
+ * that the next review of its action still waits for it.
+ */
+export function holdsCometRefresh(transaction: Transaction): boolean {
+  const isInterruptedWrapperStep =
+    isWrapperStep(transaction) &&
+    transaction.state === TransactionState.AwaitingConfirmation &&
+    transaction.isInterrupted === true;
+  return !isInterruptedWrapperStep;
+}
+
 function txReducer(currentTransactions: Transaction[], action: Action): Transaction[] {
   const [type] = action;
   let updatedTransactions: Transaction[];

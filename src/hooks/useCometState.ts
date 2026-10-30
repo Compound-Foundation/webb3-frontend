@@ -1,7 +1,7 @@
 import { StaticJsonRpcProvider } from '@ethersproject/providers';
 import { ConnectionInfo } from 'ethers/lib/utils';
 import { Provider } from 'ethers-multicall';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
@@ -15,6 +15,7 @@ import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
 import { CometStateResponse, CometWithAccountStateQuery, CometWithAccountStateResponse } from '@helpers/sleuth/types';
 import { getStETHAccountState, isStETH, isWrappedStETH } from '@helpers/steth';
+import { holdsCometRefresh } from '@hooks/useTransactionManager';
 import { useWaiter } from '@hooks/useWaiter';
 import {
   CometState,
@@ -40,7 +41,10 @@ export function useCometState(
   rewards: RewardsState
 ): CometState {
   const [state, setState] = useState<CometState>([StateType.Loading, undefined]);
-  const { waitFor } = useWaiter<Transaction[]>(transactions);
+  // The transactions a refresh waits for. The list is memoised because useWaiter re-checks its
+  // queue each time the list it is given changes identity.
+  const refreshHolders = useMemo(() => transactions.filter(holdsCometRefresh), [transactions]);
+  const { waitFor } = useWaiter<Transaction[]>(refreshHolders);
   const marketRef = useRef(marketState);
   const accountRef = useRef(web3.read.account);
   accountRef.current = web3.read.account;
@@ -88,7 +92,7 @@ export function useCometState(
         const requestedMarketAddress = marketState[1]?.marketAddress;
         if (requestedMarketAddress === marketRef.current[1]?.marketAddress) {
           waitFor(
-            (transactions) => transactions.length === 0,
+            (holders) => holders.length === 0,
             async () => {
               // The update can be held back until transactions settle, and the user can pick
               // another market or account meanwhile, so both are checked again when it is applied.
@@ -96,7 +100,7 @@ export function useCometState(
                 setState(newState);
               }
             },
-            transactions
+            refreshHolders
           );
         }
       }
@@ -106,7 +110,7 @@ export function useCometState(
       web3.read.provider,
       marketState[1]?.marketAddress,
       marketState[1]?.chainInformation.chainId,
-      transactions,
+      refreshHolders,
       rewards
     ]
   );

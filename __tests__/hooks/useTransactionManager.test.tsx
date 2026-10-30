@@ -6,7 +6,7 @@ import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { TRX_REFRESH_INTERVAL } from '@helpers/numbers';
 import { NotSentError, SendWithdrawnError } from '@helpers/walletErrors';
-import { SendResult, useTransactionManager } from '@hooks/useTransactionManager';
+import { holdsCometRefresh, SendResult, useTransactionManager } from '@hooks/useTransactionManager';
 import { PendingTransaction, SettledTransaction, Transaction, TransactionState } from '@types';
 
 import { mockWeb3 } from '../mocks/mockWeb3';
@@ -1166,5 +1166,50 @@ describe('useTransactionManager', () => {
       expect(estimateGas).toHaveBeenCalledWith('0xasset', '5', { value: 3n });
       expect(transactionFunction).toHaveBeenCalledWith('0xasset', '5', { value: 3n, gasLimit: 120_000 });
     });
+  });
+});
+
+describe('holdsCometRefresh', () => {
+  const wrapperStep = {
+    id: 'step',
+    key: WRAPPER,
+    networkId: 1,
+    networkName: 'homestead',
+    description: 'Supply USDC through the wrapper',
+    nonce: 7,
+    account: ACCOUNT.toLowerCase(),
+    step: 'supply',
+  };
+  const interruptedWrapperRequest: Transaction = {
+    ...wrapperStep,
+    state: TransactionState.AwaitingConfirmation,
+    isInterrupted: true,
+  };
+  const standardTransaction = { ...wrapperStep, key: COMET, step: undefined };
+
+  it('lets refreshes run past an interrupted wrapper step', () => {
+    expect(holdsCometRefresh(interruptedWrapperRequest)).toBe(false);
+    expect(holdsCometRefresh({ ...interruptedWrapperRequest, key: WRAPPER.toLowerCase() })).toBe(false);
+    expect(holdsCometRefresh({ ...interruptedWrapperRequest, isPendingInWallet: true })).toBe(false);
+  });
+
+  it.each<[string, Transaction]>([
+    ['a live wrapper request', { ...wrapperStep, state: TransactionState.AwaitingConfirmation }],
+    ['a wrapper request marked not interrupted', { ...interruptedWrapperRequest, isInterrupted: false }],
+    ['a broadcast wrapper transaction', { ...wrapperStep, state: TransactionState.Pending, hash: tx('wrapper') }],
+    ['a live standard request', { ...standardTransaction, state: TransactionState.AwaitingConfirmation }],
+    [
+      'a broadcast standard transaction',
+      { ...standardTransaction, state: TransactionState.Pending, hash: tx('standard') },
+    ],
+    // Only wrapper steps are ever marked interrupted, so any other such record was written by someone else.
+    ['an interrupted record keyed to a contract that is not a wrapper', { ...interruptedWrapperRequest, key: COMET }],
+    ['an interrupted wrapper record with no step', { ...interruptedWrapperRequest, step: undefined }],
+    [
+      'a broadcast wrapper transaction carrying an interrupted flag',
+      { ...interruptedWrapperRequest, state: TransactionState.Pending, hash: tx('wrapper') } as Transaction,
+    ],
+  ])('holds refreshes for %s', (_name, transaction) => {
+    expect(holdsCometRefresh(transaction)).toBe(true);
   });
 });
