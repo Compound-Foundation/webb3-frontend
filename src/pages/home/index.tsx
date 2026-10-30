@@ -1,22 +1,34 @@
-import { ReactNode, useContext, useEffect, useState } from 'react';
+import { ReactNode, useContext, useEffect, useRef, useState } from 'react';
 
 import { isUnwrappedCollateralAsset } from '@constants/chains';
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
+import { useWrappedLending } from '@contexts/WrappedLendingContext';
 import {
+  ActionRules,
   isSameToken,
   calculateUpdatedBalances,
   getActionFromPendingAction,
   sanitizedAmountForAction,
 } from '@helpers/actions';
+import { withCometStateSource } from '@helpers/cometStateSource';
 import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
+import {
+  CometStateWithMarket,
+  isSameWalletSession,
+  isSubmissionRefused,
+  LiveSubmissionState,
+  MarketIdentity,
+  supplyIncentivesForRoute,
+  WalletSession,
+} from '@helpers/wrappedPositions';
 import { Theme } from '@hooks/useThemeManager';
 import { AddTransaction } from '@hooks/useTransactionManager';
 import { useWriteCometState, WriteCometState } from '@hooks/useWriteCometState';
@@ -45,6 +57,7 @@ import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadState } from './components/Masthead';
 import PositionCard, { PositionCardState } from './components/PositionCard';
 import SupplyPausedBanner from './components/SupplyPausedBanner';
+import WrappedPositionPanel from './components/WrappedPositionPanel';
 
 const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.name ? 1 : a.name === b.name ? 0 : -1);
 
@@ -88,6 +101,44 @@ const Home = ({
   const [compare, setCompare] = useState(false);
   const [cometState] = state;
 
+  const wrappedLending = useWrappedLending();
+  const isWrappedRoute = wrappedLending.route.kind === 'wrapped';
+  const actionRules: ActionRules = { blockDirectBaseSupply: isWrappedRoute };
+  const selectedMarketIdentity: MarketIdentity | undefined =
+    selectedMarket[1] === undefined
+      ? undefined
+      : { chainId: selectedMarket[1].chainInformation.chainId, cometAddress: selectedMarket[1].marketAddress };
+  // The wallet session this render's writes sign in. The callbacks made below keep it, and are
+  // refused once another session is live.
+  const walletSession: WalletSession = {
+    account: web3.write.account,
+    connector: web3.write.connector?.uid,
+    chainId: web3.write.chainId,
+  };
+  const liveWalletSession = useRef(walletSession);
+  liveWalletSession.current = walletSession;
+  // The app keeps its Comet state across a change of market or account until the next read
+  // arrives, including while another page is shown. So the state is labelled with the market and
+  // account useCometState read it for, never with the ones selected when this page renders it.
+  const cometStateMarket = useRef<CometStateWithMarket>(withCometStateSource(state));
+  if (cometStateMarket.current.state !== state) {
+    cometStateMarket.current = withCometStateSource(state);
+  }
+  // Submissions can start from a callback a dialog kept from an earlier render, so they are
+  // judged by the session as it is now, not as it was when the callback was made.
+  const liveSession = useRef<LiveSubmissionState>({
+    route: wrappedLending.route,
+    account: web3.write.account,
+    selectedMarket: selectedMarketIdentity,
+    comet: cometStateMarket.current,
+  });
+  liveSession.current = {
+    route: wrappedLending.route,
+    account: web3.write.account,
+    selectedMarket: selectedMarketIdentity,
+    comet: cometStateMarket.current,
+  };
+
   let assetRows: ReactNode[];
   let otherAssetRows: ReactNode[] = [];
   let mastheadState: MastheadState;
@@ -113,6 +164,10 @@ const Home = ({
       isRewardsLoading,
     } = state[1];
 
+    const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, 0n, {
+      earnRewardsAPR: supplyRewardsAPR,
+      isInstitutional,
+    });
     mastheadState = [StateType.NoWallet, { baseAsset, earnAPR }];
     assetRows = collateralAssets
       .sort(sortTokensAlphabetically)
@@ -125,9 +180,9 @@ const Home = ({
         rewardsAssetSymbol,
         borrowRewardsAPR,
         earnAPR,
-        earnRewardsAPR: supplyRewardsAPR,
+        earnRewardsAPR: supplyIncentives.earnRewardsAPR,
         institutionalWhitelistStatus: whitelistStatus,
-        isInstitutional: isInstitutional,
+        isInstitutional: supplyIncentives.isInstitutional,
         isRewardsLoading,
         theme,
       },
@@ -148,6 +203,18 @@ const Home = ({
       isRewardsLoading
     } = state[1];
     isBulkerAllowed = state[1].isBulkerAllowed;
+    const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, baseAsset.balance, {
+      earnRewardsAPR: supplyRewardsAPR,
+      isInstitutional,
+    });
+    const isBlockedOnLiveRoute = (actionsToSubmit: Action[]) =>
+      isSubmissionRefused(
+        liveSession.current,
+        { chainId: market.chainInformation.chainId, cometAddress: market.marketAddress },
+        actionsToSubmit
+      ) ||
+      // A kept callback writes through the session it was made in, whatever the live balances allow.
+      !isSameWalletSession(walletSession, liveWalletSession.current);
 
     const actions = getActions(baseAsset, collateralAssets, rewards);
     const actionsForCompare = compare ? [] : actions;
@@ -156,6 +223,10 @@ const Home = ({
 
     const onRequestClose = () => setActionModalState(undefined);
     const submitBulkerAction = () => {
+      if (isBlockedOnLiveRoute(actions)) {
+        setActionModalState(undefined);
+        return;
+      }
       const description = `${actions.length} Action${actions.length > 1 ? 's' : ''}`;
       const estimatedGasLimit = estimatedGasMap.get(getKeyForActions(actions)) || 0;
       writeState.invokeBulker(market, actions, baseAsset, collateralAssets, description, estimatedGasLimit, () => {
@@ -169,6 +240,10 @@ const Home = ({
     };
 
     const submitSingleAction = (singleAction: Action) => {
+      if (isBlockedOnLiveRoute([singleAction])) {
+        setActionModalState(undefined);
+        return;
+      }
       const [actionType, assetInfo, amount] = singleAction;
 
       const submitSingleActionCallback = () => {
@@ -276,8 +351,9 @@ const Home = ({
         collateralValuePost: updatedDataPostActions.collateralValue,
         compare,
         earnAPR,
-        earnRewardsAPR: supplyRewardsAPR,
-        isInstitutional: isInstitutional ?? false,
+        earnRewardsAPR: supplyIncentives.earnRewardsAPR,
+        isInstitutional: supplyIncentives.isInstitutional ?? false,
+        isDirectBaseSupplyBlocked: isWrappedRoute,
         institutionalWhitelistStatus: whitelistStatus,
         liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
@@ -289,6 +365,7 @@ const Home = ({
           setPendingAction(pendingAction);
         },
         onSupplyAction: (pendingAction?: PendingAction) => {
+          if (isWrappedRoute && pendingAction?.[0] === ActionType.Supply) return;
           if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
             setPendingAction(pendingAction);
             setActionModalState(undefined);
@@ -310,9 +387,10 @@ const Home = ({
         collateralValue: collateralValue,
         collateralValuePost: updatedDataPostActions.collateralValue,
         earnAPR,
-        earnRewardsAPR: supplyRewardsAPR,
-        isInstitutional: isInstitutional,
+        earnRewardsAPR: supplyIncentives.earnRewardsAPR,
+        isInstitutional: supplyIncentives.isInstitutional,
         institutionalWhitelistStatus: whitelistStatus,
+        actionRules,
         rewardsAssetSymbol,
         liquidationCapacity: liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
@@ -341,6 +419,9 @@ const Home = ({
         onPendingActionConfirm: (amount: bigint) => {
           if (pendingAction !== undefined) {
             const action = getActionFromPendingAction(pendingAction, amount);
+            // The form already refuses a base supply on the wrapped route. Refusing it here as well
+            // keeps an approval for it from being requested.
+            if (isWrappedRoute && action[0] === ActionType.Supply) return;
             const confirmAction = () => {
               setPendingAction(undefined);
               addOrUpdateAction(action);
@@ -377,6 +458,7 @@ const Home = ({
         },
         onSubmitClicked: () => {
           setPendingAction(undefined);
+          if (isBlockedOnLiveRoute(actions)) return;
 
           if (web3.read.chainId !== undefined && web3.write.chainId !== undefined) {
             if (web3.write.chainId !== web3.read.chainId) {
@@ -398,7 +480,8 @@ const Home = ({
                     writeState,
                     estimatedGasMap,
                     onRequestClose,
-                    submitBulkerAction
+                    submitBulkerAction,
+                    () => !isSameWalletSession(walletSession, liveWalletSession.current)
                   )
                 );
               } else {
@@ -534,12 +617,49 @@ const Home = ({
     });
   }
 
+  let wrappedPanel: ReactNode = null;
+  const { route: wrappedRoute } = wrappedLending;
+  if (wrappedRoute.kind === 'wrapped') {
+    // The rate and price belong to the market whose Comet state this is, which can still be
+    // the previous market for a render after a switch.
+    const cometMarket = cometStateMarket.current.market;
+    const cometForRoute =
+      cometState !== StateType.Loading &&
+      cometMarket !== undefined &&
+      cometMarket.chainId === wrappedRoute.chainId &&
+      cometMarket.cometAddress.toLowerCase() === wrappedRoute.cometAddress.toLowerCase()
+        ? state[1]
+        : undefined;
+    // Only the loaded figures need the Comet state. A read failure or an unavailable wrapper
+    // shows at once, so its Retry or Reload is never hidden behind a slow Comet read.
+    const position =
+      wrappedLending.position.status === 'loaded' && cometForRoute === undefined
+        ? { status: 'loading' as const }
+        : wrappedLending.position;
+    wrappedPanel = (
+      <WrappedPositionPanel
+        route={wrappedRoute}
+        position={position}
+        baseAsset={
+          cometForRoute?.baseAsset ?? {
+            symbol: selectedMarket[1]?.baseAsset.symbol ?? '',
+            baseAssetPriceInDollars: 0n,
+            balanceOfComet: 0n,
+          }
+        }
+        earnAPR={cometForRoute?.earnAPR ?? 0n}
+        onRetry={wrappedLending.retry}
+      />
+    );
+  }
+
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
       <SupplyPausedBanner />
       <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
+      {wrappedPanel}
       <div className="home__content grid-container">
         <div className="home__assets grid-column--7">
           <div className="panel panel--assets">
@@ -624,7 +744,8 @@ function actionModalStateBulkerApprove(
   writeState: WriteCometState,
   estimatedGasMap: Map<string, number>,
   onRequestClose: () => void,
-  onCompleteClicked: () => void
+  onCompleteClicked: () => void,
+  isFromAnotherWalletSession: () => boolean
 ): ActionModalBulkerApprove {
   const transactionPredicate = (transactions: Transaction[]) => {
     return transactions.find((transaction) => transaction.key === market.bulkerAddress);
@@ -635,6 +756,11 @@ function actionModalStateBulkerApprove(
       isBulkerAllowed: state.isBulkerAllowed,
       transactions,
       onActionClicked: () => {
+        // The dialog keeps this callback, which asks the session that opened it to sign.
+        if (isFromAnotherWalletSession()) {
+          onRequestClose();
+          return;
+        }
         const allowOperatorGasLimit = estimatedGasMap.get(PreEstimatedAction.AllowOperator) || 0;
         writeState.allowOperator(market, market.bulkerAddress, 'Approve Compound III Proxy', allowOperatorGasLimit);
       },

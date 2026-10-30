@@ -67,6 +67,8 @@ type MastheadHydrated = [
     onWithdrawAction: (pendingAction?: PendingAction) => void;
     setCompare: Dispatch<boolean>;
     isInstitutional: boolean;
+    /** Base supply goes through a wrapper for this session, so the direct supply is not offered. */
+    isDirectBaseSupplyBlocked?: boolean;
   }
 ];
 export type MastheadState = MastheadLoading | MastheadNoWallet | MastheadHydrated;
@@ -237,6 +239,7 @@ function getContent(state: MastheadState): Content {
     onSupplyAction,
     onWithdrawAction,
     setCompare,
+    isDirectBaseSupplyBlocked,
   } = state[1];
   const {
     baseAsset: { symbol },
@@ -792,7 +795,7 @@ function getContent(state: MastheadState): Content {
         </button>
       );
     } else if (supplyActionIndex === -1) {
-      if (borrowActionIndex === -1 && !pendingBorrowAction) {
+      if (borrowActionIndex === -1 && !pendingBorrowAction && !isDirectBaseSupplyBlocked) {
         buttons = (
           <button
             className="button button--large button--supply"

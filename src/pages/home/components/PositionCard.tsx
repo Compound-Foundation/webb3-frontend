@@ -7,6 +7,7 @@ import NetRatesTooltip, { MarketRewards, NetRatesTooltipView, RewardsType } from
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import {
+  ActionRules,
   calculateUpdatedBalances,
   isSameAction,
   validateAddingAction,
@@ -93,6 +94,8 @@ type PositionCardHydrated = [
     onSubmitClicked: () => void;
     isRewardsLoading?: boolean;
     isInstitutional?: boolean;
+    /** Extra rules every queued and entered action must meet, such as the wrapped route's. */
+    actionRules?: ActionRules;
   }
 ];
 
@@ -265,26 +268,21 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
 
   const rewards: MarketRewards = isInstitutional
     ? {
-      type: RewardsType.Institutional,
-      supplyAPR: earnRewardsAPR ?? 0n,
-      borrowAPR: borrowRewardsAPR ?? 0n,
-      assetSymbol: rewardsAssetSymbol,
-      whitelistStatus: institutionalWhitelistStatus
-    }
+        type: RewardsType.Institutional,
+        supplyAPR: earnRewardsAPR ?? 0n,
+        borrowAPR: borrowRewardsAPR ?? 0n,
+        assetSymbol: rewardsAssetSymbol,
+        whitelistStatus: institutionalWhitelistStatus,
+      }
     : {
-      type: RewardsType.Standard,
-      supplyAPR: earnRewardsAPR ?? 0n,
-      borrowAPR: borrowRewardsAPR ?? 0n,
-      assetSymbol: rewardsAssetSymbol
-    };
+        type: RewardsType.Standard,
+        supplyAPR: earnRewardsAPR ?? 0n,
+        borrowAPR: borrowRewardsAPR ?? 0n,
+        assetSymbol: rewardsAssetSymbol,
+      };
 
   const ratesTooltipContent = (
-    <NetRatesTooltip
-      borrowAPR={borrowAPR}
-      earnAPR={earnAPR}
-      rewards={rewards}
-      view={NetRatesTooltipView.All}
-    />
+    <NetRatesTooltip borrowAPR={borrowAPR} earnAPR={earnAPR} rewards={rewards} view={NetRatesTooltipView.All} />
   );
   let rates: ReactNode = (
     <>
@@ -373,6 +371,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
     onPendingActionUpdateAmount,
     onSelectAction,
     onSubmitClicked,
+    actionRules,
   } = state[1];
   const { baseAssetPriceInDollars, symbol } = baseAsset;
   const borrowBalancePre: bigint = baseAsset.balance < 0n ? -baseAsset.balance : 0n;
@@ -559,7 +558,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
 
     const invalidAction = actions.find(
       (action, index) =>
-        validateAddingAction(baseAsset, collateralAssets, actions.slice(0, index), action) !== 'ok' ||
+        validateAddingAction(baseAsset, collateralAssets, actions.slice(0, index), action, actionRules) !== 'ok' ||
         validateAllowanceForAction(baseAsset, collateralAssets, actions.slice(0, index), action) !== 'ok'
     );
 
@@ -616,6 +615,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
         onCancel={onPendingActionCancel}
         onConfirm={onPendingActionConfirm}
         setPendingActionAmount={onPendingActionUpdateAmount}
+        actionRules={actionRules}
       />
     );
     actionInputViewActive = true;
