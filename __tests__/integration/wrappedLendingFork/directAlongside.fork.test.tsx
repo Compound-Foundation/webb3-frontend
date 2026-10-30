@@ -22,6 +22,8 @@ import {
   Transaction,
 } from '@types';
 
+import { MOCK_MARKETS } from '../../mocks/mockMarkets';
+
 import {
   COMET,
   ERC20,
@@ -49,7 +51,7 @@ type DirectHooks = { comet: CometState; writeComet: ReturnType<typeof useWriteCo
 describe.each(FORK_MARKETS)('$label', (forkMarket) => {
   const { market, symbol, label } = forkMarket;
   const account = forkAccount('direct and wrapped', forkMarket);
-  const marketData = getMarket(1, market.cometAddress) as MarketData;
+  const marketData = getMarket(MOCK_MARKETS, 1, market.cometAddress) as MarketData;
   // The standard route's writes take a loaded market. They read only its addresses and native token.
   const loadedMarket = marketData as unknown as MarketDataLoaded;
   // App holds these in state, so every render passes the same objects.

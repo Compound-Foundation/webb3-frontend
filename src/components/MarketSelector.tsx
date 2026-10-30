@@ -1,15 +1,16 @@
 import { useState, useRef, useContext, Fragment } from 'react';
-import { useSearchParams } from 'react-router';
 
+import Tooltip from '@components/Tooltip';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { iconNameForChainId } from '@helpers/assets';
-import { areSameMarket, getMarketsByNetwork, isV2Market, V2_MARKET_KEY } from '@helpers/markets';
+import { areSameMarket, getMarket, getMarketsByNetwork, isV2Market, V2_MARKET_KEY } from '@helpers/markets';
 import { V2_URL } from '@helpers/urls';
+import { useMarkets } from '@hooks/useMarkets';
 import useOnClickOutside from '@hooks/useOnClickOutside';
-import { MarketData, MarketDataLoaded, MarketsByNetwork } from '@types';
+import { MarketData, MarketDataLoaded, MarketsByNetwork, StateType } from '@types';
 
 import IconPair from './IconPair';
-import { ArrowRightNoDash, CaretDown, CheckMark, TailSpin } from './Icons';
+import { ArrowRightNoDash, CaretDown, CheckMark, CircleExclamation, TailSpin } from './Icons';
 import MarketNetworkIcon from './MarketNetworkIcon';
 
 const APPROVE_IN_WALLET = 'Approve in wallet';
@@ -17,18 +18,34 @@ const LEGACY = 'Legacy';
 const INSTITUTIONAL = 'Institutional';
 const MARKETS_SECTION = 'Markets';
 const NEW = 'New';
+const MARKETS_UNAVAILABLE = 'Markets unavailable';
+const MARKET_UNAVAILABLE = 'Market temporarily unavailable.';
 
 const MarketSelector = () => {
   const [marketDropdownActive, setMarketDropdownActive] = useState<boolean>(false);
   const { selectedMarket, selectMarket } = useContext(getSelectedMarketContext());
   const [selectedChainId, setSelectedChainId] = useState<number>(selectedMarket[1]?.chainInformation.chainId ?? 1);
   const [, currentMarket] = selectedMarket;
-  const [searchParams] = useSearchParams();
-  const marketsByNetwork = getMarketsByNetwork(searchParams.has('testnet'));
+  const [marketsStateType, marketsState] = useMarkets();
+  const marketsByNetwork = getMarketsByNetwork(marketsStateType === StateType.Hydrated ? marketsState.markets : []);
 
   const ref = useRef(null);
 
   useOnClickOutside(ref, () => setMarketDropdownActive(false));
+
+  if (marketsStateType === StateType.Loading && marketsState.loadFailed) {
+    return (
+      <div className="header__pill-dropdown market-selector">
+        <label className="label label--secondary market-selector__unavailable-label market-selector__unavailable-label-container">
+          {MARKETS_UNAVAILABLE}
+        </label>
+      </div>
+    );
+  }
+
+  if (currentMarket === undefined) {
+    return null;
+  }
 
   return (
     <div ref={ref} className="header__pill-dropdown market-selector L2">
@@ -66,24 +83,32 @@ const MarketSelector = () => {
 
 type SelectedMarketProps = {
   active: boolean;
-  market: MarketData | MarketDataLoaded | undefined;
+  market: MarketData | MarketDataLoaded;
   onClick: () => void;
 };
 
 const SelectedMarket = ({ active, market, onClick }: SelectedMarketProps) => {
-  const [currentChainName, currentBaseToken] =
-    market !== undefined ? [market.chainInformation.name, market.baseAsset.symbol] : ['Connecting', undefined];
+  const [marketsStateType, marketsState] = useMarkets();
+  // The market list symbol stays the same once the market loads, unlike the on-chain one,
+  // so the label doesn't change
+  const configMarket =
+    marketsStateType === StateType.Hydrated
+      ? getMarket(marketsState.markets, market.chainInformation.chainId, market.marketAddress)
+      : undefined;
+  const currentChainName = market.chainInformation.name;
+  const currentBaseToken = configMarket?.baseAsset.symbol ?? market.baseAsset.symbol;
+
   return (
     <div
       className={`button market-selector__selected-market${active ? ' market-selector__selected-market--active' : ''}`}
       onClick={onClick}
     >
-      {market !== undefined && market.iconPair ? (
+      {market.iconPair ? (
         <IconPair className="mobile-hide" icon1={market.iconPair[1]} icon2={market.iconPair[0]} />
       ) : null}
 
       <div className="market-selector__selected-market__info">
-        {currentBaseToken && <label className="label text-color--1 L1">{currentBaseToken}</label>}
+        <label className="label text-color--1 L1">{currentBaseToken}</label>
       </div>
       <div className="market-selector__selected-market__info">
         <label className="label text-color--2 L1">{currentChainName}</label>
@@ -158,27 +183,42 @@ const SupportedNetworks = ({ marketsByNetwork, selectedChainId, setSelectedChain
 
 type MarketOptionProps = {
   isCurrentMarket: boolean;
+  isError: boolean;
   market: MarketData;
   pathname: string;
   onClick: () => void;
   loading: boolean;
 };
 
-const MarketOption = ({ isCurrentMarket, market, pathname, onClick, loading }: MarketOptionProps) => {
+const MarketOption = ({ isCurrentMarket, isError, market, pathname, onClick, loading }: MarketOptionProps) => {
+  const [hovered, setHovered] = useState(false);
+  const hoverHandlers = { onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false) };
   const content = (
     <>
-      <MarketNetworkIcon icon={market.iconPair[1]} />
+      <MarketNetworkIcon icon={market.iconPair[1]} className={`${isError ? 'icon-disabled' : ''}`}/>
       <div className="market-selector__option__info">
-        <span className="label text-color--1 L1">{market.baseAsset.symbol}</span>
+        <span className={`label text-color--1 L1 ${isError ? "text-color--3" : ''}`}>{market.baseAsset.symbol}</span>
         {loading && <span className="label label--secondary text-color--2">{APPROVE_IN_WALLET}</span>}
       </div>
+      {isError && (
+        <Tooltip
+          open={hovered}
+          width={200}
+          yOffset={12}
+          content={<span className="market-selector__tooltip-text">{MARKET_UNAVAILABLE}</span>}
+        >
+          <span className="market-selector__option__exclamation">
+            <CircleExclamation className="svg--icon--3 market-selector__option__exclamation-icon" />
+          </span>
+        </Tooltip>
+      )}
       {market.isNew && <span className="new-badge label label--secondary">{NEW}</span>}
       {isCurrentMarket && <CheckMark className="svg--supply" />}
       {loading && <TailSpin className="svg--spin" />}
     </>
   );
 
-  if (isV2Market(market) && pathname === '/') {
+  if (isV2Market(market) && pathname === '/' && !isError) {
     // V2 market isn't supported so should link out to the V2 app
     return (
       <a
@@ -188,6 +228,7 @@ const MarketOption = ({ isCurrentMarket, market, pathname, onClick, loading }: M
         target="_blank"
         rel="noreferrer"
         onClick={onClick}
+        {...hoverHandlers}
       >
         {content}
       </a>
@@ -195,7 +236,13 @@ const MarketOption = ({ isCurrentMarket, market, pathname, onClick, loading }: M
   }
 
   return (
-    <div key={market.baseAsset.symbol} className={`market-selector__option`} onClick={onClick}>
+    <div
+      key={market.baseAsset.symbol}
+      className={`market-selector__option`}
+      aria-disabled={isError}
+      onClick={onClick}
+      {...hoverHandlers}
+    >
       {content}
     </div>
   );
@@ -218,6 +265,8 @@ const SupportedMarkets = ({ currentMarket, markets, pathname, onSelectMarket }: 
     };
 
     const isCurrentMarket = currentMarket === undefined ? false : areSameMarket(currentMarket, market);
+    // Markets in the error status are shown but can't be picked
+    const isError = market.status === 'error';
     return (
       <Fragment key={`${index}-${market.baseAsset}`}>
         {market.baseAsset.symbol === V2_MARKET_KEY && (
@@ -228,9 +277,10 @@ const SupportedMarkets = ({ currentMarket, markets, pathname, onSelectMarket }: 
         <MarketOption
           key={market.marketAddress}
           isCurrentMarket={isCurrentMarket}
+          isError={isError}
           market={market}
           pathname={pathname}
-          onClick={(pathname === '/' && isV2Market(market)) || isCurrentMarket ? () => undefined : onClick}
+          onClick={(pathname === '/' && isV2Market(market)) || isCurrentMarket || isError ? () => undefined : onClick}
           loading={false} // TODO(mykelp): This actually needs to be handled properly
         />
       </Fragment>

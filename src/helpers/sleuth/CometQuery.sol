@@ -425,12 +425,22 @@ contract CometQuery {
         liquidateCollateralFactor: assetInfo.liquidateCollateralFactor,
         liquidationFactor: assetInfo.liquidationFactor,
         name: ERC20(assetInfo.asset).name(),
-        price: comet.getPrice(assetInfo.priceFeed),
+        price: collateralPrice(comet, assetInfo.priceFeed),
         priceFeed: assetInfo.priceFeed,
         supplyCap: assetInfo.supplyCap,
         symbol: ERC20(assetInfo.asset).symbol(),
         totalSupply: comet.totalsCollateral(assetInfo.asset)
       });
+    }
+  }
+
+  // A reverting price feed (e.g. one Chainlink has shut down) shouldn't revert the
+  // whole market query, so a collateral whose price can't be read gets price 0
+  function collateralPrice(Comet comet, address priceFeed) internal view returns (uint) {
+    try comet.getPrice(priceFeed) returns (uint price) {
+      return price;
+    } catch {
+      return 0;
     }
   }
 

@@ -1,4 +1,5 @@
 import CircleMeter from '@components/CircleMeter';
+import { CircleExclamationSmall } from '@components/Icons';
 import IconTextPair, { IconTextPairSize } from '@components/IconTextPair';
 import Tooltip from '@components/Tooltip';
 import { assetIconForAssetSymbol } from '@helpers/assets';
@@ -142,6 +143,7 @@ function getFormattedState(
 
 export type AssetRowProps = {
   state: AssetRowState;
+  isCollateralError?: boolean;
 };
 
 enum SupplyCapData {
@@ -150,7 +152,7 @@ enum SupplyCapData {
   Remain = 'Remaining Capacity',
 }
 
-const AssetsTableRow = ({ state }: AssetRowProps) => {
+const AssetsTableRow = ({ state, isCollateralError = false }: AssetRowProps) => {
   const currency = Currency.USD;
   const [stateType] = state;
   if (stateType === StateType.Loading) {
@@ -179,14 +181,37 @@ const AssetsTableRow = ({ state }: AssetRowProps) => {
   const isZeroDollars = (currency: Currency, value: string) =>
     currency && currency === Currency.USD && value === '$0.00';
 
+  const assetIcon = (
+    <span
+      className={`asset asset--${assetIconForAssetSymbol(asset.symbol)}${
+        isCollateralError ? ' assets-table__row__icon--disabled' : ''
+      }`}
+    ></span>
+  );
+
   return (
     <tr className="assets-table__row">
       <td className="assets-table__row__asset-icon">
-        <span className={`asset asset--${assetIconForAssetSymbol(asset.symbol)}`}></span>
+        {isCollateralError ? (
+          <Tooltip
+            width={214}
+            yOffset={12}
+            content={<span className="assets-table__tooltip-text">{'Collateral temporarily unavailable.'}</span>}
+          >
+            <span className="assets-table__row__icon-container">
+              {assetIcon}
+              <span className="assets-table__row__error-icon">
+                <CircleExclamationSmall />
+              </span>
+            </span>
+          </Tooltip>
+        ) : (
+          assetIcon
+        )}
       </td>
       <td className="assets-table__row__asset-identity">
-        <div className="body">{asset.name}</div>
-        <div className="meta text-color--2">{asset.symbol}</div>
+        <div className={`body${isCollateralError ? ' text-color--3' : ''}`}>{asset.name}</div>
+        <div className={`meta ${isCollateralError ? 'text-color--3' : 'text-color--2'}`}>{asset.symbol}</div>
       </td>
       <td className="body assets-table__row__total-supply">
         <Tooltip
@@ -226,36 +251,49 @@ const AssetsTableRow = ({ state }: AssetRowProps) => {
           width={320}
           hideArrow={true}
           yOffset={15}
+          disabled={isCollateralError}
         >
-          <div className="tooltip__trigger">
-            <IconTextPair
-              value={totalSupply}
-              assetSymbol={baseAsset.symbol}
-              currency={currency}
-              size={IconTextPairSize.Small}
-              useSecondaryValueColor={isZeroDollars(currency, totalSupply)}
-            />
-            <CircleMeter percentageFill={percentageFill} />
+          <div className={`tooltip__trigger${isCollateralError ? ' tooltip__trigger--disabled' : ''}`}>
+            {isCollateralError ? (
+              <span className="text-color--3">N/A</span>
+            ) : (
+              <IconTextPair
+                value={totalSupply}
+                assetSymbol={baseAsset.symbol}
+                currency={currency}
+                size={IconTextPairSize.Small}
+                useSecondaryValueColor={isZeroDollars(currency, totalSupply)}
+              />
+            )}
+            <CircleMeter percentageFill={percentageFill} disabled={isCollateralError} />
           </div>
         </Tooltip>
       </td>
       <td className="body assets-table__row__reserves">
-        <IconTextPair
-          value={reserves}
-          assetSymbol={baseAsset.symbol}
-          currency={currency}
-          size={IconTextPairSize.Small}
-          useSecondaryValueColor={isZeroDollars(currency, reserves)}
-        />
+        {isCollateralError ? (
+          <span className="text-color--3">N/A</span>
+        ) : (
+          <IconTextPair
+            value={reserves}
+            assetSymbol={baseAsset.symbol}
+            currency={currency}
+            size={IconTextPairSize.Small}
+            useSecondaryValueColor={isZeroDollars(currency, reserves)}
+          />
+        )}
       </td>
       <td className="body assets-table__row__oracle-price">
-        <IconTextPair
-          value={price}
-          assetSymbol={baseAsset.symbol}
-          currency={currency}
-          size={IconTextPairSize.Small}
-          useSecondaryValueColor={isZeroDollars(currency, price)}
-        />
+        {isCollateralError ? (
+          <span className="text-color--3">N/A</span>
+        ) : (
+          <IconTextPair
+            value={price}
+            assetSymbol={baseAsset.symbol}
+            currency={currency}
+            size={IconTextPairSize.Small}
+            useSecondaryValueColor={isZeroDollars(currency, price)}
+          />
+        )}
       </td>
       <td className="body assets-table__row__collateral-factor">{collateralFactor}</td>
       <td className="body assets-table__row__liquidation-factor">{liquidationFactor}</td>

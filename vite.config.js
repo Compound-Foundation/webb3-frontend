@@ -53,7 +53,6 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      comet: resolve(__dirname, 'node_modules/comet'),
       '/fonts': resolve(__dirname, 'node_modules/compound-styles/public/fonts'),
       // Redirect the (transitive) WalletConnect provider to its self-contained UMD
       // bundle, which carries its own WalletConnect 2.21.1 packages. package.json

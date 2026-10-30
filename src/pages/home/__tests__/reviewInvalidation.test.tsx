@@ -30,6 +30,7 @@ import {
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
 import { mockCompCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
+import { MOCK_MARKETS } from '../../../../__tests__/mocks/mockMarkets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
@@ -73,8 +74,8 @@ const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
 const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
 const USDT_COMET = '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840';
-const USDC_MARKET = getMarket(1, USDC_COMET) as MarketData;
-const USDT_MARKET = getMarket(1, USDT_COMET) as MarketData;
+const USDC_MARKET = getMarket(MOCK_MARKETS, 1, USDC_COMET) as MarketData;
+const USDT_MARKET = getMarket(MOCK_MARKETS, 1, USDT_COMET) as MarketData;
 
 const BASE_ASSET = mockBaseAsset({ address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' });
 const COMP = mockCompCollateralAsset({ walletBalance: 10n ** 20n, allowance: 0n });

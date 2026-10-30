@@ -9,10 +9,11 @@ import { Theme } from '@hooks/useThemeManager';
 import { Action, ActionType, MarketData, StateType, Transaction, TransactionState } from '@types';
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
+import { MOCK_MARKETS } from '../../../../__tests__/mocks/mockMarkets';
 import PositionCard from '../components/PositionCard';
 
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-const USDC_MARKET = getMarket(1, '0xc3d688B66703497DAA19211EEdff47f25384cdc3') as MarketData;
+const USDC_MARKET = getMarket(MOCK_MARKETS, 1, '0xc3d688B66703497DAA19211EEdff47f25384cdc3') as MarketData;
 SelectedMarketContextHelpers.initializeContext({
   selectedMarket: [StateType.Hydrated, USDC_MARKET],
   selectMarket: jest.fn(),

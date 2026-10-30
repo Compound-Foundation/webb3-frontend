@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { TransactionHistoryItem } from '@types';
 
+import { MockMarketsProvider } from '../../../../__tests__/mocks/mockMarkets';
 import { mockBulkTransaction, mockUnitTransactionTransfer } from '../../../../__tests__/mocks/mockTransactions';
 import TransactionRowByMonth from '../components/TransactionRowByMonth';
 
@@ -15,7 +16,11 @@ const renderTransactionRowByMonth = ({
   transactions: TransactionHistoryItem[];
   account: string;
 }) => {
-  return render(<TransactionRowByMonth month={month} transactions={transactions} account={account} />);
+  return render(
+    <MockMarketsProvider>
+      <TransactionRowByMonth month={month} transactions={transactions} account={account} />
+    </MockMarketsProvider>
+  );
 };
 
 describe('TransactionRowByMonth', () => {

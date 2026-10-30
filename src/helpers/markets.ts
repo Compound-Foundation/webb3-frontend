@@ -1,57 +1,8 @@
-import arbitrumNativeUSDCRoots from 'comet/deployments/arbitrum/usdc/roots.json';
-import arbitrumBridgedUSDCRoots from 'comet/deployments/arbitrum/usdc.e/roots.json';
-import arbitrumUSDTRoots from 'comet/deployments/arbitrum/usdt/roots.json';
-import arbitrumWETHRoots from 'comet/deployments/arbitrum/weth/roots.json';
-import baseMainnetAERORoots from 'comet/deployments/base/aero/roots.json';
-import baseMainnetUSDbCRoots from 'comet/deployments/base/usdbc/roots.json';
-import baseMainnetUSDCRoots from 'comet/deployments/base/usdc/roots.json';
-import baseMainnetUSDSRoots from 'comet/deployments/base/usds/roots.json';
-import baseMainnetWETHRoots from 'comet/deployments/base/weth/roots.json';
-import lineaMainnetUSDCRoots from 'comet/deployments/linea/usdc/roots.json';
-import lineaWETHRoots from 'comet/deployments/linea/weth/roots.json';
-import mainnetInstitutionalUSDCRoots from 'comet/deployments/mainnet/institutional_usdc/roots.json';
-import mainnetUSDCRoots from 'comet/deployments/mainnet/usdc/roots.json';
-import mainnetUSDSRoots from 'comet/deployments/mainnet/usds/roots.json';
-import mainnetUSDTRoots from 'comet/deployments/mainnet/usdt/roots.json';
-import mainnetWBTCRoots from 'comet/deployments/mainnet/wbtc/roots.json';
-import mainnetWETHRoots from 'comet/deployments/mainnet/weth/roots.json';
-import mainnetWSTETHRoots from 'comet/deployments/mainnet/wsteth/roots.json';
-import mantleUSDERoots from 'comet/deployments/mantle/usde/roots.json';
-import optimismUSDCRoots from 'comet/deployments/optimism/usdc/roots.json';
-import optimismUSDTRoots from 'comet/deployments/optimism/usdt/roots.json';
-import optimismWETHRoots from 'comet/deployments/optimism/weth/roots.json';
-import polygonUSDCRoots from 'comet/deployments/polygon/usdc/roots.json';
-import polygonUSDTRoots from 'comet/deployments/polygon/usdt/roots.json';
-import roninWETHRoots from 'comet/deployments/ronin/weth/roots.json';
-import roninWRONRoots from 'comet/deployments/ronin/wron/roots.json';
-import scrollUSDCRoots from 'comet/deployments/scroll/usdc/roots.json';
-import unichainUSDCRoots from 'comet/deployments/unichain/usdc/roots.json';
-import unichainWETHRoots from 'comet/deployments/unichain/weth/roots.json';
-
 import { iconNameForChainId } from '@helpers/assets';
 import { MARKET_KEY_DELIMITER } from '@helpers/constants';
-import { ChainInformation, MarketData, MarketDataLoaded, MarketsByNetwork } from '@types';
+import { MarketData, MarketDataLoaded, MarketsByNetwork } from '@types';
 
 import { CHAINS } from '../constants/chains';
-
-// The base assets of our markets are all ERC-20 tokens, and for some markets, we handle & abstract away
-// the conversion so that users don't need to concern themselves with wrapping their native tokens.
-// One example is how we show ETH as the base asset to supply in the UI, but we refer to it as the WETH market (since WETH is the actual base token).
-const WRAPPED_BASE_ASSETS = ['ETH'];
-
-export const DEFAULT_MARKET: MarketData = {
-  baseAsset: {
-    symbol: 'USDC',
-    name: 'USD Coin',
-    isWrapped: false,
-  },
-  chainInformation: CHAINS[1],
-  iconPair: [iconNameForChainId(1), 'USDC'],
-  marketAddress: mainnetUSDCRoots['comet'],
-  bulkerAddress: mainnetUSDCRoots['bulker'],
-  rewardsAddress: mainnetUSDCRoots['rewards'],
-  type: 'MarketData',
-};
 
 export const V2_MARKET_KEY = 'Compound V2';
 
@@ -67,89 +18,8 @@ export const V2_MARKET: MarketData = {
   type: 'MarketData',
 };
 
-// NOTE: Currently, the order we list markets will dictate the order they show up in the market selector
-export const MARKETS: MarketData[] = [
-  ...(
-    [
-      [1, 'USDC', 'USD Coin', mainnetUSDCRoots, {
-        rewardsOverwrite: {
-          rewardsAssetSymbol: "COMP",
-          supplyCompPerDay: 55n * 10n ** 18n,
-          borrowCompPerDay: 55n * 10n ** 18n,
-        }
-      }],
-      [1, 'ETH', 'Ether', mainnetWETHRoots, {
-        rewardsOverwrite: {
-          rewardsAssetSymbol: "COMP",
-          supplyCompPerDay: 10n * 10n ** 18n,
-          borrowCompPerDay: 20n * 10n ** 18n,
-        }
-      }],
-      [1, 'USDT', 'Tether', mainnetUSDTRoots, {
-        rewardsOverwrite: {
-          rewardsAssetSymbol: "COMP",
-          supplyCompPerDay: 30n * 10n ** 18n,
-          borrowCompPerDay: 30n * 10n ** 18n,
-        }
-      }],
-      [1, 'wstETH', 'Lido Wrapped Staked ETH', mainnetWSTETHRoots],
-      [1, 'USDS', 'USDS', mainnetUSDSRoots],
-      [1, 'WBTC', 'Wrapped BTC', mainnetWBTCRoots],
-      [
-        1,
-        'USDC',
-        'USDC Institutional',
-        mainnetInstitutionalUSDCRoots,
-        { slug: 'usdc-institutional', institutional: true, isNew: true },
-      ],
-      [137, 'USDC.e', 'USD Coin (Bridged)', polygonUSDCRoots],
-      [137, 'USDT0', 'Tether', polygonUSDTRoots],
-      [42161, 'USDC', 'USD Coin', arbitrumNativeUSDCRoots],
-      [42161, 'USDC.e', 'USD Coin (Bridged)', arbitrumBridgedUSDCRoots],
-      [42161, 'ETH', 'Ether', arbitrumWETHRoots],
-      [42161, 'USD₮0', 'Tether', arbitrumUSDTRoots],
-      [10, 'USDC', 'USD Coin', optimismUSDCRoots],
-      [10, 'USDT', 'Tether', optimismUSDTRoots],
-      [10, 'ETH', 'Ether', optimismWETHRoots],
-      [8453, 'USDC', 'USD Coin', baseMainnetUSDCRoots],
-      [8453, 'USDbC', 'USD Coin (Bridged)', baseMainnetUSDbCRoots],
-      [8453, 'USDS', 'USDS', baseMainnetUSDSRoots],
-      [8453, 'ETH', 'Ether', baseMainnetWETHRoots],
-      [8453, 'AERO', 'Aero', baseMainnetAERORoots],
-      [534352, 'USDC', 'USD Coin', scrollUSDCRoots],
-      [5000, 'USDe', 'Ethena USDe', mantleUSDERoots],
-      [59144, 'USDC', 'USD Coin', lineaMainnetUSDCRoots],
-      [130, 'USDC', 'USD Coin', unichainUSDCRoots],
-      [130, 'ETH', 'Ether', unichainWETHRoots],
-      [2020, 'WETH', 'Wrapped Ether', roninWETHRoots],
-      [2020, 'RON', 'Ronin', roninWRONRoots],
-      [59144, 'ETH', 'Ether', lineaWETHRoots],
-    ] as [number, string, string, { [x: string]: string }, Pick<MarketData, 'slug' | 'institutional' | 'isNew'>?][]
-  ).map(([chainId, baseAsset, baseAssetName, root, options]) => {
-    const chain: ChainInformation = CHAINS[chainId];
-
-    return {
-      baseAsset: {
-        symbol: baseAsset,
-        name: baseAssetName,
-        isWrapped: WRAPPED_BASE_ASSETS.includes(baseAsset),
-      },
-      chainInformation: chain,
-      iconPair: [options?.institutional ? 'INSTITUTIONAL' : iconNameForChainId(chainId), baseAsset],
-      marketAddress: root['comet'],
-      bulkerAddress: root['bulker'],
-      fauceteerAddress: root['fauceteer'],
-      rewardsAddress: root['rewards'],
-      ...options,
-      type: 'MarketData',
-    } as MarketData;
-  }),
-  // This is a faux supported market for Compound V2 and points to comptroller address
-  V2_MARKET,
-];
-
-export const getMarketDescriptors = (cometAddress: string, chainId: number) => {
-  const marketData = getMarket(chainId, cometAddress);
+export const getMarketDescriptors = (markets: MarketData[], cometAddress: string, chainId: number) => {
+  const marketData = getMarket(markets, chainId, cometAddress);
 
   if (marketData === undefined) {
     return ['UNKNOWN', 'Unknown', 'Unknown'];
@@ -167,20 +37,21 @@ export function marketKey(market: MarketData | MarketDataLoaded): string {
   return [market.chainInformation.chainId, market.baseAsset.symbol, market.marketAddress].join(MARKET_KEY_DELIMITER);
 }
 
+// A market is identified by its chain and comet address. The base asset symbol isn't part of it:
+// a loaded market carries the on-chain symbol, which can differ from the market list one
 export function areSameMarket(market1: MarketData | MarketDataLoaded, market2: MarketData | MarketDataLoaded): boolean {
-  return marketKey(market1) === marketKey(market2);
+  return (
+    market1.chainInformation.chainId === market2.chainInformation.chainId &&
+    market1.marketAddress.toLowerCase() === market2.marketAddress.toLowerCase()
+  );
 }
 
 export function isV2Market(market: MarketData | MarketDataLoaded) {
   return areSameMarket(market, V2_MARKET);
 }
 
-export function getMarkets(showTestnet: boolean): MarketData[] {
-  return MARKETS.filter((market) => (showTestnet ? true : !market.chainInformation.testnet));
-}
-
-export function getMarketsByNetwork(showTestnet: boolean): MarketsByNetwork {
-  return getMarkets(showTestnet).reduce<MarketsByNetwork>((acc, market: MarketData) => {
+export function getMarketsByNetwork(markets: MarketData[]): MarketsByNetwork {
+  return markets.reduce<MarketsByNetwork>((acc, market: MarketData) => {
     const { chainInformation } = market;
     const networkInfo = acc[chainInformation.chainId] ?? { chainInformation, markets: [] };
     return {
@@ -193,11 +64,9 @@ export function getMarketsByNetwork(showTestnet: boolean): MarketsByNetwork {
   }, {});
 }
 
-export function getMarket(chainId: number, marketAddress: string): MarketData | undefined {
-  const market = MARKETS.find(
+export function getMarket(markets: MarketData[], chainId: number, marketAddress: string): MarketData | undefined {
+  return markets.find(
     (market) =>
       market.chainInformation.chainId === chainId && market.marketAddress.toLowerCase() === marketAddress.toLowerCase()
   );
-
-  return market;
 }

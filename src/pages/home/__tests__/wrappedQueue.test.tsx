@@ -45,6 +45,7 @@ import {
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
 import { mockCompCollateralAsset, mockEthCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
+import { MOCK_MARKETS } from '../../../../__tests__/mocks/mockMarkets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
@@ -92,9 +93,9 @@ const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
 const USDC_WRAPPER = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73';
 const USDT_COMET = '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840';
 const WETH_COMET = '0xA17581A9E3356d9A858b789D68B4d866e593aE94';
-const USDC_MARKET = getMarket(1, USDC_COMET) as MarketData;
-const USDT_MARKET = getMarket(1, USDT_COMET) as MarketData;
-const WETH_MARKET = getMarket(1, WETH_COMET) as MarketData;
+const USDC_MARKET = getMarket(MOCK_MARKETS, 1, USDC_COMET) as MarketData;
+const USDT_MARKET = getMarket(MOCK_MARKETS, 1, USDT_COMET) as MarketData;
+const WETH_MARKET = getMarket(MOCK_MARKETS, 1, WETH_COMET) as MarketData;
 const WALLET = { name: 'wallet provider' };
 const AMOUNT = 1_000_000_000n;
 const HASH = `0x${'7'.repeat(64)}`;

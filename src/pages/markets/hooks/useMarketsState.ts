@@ -155,14 +155,28 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
   const [baseTokenPrice, baseAssetBalanceOfComet, ...combinedCalls] = await ethcallProvider.all([
     cometContract.getPrice(market.baseAsset.priceFeed),
     baseTokenContract.balanceOf(market.marketAddress),
-    ...priceCalls,
     ...totalsCollateralCalls,
     ...collateralReservesCalls,
   ]);
 
+  // A reverting price feed reverts the whole multicall, so collateral prices are read on their own
+  // and, if that fails, one by one, with a reverting feed priced at 0 like in the Sleuth query
+  const collateralPrices: BigNumber[] = await ethcallProvider
+    .all(priceCalls)
+    .catch(() =>
+      Promise.all(
+        priceCalls.map((call) =>
+          ethcallProvider
+            .all([call])
+            .then(([price]) => price as BigNumber)
+            .catch(() => BigNumber.from(0))
+        )
+      )
+    );
+
   const numAssets = market.collateralAssets.length;
 
-  const prices = combinedCalls.slice(0, numAssets).map((price, index) => {
+  const prices = collateralPrices.map((price, index) => {
     // If we found a deprecated feed, ignore the dummy call's result and use
     // the hardcoded price for that feed instead (0 for the wUSDM feeds).
     if (ignoredCollateralPriceIndex === index) {
@@ -170,8 +184,8 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     }
     return price.toBigInt();
   });
-  const totalSupplies = combinedCalls.slice(numAssets, numAssets * 2).map((tc) => tc.totalSupplyAsset.toBigInt());
-  const collateralReserves = combinedCalls.slice(numAssets * 2, numAssets * 3).map((cr) => cr.toBigInt());
+  const totalSupplies = combinedCalls.slice(0, numAssets).map((tc) => tc.totalSupplyAsset.toBigInt());
+  const collateralReserves = combinedCalls.slice(numAssets, numAssets * 2).map((cr) => cr.toBigInt());
 
   const baseAssetPrice = baseTokenPrice.toBigInt();
   const borrowAPR = borrowRatePerSecond.toBigInt() * SECONDS_PER_YEAR;

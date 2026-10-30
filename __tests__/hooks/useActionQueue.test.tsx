@@ -8,18 +8,19 @@ import { Action, ActionQueue, ActionType, MarketData, PendingAction, RewardsStat
 
 import { mockBaseAsset } from '../mocks/mockBaseAsset';
 import { mockCompCollateralAsset } from '../mocks/mockCollateralAssets';
+import { MOCK_MARKETS } from '../mocks/mockMarkets';
 
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
 const SESSION: QueueSession = { account: ACCOUNT, connector: 'connector-uid-1', status: 'connected' };
 
-const MAINNET_USDC = getMarket(1, '0xc3d688B66703497DAA19211EEdff47f25384cdc3') as MarketData;
-const MAINNET_ETH = getMarket(1, '0xA17581A9E3356d9A858b789D68B4d866e593aE94') as MarketData;
-const BASE_USDC = getMarket(8453, '0xb125E6687d4313864e53df431d5425969c15Eb2F') as MarketData;
+const MAINNET_USDC = getMarket(MOCK_MARKETS, 1, '0xc3d688B66703497DAA19211EEdff47f25384cdc3') as MarketData;
+const MAINNET_ETH = getMarket(MOCK_MARKETS, 1, '0xA17581A9E3356d9A858b789D68B4d866e593aE94') as MarketData;
+const BASE_USDC = getMarket(MOCK_MARKETS, 8453, '0xb125E6687d4313864e53df431d5425969c15Eb2F') as MarketData;
 // Arbitrum's USDC market and Base's USDbC market share one Comet address.
 const SHARED_COMET = '0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf';
-const ARBITRUM_USDC = getMarket(42161, SHARED_COMET) as MarketData;
-const BASE_USDBC = getMarket(8453, SHARED_COMET) as MarketData;
+const ARBITRUM_USDC = getMarket(MOCK_MARKETS, 42161, SHARED_COMET) as MarketData;
+const BASE_USDBC = getMarket(MOCK_MARKETS, 8453, SHARED_COMET) as MarketData;
 
 const BASE_ASSET = mockBaseAsset();
 const COMP = mockCompCollateralAsset({ walletBalance: 10n ** 20n });

@@ -13,6 +13,7 @@ import { IDLE_WRITE_WRAPPED_STATE } from '@hooks/useWriteWrappedState';
 import { ActionQueue, BaseAssetWithAccountState, CometState, MarketData, SelectedMarketData, StateType } from '@types';
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
+import { MOCK_MARKETS } from '../../../../__tests__/mocks/mockMarkets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
@@ -41,7 +42,7 @@ jest.mock('../components/InstitutionalBanner', () => mockStandIn());
 jest.mock('@hooks/useWriteCometState', () => ({ useWriteCometState: () => ({}) }));
 
 const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
-const USDC_MARKET = getMarket(1, USDC_COMET) as MarketData;
+const USDC_MARKET = getMarket(MOCK_MARKETS, 1, USDC_COMET) as MarketData;
 const ACCOUNT_B = '0x0000000000000000000000000000000000000bb2';
 
 function wrappedLending(): WrappedLending {
