@@ -24,6 +24,7 @@ import {
   WrappedStep,
   wrappedActionIdentity,
 } from '@helpers/wrappedActions';
+import { WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import { Action, ActionType } from '@types';
 
 import { mockBaseAsset } from '../mocks/mockBaseAsset';
@@ -45,6 +46,8 @@ const CALLS = new Interface([
   'function unwrapAndWithdraw(uint256 shares)',
   'function supply(address asset, uint256 amount)',
   'function withdraw(address asset, uint256 amount)',
+  'function withdrawTo(address to, address asset, uint256 amount)',
+  'function invoke(bytes32[] actions, bytes[] data)',
 ]);
 
 function registry({ deposits = true, exits = true } = {}): WrappedMarketRegistry {
@@ -92,7 +95,12 @@ function liveSession(setup: SessionSetup = {}, provider: object | undefined = PR
 }
 
 function step(kind: WrappedStep['kind'], to: string, data: string, id: string = kind): WrappedStep {
-  return { id, kind, description: kind, request: { to, data } };
+  if (kind !== 'unwrap-and-withdraw') return { id, kind, description: kind, request: { to, data } };
+  // An exit step needs its own check. These tests check its call, and never run the check.
+  const check = async () => {
+    throw new Error('These tests never run the check.');
+  };
+  return { id, kind, description: kind, request: { to, data }, check };
 }
 
 const approve = (spender = USDC_WRAPPER, amount = 1_000_000n, to = USDC) =>
@@ -102,12 +110,26 @@ const supplyAndWrap = (to = USDC_WRAPPER) =>
 const unwrapAndWithdraw = (to = USDC_WRAPPER) =>
   step('unwrap-and-withdraw', to, CALLS.encodeFunctionData('unwrapAndWithdraw', [10n ** 18n]));
 
-/** A draft for 1 USDC in base units when supplying, or for one share when withdrawing. */
+/** A full exit's review, quoted for `shares`. */
+function withdrawalReview(shares: bigint): WithdrawalReview {
+  return {
+    request: { kind: 'full' },
+    quote: { kind: 'full', shares, grossAssets: 1_000_003n, redeemBuffer: 3n, cash: 1_000_000n, leavesDust: false },
+    shownCash: undefined,
+    blockNumber: 100,
+  };
+}
+
+/**
+ * A draft for 1 USDC in base units when supplying, or for one share when withdrawing. A withdrawal
+ * carries the quote its review shows.
+ */
 function draft(type: WrappedActionType, steps: WrappedStep[], session = liveSession()): WrappedActionDraft {
   const identity = wrappedActionIdentity(type, session);
   if (identity === undefined) throw new Error('the session must have a wrapped identity');
-  const amount = type === 'supply' ? 1_000_000n : 10n ** 18n;
-  return { kind: WRAPPED_ACTION, id: 'draft-1', identity, amount, steps };
+  if (type === 'supply') return { kind: WRAPPED_ACTION, id: 'draft-1', identity, amount: 1_000_000n, steps };
+  const amount = 10n ** 18n;
+  return { kind: WRAPPED_ACTION, id: 'draft-1', identity, amount, steps, withdrawal: withdrawalReview(amount) };
 }
 
 const BASE_ASSET = mockBaseAsset({ address: USDC });
@@ -322,6 +344,42 @@ describe('wrappedActions', () => {
       ['two resets', [reset('reset-1'), reset('reset-2'), approve(), supplyAndWrap()]],
     ])('refuses a supply with %s', (_name, steps) => {
       expect(checkWrappedDraft(draft('supply', steps))).toBe('bad-sequence');
+    });
+
+    it.each<[string, WrappedStep[], string]>([
+      ['two exits', [unwrapAndWithdraw(), { ...unwrapAndWithdraw(), id: 'again' }], 'bad-sequence'],
+      ['unwrapAndWithdraw sent to Comet', [unwrapAndWithdraw(USDC_COMET)], 'wrong-target'],
+      [
+        "Comet's withdraw",
+        [step('unwrap-and-withdraw', USDC_COMET, CALLS.encodeFunctionData('withdraw', [USDC, 10n ** 18n]))],
+        'wrong-target',
+      ],
+      [
+        "Comet's withdrawTo on the wrapper",
+        [
+          step(
+            'unwrap-and-withdraw',
+            USDC_WRAPPER,
+            CALLS.encodeFunctionData('withdrawTo', [ACCOUNT, USDC, 10n ** 18n])
+          ),
+        ],
+        'malformed-call',
+      ],
+      [
+        "the Bulker's invoke",
+        [step('unwrap-and-withdraw', BULKER, CALLS.encodeFunctionData('invoke', [[], []]))],
+        'wrong-target',
+      ],
+      ["another market's wrapper", [unwrapAndWithdraw(USDT_WRAPPER)], 'wrong-target'],
+    ])('refuses a withdrawal that makes %s', (_name, steps, problem) => {
+      expect(checkWrappedDraft(draft('withdraw', steps))).toBe(problem);
+    });
+
+    it.each<[string, WithdrawalReview | undefined]>([
+      ['no quote', undefined],
+      ['a quote for other shares', withdrawalReview(10n ** 18n + 1n)],
+    ])('refuses a withdrawal with %s, so its review shows the shares it burns', (_name, withdrawal) => {
+      expect(checkWrappedDraft({ ...draft('withdraw', [unwrapAndWithdraw()]), withdrawal })).toBe('quote-mismatch');
     });
 
     it.each<[string, WrappedActionType, bigint, WrappedStep]>([
