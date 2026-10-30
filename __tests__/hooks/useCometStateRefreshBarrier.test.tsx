@@ -160,7 +160,7 @@ describe('useCometState refresh barrier', () => {
     ],
     ['a wrapper record with no step, marked interrupted', { ...INTERRUPTED_WRAPPER_REQUEST, step: undefined }],
     ['an interrupted wrapper request carrying a hash', { ...INTERRUPTED_WRAPPER_REQUEST, hash: HASH } as Transaction],
-  ])('holds the refresh until %s settles', async (_name, transaction) => {
+  ])('delays the refresh until %s settles', async (_name, transaction) => {
     mockQueryCometData.mockResolvedValue(cometResponse(111));
     const { result, rerender } = renderCometState({
       market: [StateType.Hydrated, MARKET_A],
@@ -177,7 +177,7 @@ describe('useCometState refresh barrier', () => {
     expect(result.current[1]?.earnAPR).toBe(111n);
   });
 
-  it('applies a held refresh once a live wrapper request is marked interrupted', async () => {
+  it('applies a delayed refresh once a live wrapper request is marked interrupted', async () => {
     mockQueryCometData.mockResolvedValue(cometResponse(111));
     const liveRequest: Transaction = { ...INTERRUPTED_WRAPPER_REQUEST, isInterrupted: false };
     const { result, rerender } = renderCometState({
@@ -199,7 +199,7 @@ describe('useCometState refresh barrier', () => {
     expect(result.current[1]?.earnAPR).toBe(111n);
   });
 
-  it('holds the refresh for a broadcast transaction tracked beside an interrupted wrapper request', async () => {
+  it('delays the refresh for a broadcast transaction tracked beside an interrupted wrapper request', async () => {
     mockQueryCometData.mockResolvedValue(cometResponse(111));
     const broadcast = {
       ...INTERRUPTED_WRAPPER_REQUEST,

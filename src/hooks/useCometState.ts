@@ -15,7 +15,7 @@ import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
 import { CometStateResponse, CometWithAccountStateQuery, CometWithAccountStateResponse } from '@helpers/sleuth/types';
 import { getStETHAccountState, isStETH, isWrappedStETH } from '@helpers/steth';
-import { holdsCometRefresh } from '@hooks/useTransactionManager';
+import { delaysCometRefresh } from '@hooks/useTransactionManager';
 import { useWaiter } from '@hooks/useWaiter';
 import {
   CometState,
@@ -41,10 +41,11 @@ export function useCometState(
   rewards: RewardsState
 ): CometState {
   const [state, setState] = useState<CometState>([StateType.Loading, undefined]);
-  // The transactions a refresh waits for. The list is memoised because useWaiter re-checks its
-  // queue each time the list it is given changes identity.
-  const refreshHolders = useMemo(() => transactions.filter(holdsCometRefresh), [transactions]);
-  const { waitFor } = useWaiter<Transaction[]>(refreshHolders);
+  // The transactions a refresh waits for. Without the memo each render would pass a new list, so
+  // useWaiter would set a new queue and render again without end, and refreshData would be rebuilt
+  // every render.
+  const refreshDelayingTransactions = useMemo(() => transactions.filter(delaysCometRefresh), [transactions]);
+  const { waitFor } = useWaiter<Transaction[]>(refreshDelayingTransactions);
   const marketRef = useRef(marketState);
   const accountRef = useRef(web3.read.account);
   accountRef.current = web3.read.account;
@@ -92,7 +93,7 @@ export function useCometState(
         const requestedMarketAddress = marketState[1]?.marketAddress;
         if (requestedMarketAddress === marketRef.current[1]?.marketAddress) {
           waitFor(
-            (holders) => holders.length === 0,
+            (delayingTransactions) => delayingTransactions.length === 0,
             async () => {
               // The update can be held back until transactions settle, and the user can pick
               // another market or account meanwhile, so both are checked again when it is applied.
@@ -100,7 +101,7 @@ export function useCometState(
                 setState(newState);
               }
             },
-            refreshHolders
+            refreshDelayingTransactions
           );
         }
       }
@@ -110,7 +111,7 @@ export function useCometState(
       web3.read.provider,
       marketState[1]?.marketAddress,
       marketState[1]?.chainInformation.chainId,
-      refreshHolders,
+      refreshDelayingTransactions,
       rewards
     ]
   );

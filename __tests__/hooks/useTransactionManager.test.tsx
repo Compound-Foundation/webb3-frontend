@@ -6,7 +6,7 @@ import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { TRX_REFRESH_INTERVAL } from '@helpers/numbers';
 import { NotSentError, SendWithdrawnError } from '@helpers/walletErrors';
-import { holdsCometRefresh, SendResult, useTransactionManager } from '@hooks/useTransactionManager';
+import { delaysCometRefresh, SendResult, useTransactionManager } from '@hooks/useTransactionManager';
 import { PendingTransaction, SettledTransaction, Transaction, TransactionState } from '@types';
 
 import { mockWeb3 } from '../mocks/mockWeb3';
@@ -462,7 +462,7 @@ describe('useTransactionManager', () => {
       );
     });
 
-    it('holds Comet refreshes when its stored wallet request carries a hash', async () => {
+    it('delays Comet refreshes when its stored wallet request carries a hash', async () => {
       store([
         {
           ...storedRecord(tx('supply'), { key: WRAPPER, step: 'supply' }),
@@ -476,7 +476,7 @@ describe('useTransactionManager', () => {
           expect.objectContaining({ hash: tx('supply'), isInterrupted: true }),
         ])
       );
-      expect(holdsCometRefresh(result.current.transactions[0])).toBe(true);
+      expect(delaysCometRefresh(result.current.transactions[0])).toBe(true);
     });
 
     it('is an ordinary transaction when it is not keyed to a wrapper', async () => {
@@ -1186,7 +1186,7 @@ describe('useTransactionManager', () => {
   });
 });
 
-describe('holdsCometRefresh', () => {
+describe('delaysCometRefresh', () => {
   const wrapperStep = {
     id: 'step',
     key: WRAPPER,
@@ -1205,9 +1205,9 @@ describe('holdsCometRefresh', () => {
   const standardTransaction = { ...wrapperStep, key: COMET, step: undefined };
 
   it('lets refreshes run past an interrupted wrapper step', () => {
-    expect(holdsCometRefresh(interruptedWrapperRequest)).toBe(false);
-    expect(holdsCometRefresh({ ...interruptedWrapperRequest, key: WRAPPER.toLowerCase() })).toBe(false);
-    expect(holdsCometRefresh({ ...interruptedWrapperRequest, isPendingInWallet: true })).toBe(false);
+    expect(delaysCometRefresh(interruptedWrapperRequest)).toBe(false);
+    expect(delaysCometRefresh({ ...interruptedWrapperRequest, key: WRAPPER.toLowerCase() })).toBe(false);
+    expect(delaysCometRefresh({ ...interruptedWrapperRequest, isPendingInWallet: true })).toBe(false);
   });
 
   it.each<[string, Transaction]>([
@@ -1230,7 +1230,7 @@ describe('holdsCometRefresh', () => {
       'an interrupted wrapper request carrying a hash',
       { ...interruptedWrapperRequest, hash: tx('wrapper') } as Transaction,
     ],
-  ])('holds refreshes for %s', (_name, transaction) => {
-    expect(holdsCometRefresh(transaction)).toBe(true);
+  ])('delays refreshes for %s', (_name, transaction) => {
+    expect(delaysCometRefresh(transaction)).toBe(true);
   });
 });
