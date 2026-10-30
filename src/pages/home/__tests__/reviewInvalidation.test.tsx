@@ -6,6 +6,7 @@ import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { WrappedLending, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { getKeyForActions } from '@helpers/gasEstimator';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
@@ -98,7 +99,7 @@ function web3For({
 }
 
 function cometState(isBulkerAllowed: boolean): CometState {
-  return [
+  const state = [
     StateType.Hydrated,
     {
       baseAsset: BASE_ASSET,
@@ -116,6 +117,9 @@ function cometState(isBulkerAllowed: boolean): CometState {
       totalBaseSupplyUsd: 0n,
     },
   ] as unknown as CometState;
+  // As useCometState records it: read for the market and account these tests start with.
+  recordCometStateSource(state, { chainId: 1, cometAddress: USDC_COMET }, ACCOUNT);
+  return state;
 }
 
 function actionQueue(actions: Action[], pendingAction?: PendingAction): ActionQueue {
