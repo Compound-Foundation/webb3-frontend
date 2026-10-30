@@ -107,7 +107,13 @@ Build the app locally with the controls open:
    git status --porcelain   # expect no output
    ```
 
-2. Copy `.env.local` from the main checkout if you use one. Reads need `VITE_V3_RPC_PROVIDER_HOST`, and history needs `VITE_V3_API_HOST` (README, "Required Environment Variables").
+2. Create `.env.local` in the worktree, or copy it from the main checkout. Git ignores it. Reads need `VITE_V3_RPC_PROVIDER_HOST`, and history needs `VITE_V3_API_HOST` (README, "Required Environment Variables"). Without a local backend, use the public hosts that the production bundle uses:
+
+   ```bash
+   VITE_V3_API_HOST=https://v3-api.compound.xyz
+   VITE_V3_RPC_PROVIDER_HOST=node-provider-v3-app.compound.xyz
+   ```
+
 3. Open the release controls in this working copy only:
 
    ```bash
@@ -117,17 +123,99 @@ Build the app locally with the controls open:
 
    If fewer markets are authorized, edit only their entries by hand.
 
-4. Build and serve the app, and record the choice. Both servers bind to loopback only (`vite.config.js:18-26`).
-   - Preferred: run `yarn build && yarn preview`, then open `http://127.0.0.1:4173`. This is the production build. It screens every address and fails closed, so set `VITE_SCREENING_ENDPOINT` to a worker that allows that origin (README).
-   - Fallback: run `yarn dev`, then open `http://127.0.0.1:5173`. With no `VITE_SCREENING_ENDPOINT`, it skips screening and treats the address as allowed (`envVars.ts:38`, `src/hooks/useAddressScreening.ts:36-42`). It also runs React's development build and the dev-only code in `src/init.ts:12-17`. Record "dev build, screening bypassed". The run is then no evidence for screening or for the production build.
-5. After the run, restore the file and check the working copy:
+4. Make a certificate and an HTTPS proxy, outside the worktree. The Anchorage Digital extension 1.1.16 injects its provider on `https://` pages only (see the open question after the build identity table). Both Vite servers serve HTTP and bind to loopback only (`vite.config.js:18-26`). Do not add `--host`. A small Node proxy on loopback serves the app over HTTPS instead:
+
+   ```bash
+   mkdir -p ~/.porto-https && cd ~/.porto-https
+   openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj /CN=localhost \
+     -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' -keyout key.pem -out cert.pem
+   ```
+
+   The certificate is self-signed, so Chrome shows a warning on the first visit. To avoid the warning, `mkcert -install && mkcert -key-file key.pem -cert-file cert.pem localhost 127.0.0.1` makes a certificate that Chrome trusts. `mkcert -install` adds a local certificate authority to the system trust store, so run `mkcert -uninstall` after the run. The runs did not use mkcert.
+
+   Save this script as `~/.porto-https/proxy.mjs`. It listens on `127.0.0.1:<listen port>`, forwards each request to `http://127.0.0.1:<target port>`, and passes the websocket upgrade through, which the dev server's hot reload uses. It needs no packages.
+
+   ```js
+   // Loopback HTTPS front: https://localhost:<listen> -> http://127.0.0.1:<target>.
+   import { readFileSync } from 'node:fs';
+   import http from 'node:http';
+   import https from 'node:https';
+   import net from 'node:net';
+
+   const [listenPort = '5174', targetPort = '5173'] = process.argv.slice(2);
+   const target = { host: '127.0.0.1', port: Number(targetPort) };
+   const tls = {
+     key: readFileSync(new URL('key.pem', import.meta.url)),
+     cert: readFileSync(new URL('cert.pem', import.meta.url)),
+   };
+
+   const server = https.createServer(tls, (req, res) => {
+     const upstream = http.request({ ...target, method: req.method, path: req.url, headers: req.headers }, (answer) => {
+       res.writeHead(answer.statusCode, answer.headers);
+       answer.pipe(res);
+     });
+     upstream.on('error', (error) => (res.headersSent ? res.destroy() : res.writeHead(502).end(String(error))));
+     req.pipe(upstream);
+   });
+
+   // Vite's hot-reload websocket: replay the upgrade request to the target, then join the two sockets.
+   server.on('upgrade', (req, socket, head) => {
+     const upstream = net.connect(target, () => {
+       const lines = [`${req.method} ${req.url} HTTP/1.1`];
+       for (let i = 0; i < req.rawHeaders.length; i += 2) lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+       upstream.write(`${lines.join('\r\n')}\r\n\r\n`);
+       upstream.write(head);
+       upstream.pipe(socket).pipe(upstream);
+     });
+     upstream.on('error', () => socket.destroy());
+     socket.on('error', () => upstream.destroy());
+   });
+
+   server.listen(Number(listenPort), '127.0.0.1', () => {
+     console.log(`https://localhost:${listenPort} -> http://127.0.0.1:${targetPort}`);
+   });
+   ```
+
+5. Build and serve the app, start the proxy, and record the choice. Run the server in the worktree and the proxy in a second terminal. Pass `--strictPort`: if the port is taken, Vite otherwise moves to the next free port, and the proxy then serves another checkout's server.
+
+   - Preferred: the production build. It screens every connected address and fails closed. Vite embeds `VITE_SCREENING_ENDPOINT` in the bundle at build time (`envVars.ts:20-22`), so set it before you build. A build without it screens against a placeholder URL and blocks every wallet. The screening worker answers only origins on its CORS allowlist (`src/helpers/screening.ts:18-19`). On 2026-10-29, the production worker answered a preflight from `https://app.compound.xyz` and refused, with `403`, every `localhost` origin tried. So ask the worker's owner to allow `https://localhost:4174`, or use a worker that allows it, and check the preflight first:
+
+     ```bash
+     curl -si -X OPTIONS '<screening endpoint>' -H 'Origin: https://localhost:4174' \
+       -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' \
+       | grep -i '^HTTP\|access-control-allow-origin'
+     # expect: a 204 status and access-control-allow-origin: https://localhost:4174
+     ```
+
+     Then add `VITE_SCREENING_ENDPOINT=<screening endpoint>` to `.env.local`, and run:
+
+     ```bash
+     yarn build && grep -l '<screening endpoint host>' dist/assets/main-*.js   # expect one file
+     yarn preview --strictPort                                                 # http://127.0.0.1:4173
+     node ~/.porto-https/proxy.mjs 4174 4173                                   # second terminal
+     ```
+
+     Open `https://localhost:4174`.
+
+   - Fallback: the dev server, with no `VITE_SCREENING_ENDPOINT`. It skips screening and treats the address as allowed (`envVars.ts:38`, `src/hooks/useAddressScreening.ts:36-42`). It also runs React's development build and the dev-only code in `src/init.ts:12-17`. Record "dev build, screening bypassed". The run is then no evidence for screening or for the production build. Run:
+
+     ```bash
+     yarn dev --strictPort                     # http://127.0.0.1:5173
+     node ~/.porto-https/proxy.mjs 5174 5173   # second terminal
+     ```
+
+     Open `https://localhost:5174`. The browser console shows `[vite] connected.` once the hot-reload websocket connects through the proxy.
+
+   Open the `localhost` URL, not `https://127.0.0.1:…`. The node proxy at `VITE_V3_RPC_PROVIDER_HOST` answers `401 host not authorized` to an `Origin` of `https://127.0.0.1:5174`, and serves `https://localhost:5174` and `https://localhost:4174` (checked on 2026-10-29). With the self-signed certificate, Chrome shows "Your connection is not private" once. Choose Advanced, then "Proceed to localhost". Before P1, `curl -sk https://localhost:<listen port> | grep -c '<title>Compound Dashboard'` prints `1`.
+
+6. After the run, stop the proxy and the server, restore the file and check the working copy:
 
    ```bash
    git checkout -- src/constants/wrappedMarkets.ts
    git status --porcelain   # expect no output
    ```
 
-   Then remove the worktree with `git worktree remove ../webb3-frontend-porto-run`.
+   Then remove the worktree with `git worktree remove ../webb3-frontend-porto-run`. Delete `~/.porto-https` when no run needs the certificate.
 
 Do not commit the opened controls, and do not push them on any branch. Otherwise `build.yaml` publishes a public build with wrapped deposits and exits open. For the same reason, do not run the "Preview PR" workflow on a PR that holds them.
 
@@ -143,7 +231,7 @@ Do not commit the opened controls, and do not push them on any branch. Otherwise
 | Porto mobile app version                                         | Not recorded                                                                                             |
 | CID                                                              | None. A local build has no CID. COM-292 releases a CID.                                                  |
 
-Open question, owner Adam, answered on 2026-10-26. COM-284 ran against `app.compound.xyz`. Read from the manifest of extension 1.1.16: the `content_scripts` that inject its provider match `https://` pages only. Expected from that manifest: on an `http://` origin, such as `http://127.0.0.1:4173`, the extension does not announce itself. So P1 fails on the `http://` URLs of step 4, and the run stops there. The runs served `yarn dev` through a loopback HTTPS proxy and opened `https://localhost:5174`, where P1 passed. Another origin, such as a private staging host that screening allows, is Adam's and Leo's decision.
+Open question, owner Adam, answered on 2026-10-26. COM-284 ran against `app.compound.xyz`. Read from the manifest of extension 1.1.16: the `content_scripts` that inject its provider match `https://` pages only. Expected from that manifest: on an `http://` origin, such as `http://127.0.0.1:4173`, the extension does not announce itself. So P1 fails on the servers' own `http://` URLs, and the run stops there. The runs served `yarn dev` through a loopback HTTPS proxy and opened `https://localhost:5174`, where P1 passed. Steps 4 and 5 rebuild that setup. Their proxy script is a rewrite of the runs' script, which was not kept. On 2026-10-29 it served the dev server and a production build over HTTPS, and passed the dev server's websocket through, with no wallet connected. Another origin, such as a private staging host that screening allows, is Adam's and Leo's decision.
 
 ## Before the first signature
 
@@ -166,7 +254,7 @@ COM-284 recorded what the mobile app shows for a contract call:
 - a simulated result, marked as not guaranteed
 - decoded details: network, sender, contract, value, maximum fee, function and arguments
 
-It showed the amount raw, for example `1000000` for 1 USDC. The app's dialogs print the same raw figure. The supply dialog says "Your wallet may show this amount in the token's base units: …" (`src/pages/home/components/ActionModal/WrappedSupplyModal.tsx:180`). The withdrawal dialog says "Your wallet may show the shares in their base units: …" (`WrappedWithdrawModal.tsx:237`).
+It showed the amount raw, for example `1000000` for 1 USDC. The app's dialogs print the same raw figure. The supply dialog says "Your wallet may show this amount in the token's base units: …" (`src/pages/home/components/ActionModal/WrappedSupplyModal.tsx:180`). The withdrawal dialog says "Your wallet may show the shares in their base units: …" (`WrappedWithdrawModal.tsx:244`).
 
 | Preview field           | Approval or USDT reset                                                                                                 | Supply                                   | Exit                                                  |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------- |
@@ -242,7 +330,7 @@ Each "Expected" below is expected from code until the run observes it.
 | S5  | Disconnect and reconnect during a review            | With a review open, disconnect in the dApp, then reconnect Anchorage.                                                                                                                                               | The review closes with "Your wallet, network or market changed, so this supply was closed." (or "withdrawal"), and nothing is sent. The reconnected session shows the same account and no earlier review. After an approval that was confirmed before the disconnect, a new review only supplies.                                                                                                                                                                                           |
 | S6  | Wrong chain                                         | Switch the wallet to Base, a network Porto serves (COM-284). Switch back afterwards.                                                                                                                                | The wrapped controls read "Switch your wallet to this market's network to use wrapped deposits." and "…withdrawals." (`WrappedPositionPanel.tsx:100-101`). An open review closes and sends nothing.                                                                                                                                                                                                                                                                                         |
 | S7  | Failed reads after a reported successful switch     | Switch the wallet to Mantle with the console snippet below. Mantle is a network the app configures and Porto cannot read (COM-284). Switch back to `0x1` and reload afterwards.                                     | The panel shows "Your wallet cannot read this network, although it reported switching to it. Reload the page and reconnect your wallet, or switch it to a network it supports." with Reload (`src/hooks/useWrappedAction.ts:54-55`). No wrapped review can start.                                                                                                                                                                                                                           |
-| S8  | Broken provider after an extension update           | Wait for an extension update with the tab open, or turn the extension off and on in `chrome://extensions` with the tab open. The second way is an assumption: COM-284 saw the break only after an automatic update. | The panel shows "Your wallet extension stopped responding, which can happen after it updates. Reload the page and reconnect your wallet before you continue." (`useWrappedAction.ts:52-53`). A reload fixes it (COM-284). Record the console's error text. Only messages that match `src/helpers/walletErrors.ts:39` count as a broken extension.                                                                                                                                           |
+| S8  | Broken provider after an extension update           | Wait for an extension update with the tab open, or turn the extension off and on in `chrome://extensions` with the tab open. The second way is an assumption: COM-284 saw the break only after an automatic update. | The panel shows "Your wallet extension stopped responding, which can happen after it updates. Reload the page and reconnect your wallet before you continue." (`useWrappedAction.ts:52-53`). A reload fixes it (COM-284). Record the console's error text. Only messages that match `src/helpers/walletErrors.ts:40` count as a broken extension.                                                                                                                                           |
 | S9  | Wallet switching with a second unlocked wallet      | After the last signing row, unlock Rabby or install MetaMask in the same profile. COM-284 found Rabby installed and locked. With a review open, use "Change Wallet" to connect it, then switch back to Anchorage.   | With the second wallet: no wrapped panel, the direct Supply button returns, an open wrapped review closes and the action queue empties. The route keys on the selected connector's id alone (`src/helpers/lendingRoute.ts:175`). Back on Anchorage: the panel returns after the wrapper check, and no earlier review returns.                                                                                                                                                               |
 | S10 | Stale state                                         | With a review open, select another market.                                                                                                                                                                          | The review closes, and a confirm kept from it signs nothing. After each confirmed step, the panel's figures read again from a block that holds the step.                                                                                                                                                                                                                                                                                                                                    |
 | S11 | Anchorage-only holder visibility                    | While the test wallet holds shares, open the watch-only view of its address (S12).                                                                                                                                  | The view shows no wrapped position, because COM-285 limits it to the Anchorage route. A second wallet holds another address, and S9 checks its route. Record what the view shows.                                                                                                                                                                                                                                                                                                           |
@@ -278,19 +366,19 @@ A bare `-32603`, or any generic internal error, proves neither success nor rejec
 
 The Anchorage Digital extension 1.1.16 does not wait for a mobile approval indefinitely. On 2026-10-23 it rejected an exact USDC approval's `eth_sendTransaction` about 4 minutes 47 seconds after the request. Its answer was `-32005` and "This request is still pending and can still complete after this message. Check its status in the Anchorage extension before you try again." Nobody recorded the phone, and the run did not open the extension after that answer, so the request's later state is not recorded. Read from the source of extension 1.1.16: after this answer, the extension stops asking Anchorage's backend about the request ([finding 3](#findings-for-anchorage)). So if the request is approved later, the page never receives its hash.
 
-The app classifies this answer as `pending-in-wallet` and handles it as a provider failure (`src/helpers/walletErrors.ts:103-117` and `:123-135`). It keeps the request as interrupted (`src/hooks/useTransactionManager.ts:583-604`) and stops the step with no retry and no next step (`src/hooks/useWrappedAction.ts:773-779`). The dialog shows the text of the "Still open in the wallet" row (`WrappedActionDialog.tsx:69-78`). The panel says "Your wallet reported that it still has a request open for an earlier wrapped transaction from this account." and offers "Stop waiting" (`WrappedPositionPanel.tsx:600-621`). After `-32005`, check mobile and the extension before any retry. A later approval lands as a transaction the app did not see, so the next review reads the new allowance and balances.
+The app classifies this answer as `pending-in-wallet` and handles it as a provider failure (`src/helpers/walletErrors.ts:104-118` and `:123-135`). It keeps the request as interrupted (`src/hooks/useTransactionManager.ts:583-604`) and stops the step with no retry and no next step (`src/hooks/useWrappedAction.ts:773-779`). The dialog shows the text of the "Still open in the wallet" row (`WrappedActionDialog.tsx:69-78`). The panel says "Your wallet reported that it still has a request open for an earlier wrapped transaction from this account." and offers "Stop waiting" (`WrappedPositionPanel.tsx:600-621`). After `-32005`, check mobile and the extension before any retry. A later approval lands as a transaction the app did not see, so the next review reads the new allowance and balances.
 
-Read from the source of extension 1.1.16: the extension also stops waiting before that deadline, when the request's tab closes or the tab's wallet leaves the extension's sessions (`src/scripts/background/handlers/utils/withTabRequestSignal.ts`). A disconnect in the dApp removes the wallet, because wagmi sends `wallet_revokePermissions`. The extension then answers EIP-1193 `4900` and "Stopped waiting because the dApp tab was closed or the wallet was disconnected. The request can still complete, so check its status in the Anchorage extension before you try again." No run has produced this answer yet. Like the `-32005` answer, it carries the ID of the extension's operation for the request (`src/scripts/background/services/api/getCompletedOperation.ts`). The app classifies it as `pending-in-wallet` too, not as a refusal, and handles it as above (`src/helpers/walletErrors.ts:46` and `:107-117`). After a disconnect, the panel shows the notice above once Anchorage is connected again.
+Read from the source of extension 1.1.16: the extension also stops waiting before that deadline, when the request's tab closes or the tab's wallet leaves the extension's sessions (`src/scripts/background/handlers/utils/withTabRequestSignal.ts`). A disconnect in the dApp removes the wallet, because wagmi sends `wallet_revokePermissions`. The extension then answers EIP-1193 `4900` and "Stopped waiting because the dApp tab was closed or the wallet was disconnected. The request can still complete, so check its status in the Anchorage extension before you try again." No run has produced this answer yet. Like the `-32005` answer, it carries the ID of the extension's operation for the request (`src/scripts/background/services/api/getCompletedOperation.ts`). The app classifies it as `pending-in-wallet` too, not as a refusal, and handles it as above (`src/helpers/walletErrors.ts:47` and `:107-117`). After a disconnect, the panel shows the notice above once Anchorage is connected again.
 
 The extension can also refuse a request before it handles it. On 2026-10-26 the tester had just logged into the extension again, and the page still showed the account connected. About 5 seconds after Confirm, the extension answered an exact USDC approval's `eth_sendTransaction` with EIP-1193 code `4100` "Unauthorized". The chain showed no transaction. Read from the source of extension 1.1.16: the extension answers `4100` when the tab's session in the extension holds no wallet ([finding 2](#findings-for-anchorage)). That the new login had dropped the tab's session is inferred, not observed. Nobody recorded the phone.
 
-The app classifies EIP-1193 codes `4100` (Unauthorized), `4200` (Unsupported Method), `4900` (Disconnected) and `4901` (Chain Disconnected) as `refused` when the answer shows no request the wallet still holds (`src/helpers/walletErrors.ts:23-30`, `:119-121` and `:131-133`). The extension's `4900` "… The request can still complete …" above is not a refusal. For a refusal, the app removes the request's record, as for a rejection (`src/hooks/useTransactionManager.ts:588-592`). It stops the step with nothing sent and no next step, and a new review can start at once (`src/hooks/useWrappedAction.ts:765-768`).
+The app classifies EIP-1193 codes `4100` (Unauthorized), `4200` (Unsupported Method), `4900` (Disconnected) and `4901` (Chain Disconnected) as `refused` when the answer shows no request the wallet still holds (`src/helpers/walletErrors.ts:23-31`, `:119-121` and `:131-133`). The extension's `4900` "… The request can still complete …" above is not a refusal. For a refusal, the app removes the request's record, as for a rejection (`src/hooks/useTransactionManager.ts:588-592`). It stops the step with nothing sent and no next step, and a new review can start at once (`src/hooks/useWrappedAction.ts:765-768`).
 
 The dialog shows the text of the "Refused before the wallet handled it" row (`WrappedActionDialog.tsx:110-111`). Until the next review starts, the panel says "Your wallet refused the last wrapped request from this account before handling it (…)" (`WrappedPositionPanel.tsx:623-630`). Disconnect and reconnect the wallet in the dApp before that review. Otherwise its request can fail the same way.
 
 Read from the source of extension 1.1.16: the extension returns a transaction's hash to the page only after Anchorage's backend marks the operation complete ([finding 3](#findings-for-anchorage)). So after the approval on mobile, a step can still read "Confirm the request in your wallet…" and "Waiting for Your Wallet" while the explorer shows the transaction in a block. Before you record a step as waiting for mobile, check mobile and the explorer. Keep the dialog open until the step reads "Broadcast…", "Confirmed." or another outcome from the table below.
 
-While the dialog's button reads "Checking", "Waiting for Your Wallet" or "Waiting for the Network", a click on the dimmed area around the dialog does nothing (`WrappedActionDialog.tsx:209-218`, `WrappedSupplyModal.tsx:250` and `WrappedWithdrawModal.tsx:331`). Only the close control and the Close button close the dialog then. After a close, the review sends nothing more. A request in the wallet or a transaction on the network is not cancelled.
+While the dialog's button reads "Checking", "Waiting for Your Wallet" or "Waiting for the Network", a click on the dimmed area around the dialog does nothing (`WrappedActionDialog.tsx:209-218`, `WrappedSupplyModal.tsx:250` and `WrappedWithdrawModal.tsx:338`). Only the close control and the Close button close the dialog then. After a close, the review sends nothing more. A request in the wallet or a transaction on the network is not cancelled.
 
 | State                                | Dialog text                                                                                                                                                                                                                                         | Dialog button             | Wallet menu                                                            | Independent check                                         |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------- |

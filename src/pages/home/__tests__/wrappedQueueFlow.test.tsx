@@ -11,6 +11,7 @@ import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { WrappedBlockReason } from '@helpers/wrappedActions';
@@ -133,6 +134,8 @@ const COMET_STATE = [
     totalBaseSupplyUsd: 0n,
   },
 ] as unknown as CometState;
+// As useCometState records it: read for the USDC market and the connected account.
+recordCometStateSource(COMET_STATE, { chainId: 1, cometAddress: USDC_COMET }, ACCOUNT);
 
 const WEB3: Web3 = {
   ...mockWeb3,
@@ -350,6 +353,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
       COMET_STATE[0],
       { ...COMET_STATE[1], baseAsset: { ...BASE_ASSET, balance: 10_000_000n } },
     ] as unknown as CometState;
+    recordCometStateSource(mixed, { chainId: 1, cometAddress: USDC_COMET }, ACCOUNT);
     const value = lending(POSITION);
     const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
     view.rerender(<Dashboard value={value} state={mixed} />);

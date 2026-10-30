@@ -1212,6 +1212,54 @@ describe('useWrappedAction', () => {
       expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     });
 
+    // App owns the hook today, but whatever owns it can unmount while the manager prepares a step.
+    it('withdraws the request before the wallet is asked when its owner unmounts while the manager prepares it', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, unmount } = renderAction({ session: sessionFor(wallet), manager });
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      unmount();
+
+      await expect(requests[0].request.send()).rejects.toBeInstanceOf(SendWithdrawnError);
+      expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    });
+
+    it('withdraws the request when its owner unmounts while gas is estimated', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, unmount } = renderAction({ session: sessionFor(wallet), manager });
+      let finishEstimate: (gas: BigNumber) => void = () => undefined;
+      wallet.estimateGas.mockImplementationOnce(() => new Promise((resolve) => (finishEstimate = resolve)));
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      const sending = requests[0].request.send();
+      await waitFor(() => expect(wallet.estimateGas).toHaveBeenCalledTimes(1));
+      unmount();
+      finishEstimate(BigNumber.from(100_000));
+
+      await expect(sending).rejects.toBeInstanceOf(SendWithdrawnError);
+      expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    });
+
+    it('still hands the manager the hash of a request the wallet was asked for before its owner unmounted', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, unmount } = renderAction({ session: sessionFor(wallet), manager });
+      let answerWallet: (hash: string) => void = () => undefined;
+      wallet.sendUncheckedTransaction.mockImplementationOnce(() => new Promise((resolve) => (answerWallet = resolve)));
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      const sending = requests[0].request.send();
+      await waitFor(() => expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1));
+      unmount();
+      answerWallet('0xapproval');
+
+      await expect(sending).resolves.toBe('0xapproval');
+      await act(async () => requests[0].resolve({ status: 'submitted', id: 'id-1', hash: '0xapproval' }));
+      expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
+    });
+
     it('sends the call it checked, even if the step it was given changes afterwards', async () => {
       const { manager, requests } = fakeManager(wallet);
       const { result } = renderAction({ session: sessionFor(wallet), manager });

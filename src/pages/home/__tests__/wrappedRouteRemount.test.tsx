@@ -4,6 +4,7 @@ import { WRAPPED_MARKET_REGISTRY } from '@constants/wrappedMarkets';
 import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { Theme } from '@hooks/useThemeManager';
@@ -81,15 +82,16 @@ function wrappedLending(): WrappedLending {
   };
 }
 
-// A direct supply of 1,000 USDC at $1.
-function cometState(): CometState {
+// A direct supply of 1,000 USDC at $1, recorded as useCometState records it: read for the USDC
+// market and `account`.
+function cometState(account: string): CometState {
   const baseAsset: BaseAssetWithAccountState = {
     ...mockBaseAsset({ address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' }),
     balance: 1_000_000_000n,
     price: 100_000_000n,
     baseAssetPriceInDollars: 100_000_000n,
   };
-  return [
+  const state = [
     StateType.Hydrated,
     {
       baseAsset,
@@ -107,6 +109,12 @@ function cometState(): CometState {
       totalBaseSupplyUsd: 0n,
     },
   ] as unknown as CometState;
+  recordCometStateSource(
+    state,
+    { chainId: USDC_MARKET.chainInformation.chainId, cometAddress: USDC_MARKET.marketAddress },
+    account
+  );
+  return state;
 }
 
 function actionQueue(): ActionQueue {
@@ -173,7 +181,7 @@ describe('Home on the wrapped route across a return to the dashboard', () => {
 
   it('adds no wrapped value to the previous account’s Comet state after an account switch', () => {
     const accountA = web3For(mockWeb3.read.account as string);
-    const stateForA = cometState();
+    const stateForA = cometState(accountA.read.account as string);
     const { rerender } = render(app({ isDashboard: true, state: LOADING, web3: accountA }));
     rerender(app({ isDashboard: true, state: stateForA, web3: accountA }));
     expect(headline()).toBe('$1,250.00');
@@ -186,12 +194,12 @@ describe('Home on the wrapped route across a return to the dashboard', () => {
     expect(headline()).toBe('$1,000.00');
 
     // B's Comet state arrives while the dashboard is mounted.
-    rerender(app({ isDashboard: true, state: cometState(), web3: web3For(ACCOUNT_B) }));
+    rerender(app({ isDashboard: true, state: cometState(ACCOUNT_B), web3: web3For(ACCOUNT_B) }));
     expect(headline()).toBe('$1,250.00');
   });
 
   it('keeps the wrapped value on a return with the same account and Comet state', () => {
-    const state = cometState();
+    const state = cometState(mockWeb3.read.account as string);
     const { rerender } = render(app({ isDashboard: true, state: LOADING, web3: mockWeb3 }));
     rerender(app({ isDashboard: true, state, web3: mockWeb3 }));
     expect(headline()).toBe('$1,250.00');
@@ -201,11 +209,8 @@ describe('Home on the wrapped route across a return to the dashboard', () => {
     expect(headline()).toBe('$1,250.00');
   });
 
-  it('adds no wrapped value to Comet state read before the dashboard first mounted', () => {
-    const { rerender } = render(app({ isDashboard: true, state: cometState(), web3: mockWeb3 }));
-    expect(headline()).toBe('$1,000.00');
-
-    rerender(app({ isDashboard: true, state: cometState(), web3: mockWeb3 }));
+  it('adds the wrapped value to Comet state read for the account before the dashboard first mounted', () => {
+    render(app({ isDashboard: true, state: cometState(mockWeb3.read.account as string), web3: mockWeb3 }));
     expect(headline()).toBe('$1,250.00');
   });
 });
