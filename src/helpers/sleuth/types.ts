@@ -3,6 +3,14 @@ import { BigNumber } from 'ethers';
 // Ideally these query & response types could be auto-generated with a script
 // that parses the structs in the sleuth solidity files in the future.
 
+// Interest rate model parameters, per second at factorScale precision
+export type RateModelResponse = {
+  kink: BigNumber;
+  perSecondInterestRateBase: BigNumber;
+  perSecondInterestRateSlopeLow: BigNumber;
+  perSecondInterestRateSlopeHigh: BigNumber;
+};
+
 export type CometWithAccountStateQuery = [
   string, // comet address
   string, // nativeTokenToUsd (extra price feed)
@@ -30,7 +38,7 @@ export type CometWithAccountStateResponse = {
   baseMinForRewards: BigNumber;
   baseTrackingBorrowSpeed: BigNumber;
   baseTrackingSupplySpeed: BigNumber;
-  borrowAPR: BigNumber;
+  borrowRateModel: RateModelResponse;
   bulkerAllowance: BigNumber;
   collateralAssets: {
     collateralAsset: string;
@@ -49,14 +57,16 @@ export type CometWithAccountStateResponse = {
     totalSupply: BigNumber;
     walletBalance: BigNumber;
   }[];
-  earnAPR: BigNumber;
+  factorScale: BigNumber;
   nativeAssetInDollars: BigNumber;
   nativeAssetWalletBalance: BigNumber;
+  supplyRateModel: RateModelResponse;
   totalBorrow: BigNumber;
   totalBorrowPrincipal: BigNumber;
   totalSupply: BigNumber;
   totalSupplyPrincipal: BigNumber;
   trackingIndexScale: BigNumber;
+  utilization: BigNumber;
 };
 
 export type CometStateQuery = [
@@ -79,7 +89,7 @@ export type CometStateResponse = {
   baseMinForRewards: BigNumber;
   baseTrackingBorrowSpeed: BigNumber;
   baseTrackingSupplySpeed: BigNumber;
-  borrowAPR: BigNumber;
+  borrowRateModel: RateModelResponse;
   collateralAssets: {
     collateralAsset: string;
     collateralFactor: BigNumber;
@@ -93,11 +103,13 @@ export type CometStateResponse = {
     symbol: string;
     totalSupply: BigNumber;
   }[];
-  earnAPR: BigNumber;
+  factorScale: BigNumber;
   nativeAssetInDollars: BigNumber;
+  supplyRateModel: RateModelResponse;
   totalBorrow: BigNumber;
   totalBorrowPrincipal: BigNumber;
   totalSupply: BigNumber;
   totalSupplyPrincipal: BigNumber;
   trackingIndexScale: BigNumber;
+  utilization: BigNumber;
 };

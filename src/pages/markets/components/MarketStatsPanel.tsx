@@ -37,6 +37,13 @@ const defaultPanelContent = {
   baseAssetSymbol: '',
 };
 
+function formatCollateralization(totalSupply: bigint, totalBorrow: bigint): string {
+  if (totalBorrow === 0n) {
+    return 'N/A';
+  }
+  return (Number((totalSupply * 10n ** 10n) / totalBorrow) / 1e8).toFixed(2) + '%';
+}
+
 function getMarketStatsPanelContent(state: MarketStatsPanelState): MarketStatsPanelContent {
   const [panelState] = state;
   if (panelState === StateType.Loading) {
@@ -46,7 +53,7 @@ function getMarketStatsPanelContent(state: MarketStatsPanelState): MarketStatsPa
   } else {
     const { baseAsset, reserves, totalBorrow, totalSupply, currency } = state[1];
 
-    const { price, symbol: baseAssetSymbol, baseAssetPriceInDollars } = baseAsset;
+    const { symbol: baseAssetSymbol, baseAssetPriceInDollars } = baseAsset;
     const currencyToUse = currency;
 
     const reservesValue = getTokenValue(reserves, currency, baseAssetPriceInDollars, baseAssetSymbol);
@@ -64,7 +71,7 @@ function getMarketStatsPanelContent(state: MarketStatsPanelState): MarketStatsPa
       baseAssetPrice: formatTokenBalance(PRICE_PRECISION, baseAssetPriceInDollars, false, Currency.USD),
       reserves: formatTokenBalance(baseAsset.decimals, reservesValue, true, currencyToUse),
       totalSupply: formatTokenBalance(baseAsset.decimals, totalSupplyValue, true, currencyToUse),
-      collateralization: ((Number(totalSupply * price) * 100) / Number(totalBorrow * price)).toFixed(2) + '%',
+      collateralization: formatCollateralization(totalSupply, totalBorrow),
       availableLiquidity: formatTokenBalance(baseAsset.decimals, availableLiquidityValue, true, currencyToUse),
       currency,
       baseAssetSymbol,

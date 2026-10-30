@@ -264,8 +264,9 @@ export const getBottomLabels = (
   );
 };
 
-export const formatPercentage = (num: number) => {
-  return `${(Math.round(num * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}%`;
+export const formatPercentage = (num: number, minimumFractionDigits = 0) => {
+  const rounded = Math.round(num * 100) / 100;
+  return `${rounded.toLocaleString('en-US', { minimumFractionDigits, maximumFractionDigits: 2 })}%`;
 };
 
 export const formatPoints = (points: PolyLinePoints) => {
