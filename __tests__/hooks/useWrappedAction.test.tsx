@@ -1140,16 +1140,16 @@ describe('useWrappedAction', () => {
       const message =
         'The wallet stopped responding while it had the request. The request can still be approved in the wallet.';
       expect(result.current.state).toMatchObject({
-        steps: [{ status: 'provider-failure', message, isStoppedWhileAwaitingSignature: true }, { status: 'waiting' }],
+        steps: [{ status: 'provider-failure', message, isStoppedBySessionFailure: true }, { status: 'waiting' }],
       });
       const { state } = result.current;
       if (state.phase !== 'stopped') throw new Error('the draft must be stopped');
       const stopped = state.steps[0];
       // The wallet had the request, so it can still approve it.
       expect(canStillApproveInWallet(stopped)).toBe(true);
-      // The message is the page's own, so the step is not marked as the wallet's answer that it still
-      // holds the request, and keeps the wording of a wallet error.
-      expect(stopped).toEqual({ status: 'provider-failure', message, isStoppedWhileAwaitingSignature: true });
+      // The step keeps the generic wording of a wallet error, not the wording of a wallet that said it
+      // still holds the request, which names the Anchorage app.
+      expect(stopped).toEqual({ status: 'provider-failure', message, isStoppedBySessionFailure: true });
     });
 
     it.each<[string, WrappedStepState, boolean]>([
@@ -1160,11 +1160,7 @@ describe('useWrappedAction', () => {
       ],
       [
         'the session stopped responding while the wallet had the request',
-        {
-          status: 'provider-failure',
-          message: 'The wallet stopped responding.',
-          isStoppedWhileAwaitingSignature: true,
-        },
+        { status: 'provider-failure', message: 'The wallet stopped responding.', isStoppedBySessionFailure: true },
         true,
       ],
       ['the wallet reported another error', { status: 'provider-failure', message: 'Internal error (-32603)' }, false],

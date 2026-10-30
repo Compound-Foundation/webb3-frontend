@@ -82,29 +82,29 @@ export type WrappedStepState =
   /**
    * The wallet reported another error. Whether it reached the chain is unknown. `isPendingInWallet`
    * marks the wallet's answer that it still holds the request. Of the two flags, only it changes the
-   * step's wording. `isStoppedWhileAwaitingSignature` marks a step the page stopped because the
-   * wallet session stopped responding while the wallet had the request, so the wallet can still
-   * approve it. The message is then the page's own, not the wallet's.
+   * step's wording. `isStoppedBySessionFailure` marks a step the page stopped because the wallet
+   * session failed after the wallet was asked, so the wallet can still approve the request. The
+   * message is then the page's own, not the wallet's.
    */
   | {
       status: 'provider-failure';
       message: string;
       isPendingInWallet?: boolean;
-      isStoppedWhileAwaitingSignature?: boolean;
+      isStoppedBySessionFailure?: boolean;
     }
   /** A check refused it before the wallet was asked. Nothing was sent. */
   | { status: 'blocked'; reason: WrappedBlockReason; message?: string };
 
 /**
- * Whether the wallet can still hold the request of a step that stopped, so the user can still
- * approve or reject it there: the wallet said it still holds it, or the wallet session stopped
- * responding while the wallet had it. A request the wallet rejected or refused, or that never
- * reached the wallet, cannot be approved.
+ * Whether the user can still approve, or reject, a stopped step's request in the wallet. They can
+ * when the wallet said it still holds the request, or when the wallet session failed after the
+ * wallet was asked. They cannot approve a request the wallet rejected or refused, or one that never
+ * reached the wallet. A plain wallet error leaves it unknown, so it gives false, as does a step whose
+ * transaction was broadcast.
  */
 export function canStillApproveInWallet(step: WrappedStepState): boolean {
   return (
-    step.status === 'provider-failure' &&
-    (step.isPendingInWallet === true || step.isStoppedWhileAwaitingSignature === true)
+    step.status === 'provider-failure' && (step.isPendingInWallet === true || step.isStoppedBySessionFailure === true)
   );
 }
 
@@ -321,7 +321,7 @@ function stoppedByUnusableSession(state: WrappedActionState): WrappedActionState
       status: 'provider-failure',
       message:
         'The wallet stopped responding while it had the request. The request can still be approved in the wallet.',
-      isStoppedWhileAwaitingSignature: true,
+      isStoppedBySessionFailure: true,
     };
   } else {
     stopped = { status: 'blocked', reason: 'session-unusable' };

@@ -1215,8 +1215,8 @@ describe('WrappedWithdraw', () => {
         /if you do not want to withdraw about this amount, reject the request in your wallet/i
       );
       expect(dialog).toHaveTextContent(/the transaction has no minimum amount and no deadline/i);
-      // The step keeps the wording of a wallet error. The message is the page's own, so the dialog
-      // does not present it as the wallet's answer.
+      // The step keeps the generic wording of a wallet error, not the wording of a wallet that said
+      // it still holds the request, which names the Anchorage app.
       expect(
         within(dialog).getByText(
           'Your wallet reported an error (The wallet stopped responding while it had the request. The request can ' +
