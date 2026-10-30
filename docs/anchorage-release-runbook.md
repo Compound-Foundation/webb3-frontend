@@ -10,20 +10,21 @@ Facts from code:
 
 - **Only the Anchorage connector takes the wrapped route.** The route is wrapped only for the selected connector `com.anchorage.connect` on the three configured markets (`src/helpers/lendingRoute.ts:165-210`). Other wallets and watch-only sessions stay on the standard route under every setting of the controls. The rehearsal tests pin this (see [Rollback rehearsal](#rollback-rehearsal)).
 - **The controls are per market and independent.** `isDepositEnabled` gates the route's `deposit`, and `isExitEnabled` gates its `exit`. Reads depend on neither (`lendingRoute.ts:206-208`).
-- **The wrapped route refuses a direct base supply whatever the controls say.** The home page blocks it whenever the route is wrapped (`src/pages/home/index.tsx:104-105` and `:426`). Borrow, a repay up to the debt, collateral and the direct withdrawal stay available (#61).
+- **On the wrapped route, no base supply or withdrawal goes to Comet directly, whatever the controls say.** The home page keeps its normal Supply and Withdraw entries. Approve & Add asks for an exact approval of the wrapper when a base supply is added, and a queued base supply or withdrawal goes to the wrapper at submission (`isWrapperRouted` and `planQueuedExecution` in `src/helpers/queuedExecution.ts`). The screens, labels and order are production's, with no dialog of the route's own ([queued execution](anchorage-queued-execution.md)). The direct actions are checked again before they are sent, and a base supply or withdrawal among them is refused (`isSubmissionRefused` in `src/helpers/wrappedPositions.ts`). While a release control is off, the amount form refuses its entry. Borrow, a repay up to the debt and collateral stay direct ([`anchorage-queued-execution.md`](anchorage-queued-execution.md)).
+- **A direct Comet supply on the three markets cannot be withdrawn through this route.** A base withdrawal always goes to the wrapper and takes at most what the wrapper pays. An Anchorage account that also supplies the base token to Comet directly sees both added together. The app withdraws the wrapped part alone. Mixed direct and wrapped positions are out of COM-309's scope ([Limits](anchorage-queued-execution.md#limits)). Preflight item 11 checks for such accounts.
 - **No wrapper failure falls back to Comet.** `checkWrappedStep` allows a wrapped step only as the base token's `approve` to the wrapper, or the wrapper's `supplyAndWrap` or `unwrapAndWithdraw`, with targets from the route (`src/helpers/wrappedActions.ts:348`, #64).
 
-So the first production release that contains this stack changes Anchorage sessions on the three markets, even with both controls off. Their home page offers no direct base supply, and no wrapped supply in its place. The Extensions page can still send any transaction for an Anchorage session (#64).
+So the first production release that contains this stack changes Anchorage sessions on the three markets, even with both controls off. Their Supply and Withdraw entries go to the wrapper, and the amount form refuses both while the controls are off. A direct Comet supply that such an account holds on these markets can no longer be withdrawn through the app. The Extensions page can still send any transaction for an Anchorage session (#64).
 
 Do not merge the stack to `main` before Adam and Leo sign off Stage 0. The merge puts the stack into the next production release, whoever runs that release. Without a `cid` input, "Release Production" releases the newest successful `main` build (`.github/workflows/release-prod.yaml:41-49`).
 
-| Setting               | `isDepositEnabled` | `isExitEnabled` | Anchorage session on the market                                    | Other wallets and watch-only |
-| --------------------- | ------------------ | --------------- | ------------------------------------------------------------------ | ---------------------------- |
-| Stage 0, as committed | `false`            | `false`         | Holdings shown. No wrapped supply or exit. No direct base supply.  | unchanged                    |
-| Stage 1               | `false`            | `true`          | Holdings shown and exits open                                      | unchanged                    |
-| Stage 2               | `true`             | `true`          | Holdings shown, supply and exits open                              | unchanged                    |
-| Rollback R1           | `false`            | `true`          | the same as Stage 1                                                | unchanged                    |
-| Rollback R2           | `false`            | `false`         | the same as Stage 0. Holders exit [directly](#direct-wrapper-exit) | unchanged                    |
+| Setting               | `isDepositEnabled` | `isExitEnabled` | Anchorage session on the market                                                                    | Other wallets and watch-only |
+| --------------------- | ------------------ | --------------- | -------------------------------------------------------------------------------------------------- | ---------------------------- |
+| Stage 0, as committed | `false`            | `false`         | Holdings shown. No base supply or withdrawal. Borrow, repay and collateral actions stay available. | unchanged                    |
+| Stage 1               | `false`            | `true`          | Holdings shown and exits open                                                                      | unchanged                    |
+| Stage 2               | `true`             | `true`          | Holdings shown, supply and exits open                                                              | unchanged                    |
+| Rollback R1           | `false`            | `true`          | the same as Stage 1                                                                                | unchanged                    |
+| Rollback R2           | `false`            | `false`         | the same as Stage 0. Holders exit [directly](#direct-wrapper-exit)                                 | unchanged                    |
 
 Do not ship deposits on with exits off. Otherwise holders can enter through the app but cannot leave through it. The registry accepts that combination (`src/constants/wrappedMarkets.ts:157`), so the review of each release-control PR must refuse it.
 
@@ -51,7 +52,7 @@ A readiness review does not approve a launch or a real-value transaction. Record
 
 ## Preflight
 
-Close every item before Stage 1, except those marked for Stage 2. Items 1 and 10 also come before Stage 0.
+Close every item before Stage 1, except those marked for Stage 2. Items 1, 10 and 11 also come before Stage 0.
 
 1. **Protect the release path, or accept the risk in writing.** These are facts from 2026-10-22, read with the commands below. `main` has no branch protection and no ruleset. The `production` environment has no protection rule and no deployment branch policy. `.github/CODEOWNERS` names no owner for its security-sensitive paths. So nothing enforces the two approvals: anyone with write access can put a control change on `main`. The deployer's Seacrest signature in "Release Production" is the one enforced gate (`scripts/release.js:65-68`). Before Stage 0, do one of these:
 
@@ -124,19 +125,30 @@ Close every item before Stage 1, except those marked for Stage 2. Items 1 and 10
    - the wallet-network boundary of the standard queue (#64)
    - the 0.1% (10 basis points) tolerance for a partial exit's payout (#66, #67)
    - an acknowledgment of the debt warning before the first signature (#65)
-   - a dialog closed in the middle of a supply, which stops the supply (#65). While a step is checked, waits in the wallet or waits for the network, only the close control and the Close button close the dialog. A click on the backdrop then does nothing (#65, #66, [COM-290 failure 1](anchorage-porto-validation.md#release-blocking-failures)). M1 on USDC ran again on `8e7d022` and passed
+   - no longer applies: a dialog closed in the middle of a supply, which stopped the supply (#65, #66, [COM-290 failure 1](anchorage-porto-validation.md#release-blocking-failures)). COM-309 removes the route's dialogs. Approve & Add and Submit Transaction ask the wallet directly, so closing a dialog can no longer stop a supply
    - up to three mobile approvals for a USDT supply (#65)
-   - the Anchorage extension's pending timeout of about 4 minutes 47 seconds, shorter than a realistic custody approval. A request approved after the timeout lands as a transaction the app does not see, and new wrapped actions wait until the holder presses "Stop waiting" (#64, [COM-290 finding 1](anchorage-porto-validation.md#findings-for-anchorage)). Read from the source of extension 1.1.16, the extension also stops waiting, with `4900` "… The request can still complete …", when the holder disconnects the wallet in the interface while a request waits. The app handles that answer the same way (#64, [Telling the states apart](anchorage-porto-validation.md#telling-the-states-apart))
-   - the Anchorage extension's `4100` "Unauthorized" after a new login. On 2026-10-26 the page still showed the account connected, and the next request failed with `4100`. The chain showed no transaction. Read from the source of extension 1.1.16, the extension answers `4100` when the tab's session in the extension holds no wallet. That the new login dropped the session is inferred. The app classifies `4100` as a refusal, so its dialog and panel say that nothing was sent. Disconnecting and reconnecting the wallet is the recommended recovery, which the run did not verify (#64, [COM-290 finding 2](anchorage-porto-validation.md#findings-for-anchorage))
-   - the Anchorage extension's late hash. In the runs of 2026-10-26, the dialog still said "Waiting for Your Wallet" after the transaction was in a block. The hash first appeared 24 to 43 seconds after the block, and no read of the dialog showed the Broadcast state. Read from the source of extension 1.1.16, the extension returns a transaction's hash only after Anchorage's backend marks the operation complete ([COM-290 finding 3](anchorage-porto-validation.md#findings-for-anchorage))
+   - the Anchorage extension's pending timeout of about 4 minutes 47 seconds, shorter than a realistic custody approval. A request approved after the timeout lands as a transaction the app does not see, and new wrapped actions wait until the holder clears the request from the list of transactions with its Clear control (#64, [COM-290 finding 1](anchorage-porto-validation.md#findings-for-anchorage)). Read from the source of extension 1.1.16, the extension also stops waiting, with `4900` "… The request can still complete …", when the holder disconnects the wallet in the interface while a request waits. The app handles that answer the same way (#64, [Telling the states apart](anchorage-porto-validation.md#telling-the-states-apart))
+   - the Anchorage extension's `4100` "Unauthorized" after a new login. On 2026-10-26 the page still showed the account connected, and the next request failed with `4100`. The chain showed no transaction. Read from the source of extension 1.1.16, the extension answers `4100` when the tab's session in the extension holds no wallet. That the new login dropped the session is inferred. The app classifies `4100` as a refusal: nothing was sent, the action stays queued, and its row says "Reconnect Your Wallet". Disconnecting and reconnecting the wallet is the recommended recovery, which the run did not verify (#64, [COM-290 finding 2](anchorage-porto-validation.md#findings-for-anchorage))
+   - the Anchorage extension's late hash. In the runs of 2026-10-26, on an earlier build, the dialog still said "Waiting for Your Wallet" after the transaction was in a block. In the current flow the position card says Confirm Transaction until the hash arrives. The hash first appeared 24 to 43 seconds after the block, and no read of the dialog showed the Broadcast state. Read from the source of extension 1.1.16, the extension returns a transaction's hash only after Anchorage's backend marks the operation complete ([COM-290 finding 3](anchorage-porto-validation.md#findings-for-anchorage))
    - the Anchorage extension's asset list, which shows no wrapper share token. The extension gives a holder no view of the wrapped position ([COM-290 finding 4](anchorage-porto-validation.md#findings-for-anchorage))
-   - routing the wrapped dialogs and the panel to the security review in CODEOWNERS (#66)
+   - routing the wrapped route's hooks and helpers to the security review in CODEOWNERS (#66). The dialogs and the panel it named are gone
    - a contract variant whose exit takes a minimum amount or a deadline (#66), which is out of this release's scope
 6. **For Stage 2: close the Extensions page's path.** #64 asks to stop the Extensions page's direct `eth_sendTransaction` for Anchorage sessions before wrapped deposits are released.
 7. **For Stage 2: decide on a dropped broadcast transaction.** #64 and #65 leave no way out for a broadcast wrapper transaction that is dropped and whose nonce is never used again. Fix it, or accept it as a limitation.
 8. **For Stage 2, and preferably for Stage 1: verify a direct exit for a custody account.** Every position that the app opens belongs to an Anchorage custody account, because only the Anchorage connector takes the wrapped route. `cast` cannot sign for such an account. With a small authorized position, send `unwrapAndWithdraw(shares)` from an Anchorage account through an interface other than this app, as in [Direct wrapper exit](#direct-wrapper-exit). Record the interface and the transaction. Until this passes, R2 and R3 leave app-made holders with no verified way out.
 9. **For Stage 2: exercise an exit through the production app in Stage 1.** An authorized Anchorage account must hold shares for it, for example a small position that the COM-290 run leaves on one market on purpose. Decide that in COM-290's authorization.
 10. **Merge the stack after the Stage 0 signoff:** #60, #61, #64, #65, #66, #67 and this PR, each after its review. Before the first merge, record the CID and the commit that production serves: R3b releases that CID. Until Stage 0 ships, pin every production release's `cid` to that CID, because each merge builds a `main` that holds part of the stack. Merge the seven PRs in one sitting to keep that window short.
+11. **Before Stage 0: find direct Comet supplies of Anchorage accounts on the three markets.** From Stage 0, the app sends a base withdrawal for an Anchorage session on these markets to the wrapper. It cannot withdraw a direct Comet supply there ([Limits](anchorage-queued-execution.md#limits)). Ask Anchorage (Leo) which custody accounts have used these markets, and read each account's direct supply:
+
+    ```bash
+    cast call <comet> "balanceOf(address)(uint256)" <account>
+    ```
+
+    Record each account with a nonzero balance. Before Stage 0, decide for each one:
+
+    - the holder withdraws the supply before the release
+    - the holder withdraws it later, through an interface other than this app
+    - Adam and Leo accept the gap in writing
 
 The exit-specific safety checks that Stage 1 needs are items 1 to 5 for exits, and these:
 
@@ -174,13 +186,12 @@ Every push to a branch of this repository publishes that branch's build to IPFS 
 
 ### Stage 0: the first release with the stack
 
-Preconditions: preflight items 1 and 10, and Adam's and Leo's signoff of Stage 0 and its timing.
+Preconditions: preflight items 1, 10 and 11, and Adam's and Leo's signoff of Stage 0 and its timing.
 
 The controls are as committed: both off on every market. Release the stack's merge commit with steps 8 to 11 of [Ship a release-control change](#ship-a-release-control-change). Verify the [standard checks](#verify-after-each-release), and check the Anchorage session on each market:
 
-- The wrapped panel shows the holdings.
-- The supply control reads "Wrapped deposits are not open yet.", and the withdraw control "Wrapped withdrawals are not open yet." (`src/pages/home/components/WrappedPositionPanel.tsx:97-99`).
-- The direct Supply button is absent.
+- The masthead and the position card show the holdings as the supplied balance.
+- The amount form of Supply reads "Supply Not Open Yet", and that of Withdraw "Withdrawals Not Open Yet", and neither adds the action (`wrappedEntryBlockLabel` in `src/helpers/queuedExecution.ts`). The queue's execution is described in [`anchorage-queued-execution.md`](anchorage-queued-execution.md).
 
 ### Stage 1: exits on, deposits off
 
@@ -190,8 +201,8 @@ Change: `isExitEnabled: true` on each market to open. `isDepositEnabled` stays `
 
 Verify the standard checks, and on each opened market:
 
-- The panel shows the holdings, and the supply control still reads "Wrapped deposits are not open yet.".
-- The withdraw control opens its form for a position worth more than the buffer.
+- The masthead shows the holdings, and the amount form of Supply still reads "Supply Not Open Yet".
+- The amount form of Withdraw adds a withdrawal for a position worth more than the buffer.
 - The authorized holder's exit through the production app completes (preflight item 9). Without it, Stage 2 waits.
 
 ### Stage 2: deposits on
@@ -214,13 +225,13 @@ Check the three wrapped markets as each stage describes, and these standard-mark
 3. A watch-only `?account=` view: read-only, with no write control.
 4. Screening: a deployed build screens each connected address and fails closed. An unscreened or blocked address reaches no signing flow.
 5. Recent Transactions and the Transactions page load.
-6. The direct Supply button stays absent for Anchorage on the three markets, at every stage.
+6. Anchorage on the three markets, at every stage: the normal Supply and Withdraw entries are present. A queued base supply or withdrawal goes to the wrapper, not to Comet or the Bulker. A direct Comet supply of the account is not withdrawable there (preflight item 11).
 
 ## Stop conditions
 
 If any of these happens, stop the rollout, record it, and decide on [R1](#r1-deposit-disable-rollback) or [R2](#r2-exits-off-as-well):
 
-- A wrapped transaction from the app pays or burns other amounts than its dialog showed, beyond the bounds in [`anchorage-wrapper-verification.md`](anchorage-wrapper-verification.md).
+- A wrapped transaction from the app pays or burns other amounts than its queue row showed, beyond the bounds in [`anchorage-wrapper-verification.md`](anchorage-wrapper-verification.md).
 - A wrapped request targets a contract other than the market's base token or wrapper, or calls another function.
 - A fresh read finds another wrapper, asset, decimals or pause state than the registry records.
 - A Comet's implementation address differs from the one recorded at check 4. The fork evidence covers the recorded implementation only.
@@ -249,14 +260,14 @@ Use R1 for a fault in deposits, or for any stop condition that leaves exits safe
 
 Change: one PR that sets `isDepositEnabled: false` on the affected markets and leaves `isExitEnabled: true`. Ship it as in [Ship a release-control change](#ship-a-release-control-change), through a release branch if `main` holds other unreleased work.
 
-What R1 changes: the route's `deposit` becomes `deposits-disabled`, so the supply control reads "Wrapped deposits are not open yet.".
+What R1 changes: the route's `deposit` becomes `deposits-disabled`, and the amount form of Supply then reads "Supply Not Open Yet".
 
 What R1 must not change, each pinned by a [rehearsal test](#rollback-rehearsal) unless noted:
 
 - the wrapper identity: the mapping's wrapper, base token and units, and the validation key
 - the holdings reads: `reads` stays eligible
 - the exits: `exit` stays eligible, and the lifecycle still reviews and signs a withdrawal
-- the refusal of a direct-Comet fallback: the route stays wrapped, and the home page refuses a direct base supply on a wrapped route (#61's `wrappedRouteWiring` tests)
+- the refusal of a direct-Comet fallback: the route stays wrapped, and the home page sends no queued base supply to Comet or the Bulker (`wrappedRouteWiring` tests)
 - other wallets and watch-only sessions: they stay on the standard route
 - the safety checks: a screening, network, wrapper-check or mapping failure still closes exits
 
@@ -356,7 +367,7 @@ Steps, from a shell with Foundry's `cast` and `ETH_RPC_URL` set as above:
    cast call "$BASE" "balanceOf(address)(uint256)" "$ACCOUNT"      # up by the payout
    ```
 
-Another exit, not rehearsed: `redeem(shares, account, account)` moves the shares' value to the holder's own Comet balance through `comet.transfer`, instead of paying the base token (`WrappedCometERC4626.sol:495-518`). It works while withdrawals are paused or Comet's cash is short. It fails while Comet's transfers are paused, because `maxRedeem` is then 0 (`:719-723`). It leaves the holder with a direct Comet position, which pays the base token only through a later direct withdrawal. Product decides whether to offer it.
+Another exit, not rehearsed: `redeem(shares, account, account)` moves the shares' value to the holder's own Comet balance through `comet.transfer`, instead of paying the base token (`WrappedCometERC4626.sol:495-518`). It works while withdrawals are paused or Comet's cash is short. It fails while Comet's transfers are paused, because `maxRedeem` is then 0 (`:719-723`). It leaves the holder with a direct Comet position, which pays the base token only through a later direct withdrawal. This app cannot make that withdrawal on the wrapped route (preflight item 11). Product decides whether to offer it.
 
 Rehearsal, as facts from 2026-10-22:
 
@@ -395,9 +406,9 @@ The rehearsal has two parts.
 
    Never commit or push that change. With the Anchorage extension, check on each market:
 
-   - the supply control reads "Wrapped deposits are not open yet."
-   - the panel shows the holdings, and the withdraw control opens its form for a position
-   - the direct Supply button stays absent
+   - the amount form of Supply reads "Supply Not Open Yet"
+   - the masthead shows the holdings, and the amount form of Withdraw adds a withdrawal for a position
+   - a queued supply never reaches Comet or the Bulker
    - another wallet and a watch-only view stay on the standard route
 
    The withdraw form needs a wrapped position. Without an authorized one, record that check as not exercised.
@@ -408,7 +419,7 @@ The app sends no telemetry of its own. A search of `package.json`, `index.html` 
 
 1. **Chain data, counted per wrapper.** Count the wrappers' `Deposit` and `Withdraw` events and the failed transactions to each wrapper, per day, and read the failed ones' error selectors. Do not build lists of holder addresses, and do not link an address to a person.
 2. **Quotes against receipts.** The fork suite at a recent block compares the app's quotes with the chain's receipts, with no wallet data. Run it after each stage.
-3. **Reports from holders,** through Anchorage and Leo, with the transaction hashes that a holder chooses to share. Compare the dialog's checked cash with the cash in Comet's `Withdraw` event of the receipt. Interest after the check raises the payout. A lower payout, or a rise beyond the interest of the time between the check and the block, needs a look.
+3. **Reports from holders,** through Anchorage and Leo, with the transaction hashes that a holder chooses to share. Compare the queued cash, or for Max the full exit's cash on the queue row, with the cash in Comet's `Withdraw` event of the receipt. Interest after the check raises the payout. A lower payout, or a rise beyond the interest of the time between the check and the block, needs a look.
 
 ## Tests that pin the committed controls
 

@@ -1,6 +1,6 @@
 import { Interface } from '@ethersproject/abi';
 import { JsonRpcProvider, TransactionReceipt } from '@ethersproject/providers';
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { BigNumber, utils } from 'ethers';
 
@@ -16,7 +16,6 @@ import CometAbi from '@helpers/abis/Comet';
 import { LendingSession, resolveLendingRoute, ValidationStatus, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
-import { getBlockExplorerUrl } from '@helpers/urls';
 import {
   MarketRestriction,
   WrappedActionIdentity,
@@ -31,7 +30,12 @@ import {
   TransactionRequest,
   useTransactionManager,
 } from '@hooks/useTransactionManager';
-import { useWrappedAction, WrappedActionController, WrappedActionState } from '@hooks/useWrappedAction';
+import {
+  useSignWhenReady,
+  useWrappedAction,
+  WrappedActionController,
+  WrappedActionState,
+} from '@hooks/useWrappedAction';
 import { positionRefreshToken, useWrappedPosition } from '@hooks/useWrappedPosition';
 import {
   newestReceiptBlock,
@@ -42,9 +46,6 @@ import {
   WRAPPED_WITHDRAW_STEP_ID,
   WriteWrappedState,
 } from '@hooks/useWriteWrappedState';
-import WrappedSupplyModal from '@pages/home/components/ActionModal/WrappedSupplyModal';
-import WrappedWithdrawModal from '@pages/home/components/ActionModal/WrappedWithdrawModal';
-import WrappedPositionPanel from '@pages/home/components/WrappedPositionPanel';
 import { MarketData, SettledTransaction, TransactionState } from '@types';
 
 import { mockWeb3 } from '../mocks/mockWeb3';
@@ -552,10 +553,13 @@ function renderWrapped(
     events = [],
     blockWait = QUICK_BLOCK_WAIT,
     checkRestriction,
+    signWhenReady = false,
   }: {
     wallet?: Wallet;
     events?: Event[];
     blockWait?: BlockWait;
+    /** Signs each step once it is ready, as App does, rather than when the test confirms it. */
+    signWhenReady?: boolean;
     /** Replaces the lifecycle's read of Comet's pause, which goes through `readProvider` otherwise. */
     checkRestriction?: (identity: WrappedActionIdentity) => Promise<MarketRestriction | undefined>;
   } = {}
@@ -575,6 +579,7 @@ function renderWrapped(
     ({ session }: { session: WrappedSession }) => {
       const manager = useTransactionManager(web3);
       const action = useWrappedAction({ session, manager, readProvider, checkRestriction });
+      useSignWhenReady(signWhenReady ? action : { state: { phase: 'idle' }, confirm: () => undefined });
       const write = useWriteWrappedState({
         action,
         route: session.route,
@@ -608,11 +613,23 @@ const draftCalls = (result: Result) => {
   return state.draft.steps.map((step) => ({ id: step.id, kind: step.kind, ...step.request }));
 };
 
+/** Starts Submit's supply of `amount` and waits until it is in review, or refused. */
 async function startSupply(result: Result, amount: bigint) {
   await waitFor(() => expect(result.current.action.blockedReason('supply')).toBeUndefined());
   let refusal: unknown = 'not called';
   act(() => {
     refusal = result.current.write.supply(amount);
+  });
+  expect(refusal).toBeUndefined();
+  await waitFor(() => expect(['review', 'read-failed']).toContain(result.current.action.state.phase));
+}
+
+/** Starts Approve & Add's approval of `amount` and waits until it is in review, or refused. */
+async function startApproval(result: Result, amount: bigint) {
+  await waitFor(() => expect(result.current.action.blockedReason('supply')).toBeUndefined());
+  let refusal: unknown = 'not called';
+  act(() => {
+    refusal = result.current.write.approve(amount);
   });
   expect(refusal).toBeUndefined();
   await waitFor(() => expect(['review', 'read-failed']).toContain(result.current.action.state.phase));
@@ -629,6 +646,14 @@ async function confirmStep(result: Result) {
       stepsOf(result.current.action.state)[index]?.status
     )
   );
+}
+
+/** Approve & Add's approval, each of its steps confirmed in turn, then Submit's supply. */
+async function approveThenSupply(result: Result, amount: bigint) {
+  await startApproval(result, amount);
+  while (result.current.action.state.phase === 'review') await confirmStep(result);
+  await startSupply(result, amount);
+  await confirmStep(result);
 }
 
 const encodeApprove = (market: WrappedMarket, amount: bigint) => ({
@@ -672,15 +697,21 @@ describe('useWriteWrappedState', () => {
       const amount = parseExactUnits('1234.567891', market.baseDecimals) as bigint;
       const { result, wallet } = renderWrapped(chain);
 
-      await startSupply(result, amount);
+      // Approve & Add asks for the approval alone.
+      await startApproval(result, amount);
       expect(draftCalls(result)).toEqual([
         { id: 'approve', kind: 'approve', ...encodeApprove(market, 1_234_567_891n) },
+      ]);
+      expect(result.current.action.state).toMatchObject({ draft: { amount: 1_234_567_891n, isApprovalOnly: true } });
+      await confirmStep(result);
+      expect(result.current.action.state.phase).toBe('complete');
+      expect(walletRequests(wallet)).toEqual([approval(market, 1_234_567_891n)]);
+
+      // Submit asks for the supply alone.
+      await startSupply(result, amount);
+      expect(draftCalls(result)).toEqual([
         { id: 'supply', kind: 'supply-and-wrap', ...encodeSupply(market, 1_234_567_891n) },
       ]);
-      expect(result.current.action.state).toMatchObject({ draft: { amount: 1_234_567_891n } });
-
-      await confirmStep(result);
-      expect(walletRequests(wallet)).toEqual([approval(market, 1_234_567_891n)]);
       await confirmStep(result);
 
       expect(result.current.action.state.phase).toBe('complete');
@@ -695,9 +726,7 @@ describe('useWriteWrappedState', () => {
       const chain = chainFor(USDC_MARKET, { balance: 987_654_321n, allowance: 0n });
       const { result, wallet } = renderWrapped(chain);
 
-      await startSupply(result, 987_654_321n);
-      await confirmStep(result);
-      await confirmStep(result);
+      await approveThenSupply(result, 987_654_321n);
 
       expect(walletRequests(wallet)).toEqual([
         approval(USDC_MARKET, 987_654_321n),
@@ -709,57 +738,91 @@ describe('useWriteWrappedState', () => {
 
   describe('wrappedSupply: skips approval when allowance is sufficient and approves once when allowance is zero', () => {
     const AMOUNT = 25_000_000n;
-
-    it.each<[string, WrappedMarket, bigint]>([
+    const COVERING: [string, WrappedMarket, bigint][] = [
       ['USDC, exactly the amount', USDC_MARKET, AMOUNT],
       ['USDC, more than the amount', USDC_MARKET, AMOUNT + 1n],
       ['USDT, exactly the amount', USDT_MARKET, AMOUNT],
       ['USDT, an unlimited allowance', USDT_MARKET, MAX_UINT256],
       ['institutional USDC, more than the amount', INSTITUTIONAL_USDC_MARKET, 10n ** 12n],
-    ])('supplies without an approval when the allowance covers it: %s', async (_name, market, allowance) => {
+    ];
+
+    it.each(COVERING)(
+      'supplies without an approval when the allowance covers it: %s',
+      async (_name, market, allowance) => {
+        const chain = chainFor(market, { allowance });
+        const { result, wallet } = renderWrapped(chain);
+
+        await startSupply(result, AMOUNT);
+        expect(draftCalls(result).map(({ kind }) => kind)).toEqual(['supply-and-wrap']);
+        await confirmStep(result);
+
+        expect(result.current.action.state.phase).toBe('complete');
+        expect(walletRequests(wallet)).toEqual([supplyAndWrap(market, AMOUNT)]);
+        expectOnlyWrapperRequests(wallet, market);
+      }
+    );
+
+    it.each(COVERING)('asks for no approval when the allowance covers it: %s', async (_name, market, allowance) => {
       const chain = chainFor(market, { allowance });
       const { result, wallet } = renderWrapped(chain);
 
-      await startSupply(result, AMOUNT);
-      expect(draftCalls(result).map(({ kind }) => kind)).toEqual(['supply-and-wrap']);
-      await confirmStep(result);
+      await startApproval(result, AMOUNT);
 
-      expect(result.current.action.state.phase).toBe('complete');
-      expect(walletRequests(wallet)).toEqual([supplyAndWrap(market, AMOUNT)]);
-      expectOnlyWrapperRequests(wallet, market);
+      expect(result.current.action.state).toMatchObject({
+        phase: 'read-failed',
+        message: expect.stringMatching(/already covers/),
+      });
+      expect(walletRequests(wallet)).toEqual([]);
     });
 
     it.each(MARKETS)('approves exactly once from a zero allowance: %s', async (_name, market) => {
       const chain = chainFor(market, { allowance: 0n });
       const { result, wallet } = renderWrapped(chain);
 
-      await startSupply(result, AMOUNT);
-      expect(draftCalls(result).map(({ id }) => id)).toEqual(['approve', 'supply']);
+      await startApproval(result, AMOUNT);
+      expect(draftCalls(result).map(({ id }) => id)).toEqual(['approve']);
       await confirmStep(result);
+      await startSupply(result, AMOUNT);
+      expect(draftCalls(result).map(({ id }) => id)).toEqual(['supply']);
       await confirmStep(result);
 
       expect(result.current.action.state.phase).toBe('complete');
       expect(walletRequests(wallet)).toEqual([approval(market, AMOUNT), supplyAndWrap(market, AMOUNT)]);
       expectOnlyWrapperRequests(wallet, market);
     });
+
+    it.each(MARKETS)(
+      'refuses to supply while the allowance does not cover it, and asks for no approval: %s',
+      async (_name, market) => {
+        const chain = chainFor(market, { allowance: AMOUNT - 1n });
+        const { result, wallet } = renderWrapped(chain);
+
+        await startSupply(result, AMOUNT);
+
+        expect(result.current.action.state).toMatchObject({
+          phase: 'read-failed',
+          message: expect.stringMatching(/less than this supply/),
+        });
+        expect(walletRequests(wallet)).toEqual([]);
+      }
+    );
   });
 
-  describe('wrappedSupply: confirms a nonzero insufficient USDT allowance reset before the exact approval and supply', () => {
+  describe('wrappedSupply: confirms a nonzero insufficient USDT allowance reset before the exact approval', () => {
     const AMOUNT = 5_000_000n;
 
-    it('resets the allowance to zero, then approves the exact amount, then supplies, each after its own confirmation', async () => {
+    it('resets the allowance to zero, then approves the exact amount, each after its own confirmation, and the supply is its own draft', async () => {
       const chain = chainFor(USDT_MARKET, { balance: 9_000_000n, allowance: 1_000_000n });
       const { result, wallet } = renderWrapped(chain);
 
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       expect(draftCalls(result)).toEqual([
         { id: 'reset-allowance', kind: 'approve', ...encodeApprove(USDT_MARKET, 0n) },
         { id: 'approve', kind: 'approve', ...encodeApprove(USDT_MARKET, AMOUNT) },
-        { id: 'supply', kind: 'supply-and-wrap', ...encodeSupply(USDT_MARKET, AMOUNT) },
       ]);
 
       await confirmStep(result);
-      expect(stepStatuses(result)).toEqual(['confirmed', 'waiting', 'waiting']);
+      expect(stepStatuses(result)).toEqual(['confirmed', 'waiting']);
       expect(chain.allowance).toBe(0n);
       // The approval waits for its own confirmation.
       await act(async () => undefined);
@@ -768,8 +831,9 @@ describe('useWriteWrappedState', () => {
 
       await confirmStep(result);
       expect(walletRequests(wallet)).toEqual([approval(USDT_MARKET, 0n), approval(USDT_MARKET, AMOUNT)]);
-      expect(result.current.action.state).toMatchObject({ phase: 'review', stepIndex: 2 });
+      expect(result.current.action.state.phase).toBe('complete');
 
+      await startSupply(result, AMOUNT);
       await confirmStep(result);
       expect(result.current.action.state.phase).toBe('complete');
       expect(walletRequests(wallet)).toEqual([
@@ -780,6 +844,31 @@ describe('useWriteWrappedState', () => {
       expectOnlyWrapperRequests(wallet, USDT_MARKET);
     });
 
+    it('on one press, as App signs it, resets to zero, waits for the receipt and checks again, then approves the exact amount', async () => {
+      const chain = chainFor(USDT_MARKET, { balance: 9_000_000n, allowance: 1_000_000n });
+      const events: Event[] = [];
+      const wallet = walletFor(chain, events);
+      wallet.holdReceipts();
+      const { result } = renderWrapped(chain, { wallet, events, signWhenReady: true });
+      await waitFor(() => expect(result.current.action.blockedReason('supply')).toBeUndefined());
+
+      act(() => {
+        result.current.write.approve(AMOUNT);
+      });
+      await waitFor(() => expect(walletRequests(wallet)).toEqual([approval(USDT_MARKET, 0n)]));
+      // The approval waits for the reset's receipt.
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+      expect(walletRequests(wallet)).toEqual([approval(USDT_MARKET, 0n)]);
+      events.length = 0;
+
+      wallet.releaseReceipts();
+      await waitFor(() => expect(result.current.action.state.phase).toBe('complete'));
+      expect(walletRequests(wallet)).toEqual([approval(USDT_MARKET, 0n), approval(USDT_MARKET, AMOUNT)]);
+      // The balance and allowance are read again before the approval is asked for.
+      expect(events.filter((event) => event === 'read' || event.startsWith('send'))).toEqual(['read', 'send:approve']);
+      expect(chain.allowance).toBe(AMOUNT);
+    });
+
     it.each<[string, WrappedMarket]>([
       ['USDC', USDC_MARKET],
       ['institutional USDC', INSTITUTIONAL_USDC_MARKET],
@@ -787,9 +876,10 @@ describe('useWriteWrappedState', () => {
       const chain = chainFor(market, { allowance: 1_000_000n });
       const { result, wallet } = renderWrapped(chain);
 
-      await startSupply(result, AMOUNT);
-      expect(draftCalls(result).map(({ id }) => id)).toEqual(['approve', 'supply']);
+      await startApproval(result, AMOUNT);
+      expect(draftCalls(result).map(({ id }) => id)).toEqual(['approve']);
       await confirmStep(result);
+      await startSupply(result, AMOUNT);
       await confirmStep(result);
 
       expect(walletRequests(wallet)).toEqual([approval(market, AMOUNT), supplyAndWrap(market, AMOUNT)]);
@@ -814,10 +904,10 @@ describe('useWriteWrappedState', () => {
       interrupt(wallet, chain);
       const { result } = renderWrapped(chain, { wallet, events });
 
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
       expect(result.current.action.state).toMatchObject({ phase: 'stopped', stepIndex: 0 });
-      expect(stepStatuses(result)).toEqual([status, 'waiting', 'waiting']);
+      expect(stepStatuses(result)).toEqual([status, 'waiting']);
 
       act(() => result.current.action.confirm());
       await act(async () => undefined);
@@ -834,10 +924,11 @@ describe('useWriteWrappedState', () => {
     it('reads the balance and allowance again before each signature, and simulates the supply from the sender', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, readProvider, events } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       events.length = 0;
 
       await confirmStep(result);
+      await startSupply(result, AMOUNT);
       await confirmStep(result);
 
       expect(result.current.action.state.phase).toBe('complete');
@@ -845,6 +936,7 @@ describe('useWriteWrappedState', () => {
       expect(events.filter((event) => event !== 'position-read')).toEqual([
         'read',
         'send:approve',
+        'read',
         'read',
         'simulate',
         'send:supplyAndWrap',
@@ -870,18 +962,16 @@ describe('useWriteWrappedState', () => {
     it('sends nothing more when the simulation fails, and never falls back to Comet', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, wallet } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
+      await startSupply(result, AMOUNT);
 
       chain.simulationRevert = revertWith(CALLS.getSighash('ZeroSharesMinted'));
       await confirmStep(result);
 
       expect(result.current.action.state).toMatchObject({
         phase: 'stopped',
-        steps: [
-          { status: 'confirmed' },
-          { status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/ZeroSharesMinted/) },
-        ],
+        steps: [{ status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/ZeroSharesMinted/) }],
       });
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
       expectOnlyWrapperRequests(wallet, USDC_MARKET);
@@ -988,7 +1078,6 @@ describe('useWriteWrappedState', () => {
         settledTransactions: [],
         walletFailure: undefined,
         restoredSession: { provider: wallet, account: ACCOUNT, chainId: 1 },
-        dismissTransaction: jest.fn(),
         submitTransaction: jest.fn(),
       };
       const { result } = renderHook(() => {
@@ -1017,41 +1106,54 @@ describe('useWriteWrappedState', () => {
       expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
 
-    it.each<[string, Partial<Chain>, (chain: Chain) => void, number, string[]]>([
-      ['the allowance became enough before the approval', {}, (chain) => (chain.allowance = AMOUNT), 0, []],
-      ['another allowance was set before the approval', { allowance: 1n }, (chain) => (chain.allowance = 2n), 0, []],
-      ['the allowance was used before the supply', {}, (chain) => (chain.allowance = 0n), 1, ['approve']],
-      [
-        'the wallet balance fell below the amount before the supply',
-        {},
-        (chain) => (chain.balance = AMOUNT - 1n),
-        1,
-        ['approve'],
-      ],
-      ['the wallet balance fell below the amount before the approval', {}, (chain) => (chain.balance = 0n), 0, []],
-    ])('stops for a fresh review when %s', async (_name, initial, change, stoppedAt, sent) => {
+    it.each<[string, Partial<Chain>, (chain: Chain) => void]>([
+      ['the allowance became enough before the approval', {}, (chain) => (chain.allowance = AMOUNT)],
+      ['another allowance was set before the approval', { allowance: 1n }, (chain) => (chain.allowance = 2n)],
+      ['the wallet balance fell below the amount before the approval', {}, (chain) => (chain.balance = 0n)],
+    ])('stops the approval for a fresh review when %s', async (_name, initial, change) => {
       const chain = { ...chainFor(USDC_MARKET), ...initial };
       const { result, wallet } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
-      if (stoppedAt === 1) await confirmStep(result);
+      await startApproval(result, AMOUNT);
 
       change(chain);
       await confirmStep(result);
 
-      expect(result.current.action.state).toMatchObject({ phase: 'stopped', stepIndex: stoppedAt });
-      expect(stepsOf(result.current.action.state)[stoppedAt]).toMatchObject({
+      expect(result.current.action.state).toMatchObject({ phase: 'stopped', stepIndex: 0 });
+      expect(stepsOf(result.current.action.state)[0]).toMatchObject({
         status: 'blocked',
         reason: 'step-check-failed',
         message: expect.stringMatching(/review/i),
       });
-      expect(walletRequests(wallet).map(({ method }) => method)).toEqual(sent);
+      expect(walletRequests(wallet)).toEqual([]);
+    });
+
+    it.each<[string, (chain: Chain) => void]>([
+      ['the allowance was used before the supply', (chain) => (chain.allowance = 0n)],
+      ['the wallet balance fell below the amount before the supply', (chain) => (chain.balance = AMOUNT - 1n)],
+    ])('stops the supply for a fresh review when %s', async (_name, change) => {
+      const chain = chainFor(USDC_MARKET);
+      const { result, wallet } = renderWrapped(chain);
+      await startApproval(result, AMOUNT);
+      await confirmStep(result);
+      await startSupply(result, AMOUNT);
+
+      change(chain);
+      await confirmStep(result);
+
+      expect(result.current.action.state).toMatchObject({ phase: 'stopped', stepIndex: 0 });
+      expect(stepsOf(result.current.action.state)[0]).toMatchObject({
+        status: 'blocked',
+        reason: 'step-check-failed',
+        message: expect.stringMatching(/review/i),
+      });
+      expect(walletRequests(wallet).map(({ method }) => method)).toEqual(['approve']);
     });
 
     it('stops before the USDT reset when the allowance changed after the review', async () => {
       const chain = chainFor(USDT_MARKET, { allowance: 1_000_000n });
       const { result, wallet } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
-      expect(draftCalls(result).map(({ id }) => id)).toEqual(['reset-allowance', 'approve', 'supply']);
+      await startApproval(result, AMOUNT);
+      expect(draftCalls(result).map(({ id }) => id)).toEqual(['reset-allowance', 'approve']);
 
       // The allowance is raised elsewhere, above the amount, before the reset is signed.
       chain.allowance = 10_000_000n;
@@ -1059,7 +1161,7 @@ describe('useWriteWrappedState', () => {
 
       expect(result.current.action.state).toMatchObject({
         phase: 'stopped',
-        steps: [{ status: 'blocked', reason: 'step-check-failed' }, { status: 'waiting' }, { status: 'waiting' }],
+        steps: [{ status: 'blocked', reason: 'step-check-failed' }, { status: 'waiting' }],
       });
       expect(walletRequests(wallet)).toEqual([]);
       expect(chain.allowance).toBe(10_000_000n);
@@ -1068,8 +1170,9 @@ describe('useWriteWrappedState', () => {
     it('stops without a simulation or a request when the balance and allowance cannot be read before the supply', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, wallet, events } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
+      await startSupply(result, AMOUNT);
       events.length = 0;
 
       chain.failsFundReads = true;
@@ -1078,7 +1181,6 @@ describe('useWriteWrappedState', () => {
       expect(result.current.action.state).toMatchObject({
         phase: 'stopped',
         steps: [
-          { status: 'confirmed' },
           { status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/could not be read again/) },
         ],
       });
@@ -1089,7 +1191,7 @@ describe('useWriteWrappedState', () => {
     it('stops when a USDT allowance is nonzero again after its reset', async () => {
       const chain = chainFor(USDT_MARKET, { allowance: 1_000_000n });
       const { result, wallet } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
       expect(chain.allowance).toBe(0n);
 
@@ -1098,7 +1200,7 @@ describe('useWriteWrappedState', () => {
 
       expect(result.current.action.state).toMatchObject({
         phase: 'stopped',
-        steps: [{ status: 'confirmed' }, { status: 'blocked', reason: 'step-check-failed' }, { status: 'waiting' }],
+        steps: [{ status: 'confirmed' }, { status: 'blocked', reason: 'step-check-failed' }],
       });
       expect(walletRequests(wallet)).toEqual([approval(USDT_MARKET, 0n)]);
     });
@@ -1140,13 +1242,13 @@ describe('useWriteWrappedState', () => {
     it('reads again when a node of a load-balanced provider is still a block behind', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, wallet } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
 
       // The next pinned read lands on a node that has not reached its block yet.
       chain.laggingNodeReads = 1;
       await confirmStep(result);
 
-      expect(stepStatuses(result)).toEqual(['confirmed', 'waiting']);
+      expect(stepStatuses(result)).toEqual(['confirmed']);
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
     });
 
@@ -1178,13 +1280,14 @@ describe('useWriteWrappedState', () => {
     it('says a step stopped because the provider did not catch up, in a sentence of its own', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result } = renderWrapped(chain, { blockWait: { attempts: 3, intervalMs: 5 } });
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
+      await startSupply(result, AMOUNT);
 
       chain.providerLag = 1;
       await confirmStep(result);
 
-      expect(stepsOf(result.current.action.state)[1]).toMatchObject({
+      expect(stepsOf(result.current.action.state)[0]).toMatchObject({
         status: 'blocked',
         message:
           "This market's network has not shown your last wrapped transaction yet. Review the supply again in a moment.",
@@ -1243,10 +1346,10 @@ describe('useWriteWrappedState', () => {
       expect(step).not.toMatchObject({ message: expect.stringMatching(/rpc\.example|eth_call/) });
     });
 
-    it('stops without sending when the balance and allowance cannot be read again', async () => {
+    it('stops the approval without sending when the balance and allowance cannot be read again', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, wallet } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
 
       chain.failsFundReads = true;
       await confirmStep(result);
@@ -1255,7 +1358,6 @@ describe('useWriteWrappedState', () => {
         phase: 'stopped',
         steps: [
           { status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/could not be read again/) },
-          { status: 'waiting' },
         ],
       });
       expect(walletRequests(wallet)).toEqual([]);
@@ -1280,9 +1382,10 @@ describe('useWriteWrappedState', () => {
     it("waits for the market's provider to show the confirmed approval before checking the supply", async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, wallet, readProvider } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
       expect(chain.block).toBe(101);
+      await startSupply(result, AMOUNT);
 
       // The wallet's node has the approval's block. The market's provider is one block behind.
       chain.providerLag = 1;
@@ -1290,19 +1393,18 @@ describe('useWriteWrappedState', () => {
       act(() => result.current.action.confirm());
       await waitFor(() => expect(readProvider.getBlockNumber.mock.calls.length).toBeGreaterThan(asked + 2));
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
-      expect(stepStatuses(result)).toEqual(['confirmed', 'checking']);
+      expect(stepStatuses(result)).toEqual(['checking']);
 
       chain.providerLag = 0;
       await waitFor(() => expect(result.current.action.state.phase).toBe('complete'));
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT), supplyAndWrap(USDC_MARKET, AMOUNT)]);
     });
 
-    it("plans a fresh review from the confirmed approval while the market's provider trails, and asks for no second approval", async () => {
+    it("plans the supply from the confirmed approval while the market's provider trails, and asks for no second approval", async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, wallet } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
-      act(() => result.current.action.discard());
 
       chain.providerLag = 1;
       act(() => {
@@ -1320,18 +1422,16 @@ describe('useWriteWrappedState', () => {
     it("signs nothing when the market's provider does not catch up", async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, wallet } = renderWrapped(chain, { blockWait: { attempts: 3, intervalMs: 5 } });
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
+      await startSupply(result, AMOUNT);
 
       chain.providerLag = 1;
       await confirmStep(result);
 
       expect(result.current.action.state).toMatchObject({
         phase: 'stopped',
-        steps: [
-          { status: 'confirmed' },
-          { status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/has not shown/) },
-        ],
+        steps: [{ status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/has not shown/) }],
       });
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
     });
@@ -1339,18 +1439,16 @@ describe('useWriteWrappedState', () => {
     it("signs nothing when the market's provider stops answering for its newest block", async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, wallet, readProvider } = renderWrapped(chain, { blockWait: { attempts: 3, intervalMs: 5 } });
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
+      await startSupply(result, AMOUNT);
 
       readProvider.getBlockNumber.mockImplementation(() => new Promise<number>(() => undefined));
       await confirmStep(result);
 
       expect(result.current.action.state).toMatchObject({
         phase: 'stopped',
-        steps: [
-          { status: 'confirmed' },
-          { status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/has not shown/) },
-        ],
+        steps: [{ status: 'blocked', reason: 'step-check-failed', message: expect.stringMatching(/has not shown/) }],
       });
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
     });
@@ -1366,9 +1464,10 @@ describe('useWriteWrappedState', () => {
     it.each(CHANGES)('signs nothing further after a change of %s', async (_name, changedSession) => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, rerender, wallet } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
-      expect(result.current.action.state).toMatchObject({ phase: 'review', stepIndex: 1 });
+      await startSupply(result, AMOUNT);
+      expect(result.current.action.state).toMatchObject({ phase: 'review', stepIndex: 0 });
 
       rerender({ session: changedSession(wallet) });
       act(() => result.current.action.confirm());
@@ -1387,32 +1486,12 @@ describe('useWriteWrappedState', () => {
   describe('wrappedSupply: requires new user review after reconnect or an interrupted sequence', () => {
     const AMOUNT = 4_000_000n;
 
-    /** The wrapped panel as Home renders it from the lifecycle, the wrapped writes and the position read. */
-    function renderPanel({ action, write, position }: Harness, wallet: Wallet) {
-      const { route } = sessionFor(wallet);
-      if (route.kind !== 'wrapped') throw new Error('the route must be wrapped');
-      return render(
-        <WrappedPositionPanel
-          route={route}
-          position={position.state}
-          baseAsset={{ symbol: 'USDC', baseAssetPriceInDollars: 100_000_000n, balanceOfComet: 10n ** 12n }}
-          earnAPR={0n}
-          session={action.session}
-          canDismissRecovered={action.canDismissRecovered}
-          onDismissRecovered={action.dismissRecovered}
-          hasUnansweredWalletRequest={action.hasUnansweredWalletRequest}
-          supply={{ blockedReason: action.blockedReason('supply'), onReview: write.supply }}
-          withdraw={{ blockedReason: action.blockedReason('withdraw'), onReview: write.withdraw }}
-          onRetry={jest.fn()}
-        />
-      );
-    }
-
     it('closes the reviewed supply on a reconnect, and the next review starts from the new allowance', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: 0n });
       const { result, rerender, wallet } = renderWrapped(chain);
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
+      await startSupply(result, AMOUNT);
       const keptConfirm = result.current.action.confirm;
 
       rerender({ session: sessionFor(wallet, { status: 'reconnecting' }) });
@@ -1426,7 +1505,7 @@ describe('useWriteWrappedState', () => {
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
 
       await startSupply(result, AMOUNT);
-      // The approval already went through, so the fresh review only supplies, after its own confirmation.
+      // The approval already went through, so the fresh supply waits for its own confirmation.
       expect(draftCalls(result).map(({ id }) => id)).toEqual(['supply']);
       expect(stepStatuses(result)).toEqual(['waiting']);
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
@@ -1439,10 +1518,10 @@ describe('useWriteWrappedState', () => {
       const events: Event[] = [];
       const wallet = walletFor(chain, events);
       const first = renderWrapped(chain, { wallet, events });
-      await startSupply(first.result, AMOUNT);
+      await startApproval(first.result, AMOUNT);
       wallet.holdReceipts();
       act(() => first.result.current.action.confirm());
-      await waitFor(() => expect(stepStatuses(first.result)).toEqual(['submitted', 'waiting']));
+      await waitFor(() => expect(stepStatuses(first.result)).toEqual(['submitted']));
 
       // The page reloads while the approval is pending.
       first.unmount();
@@ -1450,6 +1529,7 @@ describe('useWriteWrappedState', () => {
       await waitFor(() => expect(second.result.current.action.recovered.pending).toHaveLength(1));
       expect(second.result.current.action.blockedReason('supply')).toBe('transaction-pending');
       expect(second.result.current.write.supply(AMOUNT)).toBe('transaction-pending');
+      expect(second.result.current.write.approve(AMOUNT)).toBe('transaction-pending');
 
       await act(async () => wallet.releaseReceipts());
       await waitFor(() => expect(second.result.current.action.recovered.settled).toHaveLength(1));
@@ -1462,7 +1542,7 @@ describe('useWriteWrappedState', () => {
       expect(walletRequests(wallet)).toEqual([approval(USDC_MARKET, AMOUNT)]);
     });
 
-    it('waits for a supply request the wallet answered with an ambiguous error until the user stops waiting, and resends nothing', async () => {
+    it('waits for a supply request the wallet answered with an ambiguous error until the user clears it, and resends nothing', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: AMOUNT });
       const events: Event[] = [];
       const wallet = walletFor(chain, events);
@@ -1474,16 +1554,16 @@ describe('useWriteWrappedState', () => {
 
       act(() => result.current.action.discard());
       expect(result.current.action.blockedReason('supply')).toBe('transaction-pending');
-      expect(result.current.action.canDismissRecovered).toBe(true);
       expect(result.current.write.supply(AMOUNT)).toBe('transaction-pending');
 
-      act(() => result.current.action.dismissRecovered());
+      // The user clears the list of transactions after checking the wallet.
+      act(() => result.current.manager.clearTransactions());
       await startSupply(result, AMOUNT);
       expect(stepStatuses(result)).toEqual(['waiting']);
       expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
     });
 
-    it('says how to stop waiting for a supply request the wallet never answers, and resends nothing', async () => {
+    it('waits for a supply request the wallet never answers, until a reload and a cleared list, and resends nothing', async () => {
       const chain = chainFor(USDC_MARKET, { allowance: AMOUNT });
       const events: Event[] = [];
       const wallet = walletFor(chain, events);
@@ -1507,49 +1587,23 @@ describe('useWriteWrappedState', () => {
       expect(stepStatuses(first.result)).toEqual(['awaiting-signature']);
       expect(first.result.current.action.session.status).toBe('usable');
 
-      // The user closes the dialog. Its notice says how to stop waiting, not to start a new review.
+      // The request still holds back a new supply, and clearing the list keeps it while it is open.
       act(() => first.result.current.action.discard());
-      const notice = render(
-        <WrappedSupplyModal
-          state={first.result.current.action.state}
-          symbol="USDC"
-          decimals={6}
-          directBorrowBalance={0n}
-          onConfirm={jest.fn()}
-          onClose={jest.fn()}
-        />
-      );
-      const dialog = screen.getByRole('dialog');
-      expect(dialog).toHaveTextContent(/approving it there still sends it/i);
-      expect(dialog).toHaveTextContent(/look for the request in your wallet app/i);
-      expect(dialog).toHaveTextContent(/if it is not there, reload the page and reconnect your wallet/i);
-      expect(dialog).not.toHaveTextContent(/start a new review/i);
-      notice.unmount();
-      act(() => first.result.current.action.discard());
-
-      // The request still holds back a new supply. The panel says how to stop waiting for it and,
-      // before a reload, offers no dismissal.
-      expect(first.result.current.action.state).toEqual({ phase: 'idle' });
       expect(first.result.current.write.supply(AMOUNT)).toBe('transaction-pending');
-      expect(first.result.current.action.canDismissRecovered).toBe(false);
-      const waiting = renderPanel(first.result.current, wallet);
-      const guidance = screen.getByText(/your wallet has not answered a request/i);
-      expect(guidance).toHaveTextContent(/look for the request in your wallet app/i);
-      expect(guidance).toHaveTextContent(/if it is not there, reload the page and reconnect your wallet/i);
-      expect(screen.queryByRole('button', { name: 'Stop waiting' })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Supply USDC through the wrapper' })).toBeDisabled();
-      waiting.unmount();
+      act(() => first.result.current.manager.clearTransactions());
+      expect(first.result.current.write.supply(AMOUNT)).toBe('transaction-pending');
 
-      // After the reload, the panel offers Stop waiting, with its warning that the request can still
-      // go through. Stopping sends nothing, and the next review waits for its own confirmation.
+      // After a reload nothing can follow it, so clearing the list stops the wait. The next supply
+      // waits for its own confirmation.
       first.unmount();
       const second = renderWrapped(chain, { wallet, events });
-      await waitFor(() => expect(second.result.current.action.canDismissRecovered).toBe(true));
-      const restored = renderPanel(second.result.current, wallet);
-      expect(screen.queryByText(/your wallet has not answered a request/i)).not.toBeInTheDocument();
-      expect(screen.getByText(/the request can still go through/i)).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: 'Stop waiting' }));
-      restored.unmount();
+      await waitFor(() =>
+        expect(second.result.current.action.recovered.pending).toEqual([
+          expect.objectContaining({ step: 'supply', isInterrupted: true }),
+        ])
+      );
+      expect(second.result.current.write.supply(AMOUNT)).toBe('transaction-pending');
+      act(() => second.result.current.manager.clearTransactions());
       await startSupply(second.result, AMOUNT);
       expect(stepStatuses(second.result)).toEqual(['waiting']);
       expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
@@ -1561,12 +1615,7 @@ describe('useWriteWrappedState', () => {
 
     type Manager = Pick<
       TransactionManager,
-      | 'transactions'
-      | 'settledTransactions'
-      | 'walletFailure'
-      | 'restoredSession'
-      | 'submitTransaction'
-      | 'dismissTransaction'
+      'transactions' | 'settledTransactions' | 'walletFailure' | 'restoredSession' | 'submitTransaction'
     >;
 
     /** A transaction manager whose sends resolve only when the test says so. */
@@ -1577,7 +1626,6 @@ describe('useWriteWrappedState', () => {
         settledTransactions: [],
         walletFailure: undefined,
         restoredSession: { provider: wallet, account: ACCOUNT, chainId: 1 },
-        dismissTransaction: jest.fn(),
         submitTransaction: jest.fn(
           (request: TransactionRequest) => new Promise<SendResult>((resolve) => requests.push({ request, resolve }))
         ),
@@ -1607,18 +1655,18 @@ describe('useWriteWrappedState', () => {
       return { ...hook, wallet, manager, requests };
     }
 
-    const OUTCOMES: [string, string, RegExp][] = [
-      ['awaiting signature', 'awaiting-signature', /confirm the request in your wallet/i],
-      ['pending hash', 'submitted', /broadcast/i],
-      ['rejection', 'rejected', /you rejected the request/i],
-      ['refusal before the wallet handled the request', 'refused', /refused this request before handling it/i],
-      ['provider failure', 'provider-failure', /your wallet reported an error/i],
-      ['revert', 'reverted', /failed on chain/i],
-      ['replacement', 'replaced', /replaced or dropped/i],
-      ['unresolved transaction', 'unresolved', /can no longer follow it/i],
+    const OUTCOMES: [string, string][] = [
+      ['awaiting signature', 'awaiting-signature'],
+      ['pending hash', 'submitted'],
+      ['rejection', 'rejected'],
+      ['refusal before the wallet handled the request', 'refused'],
+      ['provider failure', 'provider-failure'],
+      ['revert', 'reverted'],
+      ['replacement', 'replaced'],
+      ['unresolved transaction', 'unresolved'],
     ];
 
-    it.each(OUTCOMES)('%s', async (_name, status, text) => {
+    it.each(OUTCOMES)('%s', async (_name, status) => {
       const chain = chainFor(USDC_MARKET, { allowance: AMOUNT });
       const { result, rerender, manager, requests, wallet } = renderWithFakeManager(chain);
       await waitFor(() => expect(result.current.action.session.status).toBe('usable'));
@@ -1674,30 +1722,9 @@ describe('useWriteWrappedState', () => {
       // Nothing is retried or sent again.
       expect(manager.submitTransaction).toHaveBeenCalledTimes(1);
 
-      render(
-        <WrappedSupplyModal
-          state={result.current.action.state}
-          symbol="USDC"
-          decimals={6}
-          directBorrowBalance={0n}
-          onConfirm={jest.fn()}
-          onClose={jest.fn()}
-        />
-      );
-      const dialog = screen.getByRole('dialog');
-      expect(dialog).toHaveTextContent(text);
-      // Each outcome reads differently from every other.
-      for (const [, otherStatus, otherText] of OUTCOMES) {
-        if (otherStatus !== status) expect(dialog).not.toHaveTextContent(otherText);
-      }
-      const links = screen
-        .queryAllByRole('link', { name: /view on explorer/i })
-        .map((link) => link.getAttribute('href'));
       if (['submitted', 'reverted', 'replaced', 'unresolved'].includes(status)) {
         expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
-        expect(links).toEqual([`${getBlockExplorerUrl(1)}/tx/${hash}`]);
-      } else {
-        expect(links).toEqual([]);
+        expect(stepsOf(result.current.action.state)[0]).toMatchObject({ hash });
       }
     });
 
@@ -1722,7 +1749,7 @@ describe('useWriteWrappedState', () => {
       );
     });
 
-    it('refreshes shares, wallet balance and allowance after the confirmed supply, and links the transaction', async () => {
+    it('refreshes shares, wallet balance and allowance after the confirmed approval and supply', async () => {
       const chain = chainFor(USDC_MARKET, { balance: 10_000_000n, allowance: 0n });
       const { result, positionRead } = renderWrapped(chain);
       await waitFor(() =>
@@ -1732,12 +1759,13 @@ describe('useWriteWrappedState', () => {
         })
       );
 
-      await startSupply(result, AMOUNT);
+      await startApproval(result, AMOUNT);
       await confirmStep(result);
       await waitFor(() =>
         expect(result.current.position.state).toMatchObject({ position: { wrapperAllowance: AMOUNT } })
       );
       const readsBeforeSupply = positionRead.mock.calls.length;
+      await startSupply(result, AMOUNT);
       await confirmStep(result);
 
       expect(result.current.action.state.phase).toBe('complete');
@@ -1748,21 +1776,6 @@ describe('useWriteWrappedState', () => {
         })
       );
       expect(positionRead.mock.calls.length).toBeGreaterThan(readsBeforeSupply);
-
-      render(
-        <WrappedSupplyModal
-          state={result.current.action.state}
-          symbol="USDC"
-          decimals={6}
-          directBorrowBalance={0n}
-          onConfirm={jest.fn()}
-          onClose={jest.fn()}
-        />
-      );
-      const supplyHash = (stepsOf(result.current.action.state)[1] as { hash: string }).hash;
-      expect(
-        screen.getAllByRole('link', { name: /view on explorer/i }).map((link) => link.getAttribute('href'))
-      ).toContain(`${getBlockExplorerUrl(1)}/tx/${supplyHash}`);
     });
   });
 
@@ -1777,11 +1790,11 @@ describe('useWriteWrappedState', () => {
     return { ...chainFor(market), shares: SHARES, ...ledger };
   }
 
-  async function startWithdraw(result: Result, request: WithdrawalRequest, shownCash?: bigint) {
+  async function startWithdraw(result: Result, request: WithdrawalRequest) {
     await waitFor(() => expect(result.current.action.blockedReason('withdraw')).toBeUndefined());
     let refusal: unknown = 'not called';
     act(() => {
-      refusal = result.current.write.withdraw(request, shownCash);
+      refusal = result.current.write.withdraw(request);
     });
     expect(refusal).toBeUndefined();
     await waitFor(() => expect(['review', 'read-failed']).toContain(result.current.action.state.phase));
@@ -1843,7 +1856,7 @@ describe('useWriteWrappedState', () => {
 
         // Shares arrive after the panel's read. The page showed the full exit of the earlier balance.
         chain.shares = 260n * 10n ** 18n;
-        await startWithdraw(result, { kind: 'full' }, FULL_EXIT_CASH);
+        await startWithdraw(result, { kind: 'full' });
 
         expect(draftCalls(result)).toEqual([
           { id: WRAPPED_WITHDRAW_STEP_ID, kind: 'unwrap-and-withdraw', ...encodeExit(market, 260n * 10n ** 18n) },
@@ -1861,7 +1874,6 @@ describe('useWriteWrappedState', () => {
                 cash: 260_129_997n,
                 leavesDust: false,
               },
-              shownCash: FULL_EXIT_CASH,
               blockNumber: 100,
             },
           },
@@ -2032,7 +2044,6 @@ describe('useWriteWrappedState', () => {
               cash: 100_000_000n,
               leavesDust: false,
             },
-            shownCash: undefined,
           },
         },
       });
@@ -2076,7 +2087,7 @@ describe('useWriteWrappedState', () => {
         'more than the shares pay',
         {},
         { kind: 'partial', cash: FULL_EXIT_CASH + 1n },
-        [/^250\.124998 USDC is more than your wrapped position pays now/, /at most 250\.124997 USDC/, /Everything/],
+        [/^250\.124998 USDC is more than your wrapped position pays now/, /at most 250\.124997 USDC/, /Max/],
       ],
       [
         "more than the market's cash",
@@ -2154,12 +2165,12 @@ describe('useWriteWrappedState', () => {
       ]);
     });
 
-    it.each<[string, bigint, bigint, string]>([
-      ['interest raises its cash by 0.05%', 1_001_000_000n, 100_049_975n, '100.049975'],
-      ['its cash rises by exactly 0.1%', 1_001_500_500n, 100_100_000n, '100.100000'],
+    it.each<[string, bigint, bigint]>([
+      ['interest raises its cash by 0.05%', 1_001_000_000n, 100_049_975n],
+      ['its cash rises by exactly 0.1%', 1_001_500_500n, 100_100_000n],
     ])(
-      'signs the reviewed shares of a partial exit when %s, and describes the cash they now pay',
-      async (_name, totalAssets, cash, shownCash) => {
+      'signs the reviewed shares of a partial exit when %s, and quotes the cash they now pay',
+      async (_name, totalAssets, cash) => {
         const chain = exitChainFor(USDC_MARKET);
         const { result, wallet } = renderWrapped(chain);
         await startWithdraw(result, { kind: 'partial', cash: 100_000_000n });
@@ -2167,7 +2178,8 @@ describe('useWriteWrappedState', () => {
         changeAssets(chain, totalAssets);
         await confirmStep(result);
 
-        const description = `Withdraw about ${shownCash} USDC from the wrapper`;
+        // The transaction list names it as a direct withdrawal is named.
+        const description = 'Withdraw USDC';
         expect(result.current.action.state).toMatchObject({
           phase: 'complete',
           draft: { withdrawal: { quote: { shares: SHARES_FOR_100, cash: 100_000_000n } } },
@@ -2254,7 +2266,7 @@ describe('useWriteWrappedState', () => {
       expect(walletRequests(wallet)).toEqual([]);
     });
 
-    it('signs the whole balance of a full exit when its cash doubles, and describes the cash it now pays', async () => {
+    it('signs the whole balance of a full exit when its cash doubles, and quotes the cash it now pays', async () => {
       const chain = exitChainFor(USDC_MARKET);
       const { result, wallet } = renderWrapped(chain);
       await startWithdraw(result, { kind: 'full' });
@@ -2262,7 +2274,8 @@ describe('useWriteWrappedState', () => {
       changeAssets(chain, 2_001_000_000n);
       await confirmStep(result);
 
-      const description = 'Withdraw all your wrapped USDC, about 500.249997 USDC';
+      // The transaction list names it as a direct withdrawal is named.
+      const description = 'Withdraw USDC';
       expect(result.current.action.state).toMatchObject({
         phase: 'complete',
         rechecked: { description, quote: { kind: 'full', shares: SHARES, cash: 500_249_997n } },
@@ -2292,11 +2305,11 @@ describe('useWriteWrappedState', () => {
       expect(walletRequests(wallet)).toEqual([]);
     });
 
-    it('shows the cash the exit now pays in its dialog while the wallet has the request', async () => {
+    it('keeps the exit as its check found it while the wallet has the request', async () => {
       const chain = exitChainFor(USDC_MARKET);
       const { result, wallet } = renderWrapped(chain);
       await startWithdraw(result, { kind: 'partial', cash: 100_000_000n });
-      // The wallet holds the request until the test has read the dialog.
+      // The wallet holds the request until the test has read the lifecycle.
       let approve: () => void = () => undefined;
       const approval = new Promise<void>((resolve) => (approve = resolve));
       const send = wallet.sendUncheckedTransaction.getMockImplementation();
@@ -2310,21 +2323,10 @@ describe('useWriteWrappedState', () => {
       act(() => result.current.action.confirm());
       await waitFor(() => expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(stepsOf(result.current.action.state)[0]?.status).toBe('awaiting-signature'));
-      render(
-        <WrappedWithdrawModal
-          state={result.current.action.state}
-          symbol="USDC"
-          decimals={6}
-          onConfirm={jest.fn()}
-          onClose={jest.fn()}
-        />
-      );
 
-      const dialog = screen.getByRole('dialog');
-      expect(dialog).toHaveTextContent('Withdraw about 100.049975 USDC from the wrapper to your wallet.');
-      expect(within(dialog).getByTestId('wrapped-withdraw-cash')).toHaveTextContent('100.049975 USDC');
-      expect(within(dialog).getByRole('listitem')).toHaveTextContent('Withdraw about 100.049975 USDC from the wrapper');
-      expect(dialog).not.toHaveTextContent(/about 100\.000000 USDC/);
+      expect(result.current.action.state).toMatchObject({
+        rechecked: { quote: { cash: 100_049_975n }, description: 'Withdraw USDC' },
+      });
 
       approve();
       await waitFor(() => expect(result.current.action.state.phase).toBe('complete'));
@@ -2722,7 +2724,6 @@ describe('useWriteWrappedState', () => {
           identity,
           market: USDC_MARKET,
           request: { kind: 'full' },
-          shownCash: undefined,
           symbol: 'USDC',
           reads: { readSnapshot, call: jest.fn(), retryIntervalMs: 1 },
         })

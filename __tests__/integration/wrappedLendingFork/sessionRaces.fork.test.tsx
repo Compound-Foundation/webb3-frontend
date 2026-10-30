@@ -52,9 +52,10 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         for (const type of ['supply', 'withdraw'] as const) {
           const app: WrappedApp = await render();
           try {
+            // A supply starts with Approve & Add's approval, since the account approved nothing.
             const refusal =
               type === 'supply'
-                ? await app.startSupply(units(100))
+                ? await app.startApproval(units(100))
                 : await app.startWithdraw({ kind: 'partial', cash: units(100) });
             expect(refusal).toBeUndefined();
             expect(app.state().phase).toBe('review');

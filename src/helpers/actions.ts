@@ -168,31 +168,97 @@ export function sanitizedAmountForAction(
 type Validity = 'ok' | [false, string];
 
 /**
- * Why `action` adds to the account's direct Comet base supply, given the base balance the
- * earlier actions leave: a base supply always does, and so does a repay larger than the debt.
- * A full repay (`MAX_UINT256`) repays the debt exactly.
+ * Why `action` would lend or withdraw the base token as a direct Comet supplier, given the base
+ * balance the earlier actions leave: a base supply or a base withdrawal always would, and so would a
+ * repay larger than the debt. A full repay (`MAX_UINT256`) repays the debt exactly.
  */
-function directBaseSupplyProblem(baseAsset: BaseAssetWithAccountState, action: Action): string | undefined {
+function directBaseLendingProblem(baseAsset: BaseAssetWithAccountState, action: Action): string | undefined {
   const [actionType, , amount] = action;
-  if (actionType === ActionType.Supply) {
-    return 'Direct Supply Unavailable With This Wallet';
+  if (actionType === ActionType.Supply || actionType === ActionType.Withdraw) {
+    return 'Base Lending Goes Through The Wrapper';
   }
-  if (actionType === ActionType.Repay) {
-    const borrowBalance = baseAsset.balance < 0n ? -baseAsset.balance : 0n;
-    if (amount !== MAX_UINT256 && amount > borrowBalance) {
-      return 'Amount Exceeds Borrow Balance';
-    }
-  }
-  return undefined;
+  return actionType === ActionType.Repay ? excessRepayProblem(baseAsset, amount) : undefined;
 }
 
-export type ActionRules = {
+/** Why a repay of `amount` would leave a direct Comet supply: it is larger than the debt. */
+function excessRepayProblem(baseAsset: BaseAssetWithAccountState, amount: bigint): string | undefined {
+  const borrowBalance = baseAsset.balance < 0n ? -baseAsset.balance : 0n;
+  return amount !== MAX_UINT256 && amount > borrowBalance ? 'Amount Exceeds Borrow Balance' : undefined;
+}
+
+/**
+ * The selected market's base supply and withdrawal go through its wrapper for this session. A base
+ * supply needs the base token's allowance to the wrapper, which Approve & Add asks for, for exactly
+ * the amount.
+ */
+export type WrappedBaseRules = {
+  /** Why a base supply cannot be queued now, as the amount form shows it, or undefined. */
+  supplyBlockedReason: string | undefined;
+  /** Why a base withdrawal cannot be queued now, as the amount form shows it, or undefined. */
+  withdrawBlockedReason: string | undefined;
   /**
-   * The market's base supply goes through a wrapper for this session, so no action may add to
-   * the account's direct Comet supply: neither a base supply nor a repay larger than the debt.
+   * The most a partial withdrawal through the wrapper pays now, in base units: the position less
+   * the wrapper's rounding buffer, within the market's cash. Undefined until the position is read.
    */
-  blockDirectBaseSupply?: boolean;
+  maxPartialWithdrawal: bigint | undefined;
+  /** Whether a full exit can pay now. A maximum withdrawal is a full exit. */
+  canWithdrawAll: boolean;
+  /**
+   * What a full exit pays, in base units: the position less the wrapper's rounding buffer.
+   * Undefined until the position is read.
+   */
+  fullExitCash?: bigint;
+  /**
+   * The base token's allowance to the wrapper, which a base supply spends instead of the Comet
+   * allowance. Undefined until the position is read, and then treated as zero.
+   */
+  supplyAllowance?: bigint;
+  /**
+   * The queued wrapper action that stopped before anything was sent when it was last submitted, and
+   * the label its queue row shows. It stays submittable.
+   */
+  stopped?: { action: Action; label: string };
 };
+
+export type ActionRules = {
+  /** Set on the wrapped route, where the market's wrapper carries out base supply and withdrawal. */
+  wrappedBase?: WrappedBaseRules;
+};
+
+/**
+ * Why `actionToAdd` cannot be queued on the wrapped route, after `actions`. A base supply or
+ * withdrawal needs its release control open and the route eligible. A queue holds at most one of
+ * the two, since each is a separate wrapper action. A supply waits until a direct borrow is repaid
+ * in its own submission: the wrapper's steps go before the direct actions, so the supply could
+ * spend what a queued repay needs. A withdrawal pays at most what the wrapper pays now. A repay may
+ * not exceed the debt, since the excess would be a direct Comet supply.
+ */
+function wrappedBaseProblem(
+  rules: WrappedBaseRules,
+  baseAssetPre: BaseAssetWithAccountState,
+  baseAsset: BaseAssetWithAccountState,
+  actions: Action[],
+  actionToAdd: Action
+): string | undefined {
+  const [actionType, , amount] = actionToAdd;
+  const hasQueued = (type: ActionType) => actions.some((action) => action[0] === type);
+  switch (actionType) {
+    case ActionType.Supply:
+      if (rules.supplyBlockedReason !== undefined) return rules.supplyBlockedReason;
+      if (baseAssetPre.balance < 0n || hasQueued(ActionType.Repay)) return 'Must Repay Borrow First';
+      return hasQueued(ActionType.Withdraw) ? 'Submit Supply And Withdrawal Separately' : undefined;
+    case ActionType.Withdraw:
+      if (rules.withdrawBlockedReason !== undefined) return rules.withdrawBlockedReason;
+      if (hasQueued(ActionType.Supply)) return 'Submit Supply And Withdrawal Separately';
+      if (rules.maxPartialWithdrawal === undefined) return 'Balance Not Loaded Yet';
+      if (amount === MAX_UINT256) return rules.canWithdrawAll ? undefined : 'Withdrawal Unavailable Now';
+      return amount > rules.maxPartialWithdrawal ? 'Amount Exceeds Withdrawable Balance' : undefined;
+    case ActionType.Repay:
+      return excessRepayProblem(baseAsset, amount);
+    default:
+      return undefined;
+  }
+}
 
 export function validateAddingAction(
   baseAssetPre: BaseAssetWithAccountState,
@@ -208,9 +274,12 @@ export function validateAddingAction(
   const { baseAsset, collateralAssets } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions);
 
   const [actionType] = actionToAdd;
-  const directSupplyProblem = rules.blockDirectBaseSupply ? directBaseSupplyProblem(baseAsset, actionToAdd) : undefined;
-  if (directSupplyProblem !== undefined) {
-    return [false, directSupplyProblem];
+  const wrappedProblem =
+    rules.wrappedBase === undefined
+      ? undefined
+      : wrappedBaseProblem(rules.wrappedBase, baseAssetPre, baseAsset, actions, actionToAdd);
+  if (wrappedProblem !== undefined) {
+    return [false, wrappedProblem];
   }
 
   switch (actionType) {
@@ -285,9 +354,14 @@ export function validateAddingAction(
 
       const isMax = amount === MAX_UINT256;
       const mustRepayBorrow = borrowBalance > 0n;
-      const amountExceedsBalance = !isMax && amount > earnBalance;
+      // On the wrapped route the wrapper pays the withdrawal, and `wrappedBaseProblem` has checked it
+      // against what the wrapper pays now, net of its buffer and within the market's cash. The
+      // gross balance is never withdrawn from Comet, so it is not compared with the market's cash.
+      const isWrapped = rules.wrappedBase !== undefined;
+      const amountExceedsBalance = !isWrapped && !isMax && amount > earnBalance;
       const notEnoughLiquidity =
-        (isMax && earnBalance > baseAsset.balanceOfComet) || (!isMax && amount > baseAsset.balanceOfComet);
+        !isWrapped &&
+        ((isMax && earnBalance > baseAsset.balanceOfComet) || (!isMax && amount > baseAsset.balanceOfComet));
       if (mustRepayBorrow) {
         return [false, 'Must Repay Borrow First'];
       } else if (amountExceedsBalance) {
@@ -324,17 +398,19 @@ export function validateAddingAction(
 }
 
 /**
- * Whether any action in the queue adds to the account's direct Comet base supply: a base
- * supply, or a repay larger than the debt the earlier actions leave.
+ * Whether any action in the queue would lend or withdraw the base token as a direct Comet supplier:
+ * a base supply, a base withdrawal, or a repay larger than the debt the earlier actions leave. On
+ * the wrapped route the wrapper carries out base supply and withdrawal, so none of these may reach
+ * Comet or the Bulker.
  */
-export function addsDirectBaseSupply(
+export function lendsBaseDirectly(
   baseAssetPre: BaseAssetWithAccountState,
   collateralAssetsPre: TokenWithAccountState[],
   actions: Action[]
 ): boolean {
   return actions.some((action, index) => {
     const { baseAsset } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions.slice(0, index));
-    return directBaseSupplyProblem(baseAsset, action) !== undefined;
+    return directBaseLendingProblem(baseAsset, action) !== undefined;
   });
 }
 
@@ -342,11 +418,17 @@ export function validateAllowanceForAction(
   baseAssetPre: BaseAssetWithAccountState,
   collateralAssetsPre: TokenWithAccountState[],
   actions: Action[],
-  actionToAdd: Action
+  actionToAdd: Action,
+  rules: ActionRules = {}
 ): Validity {
   const { baseAsset, collateralAssets } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions);
 
   const [actionType] = actionToAdd;
+  // A base supply on the wrapped route spends the allowance to the wrapper, not to Comet.
+  if (rules.wrappedBase !== undefined && actionType === ActionType.Supply) {
+    const amount = sanitizedAmountForAction(baseAssetPre, collateralAssetsPre, actions, actionToAdd);
+    return amount > (rules.wrappedBase.supplyAllowance ?? 0n) ? [false, 'Approval Failed'] : 'ok';
+  }
 
   switch (actionType) {
     case ActionType.Supply: {

@@ -160,8 +160,10 @@ export function useActionQueue(
     onActionsChanged(state.actions);
   }, [state.actions]);
 
-  // A wrapper action has its own review and lifecycle. Refusing one here, with a typed error,
-  // keeps the queue and the Bulker from ever holding one.
+  // On the wrapped route a base supply or withdrawal is queued as an ordinary action, and Home
+  // carries it out through the wrapper at submission. A wrapper draft, or an action naming wrapper
+  // shares, is never a queue entry. Refusing one here, with a typed error, keeps the queue and the
+  // Bulker from ever holding one.
   const addOrUpdateAction = (action: Action) => {
     assertDirectActions([action]);
     updateQueue([QueueActionType.AddOrUpdate, currentVisit, action]);
