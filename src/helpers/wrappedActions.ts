@@ -5,6 +5,7 @@ import { HARDCODED_WRAPPED_LENDING_SOURCE } from '@constants/wrappedMarkets';
 import CometAbi from '@helpers/abis/Comet';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { MAX_UINT256 } from '@helpers/numbers';
+import type { WithdrawalQuote, WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import type { ScreeningStatus } from '@hooks/useAddressScreening';
 import { Action, ActionType } from '@types';
 
@@ -22,21 +23,67 @@ export type WrappedActionType = 'supply' | 'withdraw';
  */
 export type WrappedStepKind = 'approve' | 'supply-and-wrap' | 'unwrap-and-withdraw';
 
-/** The result of a step's own check. */
-export type WrappedStepCheck = { ok: true } | { ok: false; message: string };
+/**
+ * A withdrawal as its check found it just before the signature. The step still burns the reviewed
+ * shares, so only what they pay can differ from the review.
+ */
+export type RecheckedWithdrawal = {
+  /** The reviewed shares, quoted again at `blockNumber`. */
+  quote: WithdrawalQuote;
+  /** The block the check read. */
+  blockNumber: number;
+  /**
+   * The step's description with the cash of `quote`. The transaction list describes the wallet's
+   * request by it.
+   */
+  description: string;
+};
 
-/** One transaction of a wrapper action. COM-287 and COM-288 build these. */
-export type WrappedStep = {
+/** A step's own check that refused the step, and why. Nothing is sent. */
+export type WrappedStepRefusal = { ok: false; message: string };
+
+/** The result of an approval's or a supply's own check. */
+export type WrappedSupplyCheck = { ok: true } | WrappedStepRefusal;
+
+/**
+ * The result of a withdrawal's own check. A check that passes gives `rechecked`, and the lifecycle
+ * stops one that does not. The dialog then shows the cash the exit pays at the block the check
+ * read, not the reviewed cash. The transaction list describes the request by that cash too.
+ */
+export type WrappedWithdrawalCheck = { ok: true; rechecked: RecheckedWithdrawal } | WrappedStepRefusal;
+
+/** The result of a step's own check, for a step of either kind of action. */
+export type WrappedStepCheck = WrappedSupplyCheck | WrappedWithdrawalCheck;
+
+/** The fields every step has, whatever its kind. */
+type WrappedStepFields = {
   /** Unique within the draft. The transaction manager stores a submitted hash under it. */
   id: string;
-  kind: WrappedStepKind;
   /** Shown in review and in the transaction list. */
   description: string;
   /** The encoded call, which `checkWrappedStep` holds to `kind`. It never carries value. */
   request: { to: string; data: string };
-  /** A check of the step's own, such as a simulation from the sender, made just before signing. */
-  check?: () => Promise<WrappedStepCheck>;
 };
+
+/** An approval or a supply, one transaction of a wrapped supply. */
+export type WrappedSupplyStep = WrappedStepFields & {
+  kind: 'approve' | 'supply-and-wrap';
+  /** A check of the step's own, such as a simulation from the sender, made just before signing. */
+  check?: () => Promise<WrappedSupplyCheck>;
+};
+
+/** The exit, the one transaction of a wrapped withdrawal. */
+export type WrappedWithdrawalStep = WrappedStepFields & {
+  kind: 'unwrap-and-withdraw';
+  /**
+   * The exit's own check, made just before signing, such as a read of the position and a
+   * simulation from the sender. The lifecycle stops an exit step without one.
+   */
+  check: () => Promise<WrappedWithdrawalCheck>;
+};
+
+/** One transaction of a wrapper action. COM-287 and COM-288 build these. */
+export type WrappedStep = WrappedSupplyStep | WrappedWithdrawalStep;
 
 /**
  * What a wrapper draft was reviewed under. The draft applies only while all of it holds.
@@ -67,6 +114,8 @@ export type WrappedActionDraft = {
   /** In base-token units for a supply, in shares for a withdrawal. */
   amount: bigint;
   steps: readonly WrappedStep[];
+  /** A withdrawal's quote, which its review shows. It must be for the draft's shares. */
+  withdrawal?: WithdrawalReview;
 };
 
 /** The live session a wrapper action is checked against. */
@@ -265,7 +314,13 @@ export type WrappedStepProblem =
   | 'wrong-spender'
   | 'wrong-amount'
   | 'malformed-call'
-  | 'bad-sequence';
+  | 'bad-sequence'
+  /** A withdrawal has no quote, or its quote is for other shares than its call burns. */
+  | 'quote-mismatch'
+  /** A withdrawal's exit step has no check, or its check passed without the exit it found. */
+  | 'missing-recheck'
+  /** A withdrawal's check read an older block than its review. */
+  | 'stale-recheck';
 
 const BASE_TOKEN_CALLS = new Interface(['function approve(address spender, uint256 amount)']);
 const WRAPPER_CALLS = new Interface([
@@ -327,8 +382,9 @@ function approvedAmount(step: WrappedStep): bigint {
 /**
  * Checks a draft's steps as a whole. Its amount is positive and never the unlimited sentinel. A
  * supply is one `supplyAndWrap`, after either no approval, an approval of exactly its amount, or a
- * reset to zero and then that approval. A withdrawal is one `unwrapAndWithdraw`. Step ids are
- * unique, since hashes are stored under them.
+ * reset to zero and then that approval. A withdrawal is one `unwrapAndWithdraw`, and its quote is
+ * for the shares that call burns, so the review shows the cash of the shares that are signed. Step
+ * ids are unique, since hashes are stored under them.
  */
 export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem | undefined {
   if (draft.amount <= 0n || draft.amount >= MAX_UINT256) return 'wrong-amount';
@@ -347,7 +403,31 @@ export function checkWrappedDraft(draft: WrappedActionDraft): WrappedStepProblem
     approvals.length === 0 ||
     (approvals.length === 1 && approvals[0] === draft.amount) ||
     (approvals.length === 2 && approvals[0] === 0n && approvals[1] === draft.amount);
-  return isApprovalSequence ? undefined : 'bad-sequence';
+  if (!isApprovalSequence) return 'bad-sequence';
+  if (draft.identity.type === 'withdraw' && draft.withdrawal?.quote.shares !== draft.amount) return 'quote-mismatch';
+  return undefined;
+}
+
+/**
+ * Checks a withdrawal as its check found it against the draft. It must quote the draft's kind of
+ * exit for the shares the draft's call burns. Otherwise the dialog and the transaction list
+ * describe other shares than the wallet signs. It must also be read at the review's block or a
+ * later one. A read of an older block cannot show what changed after the review, such as a
+ * donation to the wrapper.
+ */
+export function checkRecheckedWithdrawal(
+  draft: WrappedActionDraft,
+  rechecked: RecheckedWithdrawal
+): WrappedStepProblem | undefined {
+  const reviewed = draft.withdrawal;
+  const isSameExit =
+    draft.identity.type === 'withdraw' &&
+    reviewed !== undefined &&
+    rechecked.quote.kind === reviewed.quote.kind &&
+    rechecked.quote.shares === draft.amount;
+  if (!isSameExit) return 'quote-mismatch';
+  // A block number that is not a number, such as NaN, fails this comparison too.
+  return rechecked.blockNumber >= reviewed.blockNumber ? undefined : 'stale-recheck';
 }
 
 export type MarketRestriction = 'supply-paused' | 'withdraw-paused' | 'restriction-unknown';

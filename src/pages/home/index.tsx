@@ -56,6 +56,7 @@ import {
 
 import ActionModal from './components/ActionModal';
 import WrappedSupplyModal from './components/ActionModal/WrappedSupplyModal';
+import WrappedWithdrawModal from './components/ActionModal/WrappedWithdrawModal';
 import AssetRow from './components/AssetRow';
 import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadState } from './components/Masthead';
@@ -768,13 +769,19 @@ const Home = ({
           // A callback kept from an earlier visit starts no review.
           onReview: (amount) => (isFromEarlierVisit() ? 'identity-changed' : wrappedLending.write.supply(amount)),
         }}
+        withdraw={{
+          blockedReason: wrappedAction.blockedReason('withdraw'),
+          // A callback kept from an earlier visit starts no review.
+          onReview: (request, shownCash) =>
+            isFromEarlierVisit() ? 'identity-changed' : wrappedLending.write.withdraw(request, shownCash),
+        }}
         onRetry={wrappedLending.retry}
       />
     );
   }
 
-  // The supply dialog describes its draft's own market. A completed or stopped draft stays on
-  // screen after the user selects another market.
+  // The supply and withdrawal dialogs describe their draft's own market. A completed or stopped
+  // draft stays on screen after the user selects another market.
   const { state: wrappedActionState } = wrappedAction;
   const draftIdentity =
     'draft' in wrappedActionState
@@ -787,18 +794,27 @@ const Home = ({
       ? undefined
       : WRAPPED_MARKET_REGISTRY.lookup(draftIdentity.chainId, draftIdentity.cometAddress);
 
+  const draftSymbol =
+    draftIdentity === undefined
+      ? ''
+      : getMarket(draftIdentity.chainId, draftIdentity.cometAddress)?.baseAsset.symbol ?? '';
+  const draftDecimals = draftLookup?.status === 'valid' ? draftLookup.market.baseDecimals : undefined;
+
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
       <WrappedSupplyModal
         state={wrappedActionState}
-        symbol={
-          draftIdentity === undefined
-            ? ''
-            : getMarket(draftIdentity.chainId, draftIdentity.cometAddress)?.baseAsset.symbol ?? ''
-        }
-        decimals={draftLookup?.status === 'valid' ? draftLookup.market.baseDecimals : undefined}
+        symbol={draftSymbol}
+        decimals={draftDecimals}
         directBorrowBalance={directBorrowBalance}
+        onConfirm={wrappedAction.confirm}
+        onClose={wrappedAction.discard}
+      />
+      <WrappedWithdrawModal
+        state={wrappedActionState}
+        symbol={draftSymbol}
+        decimals={draftDecimals}
         onConfirm={wrappedAction.confirm}
         onClose={wrappedAction.discard}
       />

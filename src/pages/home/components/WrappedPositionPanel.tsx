@@ -5,9 +5,16 @@ import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { formatRateFactor, formatValue, formatValueInDollars } from '@helpers/numbers';
 import { WrappedBlockReason } from '@helpers/wrappedActions';
 import { getWithdrawableCash, getWrappedPositionValueInDollars, WithdrawableCash } from '@helpers/wrappedPositions';
+import {
+  getWithdrawalLimits,
+  planWrappedWithdrawal,
+  WithdrawalPlan,
+  WithdrawalRequest,
+  WithdrawalSnapshot,
+} from '@helpers/wrappedWithdrawals';
 import { WalletSessionHealth } from '@hooks/useWrappedAction';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
-import { parseWrappedSupplyAmount } from '@hooks/useWriteWrappedState';
+import { formatExactUnits, parseExactUnits } from '@hooks/useWriteWrappedState';
 
 import { stringFromBigInt } from './ActionInputView';
 
@@ -43,6 +50,16 @@ type WrappedPositionPanelProps = {
     blockedReason: WrappedBlockReason | undefined;
     /** Starts a review of `amount` raw base-token units. Returns why it was refused, if it was. */
     onReview: (amount: bigint) => WrappedBlockReason | undefined;
+  };
+  /** The wrapped withdrawal entry. Without it, the withdraw control stays disabled. */
+  withdraw?: {
+    /** Why a wrapped withdrawal cannot start now, as the wrapper action lifecycle reports it. */
+    blockedReason: WrappedBlockReason | undefined;
+    /**
+     * Starts a review of `request`. `shownCash` is the full exit's cash the form showed. Returns why
+     * the review was refused, if it was.
+     */
+    onReview: (request: WithdrawalRequest, shownCash?: bigint) => WrappedBlockReason | undefined;
   };
   onRetry: () => void;
 };
@@ -118,7 +135,7 @@ const WrappedSupplyForm = ({
   const [input, setInput] = useState('');
   const [refusal, setRefusal] = useState<WrappedBlockReason | undefined>(undefined);
   const typed = input.trim();
-  const amount = typed === '' ? undefined : parseWrappedSupplyAmount(typed, decimals);
+  const amount = typed === '' ? undefined : parseExactUnits(typed, decimals);
   const isMalformed = typed !== '' && amount === undefined;
   const isAboveBalance = amount !== undefined && amount > walletBalance;
   const reviewedAmount = amount !== undefined && amount > 0n && !isAboveBalance ? amount : undefined;
@@ -188,6 +205,184 @@ const WrappedSupplyForm = ({
   );
 };
 
+/**
+ * What the withdrawal form says about an amount of zero, or about a choice the position or the
+ * market cannot pay now. It gives the most they can pay, and the full exit when that can pay.
+ */
+function revisionText(
+  plan: Extract<WithdrawalPlan, { status: 'needs-revision' }>,
+  request: WithdrawalRequest,
+  snapshot: WithdrawalSnapshot,
+  formatAmount: (value: bigint) => string
+): string {
+  const { limits } = plan;
+  switch (plan.reason) {
+    case 'no-amount':
+      return 'Enter an amount greater than 0';
+    case 'no-shares':
+      return 'You hold no wrapped shares to withdraw.';
+    case 'paused':
+      return 'Withdrawals from this market are paused.';
+    case 'dust':
+      return "Your position is worth no more than the wrapper's rounding buffer, so it cannot be withdrawn.";
+    case 'exceeds-position':
+      return `More than you can withdraw now. Enter at most ${formatAmount(limits.maxPartialCash)}${
+        limits.canExitFully ? ', or choose Everything' : ''
+      }.`;
+    case 'exceeds-liquidity':
+      return request.kind === 'full'
+        ? `The market holds only ${formatAmount(
+            snapshot.cometCash
+          )} now, less than a full exit pays. Withdraw an amount of at most ${formatAmount(
+            limits.maxPartialCash
+          )} instead.`
+        : `The market holds only ${formatAmount(snapshot.cometCash)} now. Enter at most ${formatAmount(
+            limits.maxPartialCash
+          )}.`;
+  }
+}
+
+/** The plan for `request`, or undefined when the quote fails its own check, which nothing reviews. */
+function planOrUndefined(request: WithdrawalRequest, snapshot: WithdrawalSnapshot): WithdrawalPlan | undefined {
+  try {
+    return planWrappedWithdrawal(request, snapshot);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The form of a wrapped withdrawal. The user chooses an amount of cash, or Everything for the full
+ * exit, which is never chosen for them. The form quotes the choice from the panel's figures. It
+ * refuses an amount the position or the market cannot pay now, with the most they can pay, and
+ * keeps what the user typed. The review reads everything again before anything is signed.
+ */
+const WrappedWithdrawForm = ({
+  symbol,
+  snapshot,
+  onCancel,
+  onReview,
+}: {
+  symbol: string;
+  snapshot: WithdrawalSnapshot;
+  onCancel: () => void;
+  onReview: (request: WithdrawalRequest, shownCash?: bigint) => WrappedBlockReason | undefined;
+}) => {
+  const [kind, setKind] = useState<WithdrawalRequest['kind']>('partial');
+  const [input, setInput] = useState('');
+  const [refusal, setRefusal] = useState<WrappedBlockReason | undefined>(undefined);
+  const { baseDecimals } = snapshot;
+  const formatAmount = (value: bigint) => `${formatExactUnits(value, baseDecimals)} ${symbol}`;
+  const limits = getWithdrawalLimits(snapshot);
+
+  const typed = input.trim();
+  const amount = typed === '' ? undefined : parseExactUnits(typed, baseDecimals);
+  const isMalformed = kind === 'partial' && typed !== '' && amount === undefined;
+  let request: WithdrawalRequest | undefined;
+  if (kind === 'full') request = { kind: 'full' };
+  else if (amount !== undefined) request = { kind: 'partial', cash: amount };
+  const plan = request === undefined ? undefined : planOrUndefined(request, snapshot);
+
+  let problem: string | undefined;
+  if (isMalformed) {
+    problem = `Use digits and one point, with up to ${baseDecimals} decimals`;
+  } else if (request !== undefined && plan === undefined) {
+    problem = 'This amount could not be quoted exactly. Enter another amount.';
+  } else if (request !== undefined && plan?.status === 'needs-revision') {
+    problem = revisionText(plan, request, snapshot, formatAmount);
+  }
+
+  let hint: string;
+  if (problem !== undefined) {
+    hint = problem;
+  } else if (refusal !== undefined) {
+    hint = writeBlockMessage(refusal, 'withdrawals');
+  } else if (plan?.status === 'ready' && plan.quote.leavesDust) {
+    hint = `This leaves wrapped ${symbol} worth no more than the wrapper's rounding buffer, which cannot be withdrawn on its own. To withdraw it all, choose Everything.`;
+  } else {
+    hint =
+      "You review the cash before your wallet signs. The wrapper holds back a few base units for rounding, and pays from the market's cash.";
+  }
+
+  const choose = (chosen: WithdrawalRequest['kind']) => {
+    setKind(chosen);
+    setRefusal(undefined);
+  };
+  const change = (value: string) => {
+    setInput(value);
+    setRefusal(undefined);
+  };
+
+  return (
+    <div
+      className={`action-input-view action-input-view--${
+        problem === undefined ? 'supply' : 'error'
+      } L2 wrapped-position-panel__form`}
+    >
+      <div className="action-input-view__title">
+        <label className="label">Withdraw {symbol}</label>
+      </div>
+      <fieldset className="wrapped-position-panel__choice">
+        <legend className="L4 meta text-color--2">How much to withdraw</legend>
+        <label className="L3">
+          <input
+            type="radio"
+            name="wrapped-withdraw-kind"
+            checked={kind === 'partial'}
+            onChange={() => choose('partial')}
+          />{' '}
+          An amount
+        </label>
+        <label className="L3">
+          <input type="radio" name="wrapped-withdraw-kind" checked={kind === 'full'} onChange={() => choose('full')} />{' '}
+          Everything (full exit)
+        </label>
+      </fieldset>
+      {kind === 'partial' && (
+        <div className="action-input-view__input-row">
+          <input
+            className="action-input-view__input"
+            placeholder="0"
+            aria-label={`Amount of ${symbol} to withdraw`}
+            aria-invalid={problem !== undefined}
+            value={input}
+            onChange={(event) => change(event.target.value)}
+            autoComplete="off"
+          />
+        </div>
+      )}
+      <div className="action-input-view__detail-row">
+        <div className={`asset asset--${assetIconForAssetSymbol(symbol)}`}></div>
+        <p className="L4 meta" data-testid="wrapped-withdraw-limit">
+          {kind === 'partial'
+            ? `Up to ${formatAmount(limits.maxPartialCash)} now`
+            : `About ${formatAmount(limits.fullExitCash)} for all your shares`}
+        </p>
+      </div>
+      <div className="action-input-view__hint-row">
+        <p className="L4 meta text-color--2" data-testid="wrapped-withdraw-hint">
+          {hint}
+        </p>
+      </div>
+      <div className="action-input-view__buttons">
+        <button className="button" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          className="button"
+          disabled={request === undefined || plan?.status !== 'ready'}
+          onClick={() => {
+            if (request === undefined || plan?.status !== 'ready') return;
+            setRefusal(onReview(request, request.kind === 'full' ? plan.quote.cash : undefined));
+          }}
+        >
+          Review
+        </button>
+      </div>
+    </div>
+  );
+};
+
 function withdrawableNote({ limit }: WithdrawableCash): string {
   switch (limit) {
     case 'paused':
@@ -215,15 +410,22 @@ const WrappedPositionPanel = ({
   hasUnansweredWalletRequest = false,
   walletRefusalMessage,
   supply,
+  withdraw,
   onRetry,
 }: WrappedPositionPanelProps) => {
   const { symbol } = baseAsset;
-  // The supply form belongs to the route key it was opened for, so a change of session or market
-  // closes it, and it stays closed if the key returns.
-  const [supplyFormRouteKey, setSupplyFormRouteKey] = useState<string | undefined>(undefined);
+  // The open form belongs to the route key it was opened for. A change of session or market closes
+  // it, and it stays closed if the key returns. One form is open at a time.
+  const [openForm, setOpenForm] = useState<{ kind: 'supply' | 'withdraw'; routeKey: string } | undefined>(undefined);
   useEffect(() => {
-    setSupplyFormRouteKey((current) => (current === route.validationKey ? current : undefined));
+    setOpenForm((current) => (current?.routeKey === route.validationKey ? current : undefined));
   }, [route.validationKey]);
+  const isFormOpen = (kind: 'supply' | 'withdraw') =>
+    openForm !== undefined && openForm.kind === kind && openForm.routeKey === route.validationKey;
+  const toggleForm = (kind: 'supply' | 'withdraw') =>
+    setOpenForm(
+      isFormOpen(kind) || route.validationKey === undefined ? undefined : { kind, routeKey: route.validationKey }
+    );
   let content: ReactNode;
 
   switch (position.status) {
@@ -332,7 +534,40 @@ const WrappedPositionPanel = ({
       onReview: supply.onReview,
     };
   }
-  const isSupplyFormOpen = supplyFormRouteKey !== undefined && supplyFormRouteKey === route.validationKey;
+
+  // A wrapped withdrawal can start when the route allows exits and the lifecycle allows a new
+  // review. The position must also be loaded, since the form quotes from it, and have something to pay.
+  const withdrawBlock = !route.exit.isEligible ? route.exit.reason : withdraw?.blockedReason;
+  let withdrawForm:
+    | {
+        snapshot: WithdrawalSnapshot;
+        onReview: (request: WithdrawalRequest, shownCash?: bigint) => WrappedBlockReason | undefined;
+      }
+    | undefined;
+  let withdrawMessage: string;
+  if (withdrawBlock !== undefined) {
+    withdrawMessage = writeBlockMessage(withdrawBlock, 'withdrawals');
+  } else if (withdraw === undefined) {
+    withdrawMessage = 'Wrapped withdrawals are not available in this version of the app.';
+  } else if (session.status === 'unusable') {
+    withdrawMessage = writeBlockMessage('session-unusable', 'withdrawals');
+  } else if (position.status !== 'loaded') {
+    withdrawMessage = 'Waiting for your wrapped position to load.';
+  } else if (position.position.shares <= 0n) {
+    withdrawMessage = `You hold no wrapped ${symbol} to withdraw.`;
+  } else if (position.position.isWithdrawPaused) {
+    withdrawMessage = 'Withdrawals from this market are paused.';
+  } else if (position.position.fullExitCash === 0n) {
+    withdrawMessage =
+      "Your wrapped position is too small to withdraw: it is worth no more than the wrapper's rounding buffer.";
+  } else {
+    withdrawMessage = `Pays ${symbol} from the wrapper to your wallet. Your direct Comet position does not change.`;
+    const { shares, snapshot, baseDecimals, isWithdrawPaused } = position.position;
+    withdrawForm = {
+      snapshot: { ...snapshot, shares, baseDecimals, isWithdrawPaused, cometCash: baseAsset.balanceOfComet },
+      onReview: withdraw.onReview,
+    };
+  }
 
   return (
     <div className="panel wrapped-position-panel L2">
@@ -399,33 +634,48 @@ const WrappedPositionPanel = ({
           <button
             className="button button--supply"
             disabled={supplyForm === undefined}
-            onClick={() => setSupplyFormRouteKey(isSupplyFormOpen ? undefined : route.validationKey)}
+            onClick={() => toggleForm('supply')}
           >
             Supply {symbol} through the wrapper
           </button>
           <p className="L4 meta text-color--2">{supplyMessage}</p>
         </div>
         <div className="wrapped-position-panel__action">
-          <button className="button button--supply" disabled>
+          <button
+            className="button button--supply"
+            disabled={withdrawForm === undefined}
+            onClick={() => toggleForm('withdraw')}
+          >
             Withdraw {symbol} from the wrapper
           </button>
-          <p className="L4 meta text-color--2">
-            {route.exit.isEligible
-              ? 'Wrapped withdrawals are not available in this version of the app.'
-              : writeBlockMessage(route.exit.reason, 'withdrawals')}
+          <p className="L4 meta text-color--2" data-testid="wrapped-withdraw-message">
+            {withdrawMessage}
           </p>
         </div>
       </div>
-      {isSupplyFormOpen && supplyForm !== undefined && (
+      {isFormOpen('supply') && supplyForm !== undefined && (
         <WrappedSupplyForm
           symbol={symbol}
           decimals={supplyForm.decimals}
           walletBalance={supplyForm.walletBalance}
-          onCancel={() => setSupplyFormRouteKey(undefined)}
+          onCancel={() => setOpenForm(undefined)}
           onReview={(amount) => {
             const refusal = supplyForm.onReview(amount);
             // Once the review starts, its dialog takes over.
-            if (refusal === undefined) setSupplyFormRouteKey(undefined);
+            if (refusal === undefined) setOpenForm(undefined);
+            return refusal;
+          }}
+        />
+      )}
+      {isFormOpen('withdraw') && withdrawForm !== undefined && (
+        <WrappedWithdrawForm
+          symbol={symbol}
+          snapshot={withdrawForm.snapshot}
+          onCancel={() => setOpenForm(undefined)}
+          onReview={(request, shownCash) => {
+            const refusal = withdrawForm.onReview(request, shownCash);
+            // Once the review starts, its dialog takes over.
+            if (refusal === undefined) setOpenForm(undefined);
             return refusal;
           }}
         />
