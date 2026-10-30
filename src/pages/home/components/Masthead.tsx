@@ -19,9 +19,12 @@ import {
   formatValueInDollars,
   getValueInDollars,
   PRICE_PRECISION,
+  PRICE_SCALE,
   shouldShowValueInBaseAsset,
 } from '@helpers/numbers';
+import { getWrappedPositionValueInDollars } from '@helpers/wrappedPositions';
 import { Theme } from '@hooks/useThemeManager';
+import type { WrappedPositionState } from '@hooks/useWrappedPosition';
 import {
   Action,
   ActionType,
@@ -69,6 +72,8 @@ type MastheadHydrated = [
     isInstitutional: boolean;
     /** Base supply goes through a wrapper for this session, so the direct supply is not offered. */
     isDirectBaseSupplyBlocked?: boolean;
+    /** The account's wrapped position on the wrapped route, as the wrapped position panel shows it. */
+    wrappedPosition?: WrappedPositionState;
   }
 ];
 export type MastheadState = MastheadLoading | MastheadNoWallet | MastheadHydrated;
@@ -78,7 +83,8 @@ type MastheadProps = {
 };
 
 const Masthead = ({ state }: MastheadProps) => {
-  const { balanceOverview, balanceValue, balance, buttons, ratesDetail, utilizationMeterState } = getContent(state);
+  const { balanceOverview, balanceValue, balance, wrappedSupply, buttons, ratesDetail, utilizationMeterState } =
+    getContent(state);
   const {
     currency,
     pressDownAnimate,
@@ -114,6 +120,7 @@ const Masthead = ({ state }: MastheadProps) => {
           {balanceOverview}
           <div className="masthead__balance-value">{balanceValue}</div>
           {balance}
+          {wrappedSupply}
           {ratesDetail}
         </div>
         <div className="masthead__action-buttons">{buttons}</div>
@@ -129,6 +136,7 @@ type Content = {
   balanceOverview: ReactNode;
   balanceValue: ReactNode;
   balance: ReactNode;
+  wrappedSupply?: ReactNode;
   buttons: ReactNode;
   ratesDetail: ReactNode;
   utilizationMeterState: UtilizationMeterState;
@@ -240,6 +248,7 @@ function getContent(state: MastheadState): Content {
     onWithdrawAction,
     setCompare,
     isDirectBaseSupplyBlocked,
+    wrappedPosition,
   } = state[1];
   const {
     baseAsset: { symbol },
@@ -264,6 +273,24 @@ function getContent(state: MastheadState): Content {
       </button>
     </Tooltip>
   ) : null;
+
+  // The wrapped value changes the headline and its wrapped line and nothing else. Borrow capacity,
+  // the liquidation point, the utilization meter and the buttons read Comet state alone. Direct
+  // actions do not move wrapper shares, so the value is the same before and after them.
+  // The wrapper's base units are the market's, because the route is validated before a position is read.
+  const wrappedValue = wrappedPosition?.status === 'loaded' ? wrappedPosition.position.grossAssets : 0n;
+  // In dollars the wrapped value is the one the wrapped position panel shows, in base units.
+  const wrappedValueInDollars = getWrappedPositionValueInDollars(
+    wrappedValue,
+    baseAsset.baseAssetPriceInDollars,
+    symbol
+  );
+  let wrappedValueText: string | undefined;
+  if (wrappedValue > 0n) {
+    wrappedValueText = shouldShowValueInBaseAsset(symbol as Currency, currency)
+      ? `${displayValue(baseAsset.decimals, wrappedValue)} ${symbol}`
+      : formatValueInDollars(baseAsset.decimals, wrappedValueInDollars);
+  }
 
   const utilizationMeterState: UtilizationMeterState = [
     StateType.Hydrated,
@@ -557,6 +584,10 @@ function getContent(state: MastheadState): Content {
       balance: (
         <Balance wholeNumberBalance={wholeNumberBalance} fractionalNumberBalance={fractionalNumberBalance}></Balance>
       ),
+      // The headline shows the borrow without subtracting the wrapped supply.
+      wrappedSupply: wrappedValueText !== undefined && (
+        <p className="meta text-color--3">{`Plus ${wrappedValueText} supplied through the wrapper`}</p>
+      ),
       buttons,
       ratesDetail: (
         <DetailSheet active={ratesDetailActive} onClickOutside={() => setRatesDetailActive(false)}>
@@ -568,20 +599,25 @@ function getContent(state: MastheadState): Content {
   }
   // SUPPLY POSITION OR NO BALANCE
   else {
+    // The headline counts a wrapped supply with the direct supply. The buttons still follow the
+    // direct balance, because they act on Comet only.
+    const headlineBalance = baseAssetToUse.balance + wrappedValue;
+    // In dollars the headline is the direct balance's dollar value plus the panel's dollar value
+    // of the wrapped position, raised to the direct value's scale.
+    const headlineValueInDollars =
+      getValueInDollars(baseAssetToUse.price * baseAssetToUse.balance, baseAsset) + wrappedValueInDollars * PRICE_SCALE;
     const baseAssetDenominatedForBigNumber = shouldShowValueInBaseAsset(symbol as Currency, currency);
     let currencyValue;
     let valueBasedOnCounterCurrency;
     if (baseAssetDenominatedForBigNumber) {
-      currencyValue = displayValue(baseAssetToUse.decimals, baseAssetToUse.balance);
-      const valueToUseForCounterCurrency = getValueInDollars(baseAssetToUse.price * baseAssetToUse.balance, baseAsset);
+      currencyValue = displayValue(baseAssetToUse.decimals, headlineBalance);
       valueBasedOnCounterCurrency = formatValueInDollars(
         baseAssetToUse.decimals + PRICE_PRECISION,
-        valueToUseForCounterCurrency
+        headlineValueInDollars
       );
     } else {
-      const valueToUse = getValueInDollars(baseAssetToUse.price * baseAssetToUse.balance, baseAsset);
-      currencyValue = formatValueInDollars(baseAssetToUse.decimals + PRICE_PRECISION, valueToUse);
-      valueBasedOnCounterCurrency = displayValue(baseAssetToUse.decimals, baseAssetToUse.balance);
+      currencyValue = formatValueInDollars(baseAssetToUse.decimals + PRICE_PRECISION, headlineValueInDollars);
+      valueBasedOnCounterCurrency = displayValue(baseAssetToUse.decimals, headlineBalance);
     }
     // TODO with the toggle the Big Number and small number are the same logic, refactor naming of BalanceValue and Balance
     const [wholeNumberBalanceValue, fractionalNumberBalanceValue] = currencyValue.split('.');
@@ -604,8 +640,11 @@ function getContent(state: MastheadState): Content {
 
     if (!hasActions) {
       const anchorRect = tooltipLeftAlign.current?.getBoundingClientRect();
+      // The rate includes the supply rewards, which only the direct supply earns. A wrapped-only
+      // supplier earns no rewards on this route, so the rate is the wrapped supply's own.
+      const netRateLabel = baseAssetToUse.balance > 0n && wrappedValue > 0n ? 'Direct supply Net APR' : 'Net APR';
       overviewDetails =
-        baseAssetToUse.balance > 0n ? (
+        headlineBalance > 0n ? (
           <Tooltip
             content={ratesTooltipContent}
             width={400}
@@ -620,7 +659,9 @@ function getContent(state: MastheadState): Content {
             <div className="masthead__overview-details" onClick={() => setRatesDetailActive(true)}>
               <span className="meta text-color--3"> &#64; </span>
               <div className="masthead__overview-details__net-rate">
-                <span className="meta">{formatRateFactor(earnAPR + (earnRewardsAPR || 0n))} Net APR</span>
+                <span className="meta">
+                  {formatRateFactor(earnAPR + (earnRewardsAPR || 0n))} {netRateLabel}
+                </span>
                 <HoverUnder className="hover-under" long={true} theme={theme} />
               </div>
             </div>
@@ -641,9 +682,12 @@ function getContent(state: MastheadState): Content {
     }`}
       >
         <p ref={tooltipLeftAlign} className="meta text-color--supply">
-          {baseAssetToUse.balance > 0n ? 'Supplying' : 'Balance'}
+          {headlineBalance > 0n ? 'Supplying' : 'Balance'}
         </p>
         {overviewDetails}
+        {wrappedValueText !== undefined && (
+          <p className="meta text-color--3">{`Includes ${wrappedValueText} wrapped`}</p>
+        )}
       </div>
     );
 
