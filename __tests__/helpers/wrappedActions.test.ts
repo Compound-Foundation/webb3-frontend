@@ -115,7 +115,6 @@ function withdrawalReview(shares: bigint): WithdrawalReview {
   return {
     request: { kind: 'full' },
     quote: { kind: 'full', shares, grossAssets: 1_000_003n, redeemBuffer: 3n, cash: 1_000_000n, leavesDust: false },
-    shownCash: undefined,
     blockNumber: 100,
   };
 }
@@ -130,6 +129,11 @@ function draft(type: WrappedActionType, steps: WrappedStep[], session = liveSess
   if (type === 'supply') return { kind: WRAPPED_ACTION, id: 'draft-1', identity, amount: 1_000_000n, steps };
   const amount = 10n ** 18n;
   return { kind: WRAPPED_ACTION, id: 'draft-1', identity, amount, steps, withdrawal: withdrawalReview(amount) };
+}
+
+/** Approve & Add's draft: only the approval a supply of 1 USDC needs. */
+function approvalDraft(steps: WrappedStep[]): WrappedActionDraft {
+  return { ...draft('supply', steps), isApprovalOnly: true };
 }
 
 const BASE_ASSET = mockBaseAsset({ address: USDC });
@@ -249,14 +253,14 @@ describe('wrappedActions', () => {
 
   describe('submission guard', () => {
     it('allows an approval of the base token to the wrapper and the wrapper calls', () => {
-      const supply = draft('supply', [{ ...approve(USDC_WRAPPER, 0n), id: 'reset' }, approve(), supplyAndWrap()]);
+      const approval = approvalDraft([{ ...approve(USDC_WRAPPER, 0n), id: 'reset' }, approve()]);
 
-      expect(supply.steps.map((supplyStep) => checkWrappedStep(supply, supplyStep))).toEqual([
-        undefined,
+      expect(approval.steps.map((approvalStep) => checkWrappedStep(approval, approvalStep))).toEqual([
         undefined,
         undefined,
       ]);
-      expect(checkWrappedDraft(supply)).toBeUndefined();
+      expect(checkWrappedDraft(approval)).toBeUndefined();
+      expect(checkWrappedDraft(draft('supply', [supplyAndWrap()]))).toBeUndefined();
       expect(checkWrappedDraft(draft('withdraw', [unwrapAndWithdraw()]))).toBeUndefined();
     });
 
@@ -313,6 +317,8 @@ describe('wrappedActions', () => {
       expect(checkWrappedDraft(refused)).toBe(problem);
     });
 
+    const reset = (id = 'reset') => ({ ...approve(USDC_WRAPPER, 0n), id });
+
     it.each<[string, WrappedActionType, WrappedStep[]]>([
       ['no steps', 'supply', []],
       ['an approval after the supply', 'supply', [supplyAndWrap(), approve()]],
@@ -322,28 +328,40 @@ describe('wrappedActions', () => {
         [step('supply-and-wrap', USDC_WRAPPER, supplyAndWrap().request.data, 'a'), supplyAndWrap()],
       ],
       ['an approval alone', 'supply', [approve()]],
+      // Submit asks the wallet for the supply only: Approve & Add asked for the approval.
+      ['an approval before the supply', 'supply', [approve(), supplyAndWrap()]],
+      ['a reset and an approval before the supply', 'supply', [reset(), approve(), supplyAndWrap()]],
       ['repeated step ids', 'supply', [approve(), { ...supplyAndWrap(), id: 'approve' }]],
     ])('refuses a draft with %s', (_name, type, steps) => {
       expect(checkWrappedDraft(draft(type, steps))).toBe('bad-sequence');
     });
 
-    const reset = (id = 'reset') => ({ ...approve(USDC_WRAPPER, 0n), id });
-
-    it.each<[string, WrappedStep[]]>([
-      ['the supply alone', [supplyAndWrap()]],
-      ['an approval of the amount, then the supply', [approve(), supplyAndWrap()]],
-      ['a reset to zero, an approval of the amount, then the supply', [reset(), approve(), supplyAndWrap()]],
-    ])('allows a supply of %s', (_name, steps) => {
-      expect(checkWrappedDraft(draft('supply', steps))).toBeUndefined();
+    it('allows a supply of the supply alone', () => {
+      expect(checkWrappedDraft(draft('supply', [supplyAndWrap()]))).toBeUndefined();
     });
 
     it.each<[string, WrappedStep[]]>([
-      ['a reset and no approval', [reset(), supplyAndWrap()]],
-      ['a reset after the approval', [approve(), reset(), supplyAndWrap()]],
-      ['two approvals of the amount', [approve(), { ...approve(), id: 'again' }, supplyAndWrap()]],
-      ['two resets', [reset('reset-1'), reset('reset-2'), approve(), supplyAndWrap()]],
-    ])('refuses a supply with %s', (_name, steps) => {
-      expect(checkWrappedDraft(draft('supply', steps))).toBe('bad-sequence');
+      ['an approval of the amount', [approve()]],
+      ['a reset to zero, then an approval of the amount', [reset(), approve()]],
+    ])('allows an approval draft of %s', (_name, steps) => {
+      expect(checkWrappedDraft(approvalDraft(steps))).toBeUndefined();
+    });
+
+    it.each<[string, WrappedStep[]]>([
+      ['no steps', []],
+      ['a reset and no approval', [reset()]],
+      ['a reset after the approval', [approve(), reset()]],
+      ['two approvals of the amount', [approve(), { ...approve(), id: 'again' }]],
+      ['two resets', [reset('reset-1'), reset('reset-2'), approve()]],
+      ['the supply after the approval', [approve(), supplyAndWrap()]],
+    ])('refuses an approval draft with %s', (_name, steps) => {
+      expect(checkWrappedDraft(approvalDraft(steps))).toBe('bad-sequence');
+    });
+
+    it('refuses an approval draft for a withdrawal', () => {
+      const withdrawal = { ...draft('withdraw', [unwrapAndWithdraw()]), isApprovalOnly: true };
+
+      expect(checkWrappedDraft(withdrawal)).toBe('bad-sequence');
     });
 
     it.each<[string, WrappedStep[], string]>([
@@ -429,10 +447,11 @@ describe('wrappedActions', () => {
       afterAll(() => restores.forEach((restore) => restore()));
 
       it('allows the steps of a supply and of a withdrawal', () => {
-        const supply = draft('supply', [{ ...approve(USDC_WRAPPER, 0n), id: 'reset' }, approve(), supplyAndWrap()]);
+        const approval = approvalDraft([{ ...approve(USDC_WRAPPER, 0n), id: 'reset' }, approve()]);
 
         expect(CALLS.parseTransaction(approve().request).functionFragment.format).toBeUndefined();
-        expect(checkWrappedDraft(supply)).toBeUndefined();
+        expect(checkWrappedDraft(approval)).toBeUndefined();
+        expect(checkWrappedDraft(draft('supply', [supplyAndWrap()]))).toBeUndefined();
         expect(checkWrappedDraft(draft('withdraw', [unwrapAndWithdraw()]))).toBeUndefined();
       });
 

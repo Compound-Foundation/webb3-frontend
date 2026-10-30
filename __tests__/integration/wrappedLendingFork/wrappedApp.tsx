@@ -194,15 +194,20 @@ export async function renderWrappedApp<T = undefined>(
     state,
     steps,
     waitUntilReady,
-    /** Starts a wrapped supply review of `amount` base units, as the supply form does. */
+    /** Starts the approval of the wrapper for a supply of `amount` base units, as Approve & Add does. */
+    startApproval: async (amount: bigint) => {
+      await waitUntilReady('supply');
+      return startReview(() => result.current.write.approve(amount));
+    },
+    /** Starts a wrapped supply of `amount` base units, as Submit Transaction does. */
     startSupply: async (amount: bigint) => {
       await waitUntilReady('supply');
       return startReview(() => result.current.write.supply(amount));
     },
     /** Starts a wrapped withdrawal review, as the withdraw form does. */
-    startWithdraw: async (request: WithdrawalRequest, shownCash?: bigint) => {
+    startWithdraw: async (request: WithdrawalRequest) => {
       await waitUntilReady('withdraw');
-      return startReview(() => result.current.write.withdraw(request, shownCash));
+      return startReview(() => result.current.write.withdraw(request));
     },
     /** The draft in review, or the one that completed or stopped. */
     draft: () => {

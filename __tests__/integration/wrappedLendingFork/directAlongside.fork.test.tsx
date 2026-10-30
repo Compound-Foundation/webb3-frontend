@@ -189,11 +189,11 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         expect(chainBefore.debt - borrow).toBeGreaterThanOrEqual(0n);
         expect(chainBefore.debt - borrow).toBeLessThanOrEqual(1n);
 
-        // A wrapped supply beside the direct borrow.
+        // A wrapped supply beside the direct borrow: Approve & Add's approval, then Submit's supply.
+        expect(await app.startApproval(units(1_000))).toBeUndefined();
+        app.receiptOf(await app.confirmStep());
         expect(await app.startSupply(units(1_000))).toBeUndefined();
-        const receipts = [];
-        for (let index = 0; index < app.draft().steps.length; index++)
-          receipts.push(app.receiptOf(await app.confirmStep()));
+        const receipts = [app.receiptOf(await app.confirmStep())];
         const supplied = await receiptEffects(market, account, receipts[receipts.length - 1]);
         const credited = BigInt(supplied.deposit?.args.assets.toString() ?? '-1');
         const chainAfterSupply = await directOnChain();
@@ -269,7 +269,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         // The app refuses a request that mixes a wrapped draft with direct actions, and the dashboard
         // refuses a direct base supply on this route. Nothing is sent.
         const nonce = await nonceOf(account);
-        expect(await app.startSupply(units(100))).toBeUndefined();
+        expect(await app.startApproval(units(100))).toBeUndefined();
         const draft = app.draft();
         const borrowMore: Action = [ActionType.Borrow, state.baseAsset, units(100)];
         let mixed: unknown;

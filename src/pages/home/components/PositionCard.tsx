@@ -559,7 +559,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
     const invalidAction = actions.find(
       (action, index) =>
         validateAddingAction(baseAsset, collateralAssets, actions.slice(0, index), action, actionRules) !== 'ok' ||
-        validateAllowanceForAction(baseAsset, collateralAssets, actions.slice(0, index), action) !== 'ok'
+        validateAllowanceForAction(baseAsset, collateralAssets, actions.slice(0, index), action, actionRules) !== 'ok'
     );
 
     actionQueueItems = (
@@ -579,6 +579,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
             onDeleteAction,
             onSelectAction,
             onSubmitClicked,
+            actionRules,
           }}
         />
         <ActionQueueView
@@ -596,6 +597,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
             onDeleteAction,
             onSelectAction,
             onSubmitClicked,
+            actionRules,
             mobile: true,
           }}
         />
@@ -705,6 +707,7 @@ type ActionQueueViewProps = {
   onDeleteAction: (action: Action) => void;
   onSelectAction: (action: Action) => void;
   onSubmitClicked: () => void;
+  actionRules?: ActionRules;
 };
 
 const ActionQueueView = ({
@@ -722,6 +725,7 @@ const ActionQueueView = ({
   onDeleteAction,
   onSelectAction,
   onSubmitClicked,
+  actionRules,
 }: ActionQueueViewProps) => {
   const [expanded, setExpanded] = useState(false);
   let actionQueueItems: ReactNode = actions.map((action: Action, actionIndex) => {
@@ -736,6 +740,7 @@ const ActionQueueView = ({
               actions,
               baseAsset,
               collateralAssets,
+              actionRules,
               onClick: () => {
                 onSelectAction(action);
               },
@@ -752,6 +757,7 @@ const ActionQueueView = ({
               approvalTransaction,
               baseAsset,
               collateralAssets,
+              actionRules,
             },
           ];
 
