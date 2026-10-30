@@ -24,6 +24,7 @@ import {
 } from '@types';
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
+import { mockCompCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
@@ -257,7 +258,7 @@ describe('Home on the wrapped route', () => {
     expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
   });
 
-  it('submits a full repay of a direct borrow', () => {
+  it('submits a full repay of a direct borrow as a repay of the whole debt at execution', () => {
     const borrower = { ...EMPTY_ACCOUNT, balance: -5_000_000n };
     render(
       homeElement({
@@ -269,7 +270,64 @@ describe('Home on the wrapped route', () => {
 
     const [, positionCard] = mockLastProps.PositionCard.state;
     positionCard.onSubmitClicked();
+    // Comet repays the borrow balance at execution for MAX_UINT256, so the repay leaves no excess.
     expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
+    expect(mockWriteState.supply).toHaveBeenCalledWith(
+      USDC_MARKET,
+      borrower.address,
+      MAX_UINT256,
+      `Repay ${borrower.name}`,
+      0,
+      expect.any(Function)
+    );
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+  });
+
+  // Accepted risk: a fixed amount stays fixed, so a debt that falls before execution leaves the
+  // excess as direct Comet supply.
+  it.each([
+    ['equal to', 5_000_000n],
+    ['below', 2_000_000n],
+  ])('submits a typed repay %s the debt as that fixed amount', (_, amount) => {
+    const borrower = { ...EMPTY_ACCOUNT, balance: -5_000_000n };
+    render(
+      homeElement({
+        lending: wrappedLending(),
+        state: cometState(borrower),
+        queue: actionQueue([[ActionType.Repay, borrower, amount]]),
+      })
+    );
+
+    mockLastProps.PositionCard.state[1].onSubmitClicked();
+    expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
+    expect(mockWriteState.supply).toHaveBeenCalledWith(
+      USDC_MARKET,
+      borrower.address,
+      amount,
+      `Repay ${borrower.name}`,
+      0,
+      expect.any(Function)
+    );
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+  });
+
+  it('passes a full repay queued before a collateral withdrawal to the Bulker as a repay of the whole debt', () => {
+    const borrower = { ...EMPTY_ACCOUNT, balance: -5_000_000n };
+    const actions: Action[] = [
+      [ActionType.Repay, borrower, MAX_UINT256],
+      [ActionType.WithdrawCollateral, mockCompCollateralAsset(), 10n ** 18n],
+    ];
+    render(homeElement({ lending: wrappedLending(), state: cometState(borrower), queue: actionQueue(actions) }));
+
+    act(() => mockLastProps.PositionCard.state[1].onSubmitClicked());
+    expect(mockWriteState.invokeBulker).toHaveBeenCalledTimes(1);
+    const [market, submitted] = mockWriteState.invokeBulker.mock.calls[0];
+    expect(market).toBe(USDC_MARKET);
+    expect(submitted).toEqual(actions);
+    // An in-place rewrite also changes `actions`, so the comparison above still passes. Check the
+    // amount independently.
+    expect(submitted[0][2]).toBe(MAX_UINT256);
+    expect(mockWriteState.supply).not.toHaveBeenCalled();
   });
 
   it('sends no base supply to Comet from a submit callback kept from before the route became wrapped', () => {
