@@ -45,6 +45,7 @@ jest.mock('../components/InstitutionalBanner', () => mockRecordProps('Institutio
 
 const mockWriteState = {
   approve: jest.fn(),
+  allowOperator: jest.fn(),
   supply: jest.fn(),
   withdraw: jest.fn(),
   invokeBulker: jest.fn(),
@@ -307,7 +308,11 @@ describe('Home on the wrapped route across a wallet change', () => {
     const view = render(homeElement({ lending: wrappedLending(), state, queue: repays, web3: WALLET_A }));
     act(() => mockLastProps.PositionCard.state[1].onSubmitClicked());
     const [, dialog] = mockLastProps.ActionModal.state;
-    return { ...view, completeTransaction: dialog.onCompleteClicked as () => void };
+    return {
+      ...view,
+      approveBulker: dialog.onActionClicked as () => void,
+      completeTransaction: dialog.onCompleteClicked as () => void,
+    };
   }
 
   it('completes a kept Bulker approval dialog in the session that opened it', () => {
@@ -331,6 +336,28 @@ describe('Home on the wrapped route across a wallet change', () => {
 
     // The dialog's callback would sign with wallet A's session, so nothing is submitted.
     expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+  });
+
+  it('asks for the Bulker approval from a kept dialog in the session that opened it', () => {
+    const { rerender, approveBulker } = openBulkerApproval();
+
+    const unchanged = cometState(borrower, { account: ACCOUNT_A, isBulkerAllowed: false });
+    rerender(homeElement({ lending: wrappedLending(), state: unchanged, queue: repays, web3: WALLET_A }));
+    act(() => approveBulker());
+
+    expect(mockWriteState.allowOperator).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a kept dialog's Bulker approval once another wallet is connected", () => {
+    const { rerender, approveBulker } = openBulkerApproval();
+
+    // Wallet B connects, and it has not allowed the Bulker either.
+    const walletB = cometState(borrower, { account: ACCOUNT_B, isBulkerAllowed: false });
+    rerender(homeElement({ lending: wrappedLending(), state: walletB, queue: repays, web3: WALLET_B }));
+    act(() => approveBulker());
+
+    // The dialog's approval would ask wallet A's session to sign, so nothing is requested.
+    expect(mockWriteState.allowOperator).not.toHaveBeenCalled();
   });
 
   it('refuses a kept dialog once the same account connects through another connector', () => {

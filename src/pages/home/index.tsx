@@ -480,7 +480,8 @@ const Home = ({
                     writeState,
                     estimatedGasMap,
                     onRequestClose,
-                    submitBulkerAction
+                    submitBulkerAction,
+                    () => !isSameWalletSession(walletSession, liveWalletSession.current)
                   )
                 );
               } else {
@@ -743,7 +744,8 @@ function actionModalStateBulkerApprove(
   writeState: WriteCometState,
   estimatedGasMap: Map<string, number>,
   onRequestClose: () => void,
-  onCompleteClicked: () => void
+  onCompleteClicked: () => void,
+  isFromAnotherWalletSession: () => boolean
 ): ActionModalBulkerApprove {
   const transactionPredicate = (transactions: Transaction[]) => {
     return transactions.find((transaction) => transaction.key === market.bulkerAddress);
@@ -754,6 +756,11 @@ function actionModalStateBulkerApprove(
       isBulkerAllowed: state.isBulkerAllowed,
       transactions,
       onActionClicked: () => {
+        // The dialog keeps this callback, which asks the session that opened it to sign.
+        if (isFromAnotherWalletSession()) {
+          onRequestClose();
+          return;
+        }
         const allowOperatorGasLimit = estimatedGasMap.get(PreEstimatedAction.AllowOperator) || 0;
         writeState.allowOperator(market, market.bulkerAddress, 'Approve Compound III Proxy', allowOperatorGasLimit);
       },
