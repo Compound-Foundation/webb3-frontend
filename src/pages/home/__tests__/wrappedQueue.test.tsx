@@ -1087,6 +1087,7 @@ describe('Home on the wrapped route', () => {
         lendingWith(controller({ phase: 'signing', draft, steps: [{ status: 'checking' }], stepIndex: 0 })),
         options
       );
+      expect(mockWriteState.supply).not.toHaveBeenCalled();
       rerenderHome(lendingWith(controller({ phase: 'complete', draft, steps: [confirmed()], stepIndex: 0 })), options);
 
       // Comet repays the borrow balance at execution for MAX_UINT256, so the repay leaves no excess.
