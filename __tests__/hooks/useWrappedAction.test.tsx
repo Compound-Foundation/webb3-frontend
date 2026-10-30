@@ -1636,6 +1636,19 @@ describe('useWrappedAction', () => {
     expect(result.current.state).toEqual({ phase: 'idle' });
   });
 
+  it('keeps withdrawals open when a deposit-disable rollback closes deposits only', async () => {
+    // The rollback in docs/anchorage-release-runbook.md: deposits off, exits on.
+    const { manager } = fakeManager(wallet);
+    const { result } = renderAction({
+      session: sessionFor(wallet, { registry: openRegistry({ deposits: false }) }),
+      manager,
+    });
+    await waitFor(() => expect(result.current.session).toEqual({ status: 'usable' }));
+
+    expect(result.current.blockedReason('supply')).toBe('deposits-disabled');
+    expect(result.current.blockedReason('withdraw')).toBeUndefined();
+  });
+
   describe('withdrawal drafts', () => {
     const SHARES = 99_950_027_886_106_918_655n;
     const reviewOf = (shares: bigint): WithdrawalReview => ({
@@ -1730,6 +1743,37 @@ describe('useWrappedAction', () => {
       expect(state.rechecked).not.toBe(RECHECKED);
       expect(Object.isFrozen(state.rechecked)).toBe(true);
       expect(Object.isFrozen(state.rechecked.quote)).toBe(true);
+    });
+
+    it('signs a withdrawal when a deposit-disable rollback closes deposits only', async () => {
+      // The checks before the signature and in the wallet request read the exit control, not the deposit control.
+      const { manager, requests } = fakeManager(wallet);
+      const { result } = renderAction({
+        session: sessionFor(wallet, { registry: openRegistry({ deposits: false }) }),
+        manager,
+      });
+      act(() => {
+        result.current.start('withdraw', async () => ({ amount: SHARES, steps: [EXIT], withdrawal: reviewOf(SHARES) }));
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('review'));
+
+      await confirmAndWaitForWallet(result, requests, 1);
+
+      expect(requests[0].request.key).toBe(USDC_WRAPPER);
+      expect(result.current.state).toMatchObject({ phase: 'signing', steps: [{ status: 'awaiting-signature' }] });
+
+      // The fake manager never calls `send`, so the test calls `send` as the real manager does. `send` checks
+      // the session again, estimates gas and asks the wallet.
+      await expect(requests[0].request.send()).resolves.toBe('0xsent');
+      expect(wallet.getSigner).toHaveBeenCalledWith(ACCOUNT);
+      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
+      // An extra defined field fails this match, so the match also checks that the exit sends no native value.
+      expect(wallet.sendUncheckedTransaction).toHaveBeenCalledWith({
+        to: USDC_WRAPPER,
+        data: CALLS.encodeFunctionData('unwrapAndWithdraw', [SHARES]),
+        chainId: 1,
+        gasLimit: BigNumber.from(120_000),
+      });
     });
 
     it.each<[string, RecheckedWithdrawal, 'supply' | 'withdraw']>([
