@@ -1207,6 +1207,33 @@ describe('useWrappedAction', () => {
       expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     });
 
+    it('does not take a request the last check withdrew as handed to the wallet when the session breaks later', async () => {
+      const { manager, requests } = fakeManager(wallet);
+      const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });
+      let finishEstimate: (gas: BigNumber) => void = () => undefined;
+      wallet.estimateGas.mockImplementationOnce(() => new Promise((resolve) => (finishEstimate = resolve)));
+      await reachReview(result);
+      await confirmAndWaitForWallet(result, requests, 1);
+      const sending = requests[0].request.send();
+      await waitFor(() => expect(wallet.estimateGas).toHaveBeenCalledTimes(1));
+
+      // The signer goes away while gas is estimated, so the check after the estimate withdraws the
+      // request. The manager has not reported that result yet when the session breaks.
+      rerender({ session: sessionFor(wallet, { isSignerReady: false }), manager });
+      finishEstimate(BigNumber.from(100_000));
+      await expect(sending).rejects.toBeInstanceOf(SendWithdrawnError);
+      expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+      rerender({
+        session: sessionFor(wallet, { isSignerReady: false }),
+        manager: { ...manager, walletFailure: { provider: wallet, message: 'sendMessage' } },
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+      expect(result.current.state).toMatchObject({
+        steps: [{ status: 'blocked', reason: 'session-unusable' }, { status: 'waiting' }],
+      });
+    });
+
     it('does not take a request an earlier draft handed to the wallet as the request of a later draft', async () => {
       const { manager, requests } = fakeManager(wallet);
       const { result, rerender } = renderAction({ session: sessionFor(wallet), manager });

@@ -1277,7 +1277,7 @@ describe('WrappedWithdraw', () => {
       ['the user rejected it', { status: 'rejected' }],
       ['the wallet refused it before handling it', { status: 'refused', message: 'Unauthorized (4100)' }],
       ['the wallet reported another error', { status: 'provider-failure', message: 'Internal error (-32603)' }],
-    ])('drops the estimate notices once the wallet no longer holds the request: %s', async (_name, answer) => {
+    ])('drops the estimate notices when no wallet answer says the request is open: %s', async (_name, answer) => {
       const exit = liveExit(PARTIAL_REVIEW, passes(PARTIAL_RECHECKED));
       await reachWallet(exit);
 
