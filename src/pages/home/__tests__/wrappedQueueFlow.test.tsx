@@ -14,6 +14,7 @@ import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContex
 import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
+import { MAX_UINT256 } from '@helpers/numbers';
 import { WrappedBlockReason } from '@helpers/wrappedActions';
 import { WrappedPosition } from '@helpers/wrappedPositions';
 import { useActionQueue } from '@hooks/useActionQueue';
@@ -371,6 +372,41 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     expect(row.querySelector('.action-queue-item__balance .load-spinner--new')).not.toBeNull();
     expect(row).not.toHaveTextContent(/share/i);
     expect(row).not.toHaveTextContent('260.0000');
+  });
+
+  it('keeps a queued Max repay as a repay of the whole debt after the user re-opens and updates it', async () => {
+    const user = userEvent.setup();
+    // A 5 USDC direct Comet borrow, which the 1,000 USDC wallet balance covers, and Comet approved.
+    const borrower = { ...BASE_ASSET, balance: -5_000_000n, allowance: MAX_UINT256 };
+    const indebted = [COMET_STATE[0], { ...COMET_STATE[1], baseAsset: borrower }] as unknown as CometState;
+    recordCometStateSource(indebted, { chainId: 1, cometAddress: USDC_COMET }, ACCOUNT);
+    const value = lending(POSITION);
+    const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
+    view.rerender(<Dashboard value={value} state={indebted} />);
+
+    await user.click(screen.getByRole('button', { name: 'Repay USDC' }));
+    await user.click(formButton('Max'));
+    await user.click(formButton('Add Action'));
+
+    // Re-open the queued repay and add it again without a change.
+    await user.click(within(desktopQueue()).getByText('Repay USDC'));
+    expect(formButton('Update Action')).toBeEnabled();
+    await user.click(formButton('Update Action'));
+    expect(screen.queryByRole('button', { name: 'Update Action' })).toBeNull();
+    await user.click(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' }));
+
+    // Comet repays the borrow balance at execution for MAX_UINT256, so the repay leaves no excess.
+    expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
+    expect(mockWriteState.supply).toHaveBeenCalledWith(
+      USDC_MARKET,
+      USDC,
+      MAX_UINT256,
+      `Repay ${borrower.name}`,
+      0,
+      expect.any(Function)
+    );
+    expect(value.write.supply).not.toHaveBeenCalled();
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
   });
 
   it('refuses a partial withdrawal above what the wrapper pays now', async () => {
