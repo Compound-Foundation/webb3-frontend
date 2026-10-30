@@ -11,7 +11,11 @@
     "export:extra": "mkdir ./out/markets && cp ./out/markets.html ./out/markets/index.html",
     "sleuth": "forge build --via-ir --root ./src/helpers -C Sleuth -o sleuth/out",
     "test": "TZ=UTC jest",
+    "test:fork-runner": "node --test scripts/lib/__tests__/wrapped-fork-runner.test.js",
     "lint": "eslint . --ext .ts --ext .tsx",
+    "test:browser": "playwright test -c e2e/playwright.config.ts",
+    "test:browser:dev": "BROWSER_TEST_SKIP_PROD=1 playwright test -c e2e/playwright.config.ts --project=dev",
+    "test:browser:open": "BROWSER_WALLET_INTERACTIVE=1 playwright test -c e2e/playwright.config.ts --project=interactive",
     "ipfs": "node scripts/ipfs.js",
     "release": "node scripts/release.js"
   },
@@ -48,6 +52,7 @@
     "wagmi": "^2.17.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.0",
     "@testing-library/react": "^16.3.0",
@@ -110,7 +115,12 @@
     "**/postcss/nanoid": "^3.3.18",
     "kubo-rpc-client/nanoid": "^5.1.16",
     "source-map-js": "^1.2.2",
-    "**/@reown/appkit-wallet/zod": "^4.6.6"
+    "**/@reown/appkit-wallet/zod": "^4.6.6",
+    "@walletconnect/core": "2.21.10",
+    "@walletconnect/sign-client": "2.21.10",
+    "@walletconnect/types": "2.21.10",
+    "@walletconnect/universal-provider": "2.21.10",
+    "@walletconnect/utils": "2.21.10"
   },
   "volta": {
     "node": "22.22.0"

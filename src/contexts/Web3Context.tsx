@@ -96,6 +96,11 @@ export type WriteWeb3 = {
   chainId: number | undefined;
   account: string | undefined;
   isActive: boolean;
+  /**
+   * wagmi's connection status. `isActive` stays true while wagmi reconnects with the same account
+   * and connector, so only this shows the reconnect.
+   */
+  status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected';
   provider: JsonRpcProvider | EthersWeb3Provider | undefined;
 };
 
@@ -128,7 +133,13 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
   const [desiredWriteNetwork, setDesiredWriteNetwork] = useState<undefined | number>();
   const [readChainId, setReadChainId] = useState<number>(DEFAULT_READ_CHAIN_ID);
 
-  const { address: account, chainId: writeChainId, connector: writeConnector, isConnected } = useAccount();
+  const {
+    address: account,
+    chainId: writeChainId,
+    connector: writeConnector,
+    isConnected,
+    status: connectionStatus,
+  } = useAccount();
   const { connectAsync, connectors } = useConnect();
   const { reconnect } = useReconnect();
   const { disconnect } = useDisconnect();
@@ -149,6 +160,7 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
       connector: undefined,
       chainId: readChainId,
       isActive: true,
+      status: connectionStatus,
       provider: undefined,
     };
   } else {
@@ -157,6 +169,7 @@ export const Web3Provider = ({ children }: Web3ProviderProps) => {
       connector: writeConnector,
       chainId: writeChainId,
       isActive: isConnected,
+      status: connectionStatus,
       provider: writeProvider,
     };
   }

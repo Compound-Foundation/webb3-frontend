@@ -2,6 +2,7 @@ import { ChangeEventHandler, ChangeEvent, Dispatch, useEffect, useRef, useState 
 
 import { isUnwrappedCollateralAsset } from '@constants/chains';
 import {
+  ActionRules,
   calculateUpdatedBalances,
   getActionFromPendingAction,
   isSameAction,
@@ -24,6 +25,10 @@ import {
 
 const approveAssetHelperText = (symbol: string) =>
   `You need to approve Compound on the ${symbol} contract before you can use this asset. You only need to do this once.`;
+// On the wrapped route each approval is for exactly the amount and the supply spends it, so the
+// hint does not say that one approval is enough.
+const approveWrapperHelperText = (symbol: string) =>
+  `You need to approve Compound on the ${symbol} contract before you can use this asset.`;
 const CONFIRM_BUTTON_TEXT_APPROVE = 'Approve & Add';
 const UPDATE_ALLOWANCE_STRING =
   'This amount exceeds the allowance you previously set for this asset. You will be asked to approve an increase when you add this action.';
@@ -38,6 +43,8 @@ type ActionInputViewProps = {
   onCancel: () => void;
   onConfirm: (amount: bigint, description: string) => void;
   setPendingActionAmount: (amount?: bigint) => void;
+  /** Extra rules the amount must meet, such as the wrapped route's release controls and withdrawal limit. */
+  actionRules?: ActionRules;
 };
 
 const ActionInputView = ({
@@ -50,6 +57,7 @@ const ActionInputView = ({
   onCancel,
   setPendingActionAmount,
   onConfirm,
+  actionRules,
 }: ActionInputViewProps) => {
   const [initialValueString, initialMaxClicked] = initialValue === undefined ? ['', false] : initialValue;
   const inputEl = useRef<HTMLInputElement>(null);
@@ -105,7 +113,8 @@ const ActionInputView = ({
     isUnwrappedCollateralAsset(market.chainInformation, pendingAction[1].address),
     setMaxClicked,
     setPendingActionAmount,
-    onConfirm
+    onConfirm,
+    actionRules
   );
 
   return (
@@ -198,7 +207,8 @@ function getContent(
   unwrappedCollateralAsset: boolean,
   setMaxClicked: Dispatch<boolean>,
   setPendingActionAmount: (amount?: bigint) => void,
-  onConfirm: (amount: bigint, description: string) => void
+  onConfirm: (amount: bigint, description: string) => void,
+  actionRules?: ActionRules
 ): Content {
   const [actionType, asset] = pendingAction;
   let title: string;
@@ -228,7 +238,8 @@ function getContent(
       baseAssetPre,
       collateralAssets,
       actionsToUse,
-      getActionFromPendingAction(pendingAction, amount)
+      getActionFromPendingAction(pendingAction, amount),
+      actionRules
     );
 
     if (isValid !== 'ok') {
@@ -292,12 +303,27 @@ function getContent(
         };
       }
 
-      if (baseAsset.allowance === 0n) {
-        actionHintString = approveAssetHelperText(baseAsset.symbol);
-        confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
-      } else if (maybeBigIntInputValue && baseAsset.allowance < maybeBigIntInputValue) {
-        actionHintString = UPDATE_ALLOWANCE_STRING;
-        confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
+      const wrappedBase = actionRules?.wrappedBase;
+      if (wrappedBase === undefined) {
+        if (baseAsset.allowance === 0n) {
+          actionHintString = approveAssetHelperText(baseAsset.symbol);
+          confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
+        } else if (maybeBigIntInputValue && baseAsset.allowance < maybeBigIntInputValue) {
+          actionHintString = UPDATE_ALLOWANCE_STRING;
+          confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
+        }
+      } else {
+        // On the wrapped route the supply spends the allowance to the wrapper, which Approve & Add
+        // asks for, for exactly the amount. Max supplies the wallet balance.
+        const wrapperAllowance = wrappedBase.supplyAllowance ?? 0n;
+        const amount = maxClicked ? availableAmountRaw : maybeBigIntInputValue;
+        if (wrapperAllowance === 0n) {
+          actionHintString = approveWrapperHelperText(baseAsset.symbol);
+          confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
+        } else if (amount && wrapperAllowance < amount) {
+          actionHintString = UPDATE_ALLOWANCE_STRING;
+          confirmButtonText = CONFIRM_BUTTON_TEXT_APPROVE;
+        }
       }
 
       onMaxButtonClicked = () => {

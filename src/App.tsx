@@ -14,13 +14,22 @@ import { CurrencyContextProvider } from '@contexts/CurrencyContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { initializeContext, getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import { useWeb3Context } from '@contexts/Web3Context';
-import { estimateGasForActions, getKeyForActions, initialEstimatedGasMap } from '@helpers/gasEstimator';
-import { useActionQueue } from '@hooks/useActionQueue';
+import { queueScope, submissionScope, WrappedLendingContext } from '@contexts/WrappedLendingContext';
+import { useEthersProvider } from '@helpers/ethersAdapter';
+import { estimateGasForActions, getKeyForActions } from '@helpers/gasEstimator';
+import { directActionsForRoute } from '@helpers/queuedExecution';
+import { QueueSession, useActionQueue } from '@hooks/useActionQueue';
 import { useCometState } from '@hooks/useCometState';
+import { useGasEstimates } from '@hooks/useGasEstimates';
+import { useLendingRoute } from '@hooks/useLendingRoute';
 import { useRewardsState } from '@hooks/useRewardsState';
 import { useSelectedMarketState } from '@hooks/useSelectedMarket';
+import { useSubmissionStore } from '@hooks/useSubmissionStore';
 import { useThemeManager } from '@hooks/useThemeManager';
 import { useTransactionManager } from '@hooks/useTransactionManager';
+import { useSignWhenReady, useWrappedAction } from '@hooks/useWrappedAction';
+import { positionRefreshToken, useWrappedPosition } from '@hooks/useWrappedPosition';
+import { newestReceiptBlock, useWriteWrappedState } from '@hooks/useWriteWrappedState';
 import { Action, MarketDataLoaded, StateType } from '@types';
 
 import { allExtensions } from './pages/extensions/helpers/list';
@@ -38,7 +47,15 @@ function App({ Component, pageProps }: any) {
 
   const location = useLocation();
 
-  const { transactions, addTransaction, clearTransactions } = useTransactionManager(web3);
+  const {
+    transactions,
+    settledTransactions,
+    walletFailure,
+    restoredSession,
+    addTransaction,
+    submitTransaction,
+    clearTransactions,
+  } = useTransactionManager(web3);
   const rewardsState = useRewardsState(web3, transactions);
   const { theme, setTheme } = useThemeManager();
   const themeRef = useRef(theme);
@@ -80,6 +97,46 @@ function App({ Component, pageProps }: any) {
   const cometState = useCometState(web3, selectedMarketState.selectedMarket, transactions, rewardsState);
   initializeContext(selectedMarketState);
 
+  const lendingRoute = useLendingRoute(selectedMarketState.selectedMarket[1]);
+  const wrappedChainProvider = useEthersProvider({
+    chainId: lendingRoute.kind === 'wrapped' ? lendingRoute.chainId : undefined,
+  });
+  const wrappedAction = useWrappedAction({
+    session: {
+      route: lendingRoute,
+      account: web3.write.account,
+      chainId: web3.write.chainId,
+      screeningStatus: web3.screeningStatus,
+      provider: web3.write.provider,
+    },
+    manager: {
+      transactions,
+      settledTransactions,
+      walletFailure,
+      restoredSession,
+      submitTransaction,
+    },
+    readProvider: wrappedChainProvider,
+  });
+  // A wrapper action starts from the user's press of Approve & Add or Submit Transaction, which
+  // confirms it, so each step is signed once it is ready, after its checks.
+  useSignWhenReady(wrappedAction);
+  const wrappedPosition = useWrappedPosition({
+    route: lendingRoute,
+    account: web3.write.account,
+    provider: wrappedChainProvider,
+    // Read again whenever a transaction is added or settles, such as a wrapped supply's approval,
+    // from a block that shows the account's newest settled wrapper transaction.
+    refreshToken: positionRefreshToken(transactions, settledTransactions),
+    minBlock: newestReceiptBlock(wrappedAction.recovered.settled),
+  });
+  const wrappedWrite = useWriteWrappedState({
+    action: wrappedAction,
+    route: lendingRoute,
+    readProvider: wrappedChainProvider,
+    baseSymbol: selectedMarketState.selectedMarket[1]?.baseAsset.symbol,
+  });
+
   const handleRequestNetworkSwitch = (fromChainId: number, toChainId: number, description?: string) => {
     setNetworkSwitchState({
       fromChainId,
@@ -101,9 +158,25 @@ function App({ Component, pageProps }: any) {
     }
   };
 
+  // The queue and its gas estimates belong to the wallet session they were made in.
+  const walletSession: QueueSession = {
+    account: web3.write.account,
+    connector: web3.write.connector?.uid,
+    status: web3.write.status,
+  };
+  // The estimates also belong to the wallet's network, which the queue survives.
+  const { estimatedGasMap, addEstimate } = useGasEstimates({
+    session: walletSession,
+    walletChainId: web3.write.chainId,
+    market: selectedMarketState.selectedMarket[1],
+  });
+
   // Wallet connect for mobile requires that we pre-estimate gas for
-  // transactions before they are submitted for better UX.
-  const preEstimateGas = async (actions: Action[]) => {
+  // transactions before they are submitted for better UX. On the wrapped route
+  // only the actions sent to Comet or the Bulker are estimated here: the
+  // wrapper action estimates each of its own steps just before it is signed.
+  const preEstimateGas = (queuedActions: Action[]) => {
+    const actions = directActionsForRoute(lendingRoute, queuedActions);
     if (
       actions.length > 0 &&
       selectedMarketState.selectedMarket[0] == StateType.Hydrated &&
@@ -111,29 +184,31 @@ function App({ Component, pageProps }: any) {
     ) {
       const actionsKey = getKeyForActions(actions);
       if (!estimatedGasMap.has(actionsKey) || estimatedGasMap.get(actionsKey) === 0) {
-        const estimatedGas = await estimateGasForActions(
-          web3,
-          selectedMarketState.selectedMarket[1] as MarketDataLoaded,
-          cometState[1].baseAsset,
-          cometState[1].collateralAssets,
-          actions
+        addEstimate(
+          actionsKey,
+          estimateGasForActions(
+            web3,
+            selectedMarketState.selectedMarket[1] as MarketDataLoaded,
+            cometState[1].baseAsset,
+            cometState[1].collateralAssets,
+            actions
+          )
         );
-
-        const newGasMap = new Map(estimatedGasMap.set(actionsKey, estimatedGas));
-        setEstimatedGasMap(newGasMap);
       }
     }
   };
 
-  const [estimatedGasMap, setEstimatedGasMap] = useState(initialEstimatedGasMap(undefined));
   const actionQueue = useActionQueue(
     selectedMarketState.selectedMarket,
     (actions: Action[]) => {
       preEstimateGas(actions);
     },
-    web3.write.account
+    walletSession
   );
 
+  // A change of the wallet's network keeps the queue but drops its estimates. This effect then
+  // estimates the kept queue again on the new network, under its usual conditions: no transaction
+  // is tracked, and the market and Comet state are loaded.
   useEffect(() => {
     // If a user hasn't enabled bulker then they first have to enable bulker
     // while they have actions in the queue so this catches that flow.
@@ -149,15 +224,33 @@ function App({ Component, pageProps }: any) {
       );
       preEstimateGas(actionsInQueue);
     }
-  }, [transactions, selectedMarketState.selectedMarket[0], cometState[0], rewardsState[0]]);
+  }, [transactions, selectedMarketState.selectedMarket[0], cometState[0], rewardsState[0], web3.write.chainId]);
 
-  useEffect(() => {
-    let maybeChainInfo = undefined;
-    if (selectedMarketState.selectedMarket[0] == StateType.Hydrated) {
-      maybeChainInfo = selectedMarketState.selectedMarket[1].chainInformation;
-    }
-    setEstimatedGasMap(initialEstimatedGasMap(maybeChainInfo));
-  }, [selectedMarketState.selectedMarket]);
+  // The queued submission and the wrapper action it started live here, with the lifecycle, so they
+  // survive the dashboard's unmount. The submission belongs to its scope, the wallet's network
+  // included, and a change of scope drops it whichever page is shown. The wrapper action it started
+  // is followed until its last step's outcome is known, across a change of network, and its queue
+  // entry is held until then.
+  const selectedMarket = selectedMarketState.selectedMarket[1];
+  const marketIdentity =
+    selectedMarket === undefined
+      ? undefined
+      : { chainId: selectedMarket.chainInformation.chainId, cometAddress: selectedMarket.marketAddress };
+  const submissionStore = useSubmissionStore({
+    scope: submissionScope(web3.write, marketIdentity),
+    queueScope: queueScope(web3.write, marketIdentity),
+    transactions,
+    settledTransactions,
+    removeAction: actionQueue.removeAction,
+  });
+  const wrappedLending = {
+    route: lendingRoute,
+    position: wrappedPosition.state,
+    retry: wrappedPosition.retry,
+    action: wrappedAction,
+    write: wrappedWrite,
+    submission: submissionStore,
+  };
 
   ActionQueueContextHelpers.initializeContext(actionQueue);
   const ActionQueueContext = ActionQueueContextHelpers.getActionQueueContext();
@@ -198,24 +291,26 @@ function App({ Component, pageProps }: any) {
               />
               <NetworkSwitchModal state={networkSwitchState} onSwitchNetwork={handleSwitchNetwork} />
               <div className="app-content">
-                <Component
-                  transactions={transactions}
-                  web3={web3}
-                  addTransaction={addTransaction}
-                  theme={theme}
-                  cometState={cometState}
-                  setShowConnectWalletModal={setShowConnectWalletModal}
-                  switchWriteNetwork={(chainId: number, description?: string) => {
-                    if (web3.write.chainId) {
-                      handleRequestNetworkSwitch(web3.write.chainId, chainId, description);
-                      return;
-                    }
+                <WrappedLendingContext.Provider value={wrappedLending}>
+                  <Component
+                    transactions={transactions}
+                    web3={web3}
+                    addTransaction={addTransaction}
+                    theme={theme}
+                    cometState={cometState}
+                    setShowConnectWalletModal={setShowConnectWalletModal}
+                    switchWriteNetwork={(chainId: number, description?: string) => {
+                      if (web3.write.chainId) {
+                        handleRequestNetworkSwitch(web3.write.chainId, chainId, description);
+                        return;
+                      }
 
-                    web3.switchWriteNetwork(chainId);
-                  }}
-                  estimatedGasMap={estimatedGasMap}
-                  {...pageProps}
-                />
+                      web3.switchWriteNetwork(chainId);
+                    }}
+                    estimatedGasMap={estimatedGasMap}
+                    {...pageProps}
+                  />
+                </WrappedLendingContext.Provider>
                 <ScreeningErrorOverlay screeningStatus={web3.screeningStatus} />
               </div>
               <Footer theme={theme} setTheme={setTheme} />
