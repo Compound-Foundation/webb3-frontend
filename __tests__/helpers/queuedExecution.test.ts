@@ -8,6 +8,7 @@ import { Eligibility, LendingRoute, LendingSession, resolveLendingRoute, wrapped
 import { MAX_UINT256 } from '@helpers/numbers';
 import {
   directActionsForRoute,
+  isSingleActionRoute,
   isWrapperRouted,
   planQueuedExecution,
   wrappedEntryBlockLabel,
@@ -124,31 +125,26 @@ describe('isWrapperRouted and planQueuedExecution', () => {
     expect(planQueuedExecution(route, baseFor(USDC), [], [supply]).direct).toEqual([]);
   });
 
-  it('keeps the other actions of a mixed queue direct, in their queued order', () => {
+  it('lists the direct actions of a mixed queue in their queued order', () => {
     const route = routeFor(WRAPPED_MARKETS[1].comet);
     const baseAsset = baseFor(USDT, 'USDT');
     const supplyCollateral: Action = [ActionType.SupplyCollateral, COLLATERAL, 10n ** 17n];
     const supply: Action = [ActionType.Supply, baseAsset, 3_000_000n];
     const withdrawCollateral: Action = [ActionType.WithdrawCollateral, COLLATERAL, 10n ** 16n];
 
-    const plan = planQueuedExecution(route, baseAsset, [COLLATERAL], [supplyCollateral, supply, withdrawCollateral]);
-    expect(plan.wrapper).toEqual({ type: 'supply', action: supply, amount: 3_000_000n });
-    expect(plan.direct).toEqual([supplyCollateral, withdrawCollateral]);
     expect(directActionsForRoute(route, [supplyCollateral, supply, withdrawCollateral])).toEqual([
       supplyCollateral,
       withdrawCollateral,
     ]);
   });
 
-  it('turns a maximum supply into the wallet balance the earlier actions leave', () => {
+  it('turns a maximum supply into the wallet balance', () => {
     const route = routeFor(WRAPPED_MARKETS[0].comet);
-    const baseAsset = { ...baseFor(USDC), balance: -1_000_000_000n };
-    const repay: Action = [ActionType.Repay, baseAsset, 1_000_000_000n];
-    const supply: Action = [ActionType.Supply, baseAsset, MAX_UINT256];
+    const supply: Action = [ActionType.Supply, baseFor(USDC), MAX_UINT256];
 
-    const plan = planQueuedExecution(route, baseAsset, [], [repay, supply]);
-    expect(plan.wrapper).toEqual({ type: 'supply', action: supply, amount: 4_000_000_000n });
-    expect(plan.direct).toEqual([repay]);
+    const plan = planQueuedExecution(route, baseFor(USDC), [], [supply]);
+    expect(plan.wrapper).toEqual({ type: 'supply', action: supply, amount: 5_000_000_000n });
+    expect(plan.direct).toEqual([]);
   });
 
   it('turns a maximum withdrawal into a full exit', () => {
@@ -180,6 +176,89 @@ describe('isWrapperRouted and planQueuedExecution', () => {
     expect(() => planQueuedExecution(route, other, [], [[ActionType.Supply, other, 1_000_000n]])).toThrow(
       WrappedExecutionError
     );
+  });
+});
+
+describe('single-action queues', () => {
+  const collateralActions = (baseAsset: ReturnType<typeof baseFor>): [string, Action][] => [
+    ['collateral supply', [ActionType.SupplyCollateral, COLLATERAL, 10n ** 17n]],
+    ['collateral withdrawal', [ActionType.WithdrawCollateral, COLLATERAL, 10n ** 16n]],
+    ['borrow', [ActionType.Borrow, baseAsset, 1_000_000n]],
+    ['repay', [ActionType.Repay, baseAsset, 1_000_000n]],
+  ];
+
+  it.each(WRAPPED_MARKETS)('limits Anchorage on the $name market to one action', ({ comet }) => {
+    expect(isSingleActionRoute(routeFor(comet))).toBe(true);
+  });
+
+  it.each(WRAPPED_MARKETS)('keeps batching for another wallet on the $name market', ({ comet }) => {
+    expect(isSingleActionRoute(routeFor(comet, 'io.metamask'))).toBe(false);
+  });
+
+  it('keeps batching for Anchorage on a market without a wrapper', () => {
+    expect(isSingleActionRoute(routeFor(WETH_COMET))).toBe(false);
+  });
+
+  it('limits Anchorage to one action while the release controls are closed', () => {
+    const closed = buildWrappedMarketRegistry(HARDCODED_WRAPPED_LENDING_SOURCE);
+    expect(isSingleActionRoute(routeFor(WRAPPED_MARKETS[0].comet, ANCHORAGE_CONNECTOR_ID, closed))).toBe(true);
+  });
+
+  describe.each(WRAPPED_MARKETS)('on the $name market with Anchorage', ({ comet, base }) => {
+    const route = routeFor(comet);
+    const baseAsset = baseFor(base);
+    const wrapperActions: [string, Action][] = [
+      ['supply', [ActionType.Supply, baseAsset, 1_000_000n]],
+      ['withdrawal', [ActionType.Withdraw, baseAsset, 1_000_000n]],
+    ];
+    const pairs = wrapperActions.flatMap(([wrapperName, wrapperAction]) =>
+      collateralActions(baseAsset).flatMap(([otherName, other]): [string, Action[]][] => [
+        [`${wrapperName} then ${otherName}`, [wrapperAction, other]],
+        [`${otherName} then ${wrapperName}`, [other, wrapperAction]],
+      ])
+    );
+
+    it.each(pairs)('refuses a queue of a %s whole, before any wallet request', (_name, actions) => {
+      expect(() => planQueuedExecution(route, baseAsset, [COLLATERAL], actions)).toThrow(
+        expect.objectContaining({ problem: 'several-actions' })
+      );
+    });
+
+    it('refuses two direct actions whole', () => {
+      const [[, first], [, second]] = collateralActions(baseAsset);
+      expect(() => planQueuedExecution(route, baseAsset, [COLLATERAL], [first, second])).toThrow(
+        expect.objectContaining({ problem: 'several-actions' })
+      );
+    });
+
+    it.each(collateralActions(baseAsset))('plans a single %s as one direct action', (_name, action) => {
+      expect(planQueuedExecution(route, baseAsset, [COLLATERAL], [action])).toEqual({
+        wrapper: undefined,
+        direct: [action],
+      });
+    });
+  });
+
+  it.each(WRAPPED_MARKETS)('plans several actions for another wallet on the $name market', ({ comet, base }) => {
+    const route = routeFor(comet, 'io.metamask');
+    const baseAsset = baseFor(base);
+    const actions = collateralActions(baseAsset).map(([, action]) => action);
+
+    expect(planQueuedExecution(route, baseAsset, [COLLATERAL], actions)).toEqual({
+      wrapper: undefined,
+      direct: actions,
+    });
+  });
+
+  it('plans several actions for Anchorage on a market without a wrapper', () => {
+    const route = routeFor(WETH_COMET);
+    const baseAsset = baseFor(WETH, 'WETH');
+    const actions = collateralActions(baseAsset).map(([, action]) => action);
+
+    expect(planQueuedExecution(route, baseAsset, [COLLATERAL], actions)).toEqual({
+      wrapper: undefined,
+      direct: actions,
+    });
   });
 });
 

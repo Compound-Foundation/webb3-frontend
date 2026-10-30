@@ -13,8 +13,8 @@ export type QueuedWrapperAction =
   | { type: 'withdraw'; action: Action; request: WithdrawalRequest };
 
 /**
- * How a queue is submitted: the wrapper action first, as its own wallet transactions, then the
- * other actions to Comet or the Bulker, as before. Either part can be empty.
+ * How a queue is submitted: a wrapper action as its own wallet transactions, or the direct actions
+ * to Comet or the Bulker. On the wrapped route the queue holds one action, so one part is empty.
  */
 export type QueuedExecutionPlan = { wrapper: QueuedWrapperAction | undefined; direct: Action[] };
 
@@ -27,6 +27,15 @@ export function isWrapperRouted(route: LendingRoute, action: Action): boolean {
   return route.kind === 'wrapped' && (action[0] === ActionType.Supply || action[0] === ActionType.Withdraw);
 }
 
+/**
+ * Whether the queue on `route` holds at most one action. On the wrapped route a base supply or
+ * withdrawal goes to the wrapper, which the Bulker cannot call. Each action there is therefore
+ * submitted on its own, whatever its kind.
+ */
+export function isSingleActionRoute(route: LendingRoute): boolean {
+  return route.kind === 'wrapped';
+}
+
 /** The actions of the queue that go to Comet or the Bulker on `route`, in their queued order. */
 export function directActionsForRoute(route: LendingRoute, actions: Action[]): Action[] {
   return actions.filter((action) => !isWrapperRouted(route, action));
@@ -35,9 +44,9 @@ export function directActionsForRoute(route: LendingRoute, actions: Action[]): A
 /**
  * Splits a queue into the wrapper action and the direct actions, as `QueuedExecutionPlan`
  * describes. On the standard route every action is direct. A maximum supply supplies the wallet
- * balance the earlier queued actions leave, and a maximum withdrawal is a full exit. A queue with
- * more than one wrapper action, or a base action for another token than the wrapper's, is refused
- * whole with a `WrappedExecutionError`, so no part of it is submitted.
+ * balance, and a maximum withdrawal is a full exit. A `WrappedExecutionError` refuses the whole
+ * queue when it holds more than one action on a route limited to one. It does the same for a base
+ * action for another token than the wrapper's. No part of a refused queue is submitted.
  */
 export function planQueuedExecution(
   route: LendingRoute,
@@ -45,16 +54,13 @@ export function planQueuedExecution(
   collateralAssets: TokenWithAccountState[],
   actions: Action[]
 ): QueuedExecutionPlan {
-  const direct = directActionsForRoute(route, actions);
-  if (route.kind !== 'wrapped') return { wrapper: undefined, direct };
-
-  const wrapperIndexes = actions.flatMap((action, index) => (isWrapperRouted(route, action) ? [index] : []));
-  if (wrapperIndexes.length === 0) return { wrapper: undefined, direct };
-  if (wrapperIndexes.length > 1) {
-    throw new WrappedExecutionError('several-wrapped-actions', 'Submit one supply or withdrawal at a time.');
+  if (isSingleActionRoute(route) && actions.length > 1) {
+    throw new WrappedExecutionError('several-actions', 'Submit one action at a time.');
   }
-  const index = wrapperIndexes[0];
-  const action = actions[index];
+  const direct = directActionsForRoute(route, actions);
+  // The wrapped route holds one action, so the queue is either that wrapper action or direct.
+  const action = actions.find((queued) => isWrapperRouted(route, queued));
+  if (action === undefined || route.kind !== 'wrapped') return { wrapper: undefined, direct };
   const [actionType, asset, amount] = action;
   const baseToken = route.market?.baseTokenAddress;
   if (baseToken !== undefined && asset.address.toLowerCase() !== baseToken.toLowerCase()) {
@@ -62,7 +68,7 @@ export function planQueuedExecution(
   }
 
   if (actionType === ActionType.Supply) {
-    const supplied = sanitizedAmountForAction(baseAsset, collateralAssets, actions.slice(0, index), action);
+    const supplied = sanitizedAmountForAction(baseAsset, collateralAssets, [], action);
     return { wrapper: { type: 'supply', action, amount: supplied }, direct };
   }
   const request: WithdrawalRequest = amount === MAX_UINT256 ? { kind: 'full' } : { kind: 'partial', cash: amount };

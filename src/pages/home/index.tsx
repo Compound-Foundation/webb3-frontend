@@ -17,6 +17,7 @@ import {
   isSameAction,
   isSameToken,
   calculateUpdatedBalances,
+  addsSecondAction,
   getActionFromPendingAction,
   sanitizedAmountForAction,
 } from '@helpers/actions';
@@ -28,6 +29,7 @@ import { WriteBlockReason } from '@helpers/lendingRoute';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import {
+  isSingleActionRoute,
   isWrapperRouted,
   planQueuedExecution,
   QueuedExecutionPlan,
@@ -224,6 +226,8 @@ const Home = ({
   const liveWrappedLending = useRef(wrappedLending);
   liveWrappedLending.current = wrappedLending;
   const liveActionRules = useRef<ActionRules>({});
+  // The queue as the latest render shows it, which the amount form's kept confirm callback reads.
+  const liveQueuedActions = useRef<Action[]>([]);
   const selectedMarketIdentity: MarketIdentity | undefined =
     selectedMarket[1] === undefined
       ? undefined
@@ -385,16 +389,11 @@ const Home = ({
   const submissionState: WrappedActionState = isSubmissionState ? lifecycleState : { phase: 'idle' };
   const isRunInFlight =
     submissionState.phase === 'reading' || submissionState.phase === 'review' || submissionState.phase === 'signing';
-  // The last run this dashboard saw in flight. The direct actions follow only a supply or withdrawal
-  // the dashboard followed to its receipt.
-  const runSeenInFlight = useRef<SubmissionRecord>();
-  if (isRunInFlight) runSeenInFlight.current = submission;
   // An approval ends when it confirms or stops, and its queued supply stays as it is: the row says
   // whether the allowance now covers it. A supply or withdrawal that confirms leaves the queue, and
-  // the direct actions are submitted next. One that confirmed while another page was shown leaves
-  // them queued for the next Submit, so no wallet request opens when the user returns. One that stops with nothing sent stays queued, with a
-  // label on its row unless the wallet declined it. One that stops at its last step in a state where
-  // it can still go through leaves the queue too, so it is not submitted twice.
+  // so does one that confirmed while another page was shown. One that stops with nothing sent stays
+  // queued, with a label on its row unless the wallet declined it. One that stops at its last step in
+  // a state where it can still go through leaves the queue too, so it is not submitted twice.
   useEffect(() => {
     if (submission === undefined || submission.status.kind !== 'running') return;
     const { phase } = submissionState;
@@ -406,9 +405,6 @@ const Home = ({
     if (phase === 'complete') {
       removeAction(submission.wrapper.action);
       setSubmissionRecord(undefined);
-      if (submission.directCount > 0 && runSeenInFlight.current === submission) {
-        continueAfterWrapper.current?.(submission.wrapper.action);
-      }
     } else if (phase === 'stopped') {
       if (mayStillExecute(submissionState)) removeAction(submission.wrapper.action);
       const step = submissionState.steps[submissionState.stepIndex];
@@ -423,11 +419,6 @@ const Home = ({
       setSubmissionRecord(undefined);
     }
   }, [submission, submissionState]);
-  // Submits the direct actions once the wrapper action before them confirmed. Set while the
-  // dashboard is hydrated.
-  const continueAfterWrapper = useRef<(executed: Action) => void>();
-  continueAfterWrapper.current = undefined;
-
   let assetRows: ReactNode[];
   let otherAssetRows: ReactNode[] = [];
   let mastheadState: MastheadState;
@@ -536,6 +527,7 @@ const Home = ({
           ? undefined
           : wrappedWithdrawalLimits(wrappedPosition, directBaseAsset.balanceOfComet);
       actionRules = {
+        isSingleAction: isSingleActionRoute(lendingRoute),
         wrappedBase: {
           supplyBlockedReason: wrappedEntryBlockLabel(lendingRoute, 'supply'),
           withdrawBlockedReason: wrappedEntryBlockLabel(lendingRoute, 'withdraw'),
@@ -575,6 +567,7 @@ const Home = ({
     const actions = getActions(baseAsset, collateralAssets, rewards);
     // The same queue against the Comet base asset, which the direct actions are submitted with.
     const queuedActions = getActions(directBaseAsset, collateralAssets, rewards);
+    liveQueuedActions.current = queuedActions;
     const actionsForCompare = compare ? [] : actions;
     const updatedDataPostActions = calculateUpdatedBalances(baseAsset, collateralAssets, actionsForCompare);
     const pendingAction = getPendingAction(updatedDataPostActions.baseAsset, updatedDataPostActions.collateralAssets);
@@ -739,14 +732,13 @@ const Home = ({
       }
     };
 
-    // Starts the wrapper action, which goes first. The press of Submit Transaction confirms it: the
-    // lifecycle checks it and asks the wallet with no other screen. The direct actions wait until
-    // it confirms.
-    const startWrapperAction = (wrapper: QueuedWrapperAction, directCount: number) => {
+    // Starts the queued wrapper action. The press of Submit Transaction confirms it: the lifecycle
+    // checks it and asks the wallet with no other screen.
+    const startWrapperAction = (wrapper: QueuedWrapperAction) => {
       const { write, action } = liveWrappedLending.current;
       const stateBefore = action.state;
       const refusal = wrapper.type === 'supply' ? write.supply(wrapper.amount) : write.withdraw(wrapper.request);
-      const run = { kind: 'execute' as const, wrapper, directCount, scope: visitIdentity, stateBefore };
+      const run = { kind: 'execute' as const, wrapper, scope: visitIdentity, stateBefore };
       if (refusal !== undefined) {
         console.warn('The wrapped transaction was not sent:', refusal);
         // An approval still running keeps its record, so its row keeps showing Approval Pending.
@@ -801,22 +793,10 @@ const Home = ({
       } else if (isQueueLocked()) {
         return;
       } else if (plan.wrapper !== undefined) {
-        startWrapperAction(plan.wrapper, plan.direct.length);
+        startWrapperAction(plan.wrapper);
       } else if (plan.direct.length > 0) {
         submitDirectActions(plan.direct);
       }
-    };
-
-    // The direct actions, once the wrapper action confirmed and left the queue. They go to Comet or
-    // the Bulker as a queue without a wrapper action does, through the Bulker's own dialogs.
-    continueAfterWrapper.current = (executed: Action) => {
-      if (isFromEarlierVisit()) return;
-      setSubmissionRecord(undefined);
-      // The executed action leaves the queue in the same update, which this render may not show yet.
-      const plan = planQueue(queuedActions.filter((queued) => !isSameAction(queued, executed)));
-      if (plan === undefined || plan.wrapper !== undefined || plan.direct.length === 0) return;
-      if (isBlockedOnLiveRoute(plan.direct) || web3.write.chainId !== web3.read.chainId) return;
-      submitDirectActions(plan.direct);
     };
 
     // A wrapper approval shows on its supply's queue row as Approval Pending, as an approval of
@@ -947,6 +927,8 @@ const Home = ({
           if (isFromEarlierVisit() || isQueueLocked()) return;
           if (pendingAction !== undefined) {
             const action = getActionFromPendingAction(pendingAction, amount);
+            // A queue limited to one action takes no second one, and asks for no approval for it.
+            if (liveActionRules.current.isSingleAction && addsSecondAction(liveQueuedActions.current, action)) return;
             const confirmAction = () => {
               setPendingAction(undefined);
               addOrUpdateAction(action);

@@ -3,10 +3,12 @@ import { ChangeEventHandler, ChangeEvent, Dispatch, useEffect, useRef, useState 
 import { isUnwrappedCollateralAsset } from '@constants/chains';
 import {
   ActionRules,
+  addsSecondAction,
   calculateUpdatedBalances,
   getActionFromPendingAction,
   isSameAction,
   isSameToken,
+  QUEUED_ACTION_FIRST,
   validateAddingAction,
 } from '@helpers/actions';
 import { assetIconForAssetSymbol } from '@helpers/assets';
@@ -30,6 +32,8 @@ const approveAssetHelperText = (symbol: string) =>
 const approveWrapperHelperText = (symbol: string) =>
   `You need to approve Compound on the ${symbol} contract before you can use this asset.`;
 const CONFIRM_BUTTON_TEXT_APPROVE = 'Approve & Add';
+const SINGLE_ACTION_HINT =
+  'On this market your wallet submits one action at a time. Submit or remove the queued action before you add another.';
 const UPDATE_ALLOWANCE_STRING =
   'This amount exceeds the allowance you previously set for this asset. You will be asked to approve an increase when you add this action.';
 
@@ -482,6 +486,17 @@ function getContent(
         setMaxClicked(true);
       };
     }
+  }
+
+  // A queue limited to one action takes no second one, whatever the amount, so the form says so
+  // before an amount is typed, and asks for no approval.
+  if (actionRules?.isSingleAction && addsSecondAction(actionsToUse, pendingAction)) {
+    modifier = 'error';
+    titleAdditionalContent = QUEUED_ACTION_FIRST;
+    actionHintString = SINGLE_ACTION_HINT;
+    confirmButtonText = 'Add Action';
+    confirmButtonDisabled = true;
+    onConfirmButtonClicked = noop;
   }
 
   const inputFontSize = getStyleFontSize(sanitizedInputValue);
