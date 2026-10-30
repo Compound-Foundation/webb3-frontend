@@ -2632,15 +2632,14 @@ describe('useWriteWrappedState', () => {
       expect(walletRequests(wallet)).toEqual([]);
     });
 
-    it('keeps the exit closed by the committed release control', async () => {
+    it('opens the exit with the committed release control', async () => {
       const chain = exitChainFor(USDC_MARKET);
       const { result, rerender, wallet } = renderWrapped(chain);
       rerender({ session: sessionFor(wallet, { registry: WRAPPED_MARKET_REGISTRY }) });
       await act(async () => undefined);
 
-      expect(HARDCODED_WRAPPED_LENDING_SOURCE.markets.every((market) => market.isExitEnabled === false)).toBe(true);
-      expect(result.current.action.blockedReason('withdraw')).toBe('exits-disabled');
-      expect(result.current.write.withdraw({ kind: 'full' })).toBe('exits-disabled');
+      expect(HARDCODED_WRAPPED_LENDING_SOURCE.markets.every((market) => market.isExitEnabled === true)).toBe(true);
+      await waitFor(() => expect(result.current.action.blockedReason('withdraw')).toBeUndefined());
     });
 
     it('refreshes shares and wallet balances after the confirmed exit, from a block that shows it', async () => {

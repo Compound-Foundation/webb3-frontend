@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 // The dev server's plugin opens the six wrapper release controls of the registry, and no other module. It is
-// a dev-server plugin only, so `vite build` never runs it, and the committed source stays closed.
+// a dev-server plugin only, so `vite build` never runs it, and the committed source stays as committed.
 import fs from 'node:fs';
 
 import type { Plugin } from 'vite';
@@ -24,14 +24,20 @@ describe('openWrappedReleaseControls', () => {
     expect(openWrappedReleaseControls().apply).toBe('serve');
   });
 
-  it('opens exactly the six closed controls of the committed registry and changes nothing else', () => {
-    expect(committed.match(/(isDepositEnabled|isExitEnabled): false,/g)).toHaveLength(RELEASE_CONTROL_COUNT);
+  it('leaves the committed registry, whose six controls are open, unchanged', () => {
+    expect(committed.match(/(isDepositEnabled|isExitEnabled): true,/g)).toHaveLength(RELEASE_CONTROL_COUNT);
 
-    const opened = openReleaseControls(committed);
+    expect(openReleaseControls(committed)).toBe(committed);
+  });
 
-    expect(opened.match(/(isDepositEnabled|isExitEnabled): true,/g)).toHaveLength(RELEASE_CONTROL_COUNT);
-    expect(opened.match(/(isDepositEnabled|isExitEnabled): false,/g)).toBeNull();
-    expect(opened.replace(/(isDepositEnabled|isExitEnabled): true,/g, '$1: false,')).toBe(committed);
+  it.each([
+    ['both controls closed', /(isDepositEnabled|isExitEnabled): true,/g],
+    ['deposits closed, the deposit-disable rollback', /(isDepositEnabled): true,/g],
+  ])('opens every control of a registry with %s and changes nothing else', (_label, closing) => {
+    const closed = committed.replace(closing, '$1: false,');
+    expect(closed).not.toBe(committed);
+
+    expect(openReleaseControls(closed)).toBe(committed);
   });
 
   it('transforms the registry module only', () => {
@@ -42,9 +48,9 @@ describe('openWrappedReleaseControls', () => {
     expect(transform(committed, RELEASE_CONTROLS_FILE.replace('wrappedMarkets', 'markets'))).toBeNull();
   });
 
-  it('stops the run when the registry no longer holds the six closed controls', () => {
-    const changed = committed.replace('isExitEnabled: false,', 'isExitEnabled: true,');
+  it('stops the run when the registry no longer holds six controls', () => {
+    const changed = committed.replace('isExitEnabled: true,', 'isExitEnabled: Boolean(1),');
 
-    expect(() => openReleaseControls(changed)).toThrow(/Expected 6 closed release controls/);
+    expect(() => openReleaseControls(changed)).toThrow(/Expected 6 release controls/);
   });
 });

@@ -81,7 +81,7 @@ export type Manifest = {
     removedViteVariables: string[];
     /**
      * The wrapper release controls the dev server serves. Its plugin opens them, so the wrapped specs can
-     * run. The production builds keep the committed, closed controls.
+     * run after a rollback too. The production builds keep the committed controls.
      */
     wrappedReleaseControls: 'open';
   };

@@ -81,7 +81,7 @@ The harness reads no `.env` file. Vite runs with an empty `envDir`, every `VITE_
 
 The provider announces `io.metamask` unless a spec sets another wallet with `test.use({ harnessWallet: ANCHORAGE_WALLET })` (`e2e/harness/injectedProvider.ts`). `ANCHORAGE_WALLET` announces `com.anchorage.connect`, which makes the app lend through the wrappers on the three wrapped Ethereum markets. Pass the wallet's label to `connectAccount` so that it clicks the right row ("Anchorage Digital").
 
-The committed wrapper registry (`src/constants/wrappedMarkets.ts`) keeps every release control closed, and the harness never changes it. The dev server alone runs a Vite plugin, `openWrappedReleaseControls` (`e2e/harness/releaseControls.ts`), that opens the six controls in the module it serves, so `wrapped-queue.spec.ts` can supply and withdraw through a wrapper. The plugin is declared `apply: 'serve'`, so `vite build`, the harness's production builds included, never runs it, and it uses no `VITE_*` variable. It throws unless it finds exactly six closed controls, and `manifest.json` records `app.wrappedReleaseControls: 'open'`. The controls affect the Anchorage route only, so the specs that announce MetaMask are unaffected.
+The committed wrapper registry (`src/constants/wrappedMarkets.ts`) opens all six release controls, and the harness never changes it. The dev server alone runs a Vite plugin, `openWrappedReleaseControls` (`e2e/harness/releaseControls.ts`), that opens any closed control in the module it serves, so `wrapped-queue.spec.ts` can supply and withdraw through a wrapper after a rollback too. The plugin is declared `apply: 'serve'`, so `vite build`, the harness's production builds included, never runs it, and it uses no `VITE_*` variable. It throws unless it finds exactly six controls, open or closed, and `manifest.json` records `app.wrappedReleaseControls: 'open'`. The controls affect the Anchorage route only, so the specs that announce MetaMask are unaffected.
 
 Each production build runs with `NODE_ENV=production`, and the harness refuses to serve one unless Vite resolved `DEV=false` and `PROD=true`. The bundle still holds the bypass's warning text: Vite compiles the flag to `Boolean(false) && true`, which the minifier does not fold, so the branch stays but cannot run. The tests check the behaviour, not the text. Vite keeps an existing `NODE_ENV`, and a build in a process where the dev server had set `development` would compile `DEV=true` and with it the dev-only screening bypass. The builds run before the dev server for that reason.
 
@@ -236,7 +236,7 @@ Raw-unit tolerances: USDC balances and allowances are exact. Comet's principal a
 Limits:
 
 - Real MetaMask: its UI, confirmations, simulations and key handling are not covered. WalletConnect, Ledger, Coinbase and Safe are out of scope. The real Anchorage extension is out of scope too: `wrapped-queue.spec.ts` announces its RDNS from the harness provider, so it covers the app's route, not the extension.
-- The release controls are open on the dev server only, so the wrapped specs do not run against the production builds.
+- The wrapped specs run on the dev server only, not against the production builds.
 - Transactions are never signed, so transaction serialization and EIP-1559 signing are not covered.
 - Impersonation cannot sign messages.
 - The fork runs Prague, the latest that anvil 1.2.3 knows. Mainnet runs Osaka. Gas figures can differ.
