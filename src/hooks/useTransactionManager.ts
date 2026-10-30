@@ -147,7 +147,7 @@ function isWrapperStep(transaction: Transaction): boolean {
 /**
  * Whether the record delays Comet data refreshes until it settles. Every record does, except an
  * interrupted wrapper step with no hash. The manager has no hash to look up for it, so it never
- * settles the record, which leaves the list only when the user dismisses it. A record that
+ * settles the record, which leaves the list only when the user clears the list. A record that
  * delays refreshes and never settles stops every Comet data update, so this one does not delay
  * them. It stays tracked so that the next review of its action still waits for it.
  */
