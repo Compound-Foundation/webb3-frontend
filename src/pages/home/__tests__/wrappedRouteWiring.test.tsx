@@ -320,11 +320,75 @@ describe('Home on the wrapped route', () => {
 
     rerender(homeElement({ lending: loaded, market: USDC_MARKET, state, queue: actionQueue([]) }));
     expect(mockLastProps.WrappedPositionPanel.position).toEqual({ status: 'loading' });
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
 
     rerender(
       homeElement({ lending: loaded, market: USDC_MARKET, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) })
     );
     expect(mockLastProps.WrappedPositionPanel.position).toEqual(loaded.position);
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(loaded.position);
+  });
+
+  it('gives the masthead the position the panel shows', () => {
+    const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
+    render(homeElement({ lending: loaded, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
+
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toBe(mockLastProps.WrappedPositionPanel.position);
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
+  });
+
+  it.each<[string, WrappedLending['position']]>([
+    ['loading', { status: 'loading' }],
+    ['failed to read', { status: 'error', message: 'Read failed.' }],
+  ])('gives the masthead a position that is %s, as the panel shows it', (_, position) => {
+    const lending = { ...wrappedLending(), position };
+    render(homeElement({ lending, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
+
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(position);
+  });
+
+  it('adds no wrapped value to Comet state read for another account', () => {
+    const loaded: WrappedLending = { ...wrappedLending(), position: LOADED };
+    const state = cometState(EMPTY_ACCOUNT);
+    const { rerender } = render(homeElement({ lending: loaded, state, queue: actionQueue([]) }));
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
+
+    // The wallet switched accounts, and the Comet state is still the previous account's.
+    const otherAccount = '0x0000000000000000000000000000000000000bb2';
+    const switched = {
+      ...mockWeb3,
+      read: { ...mockWeb3.read, account: otherAccount },
+      write: { ...mockWeb3.write, account: otherAccount },
+    };
+    rerender(homeElement({ lending: loaded, state, queue: actionQueue([]), web3: switched }));
+
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
+  });
+
+  it('adds the wrapped value to Comet state read for the connected account before the dashboard mounted', () => {
+    const borrower = { ...EMPTY_ACCOUNT, balance: -5_000_000n };
+    render(
+      homeElement({
+        lending: { ...wrappedLending(), position: LOADED },
+        state: cometState(borrower),
+        queue: actionQueue([[ActionType.Repay, borrower, MAX_UINT256]]),
+      })
+    );
+
+    // useCometState recorded the account it read the state for, so a remounted dashboard knows it.
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual(LOADED);
+    mockLastProps.PositionCard.state[1].onSubmitClicked();
+    expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds no wrapped value to Comet state with no record of the account it was read for', () => {
+    // A copy is a state useCometState never recorded.
+    const unrecorded = [...cometState(EMPTY_ACCOUNT)] as unknown as CometState;
+    render(
+      homeElement({ lending: { ...wrappedLending(), position: LOADED }, state: unrecorded, queue: actionQueue([]) })
+    );
+
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toEqual({ status: 'loading' });
   });
 });
 
@@ -482,5 +546,11 @@ describe('Home on the standard route', () => {
     expect(masthead.isDirectBaseSupplyBlocked).toBe(false);
     expect(masthead.earnRewardsAPR).toBe(12_000_000_000_000_000n);
     expect(mockLastProps.PositionCard.state[1].actionRules).toEqual({ blockDirectBaseSupply: false });
+  });
+
+  it('gives the masthead no wrapped position', () => {
+    render(homeElement({ lending: STANDARD, state: cometState(EMPTY_ACCOUNT), queue: actionQueue([]) }));
+
+    expect(mockLastProps.Masthead.state[1].wrappedPosition).toBeUndefined();
   });
 });
