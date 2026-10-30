@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 import { WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import useDisableScroll from '@hooks/useDisableScroll';
-import { WrappedActionState } from '@hooks/useWrappedAction';
+import { canStillApproveInWallet, WrappedActionState } from '@hooks/useWrappedAction';
 import { formatExactUnits } from '@hooks/useWriteWrappedState';
 
 import {
@@ -232,9 +232,9 @@ const WrappedWithdrawModal = ({ state, symbol, decimals, onConfirm, onClose }: W
       const step = draft.steps[stepIndex];
       const stepState = steps[stepIndex];
       // A request the wallet still holds can still be approved, and then pays what the market pays.
-      const isPendingInWallet = stepState.status === 'provider-failure' && stepState.isPendingInWallet === true;
-      const isWalletRequestOpen = stepState.status === 'awaiting-signature' || isPendingInWallet;
-      const showsEstimateWarnings = isBeforeSignature || (isStopped && isPendingInWallet);
+      const canApproveStoppedRequest = isStopped && canStillApproveInWallet(stepState);
+      const isWalletRequestOpen = stepState.status === 'awaiting-signature' || canApproveStoppedRequest;
+      const showsEstimateWarnings = isBeforeSignature || canApproveStoppedRequest;
 
       content = (
         <>

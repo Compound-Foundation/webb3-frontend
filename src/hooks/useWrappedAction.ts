@@ -81,11 +81,32 @@ export type WrappedStepState =
   | { status: 'refused'; message: string }
   /**
    * The wallet reported another error. Whether it reached the chain is unknown. `isPendingInWallet`
-   * marks the wallet's answer that it still holds the request. Only the step's wording reads it.
+   * marks the wallet's answer that it still holds the request. Of the two flags, only it changes the
+   * step's wording. `isStoppedWhileAwaitingSignature` marks a step the page stopped because the
+   * wallet session stopped responding while the wallet had the request, so the wallet can still
+   * approve it. The message is then the page's own, not the wallet's.
    */
-  | { status: 'provider-failure'; message: string; isPendingInWallet?: boolean }
+  | {
+      status: 'provider-failure';
+      message: string;
+      isPendingInWallet?: boolean;
+      isStoppedWhileAwaitingSignature?: boolean;
+    }
   /** A check refused it before the wallet was asked. Nothing was sent. */
   | { status: 'blocked'; reason: WrappedBlockReason; message?: string };
+
+/**
+ * Whether the wallet can still hold the request of a step that stopped, so the user can still
+ * approve or reject it there: the wallet said it still holds it, or the wallet session stopped
+ * responding while the wallet had it. A request the wallet rejected or refused, or that never
+ * reached the wallet, cannot be approved.
+ */
+export function canStillApproveInWallet(step: WrappedStepState): boolean {
+  return (
+    step.status === 'provider-failure' &&
+    (step.isPendingInWallet === true || step.isStoppedWhileAwaitingSignature === true)
+  );
+}
 
 type DraftProgress = {
   draft: WrappedActionDraft;
@@ -300,6 +321,7 @@ function stoppedByUnusableSession(state: WrappedActionState): WrappedActionState
       status: 'provider-failure',
       message:
         'The wallet stopped responding while it had the request. The request can still be approved in the wallet.',
+      isStoppedWhileAwaitingSignature: true,
     };
   } else {
     stopped = { status: 'blocked', reason: 'session-unusable' };

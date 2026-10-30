@@ -27,7 +27,12 @@ import {
   TransactionRequest,
   useTransactionManager,
 } from '@hooks/useTransactionManager';
-import { useWrappedAction, WrappedActionController, WrappedStepState } from '@hooks/useWrappedAction';
+import {
+  canStillApproveInWallet,
+  useWrappedAction,
+  WrappedActionController,
+  WrappedStepState,
+} from '@hooks/useWrappedAction';
 import {
   AwaitingConfirmationTransaction,
   PendingTransaction,
@@ -1132,12 +1137,66 @@ describe('useWrappedAction', () => {
       });
       await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
 
+      const message =
+        'The wallet stopped responding while it had the request. The request can still be approved in the wallet.';
       expect(result.current.state).toMatchObject({
-        steps: [
-          { status: 'provider-failure', message: expect.stringMatching(/can still be approved in the wallet/) },
-          { status: 'waiting' },
-        ],
+        steps: [{ status: 'provider-failure', message, isStoppedWhileAwaitingSignature: true }, { status: 'waiting' }],
       });
+      const { state } = result.current;
+      if (state.phase !== 'stopped') throw new Error('the draft must be stopped');
+      const stopped = state.steps[0];
+      // The wallet had the request, so it can still approve it.
+      expect(canStillApproveInWallet(stopped)).toBe(true);
+      // The message is the page's own, so the step is not marked as the wallet's answer that it still
+      // holds the request, and keeps the wording of a wallet error.
+      expect(stopped).toEqual({ status: 'provider-failure', message, isStoppedWhileAwaitingSignature: true });
+    });
+
+    it.each<[string, WrappedStepState, boolean]>([
+      [
+        'the wallet said it still holds the request',
+        { status: 'provider-failure', message: 'Still pending. (-32005)', isPendingInWallet: true },
+        true,
+      ],
+      [
+        'the session stopped responding while the wallet had the request',
+        {
+          status: 'provider-failure',
+          message: 'The wallet stopped responding.',
+          isStoppedWhileAwaitingSignature: true,
+        },
+        true,
+      ],
+      ['the wallet reported another error', { status: 'provider-failure', message: 'Internal error (-32603)' }, false],
+      ['the user rejected it', { status: 'rejected' }, false],
+      ['the wallet refused it before handling it', { status: 'refused', message: 'Unauthorized (4100)' }, false],
+      ['a check stopped it before the wallet was asked', { status: 'blocked', reason: 'session-unusable' }, false],
+      ['it was broadcast', { status: 'unresolved', hash: '0xsent' }, false],
+    ])('says whether the wallet can still approve a stopped request: %s', (_name, step, canApprove) => {
+      expect(canStillApproveInWallet(step)).toBe(canApprove);
+    });
+
+    it('stops a request still being checked as blocked, not as one the wallet can approve, when the session breaks', async () => {
+      const { manager } = fakeManager(wallet);
+      const { result, rerender } = renderAction(
+        { session: sessionFor(wallet), manager },
+        { restriction: () => new Promise<undefined>(() => undefined) }
+      );
+      await reachReview(result);
+      act(() => result.current.confirm());
+      expect(stepStatuses(result)).toEqual(['checking', 'waiting']);
+
+      rerender({
+        session: sessionFor(wallet),
+        manager: { ...manager, walletFailure: { provider: wallet, message: 'sendMessage' } },
+      });
+      await waitFor(() => expect(result.current.state.phase).toBe('stopped'));
+
+      const { state } = result.current;
+      if (state.phase !== 'stopped') throw new Error('the draft must be stopped');
+      expect(state.steps[0]).toEqual({ status: 'blocked', reason: 'session-unusable' });
+      expect(canStillApproveInWallet(state.steps[0])).toBe(false);
+      expect(manager.submitTransaction).not.toHaveBeenCalled();
     });
 
     it('stops a step the transaction manager refuses because the session moved on', async () => {
