@@ -14,6 +14,7 @@ import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
 import { calculateUpdatedBalances, validateAddingAction, validateAllowanceForAction } from '@helpers/actions';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
@@ -261,8 +262,14 @@ const BASE_ASSET = mockBaseAsset({
 });
 const COLLATERAL: TokenWithAccountState = mockEthCollateralAsset({ walletBalance: 10n ** 18n });
 
+// Records `state` as useCometState does: read for the market at `cometAddress` and the connected account.
+function recorded(state: CometState, cometAddress = USDC_COMET): CometState {
+  recordCometStateSource(state, { chainId: 1, cometAddress }, ACCOUNT);
+  return state;
+}
+
 function cometState(baseAsset: BaseAssetWithAccountState = BASE_ASSET, isBulkerAllowed = true): CometState {
-  return [
+  return recorded([
     StateType.Hydrated,
     {
       baseAsset,
@@ -279,7 +286,7 @@ function cometState(baseAsset: BaseAssetWithAccountState = BASE_ASSET, isBulkerA
       isBulkerAllowed,
       totalBaseSupplyUsd: 0n,
     },
-  ] as unknown as CometState;
+  ] as unknown as CometState);
 }
 
 type Queue = ActionQueue & {
@@ -862,7 +869,10 @@ describe('Home on the wrapped route', () => {
         name: 'Lido Staked ETH',
       });
       const state = cometState();
-      const withStETH = [state[0], { ...state[1], collateralAssets: [COLLATERAL, stETH] }] as unknown as CometState;
+      const withStETH = recorded([
+        state[0],
+        { ...state[1], collateralAssets: [COLLATERAL, stETH] },
+      ] as unknown as CometState);
       const queue = actionQueue([[ActionType.Supply, BASE_ASSET, AMOUNT]]);
       const options = { queue, state: withStETH };
       const { rerenderHome } = renderHome(lendingWith(controller()), options);
@@ -1036,7 +1046,10 @@ describe('Home on the wrapped route', () => {
       // ETH and stETH go through the Bulker even alone, so the remaining action is a COMP supply.
       const comp = mockCompCollateralAsset({ walletBalance: 10n ** 18n });
       const state = cometState();
-      const withComp = [state[0], { ...state[1], collateralAssets: [COLLATERAL, comp] }] as unknown as CometState;
+      const withComp = recorded([
+        state[0],
+        { ...state[1], collateralAssets: [COLLATERAL, comp] },
+      ] as unknown as CometState);
       const queue = actionQueue([
         [ActionType.SupplyCollateral, comp, 10n ** 17n],
         [ActionType.Supply, BASE_ASSET, AMOUNT],
@@ -1168,7 +1181,7 @@ describe('Home on the standard route', () => {
     renderHome(lendingWith(controller(), { route: routeFor(OPEN, WETH_COMET) }), {
       queue,
       market: WETH_MARKET,
-      state: cometState(weth),
+      state: recorded(cometState(weth), WETH_COMET),
     });
 
     act(() => positionCard().onSubmitClicked());
