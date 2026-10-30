@@ -13,6 +13,7 @@ import {
   getWrappedPositionValueInDollars,
   readWrappedPosition,
   supplyIncentivesForRoute,
+  waitForBlock,
   WrappedPositionReadError,
 } from '@helpers/wrappedPositions';
 import { Action, ActionType, CometState, StateType } from '@types';
@@ -200,6 +201,62 @@ describe('readWrappedPosition', () => {
     const market = usdcMarket();
     const multicall = { all: jest.fn().mockRejectedValue(new Error('rpc down')) };
     await expect(readWrappedPosition(multicall, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
+  });
+});
+
+describe('waitForBlock', () => {
+  const WAIT = { attempts: 20, intervalMs: 1_500 };
+
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  /** Tracks what a wait settled to, so a test can look before and after the clock moves. */
+  function track(wait: Promise<number | undefined>) {
+    const outcome: { settled: boolean; block?: number } = { settled: false };
+    void wait.then((block) => Object.assign(outcome, { settled: true, block }));
+    return outcome;
+  }
+
+  it('returns the provider block once it reaches the minimum block', async () => {
+    let block = 100;
+    const outcome = track(waitForBlock({ getBlockNumber: async () => block }, 101, WAIT));
+    await jest.advanceTimersByTimeAsync(3_000);
+    expect(outcome.settled).toBe(false);
+
+    block = 102;
+    await jest.advanceTimersByTimeAsync(1_500);
+    expect(outcome).toEqual({ settled: true, block: 102 });
+  });
+
+  it('gives up at the time budget when the provider never answers', async () => {
+    const outcome = track(waitForBlock({ getBlockNumber: () => new Promise<number>(() => undefined) }, 101, WAIT));
+    await jest.advanceTimersByTimeAsync(29_999);
+    expect(outcome.settled).toBe(false);
+
+    await jest.advanceTimersByTimeAsync(1);
+    expect(outcome).toEqual({ settled: true, block: undefined });
+  });
+
+  it('gives up at the time budget when every answer is slow and behind', async () => {
+    const getBlockNumber = jest.fn(() => new Promise<number>((resolve) => setTimeout(() => resolve(100), 5_000)));
+    const outcome = track(waitForBlock({ getBlockNumber }, 101, WAIT));
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(outcome).toEqual({ settled: true, block: undefined });
+  });
+
+  it('does not wait for a slow answer that would arrive after the budget', async () => {
+    const outcome = track(
+      waitForBlock(
+        { getBlockNumber: () => new Promise<number>((resolve) => setTimeout(() => resolve(101), 60_000)) },
+        101,
+        WAIT
+      )
+    );
+    await jest.advanceTimersByTimeAsync(31_000);
+    expect(outcome).toEqual({ settled: true, block: undefined });
   });
 });
 
