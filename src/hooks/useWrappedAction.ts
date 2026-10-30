@@ -234,7 +234,8 @@ type LifecycleEvent =
   | { type: 'drafted'; draft: WrappedActionDraft }
   | { type: 'rechecked'; rechecked: RecheckedWithdrawal }
   | { type: 'step'; index: number; step: WrappedStepState }
-  | { type: 'session-unusable' }
+  /** `isRequestWithWallet`: the step in progress had handed its request to the wallet. */
+  | { type: 'session-unusable'; isRequestWithWallet: boolean }
   | { type: 'discarded'; reason: 'identity-changed' | 'cleared' }
   | { type: 'reset' };
 
@@ -308,15 +309,20 @@ function withStep(state: WrappedActionState, index: number, step: WrappedStepSta
   }
 }
 
-/** A broken session stops a draft. What was sent stays sent and is shown as unresolved. */
-function stoppedByUnusableSession(state: WrappedActionState): WrappedActionState {
+/**
+ * A broken session stops a draft. What was sent stays sent and is shown as unresolved. A request
+ * handed to the wallet can still be approved there. A step awaiting its signature whose request had
+ * not yet been handed to the wallet never will be: the run that sends it ends with this stop, and
+ * its send is withdrawn at its next check, so the step is stopped as blocked.
+ */
+function stoppedByUnusableSession(state: WrappedActionState, isRequestWithWallet: boolean): WrappedActionState {
   if (state.phase === 'reading') return discardedFrom(state, state.identity, 'session-unusable');
   if (!hasProgress(state) || state.phase === 'complete' || state.phase === 'stopped') return state;
   const step = state.steps[state.stepIndex];
   let stopped: WrappedStepState;
   if (step.status === 'submitted') {
     stopped = { status: 'unresolved', hash: step.hash };
-  } else if (step.status === 'awaiting-signature') {
+  } else if (step.status === 'awaiting-signature' && isRequestWithWallet) {
     stopped = {
       status: 'provider-failure',
       message:
@@ -351,7 +357,7 @@ function lifecycleReducer(state: WrappedActionState, event: LifecycleEvent): Wra
     case 'step':
       return withStep(state, event.index, event.step);
     case 'session-unusable':
-      return stoppedByUnusableSession(state);
+      return stoppedByUnusableSession(state, event.isRequestWithWallet);
     case 'discarded': {
       // An idle or discarded state has no draft to discard.
       const identity = identityOf(state);
@@ -497,6 +503,9 @@ export function useWrappedAction({
   // Bumped whenever a draft is started, confirmed, discarded or stopped. A continuation of an
   // earlier run changes nothing.
   const runId = useRef(0);
+  // The last run whose request was handed to the wallet. Only the current run can set it, so it
+  // never marks a later run's request as handed to the wallet.
+  const runWithWalletRequest = useRef<number | undefined>(undefined);
   const draftCount = useRef(0);
 
   const { route, account, chainId, provider } = session;
@@ -595,8 +604,11 @@ export function useWrappedAction({
   const isUnusable = health.status === 'unusable';
   useEffect(() => {
     if (!isUnusable || !isInProgress(lifecycle)) return;
+    // Read before the run ends. A run that has not handed its request to the wallet by now never
+    // will: ending it here makes its send's next check withdraw the request.
+    const isRequestWithWallet = runWithWalletRequest.current === runId.current;
     runId.current++;
-    dispatch({ type: 'session-unusable' });
+    dispatch({ type: 'session-unusable', isRequestWithWallet });
   }, [isUnusable, lifecycle.phase]);
 
   const recordProbe = (target: ProbeTarget, result: SessionProbeResult) => {
@@ -777,7 +789,12 @@ export function useWrappedAction({
           if (withdrawnBecause !== undefined) throw new SendWithdrawnError();
         };
         withdrawIfChanged();
-        hash = await sendStep(draft.identity, step, withdrawIfChanged);
+        hash = await sendStep(draft.identity, step, () => {
+          withdrawIfChanged();
+          // The check passed, so this run is current, and `sendStep` calls the wallet's signer next in
+          // the same tick. Nothing on this page can withdraw the request now.
+          runWithWalletRequest.current = run;
+        });
         return hash;
       },
       onSettled: (outcome) => {
