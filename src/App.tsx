@@ -17,7 +17,7 @@ import { useWeb3Context } from '@contexts/Web3Context';
 import { queueScope, submissionScope, WrappedLendingContext } from '@contexts/WrappedLendingContext';
 import { useEthersProvider } from '@helpers/ethersAdapter';
 import { estimateGasForActions, getKeyForActions } from '@helpers/gasEstimator';
-import { directActionsForRoute } from '@helpers/queuedExecution';
+import { directActionsForRoute, isSingleActionRoute } from '@helpers/queuedExecution';
 import { QueueSession, useActionQueue } from '@hooks/useActionQueue';
 import { useCometState } from '@hooks/useCometState';
 import { useGasEstimates } from '@hooks/useGasEstimates';
@@ -203,7 +203,8 @@ function App({ Component, pageProps }: any) {
     (actions: Action[]) => {
       preEstimateGas(actions);
     },
-    walletSession
+    walletSession,
+    isSingleActionRoute(lendingRoute)
   );
 
   // A change of the wallet's network keeps the queue but drops its estimates. This effect then

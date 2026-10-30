@@ -17,6 +17,7 @@ import {
   isSameAction,
   isSameToken,
   calculateUpdatedBalances,
+  addsSecondAction,
   getActionFromPendingAction,
   sanitizedAmountForAction,
 } from '@helpers/actions';
@@ -28,6 +29,7 @@ import { WriteBlockReason } from '@helpers/lendingRoute';
 import { DEFAULT_MARKET } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import {
+  isSingleActionRoute,
   isWrapperRouted,
   planQueuedExecution,
   QueuedExecutionPlan,
@@ -224,6 +226,8 @@ const Home = ({
   const liveWrappedLending = useRef(wrappedLending);
   liveWrappedLending.current = wrappedLending;
   const liveActionRules = useRef<ActionRules>({});
+  // The queue as the latest render shows it, which the amount form's kept confirm callback reads.
+  const liveQueuedActions = useRef<Action[]>([]);
   const selectedMarketIdentity: MarketIdentity | undefined =
     selectedMarket[1] === undefined
       ? undefined
@@ -536,6 +540,7 @@ const Home = ({
           ? undefined
           : wrappedWithdrawalLimits(wrappedPosition, directBaseAsset.balanceOfComet);
       actionRules = {
+        singleAction: isSingleActionRoute(lendingRoute),
         wrappedBase: {
           supplyBlockedReason: wrappedEntryBlockLabel(lendingRoute, 'supply'),
           withdrawBlockedReason: wrappedEntryBlockLabel(lendingRoute, 'withdraw'),
@@ -562,6 +567,8 @@ const Home = ({
     // Dialogs keep the callbacks below, so they check the session when they run.
     const isBlockedOnLiveRoute = (actionsToSubmit: Action[]) =>
       liveWalletUnusable.current ||
+      // A route limited to one action submits no more than one, whatever a kept dialog holds.
+      (isSingleActionRoute(liveSession.current.route) && actionsToSubmit.length > 1) ||
       // A queue holding a wrapper action in any other form is refused whole, never submitted without it.
       !isDirectExecution(actionsToSubmit) ||
       isSubmissionRefused(
@@ -575,6 +582,7 @@ const Home = ({
     const actions = getActions(baseAsset, collateralAssets, rewards);
     // The same queue against the Comet base asset, which the direct actions are submitted with.
     const queuedActions = getActions(directBaseAsset, collateralAssets, rewards);
+    liveQueuedActions.current = queuedActions;
     const actionsForCompare = compare ? [] : actions;
     const updatedDataPostActions = calculateUpdatedBalances(baseAsset, collateralAssets, actionsForCompare);
     const pendingAction = getPendingAction(updatedDataPostActions.baseAsset, updatedDataPostActions.collateralAssets);
@@ -947,6 +955,8 @@ const Home = ({
           if (isFromEarlierVisit() || isQueueLocked()) return;
           if (pendingAction !== undefined) {
             const action = getActionFromPendingAction(pendingAction, amount);
+            // A queue limited to one action takes no second one, and asks for no approval for it.
+            if (liveActionRules.current.singleAction && addsSecondAction(liveQueuedActions.current, action)) return;
             const confirmAction = () => {
               setPendingAction(undefined);
               addOrUpdateAction(action);

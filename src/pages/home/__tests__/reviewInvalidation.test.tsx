@@ -29,7 +29,7 @@ import {
 } from '@types';
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
-import { mockCompCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
+import { mockCompCollateralAsset, mockEthCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
@@ -616,7 +616,8 @@ describe('Home submission guards', () => {
   });
 
   it("stops the dialog's operator approval once the wallet session is unusable", () => {
-    const queue = actionQueue([BORROW, SUPPLY_COMP]);
+    // A supply of ETH goes through the Bulker even alone, so it opens the Bulker's approval dialog.
+    const queue = actionQueue([[ActionType.SupplyCollateral, mockEthCollateralAsset(), 10n ** 17n]]);
     const usable = wrappedLending({ status: 'usable' });
     const { rerender } = render(homeElement({ queue, lending: usable }));
     act(() => positionCard().onSubmitClicked());
@@ -634,9 +635,12 @@ describe('Home submission guards', () => {
 
   it('allows direct writes on the wrapped route while the wallet session is usable', () => {
     const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
-    render(homeElement({ queue: actionQueue([BORROW], pendingSupply), lending: wrappedLending({ status: 'usable' }) }));
-
+    const usable = wrappedLending({ status: 'usable' });
+    const { rerender } = render(homeElement({ queue: actionQueue([BORROW]), lending: usable }));
     act(() => positionCard().onSubmitClicked());
+
+    // The borrow was sent and left the queue, so the next action can be added.
+    rerender(homeElement({ queue: actionQueue([], pendingSupply), lending: usable }));
     act(() => positionCard().onPendingActionConfirm(10n ** 18n));
 
     expect(mockWriteState.withdraw).toHaveBeenCalledTimes(1);

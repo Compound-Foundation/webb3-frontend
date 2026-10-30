@@ -15,6 +15,17 @@ export function isSameAction(action1: Action | PendingAction, action2: Action | 
   return action1[0] === action2[0] && isSameToken(action1[1], action2[1]);
 }
 
+/**
+ * Whether adding `action` to `queued` would leave a queue limited to one action with two distinct
+ * actions. The queued action itself, edited or added again, is not a second action.
+ */
+export function addsSecondAction(queued: readonly Action[], action: Action | PendingAction): boolean {
+  return queued.some((queuedAction) => !isSameAction(queuedAction, action));
+}
+
+/** Why a queue limited to one action refuses another, as the amount form and the queue show it. */
+export const QUEUED_ACTION_FIRST = 'Submit Or Remove The Queued Action First';
+
 export function isSameClaimAction(action1: Action | PendingAction, action2: Action | PendingAction): boolean {
   return (
     action1[0] === ActionType.ClaimRewards &&
@@ -223,6 +234,11 @@ export type WrappedBaseRules = {
 export type ActionRules = {
   /** Set on the wrapped route, where the market's wrapper carries out base supply and withdrawal. */
   wrappedBase?: WrappedBaseRules;
+  /**
+   * Set when the queue holds at most one action, as on the wrapped route: the Bulker cannot carry
+   * a wrapper call, so the queue's actions would otherwise go to the wallet as separate transactions.
+   */
+  singleAction?: boolean;
 };
 
 /**
@@ -270,6 +286,9 @@ export function validateAddingAction(
   // A wrapper action has its own review and is never queued with direct actions.
   if (isWrappedActionEntry(actionToAdd)) {
     return [false, 'Wrapped Actions Are Submitted Separately'];
+  }
+  if (rules.singleAction && addsSecondAction(actions, actionToAdd)) {
+    return [false, QUEUED_ACTION_FIRST];
   }
   const { baseAsset, collateralAssets } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions);
 

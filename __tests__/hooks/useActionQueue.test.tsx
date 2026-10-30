@@ -29,11 +29,12 @@ const BORROW: Action = [ActionType.Borrow, BASE_ASSET, 1_000_000_000n];
 const SUPPLY_COMP: Action = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
 const PENDING_REPAY: PendingAction = [ActionType.Repay, BASE_ASSET, 5_000_000n];
 
-type Props = { market: MarketData; session: QueueSession };
+type Props = { market: MarketData; session: QueueSession; isSingleAction?: boolean };
 
 function renderQueue(initialProps: Props) {
   return renderHook(
-    ({ market, session }: Props) => useActionQueue([StateType.Hydrated, market], () => undefined, session),
+    ({ market, session, isSingleAction }: Props) =>
+      useActionQueue([StateType.Hydrated, market], () => undefined, session, isSingleAction),
     { initialProps }
   );
 }
@@ -273,5 +274,131 @@ describe('useActionQueue', () => {
       expect(visibleActions(result.current)).toEqual([BORROW, SUPPLY_COMP]);
       expect(pendingAction(result.current)).toEqual(PENDING_REPAY);
     });
+  });
+});
+
+describe('useActionQueue limited to one action', () => {
+  const SINGLE: Props = { market: MAINNET_USDC, session: SESSION, isSingleAction: true };
+  const SUPPLY: Action = [ActionType.Supply, BASE_ASSET, 1_000_000n];
+  const WITHDRAW: Action = [ActionType.Withdraw, BASE_ASSET, 1_000_000n];
+  const REPAY: Action = [ActionType.Repay, BASE_ASSET, 1_000_000n];
+  const WITHDRAW_COMP: Action = [ActionType.WithdrawCollateral, COMP, 10n ** 17n];
+  const pairs: [string, Action, Action][] = [
+    ['a supply then a collateral supply', SUPPLY, SUPPLY_COMP],
+    ['a collateral supply then a supply', SUPPLY_COMP, SUPPLY],
+    ['a withdrawal then a borrow', WITHDRAW, BORROW],
+    ['a borrow then a withdrawal', BORROW, WITHDRAW],
+    ['a repay then a collateral withdrawal', REPAY, WITHDRAW_COMP],
+    ['a collateral withdrawal then a repay', WITHDRAW_COMP, REPAY],
+    ['a supply then a withdrawal', SUPPLY, WITHDRAW],
+  ];
+
+  it.each(pairs)('refuses the second of %s, and keeps the first', (_name, first, second) => {
+    const { result } = renderQueue(SINGLE);
+    let accepted: boolean[] = [];
+    act(() => {
+      accepted = [result.current.addOrUpdateAction(first), result.current.addOrUpdateAction(second)];
+    });
+
+    expect(accepted).toEqual([true, false]);
+    expect(visibleActions(result.current)).toEqual([first]);
+  });
+
+  it('refuses a second action added in a later event as well', () => {
+    const { result } = renderQueue(SINGLE);
+    act(() => {
+      result.current.addOrUpdateAction(SUPPLY);
+    });
+    let accepted = true;
+    act(() => {
+      accepted = result.current.addOrUpdateAction(SUPPLY_COMP);
+    });
+
+    expect(accepted).toBe(false);
+    expect(visibleActions(result.current)).toEqual([SUPPLY]);
+  });
+
+  it('refuses the second action from a callback kept from before the first was added', () => {
+    const { result } = renderQueue(SINGLE);
+    const kept = result.current;
+    act(() => {
+      result.current.addOrUpdateAction(SUPPLY);
+    });
+    act(() => {
+      kept.addOrUpdateAction(SUPPLY_COMP);
+    });
+
+    expect(visibleActions(result.current)).toEqual([SUPPLY]);
+  });
+
+  it('updates the queued action in place', () => {
+    const { result } = renderQueue(SINGLE);
+    const larger: Action = [ActionType.Supply, BASE_ASSET, 2_000_000n];
+    act(() => {
+      result.current.addOrUpdateAction(SUPPLY);
+    });
+    let accepted = false;
+    act(() => {
+      accepted = result.current.addOrUpdateAction(larger);
+    });
+
+    expect(accepted).toBe(true);
+    expect(visibleActions(result.current)).toEqual([larger]);
+  });
+
+  it.each<[string, (queue: ActionQueue) => void]>([
+    ['removed', (queue) => queue.removeAction(SUPPLY)],
+    ['cleared', (queue) => queue.clearActions()],
+  ])('accepts another action once the queued one is %s', (_name, empty) => {
+    const { result } = renderQueue(SINGLE);
+    act(() => {
+      result.current.addOrUpdateAction(SUPPLY);
+    });
+    act(() => empty(result.current));
+    let accepted = false;
+    act(() => {
+      accepted = result.current.addOrUpdateAction(BORROW);
+    });
+
+    expect(accepted).toBe(true);
+    expect(visibleActions(result.current)).toEqual([BORROW]);
+  });
+
+  it.each<[string, Props]>([
+    ['account', { ...SINGLE, session: { ...SESSION, account: OTHER_ACCOUNT } }],
+    ['connection', { ...SINGLE, session: { ...SESSION, status: 'reconnecting' } }],
+    ['market', { ...SINGLE, market: MAINNET_ETH }],
+  ])('accepts a new action after a change of %s', (_name, changed) => {
+    const { result, rerender } = renderQueue(SINGLE);
+    act(() => {
+      result.current.addOrUpdateAction(SUPPLY);
+    });
+
+    rerender(changed);
+    act(() => {
+      result.current.addOrUpdateAction(BORROW);
+    });
+
+    expect(visibleActions(result.current)).toEqual([BORROW]);
+  });
+
+  it('replays only the first of several actions deferred for a market limited to one', () => {
+    const { result, rerender } = renderQueue({ market: MAINNET_ETH, session: SESSION });
+    act(() => defer(result.current, MAINNET_USDC, [SUPPLY_COMP, BORROW]));
+
+    rerender(SINGLE);
+
+    expect(visibleActions(result.current)).toEqual([SUPPLY_COMP]);
+  });
+
+  it('batches several actions when the queue is not limited to one', () => {
+    const { result } = renderQueue({ ...SINGLE, isSingleAction: false });
+    let accepted: boolean[] = [];
+    act(() => {
+      accepted = [result.current.addOrUpdateAction(SUPPLY), result.current.addOrUpdateAction(SUPPLY_COMP)];
+    });
+
+    expect(accepted).toEqual([true, true]);
+    expect(visibleActions(result.current)).toEqual([SUPPLY, SUPPLY_COMP]);
   });
 });

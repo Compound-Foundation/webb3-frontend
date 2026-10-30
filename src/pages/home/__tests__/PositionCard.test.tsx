@@ -51,13 +51,15 @@ function renderCard({
   rules = {},
   approvalTransactions = [],
   blocking,
+  singleAction,
 }: {
   actions?: Action[];
   rules?: Partial<WrappedBaseRules>;
   approvalTransactions?: Transaction[];
   blocking?: Transaction;
+  singleAction?: boolean;
 } = {}) {
-  const actionRules: ActionRules = { wrappedBase: { ...WRAPPED, ...rules } };
+  const actionRules: ActionRules = { singleAction, wrappedBase: { ...WRAPPED, ...rules } };
   const view = render(
     <>
       <PositionCard
@@ -158,5 +160,25 @@ describe('the position card queue on the wrapped route', () => {
     expect(unknown.desktop.querySelector('.action-queue-item__balance .load-spinner--new')).not.toBeNull();
     expect(unknown.desktop).not.toHaveTextContent(/share/i);
     expect(unknown.submit()).toBeDisabled();
+  });
+});
+
+describe('the position card queue limited to one action', () => {
+  const BORROW: Action = [ActionType.Borrow, BASE_ASSET, 1_000_000_000n];
+
+  it('lets one queued action be submitted', () => {
+    const { submit } = renderCard({ singleAction: true });
+
+    expect(submit()).toBeEnabled();
+  });
+
+  it.each<[string, Action[]]>([
+    ['a supply then a borrow', [SUPPLY, BORROW]],
+    ['a borrow then a supply', [BORROW, SUPPLY]],
+  ])('disables Submit, and says why, for a queue of %s kept from before the limit', (_name, actions) => {
+    const { desktop, submit } = renderCard({ actions, singleAction: true });
+
+    expect(desktop).toHaveTextContent('Submit Or Remove The Queued Action First');
+    expect(submit()).toBeDisabled();
   });
 });

@@ -27,6 +27,15 @@ export function isWrapperRouted(route: LendingRoute, action: Action): boolean {
   return route.kind === 'wrapped' && (action[0] === ActionType.Supply || action[0] === ActionType.Withdraw);
 }
 
+/**
+ * Whether the queue on `route` holds at most one action. On the wrapped route a base supply or
+ * withdrawal goes to the wrapper, which the Bulker cannot call, so several actions would reach the
+ * wallet as separate transactions. Each action is therefore submitted on its own, whatever its kind.
+ */
+export function isSingleActionRoute(route: LendingRoute): boolean {
+  return route.kind === 'wrapped';
+}
+
 /** The actions of the queue that go to Comet or the Bulker on `route`, in their queued order. */
 export function directActionsForRoute(route: LendingRoute, actions: Action[]): Action[] {
   return actions.filter((action) => !isWrapperRouted(route, action));
@@ -35,9 +44,9 @@ export function directActionsForRoute(route: LendingRoute, actions: Action[]): A
 /**
  * Splits a queue into the wrapper action and the direct actions, as `QueuedExecutionPlan`
  * describes. On the standard route every action is direct. A maximum supply supplies the wallet
- * balance the earlier queued actions leave, and a maximum withdrawal is a full exit. A queue with
- * more than one wrapper action, or a base action for another token than the wrapper's, is refused
- * whole with a `WrappedExecutionError`, so no part of it is submitted.
+ * balance the earlier queued actions leave, and a maximum withdrawal is a full exit. A queue of
+ * more than one action on a route limited to one, or a base action for another token than the
+ * wrapper's, is refused whole with a `WrappedExecutionError`, so no part of it is submitted.
  */
 export function planQueuedExecution(
   route: LendingRoute,
@@ -45,6 +54,9 @@ export function planQueuedExecution(
   collateralAssets: TokenWithAccountState[],
   actions: Action[]
 ): QueuedExecutionPlan {
+  if (isSingleActionRoute(route) && actions.length > 1) {
+    throw new WrappedExecutionError('several-actions', 'Submit one action at a time.');
+  }
   const direct = directActionsForRoute(route, actions);
   if (route.kind !== 'wrapped') return { wrapper: undefined, direct };
 

@@ -1,7 +1,7 @@
-import { useEffect, useReducer } from 'react';
+import { useEffect, useReducer, useRef } from 'react';
 
 import type { WriteWeb3 } from '@contexts/Web3Context';
-import { isSameAction, isSameToken } from '@helpers/actions';
+import { addsSecondAction, isSameAction, isSameToken } from '@helpers/actions';
 import { filterMap } from '@helpers/functions';
 import { getRewardsForMarket } from '@helpers/rewards';
 import { assertDirectActions } from '@helpers/wrappedActions';
@@ -55,13 +55,14 @@ enum QueueActionType {
 
 // Every change except a reset carries the visit key its caller rendered with. It applies only
 // during that visit, so a callback kept from an earlier session or market, or from an earlier visit
-// to the same ones, changes nothing.
-type AddOrUpdateAction = [QueueActionType.AddOrUpdate, string, Action];
+// to the same ones, changes nothing. An addition and a reset also carry whether the queue is limited
+// to one action, which follows from the session and market and so is the same for the whole visit.
+type AddOrUpdateAction = [QueueActionType.AddOrUpdate, string, Action, boolean];
 type ClearAction = [QueueActionType.Clear, string];
 type RemoveAction = [QueueActionType.Remove, string, Action];
 type SetPendingAction = [QueueActionType.SetPending, string, PendingAction | undefined];
 type DeferAction = [QueueActionType.Defer, string, string, Action[]];
-type ResetAction = [QueueActionType.Reset, QueueIdentity];
+type ResetAction = [QueueActionType.Reset, QueueIdentity, boolean];
 
 type QueueAction = AddOrUpdateAction | ClearAction | RemoveAction | SetPendingAction | DeferAction | ResetAction;
 
@@ -92,20 +93,29 @@ function addOrUpdate(actions: Action[], action: Action): Action[] {
   return actions.map((queued, index) => (index === actionIndex ? action : queued));
 }
 
+/** As `addOrUpdate`, except that a queue limited to one action keeps a second action out. */
+function addOrUpdateWithin(isSingleAction: boolean) {
+  return (actions: Action[], action: Action): Action[] =>
+    isSingleAction && addsSecondAction(actions, action) ? actions : addOrUpdate(actions, action);
+}
+
 function queueReducer(state: QueueState, queueAction: QueueAction): QueueState {
   if (queueAction[0] === QueueActionType.Reset) {
-    const identity = queueAction[1];
+    const [, identity, isSingleAction] = queueAction;
     if (identityKey(identity) === identityKey(state.identity)) return state;
     // Nothing queued, open or deferred carries over to a new session or market. When only the
-    // market changed, the actions deferred for that market are queued.
+    // market changed, the actions deferred for that market are queued, as far as its limit allows.
     const replay = identity.session === state.identity.session ? state.deferred[identity.market] ?? [] : [];
-    return { ...emptyQueue(identity, state.visit + 1), actions: replay.reduce(addOrUpdate, []) };
+    return { ...emptyQueue(identity, state.visit + 1), actions: replay.reduce(addOrUpdateWithin(isSingleAction), []) };
   }
 
   if (queueAction[1] !== visitKey(state)) return state;
   switch (queueAction[0]) {
-    case QueueActionType.AddOrUpdate:
-      return { ...state, actions: addOrUpdate(state.actions, queueAction[2]) };
+    case QueueActionType.AddOrUpdate: {
+      const [, , action, isSingleAction] = queueAction;
+      const actions = addOrUpdateWithin(isSingleAction)(state.actions, action);
+      return actions === state.actions ? state : { ...state, actions };
+    }
     case QueueActionType.Clear:
       return { ...state, actions: [] };
     case QueueActionType.Remove: {
@@ -128,11 +138,15 @@ function queueReducer(state: QueueState, queueAction: QueueAction): QueueState {
  * and connection status) and the market (chain and Comet) they were made for. A change of either
  * clears them all in the same render. A market change then queues the actions deferred for the new
  * market.
+ *
+ * With `isSingleAction`, the queue holds at most one action: a distinct second action is refused
+ * until the queued one is submitted, removed or cleared. The queued action can still be updated.
  */
 export function useActionQueue(
   market: MarketDataState,
   onActionsChanged: (actions: Action[]) => void,
-  session: QueueSession = NO_SESSION
+  session: QueueSession = NO_SESSION,
+  isSingleAction = false
 ): ActionQueue {
   const selectedMarket = market[1];
   const identity: QueueIdentity = {
@@ -148,13 +162,18 @@ export function useActionQueue(
   // React discards this render and renders again with the reset applied, so no committed render
   // shows the previous session's or market's queue.
   if (identityKey(state.identity) !== key) {
-    updateQueue([QueueActionType.Reset, identity]);
+    updateQueue([QueueActionType.Reset, identity, isSingleAction]);
   }
   const isCurrent = identityKey(state.identity) === key;
   const actions = isCurrent ? state.actions : [];
   const pendingAction = isCurrent ? state.pendingAction : undefined;
   // What the callbacks below carry: this visit to this session and market.
   const currentVisit = visitKey(state);
+  // The queue as the latest changes leave it, before React renders them, so that several additions
+  // in one event, or one from a callback kept from an earlier render, are each checked against the
+  // actions added before them.
+  const latestActions = useRef(actions);
+  latestActions.current = actions;
 
   useEffect(() => {
     onActionsChanged(state.actions);
@@ -163,13 +182,18 @@ export function useActionQueue(
   // On the wrapped route a base supply or withdrawal is queued as an ordinary action, and Home
   // carries it out through the wrapper at submission. A wrapper draft, or an action naming wrapper
   // shares, is never a queue entry. Refusing one here, with a typed error, keeps the queue and the
-  // Bulker from ever holding one.
-  const addOrUpdateAction = (action: Action) => {
+  // Bulker from ever holding one. The reducer applies the single-action limit as well, so a change
+  // that reaches it in another order still cannot add a second action.
+  const addOrUpdateAction = (action: Action): boolean => {
     assertDirectActions([action]);
-    updateQueue([QueueActionType.AddOrUpdate, currentVisit, action]);
+    if (isSingleAction && addsSecondAction(latestActions.current, action)) return false;
+    latestActions.current = addOrUpdate(latestActions.current, action);
+    updateQueue([QueueActionType.AddOrUpdate, currentVisit, action, isSingleAction]);
+    return true;
   };
 
   const clearActions = () => {
+    latestActions.current = [];
     updateQueue([QueueActionType.Clear, currentVisit]);
   };
 
@@ -179,6 +203,7 @@ export function useActionQueue(
   };
 
   const removeAction = (action: Action) => {
+    latestActions.current = latestActions.current.filter((queued) => !isSameAction(queued, action));
     updateQueue([QueueActionType.Remove, currentVisit, action]);
   };
 

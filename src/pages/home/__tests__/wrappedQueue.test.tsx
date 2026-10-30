@@ -13,7 +13,12 @@ import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
-import { calculateUpdatedBalances, validateAddingAction, validateAllowanceForAction } from '@helpers/actions';
+import {
+  calculateUpdatedBalances,
+  QUEUED_ACTION_FIRST,
+  validateAddingAction,
+  validateAllowanceForAction,
+} from '@helpers/actions';
 import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingRoute, LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
@@ -992,106 +997,112 @@ describe('Home on the wrapped route', () => {
     });
   });
 
-  describe('a mixed queue: the wrapper action first, then the direct actions through the production path', () => {
+  describe('holds one action at a time', () => {
     const supplyCollateral: Action = [ActionType.SupplyCollateral, COLLATERAL, 10n ** 17n];
     const withdrawCollateral: Action = [ActionType.WithdrawCollateral, COLLATERAL, 10n ** 16n];
+    const supply: Action = [ActionType.Supply, BASE_ASSET, AMOUNT];
+    const withdraw: Action = [ActionType.Withdraw, BASE_ASSET, 400_000_000n];
+    const borrower = { ...BASE_ASSET, balance: -AMOUNT };
+    const repay: Action = [ActionType.Repay, borrower, MAX_UINT256];
 
-    it('starts the wrapper action alone, with no dialog', () => {
-      const lending = lendingWith();
-      const queue = actionQueue([supplyCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      renderHome(lending, { queue });
+    it('gives the amount form and the queue the limit of one action', () => {
+      renderHome(lendingWith(), { queue: actionQueue([supply]) });
+      const { actionRules, baseAsset, collateralAssets } = positionCard();
+
+      expect(actionRules.singleAction).toBe(true);
+      expect(validateAddingAction(baseAsset, collateralAssets, [supply], supplyCollateral, actionRules)).toEqual([
+        false,
+        QUEUED_ACTION_FIRST,
+      ]);
+      expect(validateAddingAction(baseAsset, collateralAssets, [supplyCollateral], supply, actionRules)).toEqual([
+        false,
+        QUEUED_ACTION_FIRST,
+      ]);
+    });
+
+    it.each<[string, Action[], CometState]>([
+      ['a supply then a collateral supply', [supply, supplyCollateral], cometState()],
+      ['a collateral supply then a supply', [supplyCollateral, supply], cometState()],
+      ['a withdrawal then a collateral withdrawal', [withdraw, withdrawCollateral], cometState()],
+      ['a collateral withdrawal then a withdrawal', [withdrawCollateral, withdraw], cometState()],
+      ['a full repay then a withdrawal', [repay, withdraw], cometState(borrower)],
+      ['a collateral supply then a collateral withdrawal', [supplyCollateral, withdrawCollateral], cometState()],
+    ])('sends no wallet request for a queue of %s', (_name, actions, state) => {
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const lending = lendingWith(controller(), { position: POSITION });
+      const queue = actionQueue(actions);
+      renderHome(lending, { queue, state });
 
       act(() => positionCard().onSubmitClicked());
 
-      expect(lending.write.supply).toHaveBeenCalledWith(AMOUNT);
-      expect(mockWriteState.supply).not.toHaveBeenCalled();
-      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+      expect(lending.write.approve).not.toHaveBeenCalled();
+      expect(lending.write.supply).not.toHaveBeenCalled();
+      expect(lending.write.withdraw).not.toHaveBeenCalled();
+      Object.values(mockWriteState).forEach((fn) => expect(fn).not.toHaveBeenCalled());
+      expect(queue.removeAction).not.toHaveBeenCalled();
       expectNoDialog();
     });
 
-    it('sends the direct actions through the Bulker once the wrapper action confirms, and never the wrapper action', () => {
-      const queue = actionQueue([supplyCollateral, withdrawCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const { rerenderHome } = renderHome(lendingWith(), { queue });
-      act(() => positionCard().onSubmitClicked());
-      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), { queue });
-      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+    it('asks for no approval, and queues nothing, for a supply confirmed while another action is queued', () => {
+      const lending = lendingWith(controller(), { position: POSITION });
+      const queue = actionQueue([supplyCollateral], [ActionType.Supply, BASE_ASSET, undefined]);
+      renderHome(lending, { queue });
 
-      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()]))), { queue });
+      act(() => positionCard().onPendingActionConfirm(AMOUNT));
 
-      expect(queue.removeAction).toHaveBeenCalledTimes(1);
-      expect(mockWriteState.invokeBulker).toHaveBeenCalledTimes(1);
-      const bulkerActions: Action[] = mockWriteState.invokeBulker.mock.calls[0][1];
-      expect(bulkerActions.map((action) => action[0])).toEqual([
-        ActionType.SupplyCollateral,
-        ActionType.WithdrawCollateral,
-      ]);
-      expect(mockWriteState.supply).not.toHaveBeenCalled();
-      // The Bulker's own transaction dialog, as for any queue of several direct actions.
-      expect(mockLastProps.ActionModal.state[0]).toBe('bulker');
+      expect(lending.write.approve).not.toHaveBeenCalled();
+      expect(mockWriteState.approve).not.toHaveBeenCalled();
+      expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
     });
 
-    it("opens the Bulker's own approval first when the Bulker is not yet allowed", () => {
-      const queue = actionQueue([supplyCollateral, withdrawCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const options = { queue, state: cometState(BASE_ASSET, false) };
-      const { rerenderHome } = renderHome(lendingWith(), options);
-      act(() => positionCard().onSubmitClicked());
-      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), options);
-      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()]))), options);
+    it('queues nothing for a withdrawal confirmed while a supply is queued', () => {
+      const lending = lendingWith(controller(), { position: POSITION });
+      const queue = actionQueue([supply], [ActionType.Withdraw, BASE_ASSET, undefined]);
+      renderHome(lending, { queue });
 
-      expect(mockLastProps.ActionModal.state[0]).toBe('bulker-approve');
-      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+      act(() => positionCard().onPendingActionConfirm(400_000_000n));
+
+      expect(queue.addOrUpdateAction).not.toHaveBeenCalled();
     });
 
-    it('sends one remaining direct action straight to Comet, as production does for a token that is not wrapped', () => {
-      // ETH and stETH go through the Bulker even alone, so the remaining action is a COMP supply.
+    it('updates the queued withdrawal', () => {
+      const lending = lendingWith(controller(), { position: POSITION });
+      const queue = actionQueue([withdraw], [ActionType.Withdraw, BASE_ASSET, 400_000_000n]);
+      renderHome(lending, { queue });
+
+      act(() => positionCard().onPendingActionConfirm(500_000_000n));
+
+      expect(queue.addOrUpdateAction).toHaveBeenCalledTimes(1);
+      const [queued] = queue.addOrUpdateAction.mock.calls[0];
+      expect([queued[0], queued[2]]).toEqual([ActionType.Withdraw, 500_000_000n]);
+    });
+
+    it('submits a single collateral supply straight to Comet, with no wrapper request', () => {
+      // ETH goes through the Bulker even alone, so the single action is a COMP supply.
       const comp = mockCompCollateralAsset({ walletBalance: 10n ** 18n });
       const state = cometState();
       const withComp = recorded([
         state[0],
         { ...state[1], collateralAssets: [COLLATERAL, comp] },
       ] as unknown as CometState);
-      const queue = actionQueue([
-        [ActionType.SupplyCollateral, comp, 10n ** 17n],
-        [ActionType.Supply, BASE_ASSET, AMOUNT],
-      ]);
-      const options = { queue, state: withComp };
-      const { rerenderHome } = renderHome(lendingWith(), options);
+      const lending = lendingWith();
+      renderHome(lending, { queue: actionQueue([[ActionType.SupplyCollateral, comp, 10n ** 17n]]), state: withComp });
+
       act(() => positionCard().onSubmitClicked());
-      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }]))), options);
-      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()]))), options);
 
       expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
       expect(mockWriteState.supply.mock.calls[0][1]).toBe(comp.address);
+      expect(lending.write.supply).not.toHaveBeenCalled();
       expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
-      expectNoDialog();
     });
 
-    it('sends a full repay queued before a wrapped withdrawal to Comet as a repay of the whole debt at execution', () => {
-      const borrower = { ...BASE_ASSET, balance: -AMOUNT };
-      const repay: Action = [ActionType.Repay, borrower, MAX_UINT256];
-      const withdraw: Action = [ActionType.Withdraw, borrower, 400_000_000n];
-      const options = { queue: actionQueue([repay, withdraw]), state: cometState(borrower) };
+    it('submits a single full repay to Comet as a repay of the whole debt at execution', () => {
       const lending = lendingWith();
-      const { rerenderHome } = renderHome(lending, options);
-      // The form accepts the withdrawal once the queued repay clears the debt.
-      const { actionRules, baseAsset, collateralAssets } = positionCard();
-      expect(validateAddingAction(baseAsset, collateralAssets, [], repay, actionRules)).toBe('ok');
-      expect(validateAddingAction(baseAsset, collateralAssets, [repay], withdraw, actionRules)).toBe('ok');
+      renderHome(lending, { queue: actionQueue([repay]), state: cometState(borrower) });
 
       act(() => positionCard().onSubmitClicked());
-      expect(lending.write.withdraw).toHaveBeenCalledWith({ kind: 'partial', cash: 400_000_000n });
-      expect(mockWriteState.supply).not.toHaveBeenCalled();
-
-      const draft = draftFor('withdraw', [WITHDRAW_STEP], SHARES);
-      rerenderHome(
-        lendingWith(controller({ phase: 'signing', draft, steps: [{ status: 'checking' }], stepIndex: 0 })),
-        options
-      );
-      expect(mockWriteState.supply).not.toHaveBeenCalled();
-      rerenderHome(lendingWith(controller({ phase: 'complete', draft, steps: [confirmed()], stepIndex: 0 })), options);
 
       // Comet repays the borrow balance at execution for MAX_UINT256, so the repay leaves no excess.
-      expect(mockWriteState.supply).toHaveBeenCalledTimes(1);
       expect(mockWriteState.supply).toHaveBeenCalledWith(
         USDC_MARKET,
         USDC,
@@ -1100,48 +1111,7 @@ describe('Home on the wrapped route', () => {
         0,
         expect.any(Function)
       );
-      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
-    });
-
-    it('leaves the direct actions queued for the next Submit when the wrapper action confirmed while another page was shown', () => {
-      const queue = actionQueue([supplyCollateral, withdrawCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const { rerenderHome } = renderHome(lendingWith(), { queue });
-      act(() => positionCard().onSubmitClicked());
-      const draft = draftFor('supply', [SUPPLY_STEP]);
-      rerenderHome(lendingWith(controller(supplyState('signing', [SUPPLY_STEP], [{ status: 'checking' }], 0, draft))), {
-        queue,
-      });
-
-      // The user opens another page, and the supply confirms there.
-      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()], 0, draft))), {
-        queue,
-        isDashboard: false,
-      });
-      rerenderHome(lendingWith(controller(supplyState('complete', [SUPPLY_STEP], [confirmed()], 0, draft))), { queue });
-
-      expect(queue.removeAction).toHaveBeenCalledTimes(1);
-      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
-      expect(mockWriteState.supply).not.toHaveBeenCalled();
-      expectNoDialog();
-    });
-
-    it('keeps every action queued and sends no direct action when the wrapper action stops', () => {
-      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-      const queue = actionQueue([supplyCollateral, [ActionType.Supply, BASE_ASSET, AMOUNT]]);
-      const { rerenderHome } = renderHome(lendingWith(), { queue });
-      act(() => positionCard().onSubmitClicked());
-
-      rerenderHome(
-        lendingWith(
-          controller(supplyState('stopped', [SUPPLY_STEP], [{ status: 'blocked', reason: 'supply-paused' }]))
-        ),
-        { queue }
-      );
-
-      expect(queue.removeAction).not.toHaveBeenCalled();
-      expect(mockWriteState.supply).not.toHaveBeenCalled();
-      expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
-      expectNoDialog();
+      expect(lending.write.withdraw).not.toHaveBeenCalled();
     });
   });
 

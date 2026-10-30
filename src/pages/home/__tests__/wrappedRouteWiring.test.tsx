@@ -24,7 +24,7 @@ import {
 } from '@types';
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
-import { mockCompCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
+import { mockCompCollateralAsset, mockEthCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import { TestLendingProvider } from '../../../../__tests__/mocks/wrappedLending';
 import Home from '../index';
@@ -215,6 +215,7 @@ describe('Home on the wrapped route', () => {
     const [, positionCard] = mockLastProps.PositionCard.state;
     // The committed release controls are closed, so the form shows why instead of queueing.
     expect(positionCard.actionRules).toEqual({
+      singleAction: true,
       wrappedBase: {
         supplyBlockedReason: 'Supply Not Open Yet',
         withdrawBlockedReason: 'Withdrawals Not Open Yet',
@@ -311,13 +312,38 @@ describe('Home on the wrapped route', () => {
     expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
   });
 
-  it('passes a full repay queued before a collateral withdrawal to the Bulker as a repay of the whole debt', () => {
+  it.each<[string, Action[]]>([
+    [
+      'a full repay then a collateral withdrawal',
+      [
+        [ActionType.Repay, { ...EMPTY_ACCOUNT, balance: -5_000_000n }, MAX_UINT256],
+        [ActionType.WithdrawCollateral, mockCompCollateralAsset(), 10n ** 18n],
+      ],
+    ],
+    [
+      'a collateral withdrawal then a full repay',
+      [
+        [ActionType.WithdrawCollateral, mockCompCollateralAsset(), 10n ** 18n],
+        [ActionType.Repay, { ...EMPTY_ACCOUNT, balance: -5_000_000n }, MAX_UINT256],
+      ],
+    ],
+  ])('sends no wallet request for a queue of %s, kept from before the limit of one action', (_name, actions) => {
+    const borrower = { ...EMPTY_ACCOUNT, balance: -5_000_000n };
+    render(homeElement({ lending: wrappedLending(), state: cometState(borrower), queue: actionQueue(actions) }));
+
+    act(() => mockLastProps.PositionCard.state[1].onSubmitClicked());
+
+    Object.values(mockWriteState).forEach((fn) => expect(fn).not.toHaveBeenCalled());
+    expect(mockLastProps.ActionModal.state).toBeUndefined();
+  });
+
+  it('passes a full repay queued before a collateral withdrawal to the Bulker on the standard route', () => {
     const borrower = { ...EMPTY_ACCOUNT, balance: -5_000_000n };
     const actions: Action[] = [
       [ActionType.Repay, borrower, MAX_UINT256],
       [ActionType.WithdrawCollateral, mockCompCollateralAsset(), 10n ** 18n],
     ];
-    render(homeElement({ lending: wrappedLending(), state: cometState(borrower), queue: actionQueue(actions) }));
+    render(homeElement({ lending: STANDARD, state: cometState(borrower), queue: actionQueue(actions) }));
 
     act(() => mockLastProps.PositionCard.state[1].onSubmitClicked());
     expect(mockWriteState.invokeBulker).toHaveBeenCalledTimes(1);
@@ -472,11 +498,8 @@ describe('Home on the wrapped route across a wallet change', () => {
   const WALLET_A = walletSession(ACCOUNT_A, 'connector-a');
   const WALLET_B = walletSession(ACCOUNT_B, 'connector-b');
   const borrower = { ...EMPTY_ACCOUNT, balance: -100_000_000n };
-  // Two actions go through the Bulker, which these accounts have not yet allowed.
-  const repays = actionQueue([
-    [ActionType.Repay, borrower, 50_000_000n],
-    [ActionType.Repay, borrower, 50_000_000n],
-  ]);
+  // A supply of ETH goes through the Bulker even alone, and these accounts have not yet allowed it.
+  const ethSupply = actionQueue([[ActionType.SupplyCollateral, mockEthCollateralAsset(), 10n ** 17n]]);
 
   beforeEach(() => {
     Object.values(mockWriteState).forEach((fn) => fn.mockReset());
@@ -484,7 +507,7 @@ describe('Home on the wrapped route across a wallet change', () => {
 
   function openBulkerApproval() {
     const state = cometState(borrower, { account: ACCOUNT_A, isBulkerAllowed: false });
-    const view = render(homeElement({ lending: wrappedLending(), state, queue: repays, web3: WALLET_A }));
+    const view = render(homeElement({ lending: wrappedLending(), state, queue: ethSupply, web3: WALLET_A }));
     act(() => mockLastProps.PositionCard.state[1].onSubmitClicked());
     const [, dialog] = mockLastProps.ActionModal.state;
     return {
@@ -499,7 +522,7 @@ describe('Home on the wrapped route across a wallet change', () => {
 
     // The approval settles and the account's balances load again.
     const approved = cometState(borrower, { account: ACCOUNT_A });
-    rerender(homeElement({ lending: wrappedLending(), state: approved, queue: repays, web3: WALLET_A }));
+    rerender(homeElement({ lending: wrappedLending(), state: approved, queue: ethSupply, web3: WALLET_A }));
     act(() => completeTransaction());
 
     expect(mockWriteState.invokeBulker).toHaveBeenCalledTimes(1);
@@ -510,7 +533,7 @@ describe('Home on the wrapped route across a wallet change', () => {
 
     // Wallet B connects, its balances load and allow the same repayments, and it allows the Bulker.
     const walletB = cometState(borrower, { account: ACCOUNT_B });
-    rerender(homeElement({ lending: wrappedLending(), state: walletB, queue: repays, web3: WALLET_B }));
+    rerender(homeElement({ lending: wrappedLending(), state: walletB, queue: ethSupply, web3: WALLET_B }));
     act(() => completeTransaction());
 
     // The dialog's callback would sign with wallet A's session, so nothing is submitted.
@@ -521,7 +544,7 @@ describe('Home on the wrapped route across a wallet change', () => {
     const { rerender, approveBulker } = openBulkerApproval();
 
     const unchanged = cometState(borrower, { account: ACCOUNT_A, isBulkerAllowed: false });
-    rerender(homeElement({ lending: wrappedLending(), state: unchanged, queue: repays, web3: WALLET_A }));
+    rerender(homeElement({ lending: wrappedLending(), state: unchanged, queue: ethSupply, web3: WALLET_A }));
     act(() => approveBulker());
 
     expect(mockWriteState.allowOperator).toHaveBeenCalledTimes(1);
@@ -532,7 +555,7 @@ describe('Home on the wrapped route across a wallet change', () => {
 
     // Wallet B connects, and it has not allowed the Bulker either.
     const walletB = cometState(borrower, { account: ACCOUNT_B, isBulkerAllowed: false });
-    rerender(homeElement({ lending: wrappedLending(), state: walletB, queue: repays, web3: WALLET_B }));
+    rerender(homeElement({ lending: wrappedLending(), state: walletB, queue: ethSupply, web3: WALLET_B }));
     act(() => approveBulker());
 
     // The dialog's approval would ask wallet A's session to sign, so nothing is requested.
@@ -544,7 +567,7 @@ describe('Home on the wrapped route across a wallet change', () => {
 
     const sameAccount = walletSession(ACCOUNT_A, 'connector-b');
     const approved = cometState(borrower, { account: ACCOUNT_A });
-    rerender(homeElement({ lending: wrappedLending(), state: approved, queue: repays, web3: sameAccount }));
+    rerender(homeElement({ lending: wrappedLending(), state: approved, queue: ethSupply, web3: sameAccount }));
     act(() => completeTransaction());
 
     expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
