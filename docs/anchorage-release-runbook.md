@@ -397,7 +397,7 @@ The rehearsal has two parts.
    yarn test __tests__/helpers/lendingRoute.test.ts __tests__/hooks/useWrappedAction.test.tsx -t "deposit-disable rollback"
    ```
 
-2. **A local build, by hand.** Build the release commit locally as [the COM-290 checklist](anchorage-porto-validation.md#build-under-test) does, but open exits only. From both controls off, run:
+2. **A local build, by hand.** Build the release commit locally and serve it over loopback HTTPS as [the COM-290 checklist](anchorage-porto-validation.md#build-under-test) does, but open exits only. The Anchorage extension does not appear on an `http://` page. From both controls off, run:
 
    ```bash
    perl -pi -e 's/isExitEnabled: false/isExitEnabled: true/' src/constants/wrappedMarkets.ts

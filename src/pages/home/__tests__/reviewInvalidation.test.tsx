@@ -7,6 +7,7 @@ import * as ActionQueueContextHelpers from '@contexts/ActionQueueContext';
 import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { STANDARD_LENDING, WrappedLending } from '@contexts/WrappedLendingContext';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { getKeyForActions } from '@helpers/gasEstimator';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
@@ -100,7 +101,7 @@ function web3For({
 }
 
 function cometState(isBulkerAllowed: boolean): CometState {
-  return [
+  const state = [
     StateType.Hydrated,
     {
       baseAsset: BASE_ASSET,
@@ -118,6 +119,9 @@ function cometState(isBulkerAllowed: boolean): CometState {
       totalBaseSupplyUsd: 0n,
     },
   ] as unknown as CometState;
+  // As useCometState records it: read for the market and account these tests start with.
+  recordCometStateSource(state, { chainId: 1, cometAddress: USDC_COMET }, ACCOUNT);
+  return state;
 }
 
 function actionQueue(actions: Action[], pendingAction?: PendingAction): ActionQueue {
@@ -486,6 +490,53 @@ describe('Home submission guards', () => {
       await act(async () => manager.finishPreparing());
 
       expect(walletApprove).toHaveBeenCalledWith(USDC_COMET, MAX_UINT256.toString(), { value: 0n, gasLimit: 0 });
+      expect(manager.outcomes).toEqual(['sent']);
+    });
+
+    it('withdraws an approval when the user leaves Home before the wallet is asked, even after Home mounts again', async () => {
+      const manager = preparingManager();
+      const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
+      const { unmount } = render(
+        homeElement({ queue: actionQueue([], pendingSupply), addTransaction: manager.addTransaction })
+      );
+      act(() => positionCard().onPendingActionConfirm(10n ** 18n));
+      expect(manager.addTransaction).toHaveBeenCalledTimes(1);
+
+      // Navigation unmounts Home. Home for another account mounts with refs of its own.
+      unmount();
+      render(
+        homeElement({
+          queue: actionQueue([]),
+          addTransaction: manager.addTransaction,
+          web3: web3For({ account: OTHER_ACCOUNT }),
+        })
+      );
+      await act(async () => manager.finishPreparing());
+
+      expect(walletApprove).not.toHaveBeenCalled();
+      expect(manager.outcomes).toEqual(['withdrawn']);
+    });
+
+    it('keeps an approval the wallet was asked for before the user left Home', async () => {
+      const manager = preparingManager();
+      let answerWallet: () => void = () => undefined;
+      walletApprove.mockImplementationOnce(
+        () =>
+          new Promise<TransactionResponse>(
+            (resolve) => (answerWallet = () => resolve({ hash: '0xapproval' } as unknown as TransactionResponse))
+          )
+      );
+      const pendingSupply: PendingAction = [ActionType.SupplyCollateral, COMP, 10n ** 18n];
+      const { unmount } = render(
+        homeElement({ queue: actionQueue([], pendingSupply), addTransaction: manager.addTransaction })
+      );
+      act(() => positionCard().onPendingActionConfirm(10n ** 18n));
+      await act(async () => manager.finishPreparing());
+      expect(walletApprove).toHaveBeenCalledTimes(1);
+
+      unmount();
+      await act(async () => answerWallet());
+
       expect(manager.outcomes).toEqual(['sent']);
     });
 

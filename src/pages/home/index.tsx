@@ -20,6 +20,7 @@ import {
   getActionFromPendingAction,
   sanitizedAmountForAction,
 } from '@helpers/actions';
+import { withCometStateSource } from '@helpers/cometStateSource';
 import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
@@ -38,10 +39,12 @@ import { SendWithdrawnError } from '@helpers/walletErrors';
 import { isDirectExecution, WrappedBlockReason, WrappedExecutionError } from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
+  isSameWalletSession,
   isSubmissionRefused,
   LiveSubmissionState,
   MarketIdentity,
   supplyIncentivesForRoute,
+  WalletSession,
   withWrappedSupply,
   WrappedPosition,
 } from '@helpers/wrappedPositions';
@@ -76,14 +79,9 @@ import AssetRow from './components/AssetRow';
 import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadNotice, MastheadState } from './components/Masthead';
 import PositionCard, { PositionCardState } from './components/PositionCard';
+import SupplyPausedBanner from './components/SupplyPausedBanner';
 
 const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.name ? 1 : a.name === b.name ? 0 : -1);
-
-// The market and account current when Home first saw each Comet state, or no account for a state
-// that was already there when Home mounted. The app keeps its Comet state while another page is
-// shown, so the record outlives Home. The app replaces the state object on every read, so an old
-// record is dropped with its state.
-const cometStateProvenance = new WeakMap<CometState, CometStateWithMarket>();
 
 /**
  * Whether a stopped wrapper action's last step can have executed, or can still: the wallet answered
@@ -230,41 +228,29 @@ const Home = ({
     selectedMarket[1] === undefined
       ? undefined
       : { chainId: selectedMarket[1].chainInformation.chainId, cometAddress: selectedMarket[1].marketAddress };
-  // Comet state names no market or account, and it trails a change of either by a render. Each
-  // new state is recorded with the market and account current when it arrived, so a stale one
-  // keeps the old ones.
-  const cometStateMarket = useRef<CometStateWithMarket>({
-    market: selectedMarketIdentity,
-    account: web3.read.account,
-    state,
-  });
+  // The wallet session this render's writes sign in. The callbacks made below keep it, and are
+  // refused once another session is live.
+  const walletSession: WalletSession = {
+    account: web3.write.account,
+    connector: web3.write.connector?.uid,
+    chainId: web3.write.chainId,
+  };
+  const liveWalletSession = useRef(walletSession);
+  liveWalletSession.current = walletSession;
+  // The app keeps its Comet state across a change of market or account until the next read
+  // arrives, including while another page is shown. So the state is labelled with the market and
+  // account useCometState read it for, never with the ones selected when this page renders it.
+  const cometStateMarket = useRef<CometStateWithMarket>(withCometStateSource(state));
   if (cometStateMarket.current.state !== state) {
-    cometStateMarket.current = { market: selectedMarketIdentity, account: web3.read.account, state };
+    cometStateMarket.current = withCometStateSource(state);
   }
-  // On the wrapped route, the wrapped position joins a Comet state's balances only if the state is
-  // known to be the connected account's. The app keeps its Comet state while another page is shown,
-  // and after an account switch it keeps the previous account's state until the new read arrives,
-  // so the label above can name an account the state was not read for. A state that arrives while
-  // the dashboard is mounted is recorded with the account then connected, and the record outlives
-  // the dashboard. A hydrated state already there when the dashboard mounts, and never recorded, has
-  // an unknown account: the dashboard shows the direct balance alone, and offers no wrapped
-  // withdrawal, until the next Comet read, at most the timed refresh later. Submissions are judged
-  // by the label above, as before.
-  const lastSeenCometState = useRef<CometState>();
-  if (lastSeenCometState.current !== state) {
-    if (!cometStateProvenance.has(state)) {
-      const isRetainedFromBeforeMount = lastSeenCometState.current === undefined && state[0] === StateType.Hydrated;
-      cometStateProvenance.set(state, {
-        market: selectedMarketIdentity,
-        account: isRetainedFromBeforeMount ? undefined : web3.read.account,
-        state,
-      });
-    }
-    lastSeenCometState.current = state;
-  }
-  const verifiedCometAccount = cometStateProvenance.get(state)?.account;
+  // On the wrapped route, the wrapped position joins a Comet state's balances only if useCometState
+  // read the state for the connected account. For a state read for another account, or with no
+  // record, the dashboard shows the direct balance alone, and offers no wrapped withdrawal, until
+  // the next Comet read.
+  const cometAccount = cometStateMarket.current.account;
   const isCometStateVerifiedForAccount =
-    verifiedCometAccount !== undefined && verifiedCometAccount.toLowerCase() === web3.write.account?.toLowerCase();
+    cometAccount !== undefined && cometAccount.toLowerCase() === web3.write.account?.toLowerCase();
   // Submissions can start from a callback a dialog kept from an earlier render, so they are
   // judged by the session as it is now, not as it was when the callback was made.
   const liveSession = useRef<LiveSubmissionState>({
@@ -292,8 +278,18 @@ const Home = ({
   const visitKey = `${visitIdentity}#${visit.current.count}`;
   const liveVisitKey = useRef(visitKey);
   liveVisitKey.current = visitKey;
+  // Leaving Home also ends the visit. An unmounted Home renders no more, so its refs keep the last
+  // visit forever, and Home mounted again has refs of its own that cannot end it.
+  const isMounted = useRef(true);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+  const isLiveVisit = (key: string) => isMounted.current && liveVisitKey.current === key;
   // Dialogs and the position card keep the callbacks of the render that made them.
-  const isFromEarlierVisit = () => liveVisitKey.current !== visitKey;
+  const isFromEarlierVisit = () => !isLiveVisit(visitKey);
   // On the wrapped route, a wallet session found unusable stops direct writes as well.
   const liveWalletUnusable = useRef(false);
   liveWalletUnusable.current = wrappedLending.action.session.status === 'unusable';
@@ -305,8 +301,9 @@ const Home = ({
   liveEstimatedGasMap.current = estimatedGasMap;
 
   // The manager reads the network and nonce, and can estimate gas, before it asks the wallet. If
-  // the write's visit ends or the session is found unusable in that time, the write is withdrawn.
-  // Otherwise the wallet is asked to sign for a session or market the user has left.
+  // the write's visit ends, Home unmounts or the session is found unusable in that time, the write
+  // is withdrawn. Otherwise the wallet is asked to sign for a session, market or page the user has
+  // left. A write the wallet was already asked for stays with the manager, which tracks it.
   const addTransactionWhileCurrent: AddTransaction = (
     key,
     description,
@@ -319,7 +316,7 @@ const Home = ({
   ) => {
     const visitKeyBefore = liveVisitKey.current;
     const sendWhileCurrent: typeof trxFn = (...args) =>
-      liveVisitKey.current === visitKeyBefore && !liveWalletUnusable.current
+      isLiveVisit(visitKeyBefore) && !liveWalletUnusable.current
         ? trxFn(...args)
         : Promise.reject(new SendWithdrawnError());
     return addTransaction(key, description, sendWhileCurrent, estimatedGas, trxEstimateGasFn, fnArgs, value, callback);
@@ -498,7 +495,7 @@ const Home = ({
       supplyRewardsAPR,
       isInstitutional,
       rewardsAssetSymbol,
-      isRewardsLoading
+      isRewardsLoading,
     } = state[1];
     isBulkerAllowed = state[1].isBulkerAllowed;
     const supplyIncentives = supplyIncentivesForRoute(isWrappedRoute, directBaseAsset.balance, {
@@ -571,7 +568,9 @@ const Home = ({
         liveSession.current,
         { chainId: market.chainInformation.chainId, cometAddress: market.marketAddress },
         actionsToSubmit
-      );
+      ) ||
+      // A kept callback writes through the session it was made in, whatever the live balances allow.
+      !isSameWalletSession(walletSession, liveWalletSession.current);
 
     const actions = getActions(baseAsset, collateralAssets, rewards);
     // The same queue against the Comet base asset, which the direct actions are submitted with.
@@ -717,7 +716,8 @@ const Home = ({
             { ...writeState, allowOperator: allowOperatorWhileCurrent },
             estimatedGasMap,
             onRequestClose,
-            () => submitBulkerAction(directActions)
+            () => submitBulkerAction(directActions),
+            () => !isSameWalletSession(walletSession, liveWalletSession.current)
           )
         );
       } else {
@@ -1148,6 +1148,7 @@ const Home = ({
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
+      <SupplyPausedBanner />
       <InstitutionalBanner market={selectedMarket[1]} />
       <Masthead state={mastheadState} />
       <div className="home__content grid-container">
@@ -1234,7 +1235,8 @@ function actionModalStateBulkerApprove(
   writeState: WriteCometState,
   estimatedGasMap: Map<string, number>,
   onRequestClose: () => void,
-  onCompleteClicked: () => void
+  onCompleteClicked: () => void,
+  isFromAnotherWalletSession: () => boolean
 ): ActionModalBulkerApprove {
   const transactionPredicate = (transactions: Transaction[]) => {
     return transactions.find((transaction) => transaction.key === market.bulkerAddress);
@@ -1245,6 +1247,11 @@ function actionModalStateBulkerApprove(
       isBulkerAllowed: state.isBulkerAllowed,
       transactions,
       onActionClicked: () => {
+        // The dialog keeps this callback, which asks the session that opened it to sign.
+        if (isFromAnotherWalletSession()) {
+          onRequestClose();
+          return;
+        }
         const allowOperatorGasLimit = estimatedGasMap.get(PreEstimatedAction.AllowOperator) || 0;
         writeState.allowOperator(market, market.bulkerAddress, 'Approve Compound III Proxy', allowOperatorGasLimit);
       },

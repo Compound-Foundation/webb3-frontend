@@ -696,7 +696,8 @@ const titleOf = ({ scenario, market }) => `${scenario} (${market})`;
 /**
  * The cells, each held to Jest's own result for its test. A scenario records its cell when its body
  * settles, which can come after Jest failed the test, for example on a timeout. Such a cell fails.
- * A test that Jest failed can also have recorded no cell. Its `beforeAll` or `beforeEach` hook
+ * A cell that recorded a failure keeps it, and its reason also names Jest's failure when that is not
+ * the cell's own. A test that Jest failed can also have recorded no cell. Its `beforeAll` or `beforeEach` hook
  * failed, or its scenario never settled before Jest timed it out. It gets a failed cell, with Jest's
  * failure as the reason.
  */
@@ -706,7 +707,12 @@ export function heldToJest(results, jest) {
   );
   const held = results.map((result) => {
     const failure = failures.get(titleOf(result));
-    if (failure === undefined || result.status === 'fail') return result;
+    if (failure === undefined) return result;
+    if (result.status === 'fail') {
+      return failure.includes(result.reason ?? '')
+        ? result
+        : { ...result, reason: `${result.reason}; Jest failed this test: ${failure}` };
+    }
     return {
       ...result,
       status: 'fail',
@@ -729,12 +735,17 @@ export function heldToJest(results, jest) {
 /**
  * Whether `run` failed only because the upstream failed to serve the fork's state. At least one
  * cell must have failed, and every failed cell must carry anvil's fetch error and no refusal by the
- * chain. Jest must have reported its results and failed no other test. No suite must have failed
+ * chain. So must Jest's failure of the cell's test, as when Jest timed the test out before its
+ * scenario recorded the fetch error. Jest must have reported its results and failed no other test. No suite must have failed
  * outside its tests, as one does when it fails to load or its `afterAll` hook throws. anvil must not
  * have exited. The proxy must have seen the upstream fail or answer with an error.
  */
 export function failedOnUpstreamOnly(run) {
   const failed = run.results.filter((result) => result.status === 'fail');
+  const jestFailures = new Map(
+    (run.jest?.tests ?? []).filter((test) => test.status === 'failed').map((test) => [test.title, test.failure])
+  );
+  const isUpstreamFailure = (text) => FORK_FETCH_ERROR.test(text ?? '') && !CHAIN_REFUSAL.test(text ?? '');
   return (
     run.exitCode !== 0 &&
     !run.anvilExited &&
@@ -743,7 +754,11 @@ export function failedOnUpstreamOnly(run) {
     run.jest.numRuntimeErrorTestSuites === 0 &&
     failed.length === run.jest.numFailedTests &&
     run.stats.failures + run.stats.errorAnswers > 0 &&
-    failed.every((result) => FORK_FETCH_ERROR.test(result.reason ?? '') && !CHAIN_REFUSAL.test(result.reason ?? ''))
+    failed.every(
+      (result) =>
+        isUpstreamFailure(result.reason) &&
+        (!jestFailures.has(titleOf(result)) || isUpstreamFailure(jestFailures.get(titleOf(result))))
+    )
   );
 }
 

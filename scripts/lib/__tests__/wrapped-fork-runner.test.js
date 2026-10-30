@@ -1038,6 +1038,25 @@ describe('cells held to Jest', () => {
     ]);
   });
 
+  test("keeps Jest's timeout beside a failure that the scenario recorded after it", () => {
+    const fetchError = 'failed to get storage for 0x1 at 1: HTTP error 429';
+    const [held] = heldToJest(
+      [cell('pause', 'USDT', 'fail', fetchError)],
+      jestReport([
+        { title: 'pause (USDT)', status: 'failed', failure: 'thrown: Exceeded timeout of 600000 ms for a test.' },
+      ])
+    );
+    assert.deepEqual(
+      held,
+      cell(
+        'pause',
+        'USDT',
+        'fail',
+        `${fetchError}; Jest failed this test: thrown: Exceeded timeout of 600000 ms for a test.`
+      )
+    );
+  });
+
   test('keeps a failed cell, and every cell when Jest reported nothing', () => {
     const results = [cell('dust', 'USDC', 'fail', 'Error: dust'), cell('dust', 'USDT', 'pass')];
     assert.deepEqual(heldToJest(results, undefined), results);
@@ -1092,6 +1111,20 @@ describe('the retry rule', () => {
     for (const [name, failedRun] of Object.entries(cases)) {
       assert.equal(failedOnUpstreamOnly(failedRun), false, name);
     }
+  });
+
+  test('never retries a cell that recorded a fetch error after Jest failed its test for another reason', () => {
+    const run = upstreamOnly();
+    const heldTo = (failure) => {
+      const jest = { ...run.jest, tests: [{ title: 'pause (USDT)', status: 'failed', failure }] };
+      return { ...run, jest, results: heldToJest(run.results, jest) };
+    };
+    const timedOut = heldTo('thrown: Exceeded timeout of 600000 ms for a test.');
+    assert.equal(failedOnUpstreamOnly(timedOut), false);
+    assert.equal(isRetryable(timedOut), false);
+    assert.equal(finalVerdict([timedOut]).verdict, 'FAIL');
+    // Jest's failure that is the cell's own fetch error still qualifies.
+    assert.equal(failedOnUpstreamOnly(heldTo(`Error: ${fetchError}`)), true);
   });
 
   test('a retry tries the other endpoints first and the failed one last', () => {
@@ -1244,14 +1277,17 @@ describe('the verdict', () => {
   /** Every cell of the full matrix, passed, with `changes` merged into the cells that they name by title. */
   const fullMatrix = (changes = {}) =>
     MATRIX_CELLS.map((each) => ({ ...each, status: 'pass', ...changes[titleOf(each)] }));
-  /** The cell reporter's file for `results`: one test for each cell, failed if the cell failed, and passed otherwise. */
+  /**
+   * The cell reporter's file for `results`: one test for each cell, failed with the cell's error if
+   * the cell failed, and passed otherwise.
+   */
   const jestReportFor = (results) => ({
     numFailedTests: results.filter((result) => result.status === 'fail').length,
     numRuntimeErrorTestSuites: 0,
     tests: results.map((result) => ({
       title: titleOf(result),
       status: result.status === 'fail' ? 'failed' : 'passed',
-      failure: '',
+      failure: result.status === 'fail' ? `Error: ${result.reason ?? ''}` : '',
     })),
   });
   const suiteRun = (
