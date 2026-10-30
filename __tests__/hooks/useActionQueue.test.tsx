@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 
 import { getMarket } from '@helpers/markets';
+import { MAX_UINT256 } from '@helpers/numbers';
 import { WRAPPED_ACTION, WrappedExecutionError } from '@helpers/wrappedActions';
 import { QueueSession, useActionQueue } from '@hooks/useActionQueue';
 import { Action, ActionQueue, ActionType, MarketData, PendingAction, RewardsState, StateType } from '@types';
@@ -222,6 +223,17 @@ describe('useActionQueue', () => {
 
     rerender({ market: MAINNET_ETH, session: SESSION });
     expect(visibleActions(result.current)).toEqual([]);
+  });
+
+  it('keeps a queued Max repay as MAX_UINT256 instead of the debt in the latest Comet read', () => {
+    const { result } = renderQueue({ market: MAINNET_USDC, session: SESSION });
+    const borrower = mockBaseAsset({ balance: -5_000_000n });
+    act(() => result.current.addOrUpdateAction([ActionType.Repay, BASE_ASSET, MAX_UINT256]));
+
+    // Comet repays the borrow balance at execution for MAX_UINT256, so the repay leaves no excess.
+    expect(result.current.getActions(borrower, [COMP], NO_REWARDS)).toEqual([
+      [ActionType.Repay, borrower, MAX_UINT256],
+    ]);
   });
 
   describe('with an unchanged session and market', () => {
