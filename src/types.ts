@@ -616,6 +616,7 @@ export enum Currency {
   USDT = 'USDT',
   wstETH = 'wstETH',
   USDS = 'USDS',
+  USDG = 'USDG',
   USDbC = 'USDbC',
   'USDC.e' = 'USDC.e',
   USDe = 'USDe',

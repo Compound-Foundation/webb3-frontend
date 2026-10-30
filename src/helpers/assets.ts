@@ -128,6 +128,7 @@ export const hasAssetIcon = (symbol: string): boolean => {
     'tBTC',
     'AERO',
     'USDS',
+    'USDG',
     'USDe',
     'sFRAX',
     'ETHx',
