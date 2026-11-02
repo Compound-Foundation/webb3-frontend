@@ -368,7 +368,7 @@ Steps, from a shell with Foundry's `cast` and `ETH_RPC_URL` set as above:
    cast call "$BASE" "balanceOf(address)(uint256)" "$ACCOUNT"      # up by the payout
    ```
 
-Another exit, not rehearsed: `redeem(shares, account, account)` moves the shares' value to the holder's own Comet balance through `comet.transfer`, instead of paying the base token (`WrappedCometERC4626.sol:495-518`). It works while withdrawals are paused or Comet's cash is short. It fails while Comet's transfers are paused, because `maxRedeem` is then 0 (`:719-723`). It leaves the holder with a direct Comet position, which pays the base token only through a later direct withdrawal. This app cannot make that withdrawal on the wrapped route (preflight item 11). Product decides whether to offer it.
+Another exit, not rehearsed: `redeem(shares, account, account)` moves the shares' value to the holder's own Comet balance through `comet.transfer`, instead of paying the base token (`WrappedCometERC4626.sol:495-518`). It works while withdrawals are paused or Comet's cash is short. It fails while Comet's transfers are paused, because `maxRedeem` is then 0 (`:719-723`). It leaves the holder with a direct Comet position, which pays the base token only through a later direct withdrawal. While exits are closed on the market (`isExitEnabled` is `false`), this app cannot make that withdrawal on the wrapped route (preflight item 11). Once they are open, the wrapped route's Withdraw takes a direct supply first, as production's Comet base withdrawal (COM-344). Product decides whether to offer `redeem`.
 
 Rehearsal, as facts from 2026-10-22:
 
