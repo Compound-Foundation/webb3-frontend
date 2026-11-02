@@ -7,7 +7,6 @@ import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { filterMap } from '@helpers/functions';
 import { TRX_REFRESH_INTERVAL } from '@helpers/numbers';
-import { readStoredTransactions } from '@helpers/transactionStorage';
 import {
   classifyWalletError,
   describeWalletError,
@@ -15,11 +14,10 @@ import {
   NotSentError,
   SendWithdrawnError,
 } from '@helpers/walletErrors';
-import { isDirectWithdrawalStep, isHeldDirectWithdrawal, isWrapperAddress } from '@helpers/wrappedActions';
+import { isWrapperAddress } from '@helpers/wrappedActions';
 import {
   AwaitingConfirmationTransaction,
   BaseTransaction,
-  HeldDirectWithdrawal,
   PendingTransaction,
   SettledTransaction,
   Transaction,
@@ -89,6 +87,44 @@ type ClearAction = [ActionType.Clear];
 
 type Action = AddAction | UpdateAction | RemoveAction | ClearAction;
 
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const TRANSACTION_HASH = /^0x[0-9a-fA-F]{64}$/;
+
+/** Whether a stored value is a well-formed transaction record. Any script on the page can write storage. */
+function isStoredTransaction(value: unknown): value is Transaction {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  const isCount = (field: unknown, minimum: number) =>
+    typeof field === 'number' && Number.isSafeInteger(field) && field >= minimum;
+  return (
+    typeof record.id === 'string' &&
+    typeof record.key === 'string' &&
+    isCount(record.networkId, 1) &&
+    typeof record.networkName === 'string' &&
+    typeof record.description === 'string' &&
+    isCount(record.nonce, 0) &&
+    (record.nonceSource === undefined ||
+      record.nonceSource === 'transaction' ||
+      record.nonceSource === 'lower-bound') &&
+    (record.account === undefined || (typeof record.account === 'string' && ADDRESS.test(record.account))) &&
+    (record.step === undefined || typeof record.step === 'string') &&
+    (record.state === TransactionState.AwaitingConfirmation ||
+      (record.state === TransactionState.Pending &&
+        typeof record.hash === 'string' &&
+        TRANSACTION_HASH.test(record.hash)))
+  );
+}
+
+/** The well-formed stored records. Anything else is dropped at the next write. */
+function readStoredTransactions(): Transaction[] {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]');
+    return Array.isArray(parsed) ? parsed.filter(isStoredTransaction) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Applies `change` to the stored records. Storage that is full or unavailable never throws here. */
 function updateStoredTransactions(change: (stored: Transaction[]) => Transaction[]) {
   try {
@@ -109,20 +145,6 @@ function isWrapperStep(transaction: Transaction): boolean {
 }
 
 /**
- * Whether the record is a step the manager keeps after an ambiguous answer or a reload: a wrapper
- * step, or a direct withdrawal step whose wallet request was made. Home records a direct step's
- * `heldWithdrawal` just before it asks the wallet, so a direct step without it never reached the
- * wallet, as when its gas estimate failed, and holds nothing back.
- */
-function isFollowedStep(transaction: Transaction): boolean {
-  return (
-    isWrapperStep(transaction) ||
-    (isDirectWithdrawalStep(transaction) &&
-      (transaction.state === TransactionState.Pending || transaction.heldWithdrawal !== undefined))
-  );
-}
-
-/**
  * Whether the record delays Comet data refreshes until it settles. Every record does, except an
  * interrupted wrapper step with no hash. The manager has no hash to look up for it, so it never
  * settles the record, which leaves the list only when the user clears the list. A record that
@@ -132,9 +154,8 @@ function isFollowedStep(transaction: Transaction): boolean {
 export function delaysCometRefresh(transaction: Transaction): boolean {
   // Storage validation accepts a wallet request record that carries a hash, and the type does not
   // declare one, so the field is read at runtime. Any hash value keeps the record delaying refreshes.
-  // A held direct withdrawal step is the same: a reload or an ambiguous answer left it without a hash.
   const isInterruptedWrapperStep =
-    isFollowedStep(transaction) &&
+    isWrapperStep(transaction) &&
     transaction.state === TransactionState.AwaitingConfirmation &&
     transaction.isInterrupted === true &&
     !('hash' in transaction && transaction.hash !== undefined);
@@ -146,15 +167,11 @@ export function delaysCometRefresh(transaction: Transaction): boolean {
  * because it has a hash or its wallet request is open in this session. A wrapper step interrupted
  * by a reload or an ambiguous answer has neither, so nothing can follow it. Clearing the list is
  * how the user stops waiting for it, after checking the wallet, as for any other transaction.
- *
- * A direct withdrawal step is always kept: while it can still execute, a second partial withdrawal
- * could take more than the direct supply, and Comet would borrow the rest. Only its outcome ends it:
- * a receipt or a taken nonce, or, without a hash, Home's check that the supply fell by its amount.
  */
 function isKeptByClear(transaction: Transaction): boolean {
   const isInterrupted =
     transaction.state === TransactionState.AwaitingConfirmation && transaction.isInterrupted === true;
-  return (isWrapperStep(transaction) && !isInterrupted) || isDirectWithdrawalStep(transaction);
+  return isWrapperStep(transaction) && !isInterrupted;
 }
 
 function txReducer(currentTransactions: Transaction[], action: Action): Transaction[] {
@@ -219,9 +236,8 @@ type Resolution =
  *
  * The nonce read before sending is only a lower bound: a wallet that queues the transaction behind
  * another sends it with a higher one. The node's record of the transaction gives its own nonce. A
- * wrapper step, or a direct withdrawal step, is judged replaced only by its own nonce, since
- * reporting it replaced lets a fresh review of the action start, and a lower bound can report a
- * transaction that is still pending.
+ * wrapper step is judged replaced only by its own nonce, since reporting it replaced lets a fresh
+ * review of the action start, and a lower bound can report a transaction that is still pending.
  *
  * The record's nonce is the transaction's own, or that lower bound, so the transaction's own nonce
  * is never below it. A smaller reported nonce is not the transaction's and is ignored. A Safe, for
@@ -239,7 +255,7 @@ async function resolveTransaction(provider: TransactionReader, transaction: Pend
       ? sentTransaction.nonce
       : undefined;
   const ownNonce = reportedNonce ?? (transaction.nonceSource === 'transaction' ? transaction.nonce : undefined);
-  const nonce = ownNonce ?? (isFollowedStep(transaction) ? undefined : transaction.nonce);
+  const nonce = ownNonce ?? (isWrapperStep(transaction) ? undefined : transaction.nonce);
   const pending: Resolution = { status: 'pending', ownNonce: reportedNonce };
   if (nonce === undefined) return pending;
   const confirmedNonce = await provider.getTransactionCount(transaction.account);
@@ -276,8 +292,7 @@ export type AddTransaction = (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   fnArgs: any[],
   value?: bigint,
-  callback?: (outcome: TransactionOutcome) => void,
-  options?: { step?: string; onSend?: (context: SendContext) => void }
+  callback?: (outcome: TransactionOutcome) => void
 ) => Promise<TransactionResponse | undefined>;
 
 /**
@@ -300,9 +315,8 @@ export type AddTransaction = (
  * - `not-sent`: the request failed before the wallet was asked to sign, for example while
  *   reading the nonce or estimating gas. Nothing was sent.
  *
- * After `provider-failure`, `pending-in-wallet` or `session-broken`, a wrapper step's or a direct
- * withdrawal step's record stays, marked interrupted, since the wallet can still send it. Other
- * records are removed.
+ * After `provider-failure`, `pending-in-wallet` or `session-broken`, a wrapper step's record stays,
+ * marked interrupted, since the wallet can still send it. Other records are removed.
  */
 export type SendResult =
   | { status: 'submitted'; id: string; hash: string; response?: TransactionResponse }
@@ -322,7 +336,7 @@ export type TransactionRequest = {
    * Asks the wallet to send the transaction. Resolves with its hash or response once broadcast.
    * Throwing `SendWithdrawnError` withdraws the request before the wallet is asked.
    */
-  send: (context?: SendContext) => Promise<TransactionResponse | string>;
+  send: () => Promise<TransactionResponse | string>;
   /** For one transaction of a multi-step action, the step it is. */
   step?: string;
   /** The sender the caller checked. Nothing is sent if the session's account differs. */
@@ -330,18 +344,6 @@ export type TransactionRequest = {
   /** The chain the caller checked. Nothing is sent if the wallet reports another. */
   chainId?: number;
   onSettled?: (outcome: TransactionOutcome) => void;
-};
-
-/** What `send` can tell the manager about the request it is sending. */
-export type SendContext = {
-  /** The id of the manager's record of the request. */
-  id: string;
-  /**
-   * For a direct withdrawal step, called just before the wallet is asked: the record, in storage
-   * too, keeps `held`, what tells later whether the step executed. A direct step that an ambiguous
-   * answer or a reload interrupts is kept only once this was called.
-   */
-  holdWith: (held: HeldDirectWithdrawal) => void;
 };
 
 export type SubmitTransaction = (request: TransactionRequest) => Promise<SendResult>;
@@ -372,13 +374,8 @@ export type TransactionManager = {
   restoredSession: RestoredSession | undefined;
   addTransaction: AddTransaction;
   submitTransaction: SubmitTransaction;
-  /**
-   * Clears the list, except wrapper steps that can still be followed and direct withdrawal steps,
-   * which stay until they settle or are released.
-   */
+  /** Clears the list, except wrapper steps that can still be followed, which stay until they settle. */
   clearTransactions: () => void;
-  /** Removes a held direct withdrawal step (`isHeldDirectWithdrawal`) that Home found resolved. */
-  releaseHeldDirectWithdrawal: (id: string) => void;
 };
 
 export function useTransactionManager(web3: Web3): TransactionManager {
@@ -440,9 +437,8 @@ export function useTransactionManager(web3: Web3): TransactionManager {
           const isOwn = (tx: Transaction) => tx.networkId === chainId && tx.account?.toLowerCase() === sender;
           // A record with no sender cannot be tied to an account, and a wallet request with no hash
           // cannot be looked up. A wrapper step stays, though: its wallet request can still be open,
-          // so the next review of its action waits until the user clears it from the list. So does a
-          // direct withdrawal step, which holds back the next Comet step until it is resolved.
-          const isRestorable = (tx: Transaction) => tx.state === TransactionState.Pending || isFollowedStep(tx);
+          // so the next review of its action waits until the user clears it from the list.
+          const isRestorable = (tx: Transaction) => tx.state === TransactionState.Pending || isWrapperStep(tx);
           // A transaction this session settled is dropped, even when storage holds it again, as after
           // another tab writes it back. `settle` ignores an id it has settled, so a copy tracked
           // again stays pending until a reload.
@@ -578,13 +574,8 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         updateTransactions([ActionType.Add, record]);
         if (request.onSettled !== undefined) callbacks.current.set(id, request.onSettled);
 
-        const holdWith = (held: HeldDirectWithdrawal) => {
-          if (record === undefined || !isDirectWithdrawalStep(record)) return;
-          record = { ...record, heldWithdrawal: held };
-          updateTransactions([ActionType.Update, record]);
-        };
         isSendCalled = true;
-        const response = await request.send({ id, holdWith });
+        const response = await request.send();
         const hash = typeof response === 'string' ? response : response.hash;
         // A hash alone, or a `connectUnchecked` signer's response, gives no nonce.
         const ownNonce =
@@ -629,9 +620,7 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         }
         // The wallet had the request and can still send it. A wrapper step stays, marked
         // interrupted, so the next review of its action waits until the user clears it from the list.
-        // A direct withdrawal step that reached the wallet stays too, with what tells later whether
-        // it executed.
-        if (record !== undefined && isFollowedStep(record)) {
+        if (record !== undefined && isWrapperStep(record)) {
           const interrupted = { ...record, isInterrupted: true };
           updateTransactions([
             ActionType.Update,
@@ -647,14 +636,12 @@ export function useTransactionManager(web3: Web3): TransactionManager {
   );
 
   const addTransaction = useCallback<AddTransaction>(
-    async (key, description, trxFn, estimatedGas, trxEstimateGasFn, fnArgs, value = 0n, callback, options) => {
+    async (key, description, trxFn, estimatedGas, trxEstimateGasFn, fnArgs, value = 0n, callback) => {
       const result = await submitTransaction({
         key,
         description,
-        step: options?.step,
         onSettled: callback,
-        send: async (context) => {
-          if (context !== undefined) options?.onSend?.(context);
+        send: async () => {
           let gasLimit = estimatedGas;
           if (estimatedGas === 0) {
             const estimatedGasUsage = (await trxEstimateGasFn(...fnArgs, { value })).toNumber();
@@ -672,11 +659,6 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     updateTransactions([ActionType.Clear]);
   };
 
-  const releaseHeldDirectWithdrawal = useCallback((id: string) => {
-    const held = trackedTransactions.current.find((transaction) => transaction.id === id);
-    if (held !== undefined && isHeldDirectWithdrawal(held)) updateTransactions([ActionType.Remove, id]);
-  }, []);
-
   return {
     transactions,
     settledTransactions,
@@ -685,6 +667,5 @@ export function useTransactionManager(web3: Web3): TransactionManager {
     addTransaction,
     submitTransaction,
     clearTransactions,
-    releaseHeldDirectWithdrawal,
   };
 }

@@ -18,7 +18,6 @@ import { mockBaseAsset } from '../mocks/mockBaseAsset';
 
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const WRAPPER = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73';
-const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
 const ACTION: Action = [ActionType.Supply, mockBaseAsset(), 1_000_000n];
 
 const SENT: SentWrapperAction = {
@@ -177,79 +176,6 @@ describe('useSubmissionStore', () => {
     // Back on the market, the next fresh read still waits for the block.
     rerender({ queueScope: 'queue-scope' });
     expect(result.current.directStep).toEqual({ scope: 'queue-scope', blockNumber: 101 });
-  });
-
-  describe('directHold', () => {
-    const WALLET = { provider: {}, account: ACCOUNT, chainId: 1 };
-    const MARKET = { chainId: 1, cometAddress: USDC_COMET };
-    const RESTORED = { provider: WALLET.provider, account: ACCOUNT.toLowerCase(), chainId: 1 };
-    const held = (overrides: Partial<AwaitingConfirmationTransaction> = {}): AwaitingConfirmationTransaction => ({
-      id: 'held-1',
-      key: USDC_COMET,
-      networkId: 1,
-      networkName: 'homestead',
-      description: 'Withdraw USDC',
-      nonce: 5,
-      account: ACCOUNT.toLowerCase(),
-      step: 'wrapped-route-direct-withdraw',
-      state: TransactionState.AwaitingConfirmation,
-      isInterrupted: true,
-      heldWithdrawal: { amount: '200000000', principalBefore: '238095238' },
-      ...overrides,
-    });
-
-    it("lists the account's held Comet steps on the market once the manager has restored the session", () => {
-      const { result, rerender } = renderStore({ wallet: WALLET, market: MARKET, transactions: [held()] });
-      expect(result.current.directHold).toEqual({ isKnown: false, held: [held()] });
-
-      rerender({ wallet: WALLET, market: MARKET, transactions: [held()], restoredSession: RESTORED });
-      expect(result.current.directHold).toEqual({ isKnown: true, held: [held()] });
-    });
-
-    it('lists none for another account, market or network, and none that is not held', () => {
-      const transactions = [
-        held({ id: 'other-account', account: '0x0000000000000000000000000000000000000bb2' }),
-        held({ id: 'other-market', key: '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840' }),
-        held({ id: 'other-network', networkId: 8453 }),
-        held({ id: 'open-request', isInterrupted: undefined }),
-        held({ id: 'wrapper-step', key: '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73' }),
-      ];
-      const { result } = renderStore({ wallet: WALLET, market: MARKET, transactions, restoredSession: RESTORED });
-      expect(result.current.directHold).toEqual({ isKnown: true, held: [] });
-    });
-
-    it('is not known while the restored session is another one, or the wallet is on another network than the market', () => {
-      const { result, rerender } = renderStore({
-        wallet: WALLET,
-        market: MARKET,
-        restoredSession: { ...RESTORED, provider: {} },
-      });
-      expect(result.current.directHold.isKnown).toBe(false);
-      rerender({
-        wallet: { ...WALLET, chainId: 8453 },
-        market: MARKET,
-        restoredSession: { ...RESTORED, chainId: 8453 },
-      });
-      expect(result.current.directHold.isKnown).toBe(false);
-    });
-
-    it('keeps the hold across every change of scope, and releases it only through the manager', () => {
-      const releaseHeldDirectWithdrawal = jest.fn();
-      const options = {
-        wallet: WALLET,
-        market: MARKET,
-        transactions: [held()],
-        restoredSession: RESTORED,
-        releaseHeldDirectWithdrawal,
-      };
-      const { result, rerender } = renderStore(options);
-      rerender({ ...options, queueScope: 'other-market', scope: 'other-market' });
-      rerender({ ...options, queueScope: 'queue-scope', scope: 'scope-1' });
-      expect(result.current.directHold.held).toEqual([held()]);
-
-      act(() => result.current.releaseHeldDirectStep('held-1'));
-      expect(releaseHeldDirectWithdrawal).toHaveBeenCalledWith('held-1');
-    });
   });
 
   it('drops a sent action with the queue, after a change of account, connector, connection or market', () => {

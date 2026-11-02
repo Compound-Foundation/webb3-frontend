@@ -6,7 +6,7 @@ import type { WrappedActionType } from '@helpers/wrappedActions';
 import { IDLE_WRAPPED_ACTION, WrappedActionController, WrappedActionState } from '@hooks/useWrappedAction';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
 import { IDLE_WRITE_WRAPPED_STATE, WriteWrappedState } from '@hooks/useWriteWrappedState';
-import type { Action, AwaitingConfirmationTransaction } from '@types';
+import type { Action } from '@types';
 
 /**
  * A wrapper action the dashboard started, and what became of it:
@@ -79,15 +79,6 @@ export type SentWrapperAction = {
 export type DirectStepRecord = { scope: string; blockNumber: number };
 
 /**
- * The Comet steps of split withdrawals that can still execute, for the connected account on the
- * selected market (`isHeldDirectWithdrawal` in `@hooks/useTransactionManager`). They are the
- * transaction manager's stored records, so they survive a reload, a change of market and Clear.
- * `isKnown` is false until the manager has restored the live wallet session's stored records, while
- * `held` can still lack one sent before a reload.
- */
-export type DirectStepHold = { isKnown: boolean; held: readonly AwaitingConfirmationTransaction[] };
-
-/**
  * The account, connector, connection status and market the queue belongs to. The wallet's network
  * is not part of it, as it is not part of the queue's session, so a sent wrapper action is followed
  * across a change of network.
@@ -135,10 +126,6 @@ export type SubmissionStore = {
   /** Where the last confirmed Comet step of a split withdrawal executed, in the current `queueScope`. */
   directStep: DirectStepRecord | undefined;
   setDirectStep: (record: DirectStepRecord | undefined) => void;
-  /** The Comet steps of split withdrawals that can still execute, for this account and market. */
-  directHold: DirectStepHold;
-  /** Ends the hold of a step in `directHold.held`, once Home has found it resolved. */
-  releaseHeldDirectStep: (id: string) => void;
 };
 
 /**
@@ -170,8 +157,6 @@ export const STANDARD_LENDING: WrappedLending = Object.freeze({
     setSent: () => undefined,
     directStep: undefined,
     setDirectStep: () => undefined,
-    directHold: { isKnown: true, held: [] },
-    releaseHeldDirectStep: () => undefined,
   },
 });
 

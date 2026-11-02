@@ -7,7 +7,7 @@ import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { MAX_UINT256 } from '@helpers/numbers';
 import type { WithdrawalQuote, WithdrawalReview } from '@helpers/wrappedWithdrawals';
 import type { ScreeningStatus } from '@hooks/useAddressScreening';
-import { Action, ActionType, AwaitingConfirmationTransaction, Transaction, TransactionState } from '@types';
+import { Action, ActionType } from '@types';
 
 /** Marks a wrapper action. Standard queue entries are tuples and never carry it. */
 export const WRAPPED_ACTION = 'wrapped-action';
@@ -219,41 +219,9 @@ const WRAPPED_COMET_ADDRESSES: ReadonlySet<string> = new Set(
   HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => String(market.cometAddress).toLowerCase())
 );
 
-/**
- * The step id of the Comet base withdrawal that a withdrawal on the wrapped route sends first, for
- * the account's direct supply. The transaction manager follows a record with this step, keyed to
- * one of these Comet markets, as it follows a wrapper step.
- */
-export const DIRECT_WITHDRAW_STEP_ID = 'wrapped-route-direct-withdraw';
-
 /** Whether `address` is a Comet market the configuration names a wrapper for. */
 export function isWrappedCometAddress(address: unknown): boolean {
   return typeof address === 'string' && WRAPPED_COMET_ADDRESSES.has(address.toLowerCase());
-}
-
-/**
- * Whether the record is the Comet step of a withdrawal on the wrapped route, which takes the
- * account's direct supply before the wrapper step. It is followed as a wrapper step is, so that one
- * that can still execute holds back the next across a reload, a change of market and a Clear. Only
- * records keyed to a Comet market with a configured wrapper qualify, so a record written to storage
- * by anyone else cannot hold any other contract's withdrawals.
- */
-export function isDirectWithdrawalStep(transaction: Transaction): boolean {
-  return transaction.step === DIRECT_WITHDRAW_STEP_ID && isWrappedCometAddress(transaction.key);
-}
-
-/**
- * Whether the record is a direct withdrawal step that the wallet had and answered with an ambiguous
- * error, or that was open at a reload, so it can still execute with no hash to follow. It holds back
- * every further Comet step of its account and market until Home finds it resolved
- * (`isHeldWithdrawalResolved`) and releases it. It does not hold the dashboard.
- */
-export function isHeldDirectWithdrawal(transaction: Transaction): transaction is AwaitingConfirmationTransaction {
-  return (
-    isDirectWithdrawalStep(transaction) &&
-    transaction.state === TransactionState.AwaitingConfirmation &&
-    transaction.isInterrupted === true
-  );
 }
 
 /** Whether `address` is a wrapper the configuration names. */

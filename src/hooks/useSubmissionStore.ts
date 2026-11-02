@@ -1,16 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type {
-  DirectStepHold,
   DirectStepRecord,
   SentWrapperAction,
   SubmissionRecord,
   SubmissionStore,
 } from '@contexts/WrappedLendingContext';
-import { isHeldDirectWithdrawal, WrappedActionType } from '@helpers/wrappedActions';
-import { Action, AwaitingConfirmationTransaction, SettledTransaction, Transaction, TransactionState } from '@types';
+import type { WrappedActionType } from '@helpers/wrappedActions';
+import { Action, SettledTransaction, Transaction, TransactionState } from '@types';
 
-import type { RestoredSession } from './useTransactionManager';
 import { WRAPPED_SUPPLY_STEP_IDS, WRAPPED_WITHDRAW_STEP_ID } from './useWriteWrappedState';
 
 /** The step of each wrapper action that carries it out. The steps before it only approve. */
@@ -90,45 +88,7 @@ export type UseSubmissionStoreOptions = {
   settledTransactions: readonly SettledTransaction[];
   /** Takes an action out of the live queue. */
   removeAction: (action: Action) => void;
-  /** The live wallet session: its provider, account and network. */
-  wallet?: { provider?: object; account?: string; chainId?: number };
-  /** The selected market. */
-  market?: { chainId: number; cometAddress: string };
-  /** The last wallet session whose stored transactions the manager restored. */
-  restoredSession?: RestoredSession;
-  /** Removes a held direct withdrawal step from the manager. */
-  releaseHeldDirectWithdrawal?: (id: string) => void;
 };
-
-/**
- * The held direct withdrawal steps of the wallet's account on `market`, from the manager's records,
- * and whether the manager has restored the live session's stored records, so that the list is
- * complete. Until then, and while the wallet is on another network than the market, it is not.
- */
-export function directStepHold(
-  transactions: readonly Transaction[],
-  wallet: UseSubmissionStoreOptions['wallet'],
-  market: UseSubmissionStoreOptions['market'],
-  restoredSession: RestoredSession | undefined
-): DirectStepHold {
-  const account = wallet?.account?.toLowerCase();
-  if (account === undefined || market === undefined) return { isKnown: false, held: [] };
-  const isKnown =
-    restoredSession !== undefined &&
-    wallet?.provider !== undefined &&
-    restoredSession.provider === wallet.provider &&
-    restoredSession.account === account &&
-    restoredSession.chainId === wallet.chainId &&
-    wallet.chainId === market.chainId;
-  const held = transactions.filter(
-    (transaction): transaction is AwaitingConfirmationTransaction =>
-      isHeldDirectWithdrawal(transaction) &&
-      transaction.account === account &&
-      transaction.networkId === market.chainId &&
-      transaction.key.toLowerCase() === market.cometAddress.toLowerCase()
-  );
-  return { isKnown, held };
-}
 
 /**
  * The wrapped run and the queued wrapper action it submitted, as App keeps them. A change of
@@ -137,10 +97,6 @@ export function directStepHold(
  * every step against the live session before it is signed. The sent wrapper action is followed until its last step's outcome is known,
  * across a change of network: an entry whose last step confirmed leaves the queue, and one whose
  * last step did not execute is released. A change of `queueScope` drops it with the queue itself.
- *
- * A held Comet step of a split withdrawal is the manager's record, not the store's, so no change of
- * scope ends it. The store only reads it for the account and market (`directHold`), and releases it
- * when Home asks.
  */
 export function useSubmissionStore({
   scope,
@@ -148,10 +104,6 @@ export function useSubmissionStore({
   transactions,
   settledTransactions,
   removeAction,
-  wallet,
-  market,
-  restoredSession,
-  releaseHeldDirectWithdrawal,
 }: UseSubmissionStoreOptions): SubmissionStore {
   const [record, setRecord] = useState<SubmissionRecord>();
   const [sentRecord, setSentRecord] = useState<SentWrapperAction>();
@@ -194,18 +146,6 @@ export function useSubmissionStore({
   }, [sent, isSubmissionOpen, transactions, settledTransactions]);
 
   const directStep = directStepRecord?.scope === queueScope ? directStepRecord : undefined;
-  const directHold = useMemo(
-    () => directStepHold(transactions, wallet, market, restoredSession),
-    [
-      transactions,
-      wallet?.provider,
-      wallet?.account,
-      wallet?.chainId,
-      market?.chainId,
-      market?.cometAddress,
-      restoredSession,
-    ]
-  );
 
   return {
     record: submission,
@@ -214,7 +154,5 @@ export function useSubmissionStore({
     setSent: setSentRecord,
     directStep,
     setDirectStep,
-    directHold,
-    releaseHeldDirectStep: (id) => releaseHeldDirectWithdrawal?.(id),
   };
 }

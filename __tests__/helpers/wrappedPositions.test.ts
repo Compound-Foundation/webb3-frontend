@@ -15,8 +15,7 @@ import {
   getRedeemBuffer,
   getWrappedPositionValueInDollars,
   getWrappedRouteWithdrawalLimits,
-  isHeldWithdrawalResolved,
-  readDirectBaseState,
+  readDirectBalance,
   readWrappedPosition,
   supplyIncentivesForRoute,
   waitForBlock,
@@ -454,104 +453,21 @@ describe('isSubmissionRefused', () => {
   });
 });
 
-describe('readDirectBaseState', () => {
+describe('readDirectBalance', () => {
   const COMET_ABI = new Interface(CometAbi);
-  /** Comet answering for the account: 250 USDC at a supply index of 1.05. */
-  const comet = () => ({
-    call: jest.fn(async ({ data }: { to: string; data: string }) => {
-      const call = COMET_ABI.parseTransaction({ data });
-      if (call.name === 'balanceOf') return COMET_ABI.encodeFunctionResult('balanceOf', [250_000_000n]);
-      if (call.name === 'userBasic') return COMET_ABI.encodeFunctionResult('userBasic', [238_095_238n, 0, 0, 0, 0]);
-      return COMET_ABI.encodeFunctionResult('totalsBasic', [
-        {
-          baseSupplyIndex: 1_050_000_000_000_000n,
-          baseBorrowIndex: 1_100_000_000_000_000n,
-          trackingSupplyIndex: 0n,
-          trackingBorrowIndex: 0n,
-          totalSupplyBase: 0n,
-          totalBorrowBase: 0n,
-          lastAccrualTime: 0n,
-          pauseFlags: 0n,
-        },
-      ]);
-    }),
-  });
 
-  it("reads Comet's balanceOf and userBasic for the account, and totalsBasic, all at the given block", async () => {
-    const provider = comet();
-    await expect(readDirectBaseState(provider, USDC_COMET, ACCOUNT, 1_234)).resolves.toEqual({
-      balance: 250_000_000n,
-      principal: 238_095_238n,
-      baseSupplyIndex: 1_050_000_000_000_000n,
-    });
+  it("reads Comet's balanceOf for the account at the given block", async () => {
+    const provider = { call: jest.fn(async () => COMET_ABI.encodeFunctionResult('balanceOf', [250_000_000n])) };
+    await expect(readDirectBalance(provider, USDC_COMET, ACCOUNT, 1_234)).resolves.toBe(250_000_000n);
     expect(provider.call).toHaveBeenCalledWith(
       { to: USDC_COMET, data: '0x70a08231' + ACCOUNT.slice(2).toLowerCase().padStart(64, '0') },
       1_234
     );
-    expect(provider.call).toHaveBeenCalledWith(
-      { to: USDC_COMET, data: COMET_ABI.encodeFunctionData('userBasic', [ACCOUNT]) },
-      1_234
-    );
-    expect(provider.call).toHaveBeenCalledWith(
-      { to: USDC_COMET, data: COMET_ABI.encodeFunctionData('totalsBasic', []) },
-      1_234
-    );
   });
 
-  it('fails, rather than returning zero, when a read fails', async () => {
+  it('fails, rather than returning zero, when the read fails', async () => {
     const provider = { call: jest.fn(async () => Promise.reject(new Error('rate limited'))) };
-    await expect(readDirectBaseState(provider, USDC_COMET, ACCOUNT, 1_234)).rejects.toThrow('rate limited');
-  });
-});
-
-describe('isHeldWithdrawalResolved', () => {
-  const INDEX = 1_050_000_000_000_000n;
-  // 250 USDC at a supply index of 1.05, before a held withdrawal of 200 USDC.
-  const PRINCIPAL_BEFORE = (250_000_000n * 10n ** 15n) / INDEX;
-  const held = { amount: '200000000', principalBefore: PRINCIPAL_BEFORE.toString() };
-  /** The principal Comet leaves after `withdraw(base, amount)` at `index`, rounding as Comet does. */
-  const afterWithdraw = (principal: bigint, amount: bigint, index: bigint) =>
-    (((principal * index) / 10n ** 15n - amount) * 10n ** 15n) / index;
-
-  it('is resolved once the principal fell by the withdrawal, at the index it executed at or any earlier one', () => {
-    for (const executedAt of [INDEX, INDEX + 10n ** 12n, INDEX + 5n * 10n ** 13n]) {
-      const principal = afterWithdraw(PRINCIPAL_BEFORE, 200_000_000n, executedAt);
-      for (const indexNow of [executedAt, executedAt + 10n ** 13n]) {
-        const now = { balance: (principal * indexNow) / 10n ** 15n, principal, baseSupplyIndex: indexNow };
-        expect(isHeldWithdrawalResolved(held, now)).toBe(true);
-      }
-    }
-  });
-
-  it('stays held while the supply only earns interest, or another withdrawal took clearly less', () => {
-    const grown = INDEX + 10n ** 13n;
-    expect(
-      isHeldWithdrawalResolved(held, {
-        balance: (PRINCIPAL_BEFORE * grown) / 10n ** 15n,
-        principal: PRINCIPAL_BEFORE,
-        baseSupplyIndex: grown,
-      })
-    ).toBe(false);
-    // Comet rounds to a base unit or two, so 'clearly less' is a cent here.
-    const principal = afterWithdraw(PRINCIPAL_BEFORE, 199_990_000n, INDEX);
-    expect(
-      isHeldWithdrawalResolved(held, { balance: (principal * INDEX) / 10n ** 15n, principal, baseSupplyIndex: INDEX })
-    ).toBe(false);
-  });
-
-  it('is resolved once the account has no direct supply, whatever was held', () => {
-    const none = { balance: 0n, principal: 0n, baseSupplyIndex: INDEX };
-    expect(isHeldWithdrawalResolved(held, none)).toBe(true);
-    expect(isHeldWithdrawalResolved({ ...held, amount: MAX_UINT256.toString() }, none)).toBe(true);
-    expect(isHeldWithdrawalResolved(undefined, none)).toBe(true);
-    // A borrower's balanceOf is zero.
-    expect(isHeldWithdrawalResolved(held, { balance: 0n, principal: -5n, baseSupplyIndex: INDEX })).toBe(true);
-  });
-
-  it('keeps a step for the whole supply, or one held without its figures, until the supply is gone', () => {
-    const left = { balance: 1n, principal: 1n, baseSupplyIndex: INDEX };
-    expect(isHeldWithdrawalResolved({ ...held, amount: MAX_UINT256.toString() }, left)).toBe(false);
-    expect(isHeldWithdrawalResolved(undefined, left)).toBe(false);
+    await expect(readDirectBalance(provider, USDC_COMET, ACCOUNT, 1_234)).rejects.toThrow('rate limited');
   });
 });
 
