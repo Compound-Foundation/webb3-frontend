@@ -49,6 +49,7 @@ import {
   MarketIdentity,
   readDirectBaseBalance,
   supplyIncentivesForRoute,
+  waitForBlock,
   WalletSession,
   withWrappedSupply,
   WrappedPosition,
@@ -179,12 +180,15 @@ function unavailableNotice(reason: WriteBlockReason, reload: () => void): Masthe
  * What the masthead says when part of the account's balance on the wrapped route is supplied to
  * Comet directly, outside the wrapper.
  */
-function directSupplyNotice(amount: bigint, baseAsset: BaseAssetWithAccountState): MastheadNotice {
-  return {
-    message: `${formatValue(baseAsset.decimals, amount)} ${
-      baseAsset.symbol
-    } of your balance is supplied to Comet directly, outside the wrapper. Withdraw takes it out first.`,
-  };
+function directSupplyNotice(
+  amount: bigint,
+  baseAsset: BaseAssetWithAccountState,
+  isWithdrawOpen: boolean
+): MastheadNotice {
+  const supplied = `${formatValue(baseAsset.decimals, amount)} ${
+    baseAsset.symbol
+  } of your balance is supplied to Comet directly, outside the wrapper.`;
+  return { message: isWithdrawOpen ? `${supplied} Withdraw takes it out first.` : supplied };
 }
 
 /** The row's label when a withdrawal stopped before its Comet step because the direct supply fell. */
@@ -380,7 +384,12 @@ const Home = ({
       fnArgs.length === 2 &&
       fnArgs[0] === request.args[0] &&
       fnArgs[1] === request.args[1];
-    if (request === undefined || !isPlannedCall) return Promise.resolve(undefined);
+    if (request === undefined) return Promise.resolve(undefined);
+    if (!isPlannedCall) {
+      const notSent = Promise.resolve(undefined);
+      request.onRequested(notSent);
+      return notSent;
+    }
     const checkedSend: typeof trxFn = async (...args) => {
       await request.checkBeforeSend();
       try {
@@ -618,7 +627,8 @@ const Home = ({
       } else if (position.status === 'unavailable') {
         notice = unavailableNotice(position.reason, reload);
       } else if (directSupply > 0n && isCometStateForRoute && isCometStateVerifiedForAccount) {
-        notice = directSupplyNotice(directSupply, directBaseAsset);
+        const isWithdrawOpen = wrappedEntryBlockLabel(lendingRoute, 'withdraw') === undefined;
+        notice = directSupplyNotice(directSupply, directBaseAsset, isWithdrawOpen);
       }
       const readPosition = wrappedPosition;
       const limits =
@@ -891,7 +901,7 @@ const Home = ({
     // base withdrawal, the transaction production sends. Any rest follows through the wrapper, which
     // starts only once the Comet step confirms, with no other press. Both steps belong to the queue's
     // one withdrawal row, which stays locked until the last of them ends. Nothing reaches the wrapper
-    // if the Comet step fails, is declined, or may still execute.
+    // unless the Comet step confirmed.
     const startSplitWithdrawal = (
       withdrawal: Extract<QueuedWrapperAction, { type: 'withdraw' }>,
       otherCount: number
@@ -911,11 +921,24 @@ const Home = ({
         return;
       }
       const direct = split.direct;
-      if (direct === undefined) return;
+      if (direct === undefined) {
+        startWrapperAction(withdrawal, otherCount);
+        return;
+      }
       if (otherCount > 0) {
         setSubmissionRecord(recordStopped(WITHDRAW_ALONE_LABEL));
         return;
       }
+      // An earlier Comet step that can still execute holds back every new one: together they could
+      // take more than the direct supply, and Comet would borrow the rest. A reload or a change of
+      // account, connector or market ends the hold.
+      const earlierStep = liveWrappedLending.current.submission.directStep;
+      if (earlierStep?.scope === sentScope && earlierStep.status === 'unresolved') {
+        setSubmissionRecord(recordStopped(EARLIER_PENDING_LABEL));
+        return;
+      }
+      const minBlock =
+        earlierStep?.scope === sentScope && earlierStep.status === 'confirmed' ? earlierStep.blockNumber : undefined;
       // The visit and wallet session the press was made in are still live and usable.
       const isSessionLive = () =>
         isLiveVisit(visitKeyAtStart) &&
@@ -929,31 +952,49 @@ const Home = ({
       // Changes the run only while it is still this one. A change of scope drops it meanwhile.
       const endRun = (next: SubmissionRecord | undefined) =>
         submissionStore.setRecord((current) => (current === record ? next : current));
+      // What the wrapper still pays once the Comet step has taken the direct supply. A maximum stays a
+      // full exit.
+      const request = split.request;
+      const rest: Action | undefined =
+        request === undefined
+          ? undefined
+          : request.kind === 'full'
+          ? withdrawal.action
+          : [ActionType.Withdraw, withdrawal.action[1] as BaseAssetWithAccountState, request.cash];
+      // The row once the Comet step executed, or may have: the rest, or nothing when there is none.
+      const queueRest = () => (rest === undefined ? removeAction(withdrawal.action) : addOrUpdateAction(rest));
+      // The Comet step can still execute, so it holds back the next one, and its row keeps only the rest.
+      const holdUnresolved = () => {
+        submissionStore.setDirectStep({ scope: sentScope, status: 'unresolved' });
+        queueRest();
+        endRun(undefined);
+      };
       const account = web3.write.account;
       const readProvider = web3.read.provider;
-      const request: DirectStepRequest = {
+      const directStep: DirectStepRequest = {
         cometAddress: market.marketAddress,
         args: [directBaseAsset.address, direct.amount.toString()],
-        // Just before the wallet is asked: the session and the live Comet state still allow the
-        // step, and a fresh read of the direct supply still covers what the step counts on. A part
-        // larger than the supply would borrow the difference, so it goes back for a new amount.
+        // Just before the wallet is asked: the session and the live Comet state still allow the step,
+        // and a fresh read still shows the direct supply the step counts on. The read is of a block no
+        // older than the last confirmed Comet step. A part larger than the supply would borrow the
+        // difference, so a fall sends nothing and asks for a new amount.
         checkBeforeSend: async () => {
-          if (!isSessionLive()) throw new SendWithdrawnError();
-          if (isDirectWithdrawalRefused(liveSession.current, submittedMarket, direct)) {
-            request.isBalanceShort = true;
-            throw new SendWithdrawnError('The direct supply fell below the withdrawal before it was signed.');
+          if (!isSessionLive() || isDirectWithdrawalRefused(liveSession.current, submittedMarket, direct)) {
+            throw new SendWithdrawnError();
           }
           if (readProvider === undefined || account === undefined) {
             throw new NotSentError(new Error("This market's network cannot be read right now."));
           }
           let balance: bigint;
           try {
-            balance = await readDirectBaseBalance(readProvider, market.marketAddress, account);
+            const blockNumber = await waitForBlock(readProvider, minBlock);
+            if (blockNumber === undefined) throw new Error("This market's network has not shown your last withdrawal.");
+            balance = await readDirectBaseBalance(readProvider, market.marketAddress, account, blockNumber);
           } catch (error) {
             throw new NotSentError(error);
           }
           if (balance < direct.minBalance) {
-            request.isBalanceShort = true;
+            directStep.isBalanceShort = true;
             throw new SendWithdrawnError('The direct supply fell below the withdrawal before it was signed.');
           }
           if (!isSessionLive()) throw new SendWithdrawnError();
@@ -961,18 +1002,16 @@ const Home = ({
         onRequested: (sent) => {
           sent.then((response) => {
             if (response !== undefined) return;
-            if (request.isBalanceShort) {
+            if (directStep.isBalanceShort) {
               endRun(recordStopped(DIRECT_BALANCE_CHANGED_LABEL));
-            } else if (request.walletError === 'rejected') {
+            } else if (directStep.walletError === 'rejected') {
               // As for a wrapper action, a rejection returns the queue with nothing said.
               endRun(undefined);
-            } else if (request.walletError === 'refused') {
+            } else if (directStep.walletError === 'refused') {
               endRun(recordStopped('Reconnect Your Wallet'));
-            } else if (request.walletError !== undefined) {
-              // The wallet had the request and can still send it, so the withdrawal leaves the queue
-              // and is never sent twice. Nothing is sent to the wrapper.
-              removeAction(withdrawal.action);
-              endRun(undefined);
+            } else if (directStep.walletError !== undefined) {
+              // The wallet had the request and can still send it. Nothing is sent to the wrapper.
+              holdUnresolved();
             } else {
               endRun(recordStopped(NOT_SENT_LABEL));
             }
@@ -983,30 +1022,35 @@ const Home = ({
             endRun(recordStopped('Transaction Failed'));
             return;
           }
-          // A replaced step can have executed as a sped-up copy, so nothing more is sent for it.
-          if (outcome.status === 'replaced' || split.request === undefined) {
-            removeAction(withdrawal.action);
-            endRun(undefined);
+          // Another transaction took the step's nonce. A sped-up copy of it can have executed, and the
+          // manager can judge a step still pending replaced, so nothing more is sent for it.
+          if (outcome.status === 'replaced') {
+            holdUnresolved();
             return;
           }
-          // The queue row now holds what the wrapper still pays. A maximum stays a full exit.
-          const rest: Action =
-            split.request.kind === 'full'
-              ? withdrawal.action
-              : [ActionType.Withdraw, withdrawal.action[1] as BaseAssetWithAccountState, split.request.cash];
-          addOrUpdateAction(rest);
+          submissionStore.setDirectStep({
+            scope: sentScope,
+            status: 'confirmed',
+            blockNumber: outcome.receipt.blockNumber,
+          });
+          queueRest();
           // The wrapper step follows at once while the run and its visit are live. Otherwise the rest
           // stays queued for the next Submit, as a wrapper action that confirmed while another page
           // was shown leaves the queue as it is.
-          if (!isLiveVisit(visitKeyAtStart) || liveSubmission.current !== record) {
+          if (
+            rest === undefined ||
+            request === undefined ||
+            !isLiveVisit(visitKeyAtStart) ||
+            liveSubmission.current !== record
+          ) {
             endRun(undefined);
             return;
           }
-          startWrapperAction({ type: 'withdraw', action: rest, request: split.request }, 0);
+          startWrapperAction({ type: 'withdraw', action: rest, request }, 0);
         },
       };
       setSubmissionRecord(record);
-      directStepRequest.current = request;
+      directStepRequest.current = directStep;
       directStepWriteState.withdraw(
         market,
         directBaseAsset.address,
@@ -1015,7 +1059,7 @@ const Home = ({
         0,
         () => undefined
       );
-      if (directStepRequest.current === request) {
+      if (directStepRequest.current === directStep) {
         // The write did not start, as when the wallet session changed, so nothing was sent.
         directStepRequest.current = undefined;
         endRun(recordStopped(NOT_SENT_LABEL));
@@ -1028,7 +1072,9 @@ const Home = ({
       if (web3.read.chainId === undefined || web3.write.chainId === undefined) return;
       const plan = planQueue();
       if (plan === undefined) return;
-      if (plan.direct.length > 0 && isBlockedOnLiveRoute(plan.direct)) return;
+      // A withdrawal with a direct part is submitted on its own, and its row says so.
+      const isSplitWithOthers = plan.wrapper?.type === 'withdraw' && directSupply > 0n && plan.direct.length > 0;
+      if (plan.direct.length > 0 && !isSplitWithOthers && isBlockedOnLiveRoute(plan.direct)) return;
       if (web3.write.chainId !== web3.read.chainId) {
         switchWriteNetwork(web3.read.chainId);
       } else if (isQueueLocked()) {

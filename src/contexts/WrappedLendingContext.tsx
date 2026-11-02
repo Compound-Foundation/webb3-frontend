@@ -70,6 +70,19 @@ export type SentWrapperAction = {
 };
 
 /**
+ * The Comet step of the account's last split withdrawal on the wrapped route, while it matters to
+ * the next one. It belongs to the `queueScope` it was sent in, which leaves out the wallet's network.
+ * - `unresolved`: the wallet had the request and answered with an error, or another transaction took
+ *   its nonce, so it can still execute. No further Comet step is sent in its scope: two partial
+ *   withdrawals could together take more than the direct supply, and Comet would borrow the rest.
+ * - `confirmed`: it executed in block `blockNumber`. A later Comet step's fresh read is of that block
+ *   or a newer one, so a read provider behind the wallet's node cannot show the supply it took.
+ */
+export type DirectStepRecord =
+  | { scope: string; status: 'unresolved' }
+  | { scope: string; status: 'confirmed'; blockNumber: number };
+
+/**
  * The account, connector, connection status and market the queue belongs to. The wallet's network
  * is not part of it, as it is not part of the queue's session, so a sent wrapper action is followed
  * across a change of network.
@@ -114,6 +127,9 @@ export type SubmissionStore = {
   /** The wrapper action submitted from the queue, until what became of its last step is known. */
   sent: SentWrapperAction | undefined;
   setSent: (sent: SentWrapperAction | undefined) => void;
+  /** The Comet step of the last split withdrawal, in the current `queueScope`. */
+  directStep: DirectStepRecord | undefined;
+  setDirectStep: (record: DirectStepRecord | undefined) => void;
 };
 
 /**
@@ -138,7 +154,14 @@ export const STANDARD_LENDING: WrappedLending = Object.freeze({
   retry: () => undefined,
   action: IDLE_WRAPPED_ACTION,
   write: IDLE_WRITE_WRAPPED_STATE,
-  submission: { record: undefined, setRecord: () => undefined, sent: undefined, setSent: () => undefined },
+  submission: {
+    record: undefined,
+    setRecord: () => undefined,
+    sent: undefined,
+    setSent: () => undefined,
+    directStep: undefined,
+    setDirectStep: () => undefined,
+  },
 });
 
 export const WrappedLendingContext = createContext<WrappedLending>(STANDARD_LENDING);

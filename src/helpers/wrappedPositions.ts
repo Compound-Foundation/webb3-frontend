@@ -313,8 +313,9 @@ export function isSubmissionRefused(
  * Whether to refuse the Comet base withdrawal that a wrapped-route withdrawal plans for the account's
  * direct supply, judged by the session as it is now. It is the one base withdrawal that goes to Comet
  * on the wrapped route, and `isSubmissionRefused` still refuses every other. It is refused unless the
- * wrapped route of `submittedMarket` is live, the Comet state was read for that market and the
- * connected account, and that state's direct supply still covers `withdrawal.minBalance`.
+ * wrapped route of `submittedMarket` is live with its exits open and eligible, the Comet state was
+ * read for that market and the connected account, and that state's direct supply still covers
+ * `withdrawal.minBalance`.
  */
 export function isDirectWithdrawalRefused(
   live: LiveSubmissionState,
@@ -322,6 +323,8 @@ export function isDirectWithdrawalRefused(
   withdrawal: DirectBaseWithdrawal
 ): boolean {
   if (!isSameMarket(live.selectedMarket, submittedMarket) || live.route.kind !== 'wrapped') return true;
+  // Withdraw is gated as a whole by the exit release control and the route's eligibility.
+  if (!live.route.exit.isEligible) return true;
   const cometState = liveCometStateFor(live, submittedMarket);
   if (cometState === undefined) return true;
   return withdrawal.minBalance <= 0n || cometState.baseAsset.balance < withdrawal.minBalance;
@@ -330,19 +333,20 @@ export function isDirectWithdrawalRefused(
 const cometInterface = new Interface(CometAbi);
 
 /**
- * The account's direct Comet supply of the base token, in base units, at the provider's newest block.
- * Comet's `balanceOf` reports the supply only, and zero for a borrower. Read just before the wallet
- * is asked to sign a direct withdrawal, so a part is never more than the supply.
+ * The account's direct Comet supply of the base token, in base units, at `blockNumber`. Comet's
+ * `balanceOf` reports the supply only, and zero for a borrower. Read just before the wallet is asked
+ * to sign a direct withdrawal, so a part is never more than the supply.
  */
 export async function readDirectBaseBalance(
   provider: Pick<JsonRpcProvider, 'call'>,
   cometAddress: string,
-  account: string
+  account: string,
+  blockNumber: number
 ): Promise<bigint> {
-  const result = await provider.call({
-    to: cometAddress,
-    data: cometInterface.encodeFunctionData('balanceOf', [account]),
-  });
+  const result = await provider.call(
+    { to: cometAddress, data: cometInterface.encodeFunctionData('balanceOf', [account]) },
+    blockNumber
+  );
   return toBigInt(cometInterface.decodeFunctionResult('balanceOf', result)[0], 'directBaseBalance');
 }
 

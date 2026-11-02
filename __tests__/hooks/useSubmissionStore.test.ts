@@ -162,6 +162,21 @@ describe('useSubmissionStore', () => {
     expect(result.current.sent).toBeUndefined();
   });
 
+  it("keeps a split withdrawal's Comet step across a change of network, and drops it with the queue's scope", () => {
+    const { result, rerender } = renderStore();
+    act(() => result.current.setDirectStep({ scope: 'queue-scope', status: 'unresolved' }));
+    expect(result.current.directStep).toEqual({ scope: 'queue-scope', status: 'unresolved' });
+
+    rerender({ scope: 'scope-on-base' });
+    expect(result.current.directStep).toEqual({ scope: 'queue-scope', status: 'unresolved' });
+
+    rerender({ queueScope: 'other-account' });
+    expect(result.current.directStep).toBeUndefined();
+    // A return to the same scope never brings it back.
+    rerender({ queueScope: 'queue-scope' });
+    expect(result.current.directStep).toBeUndefined();
+  });
+
   it('drops a sent action with the queue, after a change of account, connector, connection or market', () => {
     const { result, rerender, removeAction } = renderStore({ transactions: [pending()] });
     act(() => result.current.setSent(SENT));

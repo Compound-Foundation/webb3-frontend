@@ -413,7 +413,8 @@ export function validateAddingAction(
 
 /**
  * Whether any action in the queue would lend or withdraw the base token as a direct Comet supplier:
- * a base supply, a base withdrawal, or a repay larger than the debt the earlier actions leave. On
+ * a base supply, a base withdrawal, a repay larger than the debt the earlier actions leave, or a
+ * borrow while a direct supply remains, which Comet withdraws before it borrows. On
  * the wrapped route the wrapper carries out base supply and withdrawal, so none of these may reach
  * Comet or the Bulker.
  */

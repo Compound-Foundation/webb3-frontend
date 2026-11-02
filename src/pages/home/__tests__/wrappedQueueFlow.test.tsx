@@ -398,6 +398,26 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     ).toBeInTheDocument();
   });
 
+  it('states the direct supply without offering Withdraw for it while withdrawals are closed', () => {
+    const closed = buildWrappedMarketRegistry(HARDCODED_WRAPPED_LENDING_SOURCE);
+    const closedLookup = closed.lookup(1, USDC_COMET);
+    if (closedLookup.status !== 'valid') throw new Error('the mapping must be valid');
+    const closedRoute = resolveLendingRoute({
+      market: { chainId: 1, cometAddress: USDC_COMET },
+      session: SESSION,
+      conflictedRdns: new Set(),
+      validation: { key: wrappedRouteKey(closedLookup.market, SESSION), status: 'matched' },
+      registry: closed,
+    });
+    const value = { ...lending(POSITION), route: closedRoute };
+    const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
+    view.rerender(<Dashboard value={value} state={stateWithDirectSupply(10_000_000n)} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      /^10\.0000 USDC of your balance is supplied to Comet directly, outside the wrapper\.$/
+    );
+  });
+
   it('says nothing about a direct supply when the account has none', async () => {
     const user = userEvent.setup();
     renderDashboard(lending(POSITION));

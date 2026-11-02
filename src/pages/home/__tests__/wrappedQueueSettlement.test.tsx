@@ -181,44 +181,51 @@ function mine(chain: Chain, { to, data }: { to: string; data: string }): boolean
 function readProviderFor(chain: Chain) {
   return {
     getBlockNumber: jest.fn(async () => chain.block),
-    call: jest.fn(async ({ from, to, data }: { from?: string; to?: string; data?: string }) => {
-      const call = CALLS.parseTransaction({ data: data ?? '0x' });
-      if (call.name === 'isSupplyPaused' || call.name === 'isWithdrawPaused') {
-        return CALLS.encodeFunctionResult(call.name, [false]);
+    // The block tag, the second argument, is ignored: the simulated chain keeps only its newest state.
+    call: jest.fn<Promise<string>, [{ from?: string; to?: string; data?: string }, unknown?]>(
+      async ({ from, to, data }) => {
+        const call = CALLS.parseTransaction({ data: data ?? '0x' });
+        if (call.name === 'isSupplyPaused' || call.name === 'isWithdrawPaused') {
+          return CALLS.encodeFunctionResult(call.name, [false]);
+        }
+        if (call.name === 'balanceOf' && isSame(to, MARKET.baseTokenAddress) && isSame(call.args[0], ACCOUNT)) {
+          return CALLS.encodeFunctionResult('balanceOf', [chain.balance]);
+        }
+        if (
+          call.name === 'balanceOf' &&
+          isSame(to, MARKET.baseTokenAddress) &&
+          isSame(call.args[0], MARKET.cometAddress)
+        ) {
+          return CALLS.encodeFunctionResult('balanceOf', [chain.cometCash]);
+        }
+        if (call.name === 'allowance' && isSame(to, MARKET.baseTokenAddress)) {
+          return CALLS.encodeFunctionResult('allowance', [chain.allowance]);
+        }
+        if (call.name === 'balanceOf' && isSame(to, MARKET.wrapperAddress) && isSame(call.args[0], ACCOUNT)) {
+          return CALLS.encodeFunctionResult('balanceOf', [chain.shares]);
+        }
+        if (
+          call.name === 'balanceOf' &&
+          isSame(to, MARKET.cometAddress) &&
+          isSame(call.args[0], MARKET.wrapperAddress)
+        ) {
+          return CALLS.encodeFunctionResult('balanceOf', [chain.totalAssets]);
+        }
+        if (call.name === 'balanceOf' && isSame(to, MARKET.cometAddress) && isSame(call.args[0], ACCOUNT)) {
+          return CALLS.encodeFunctionResult('balanceOf', [chain.directSupply]);
+        }
+        if (call.name === 'totalSupply' && isSame(to, MARKET.wrapperAddress)) {
+          return CALLS.encodeFunctionResult('totalSupply', [chain.totalSupply]);
+        }
+        if (call.name === 'supplyAndWrap' && isSame(from, ACCOUNT)) {
+          return CALLS.encodeFunctionResult('supplyAndWrap', [BigInt(call.args[0].toString()) * 10n ** 12n]);
+        }
+        if (call.name === 'unwrapAndWithdraw' && isSame(from, ACCOUNT)) {
+          return CALLS.encodeFunctionResult('unwrapAndWithdraw', [exitCashAt(chain, BigInt(call.args[0].toString()))]);
+        }
+        throw new Error(`unexpected read of ${to} from ${from}`);
       }
-      if (call.name === 'balanceOf' && isSame(to, MARKET.baseTokenAddress) && isSame(call.args[0], ACCOUNT)) {
-        return CALLS.encodeFunctionResult('balanceOf', [chain.balance]);
-      }
-      if (
-        call.name === 'balanceOf' &&
-        isSame(to, MARKET.baseTokenAddress) &&
-        isSame(call.args[0], MARKET.cometAddress)
-      ) {
-        return CALLS.encodeFunctionResult('balanceOf', [chain.cometCash]);
-      }
-      if (call.name === 'allowance' && isSame(to, MARKET.baseTokenAddress)) {
-        return CALLS.encodeFunctionResult('allowance', [chain.allowance]);
-      }
-      if (call.name === 'balanceOf' && isSame(to, MARKET.wrapperAddress) && isSame(call.args[0], ACCOUNT)) {
-        return CALLS.encodeFunctionResult('balanceOf', [chain.shares]);
-      }
-      if (call.name === 'balanceOf' && isSame(to, MARKET.cometAddress) && isSame(call.args[0], MARKET.wrapperAddress)) {
-        return CALLS.encodeFunctionResult('balanceOf', [chain.totalAssets]);
-      }
-      if (call.name === 'balanceOf' && isSame(to, MARKET.cometAddress) && isSame(call.args[0], ACCOUNT)) {
-        return CALLS.encodeFunctionResult('balanceOf', [chain.directSupply]);
-      }
-      if (call.name === 'totalSupply' && isSame(to, MARKET.wrapperAddress)) {
-        return CALLS.encodeFunctionResult('totalSupply', [chain.totalSupply]);
-      }
-      if (call.name === 'supplyAndWrap' && isSame(from, ACCOUNT)) {
-        return CALLS.encodeFunctionResult('supplyAndWrap', [BigInt(call.args[0].toString()) * 10n ** 12n]);
-      }
-      if (call.name === 'unwrapAndWithdraw' && isSame(from, ACCOUNT)) {
-        return CALLS.encodeFunctionResult('unwrapAndWithdraw', [exitCashAt(chain, BigInt(call.args[0].toString()))]);
-      }
-      throw new Error(`unexpected read of ${to} from ${from}`);
-    }),
+    ),
   };
 }
 // Comet's `totalsBasic` is read through the Comet ABI.
@@ -414,6 +421,7 @@ function Dashboard({ wallets, readProvider, walletChainId, state, position, isHo
     removeAction: queue.removeAction,
   });
   live = { queue, manager, action };
+  mockLastProps.readProvider = readProvider;
   ActionQueueContextHelpers.initializeContext(queue);
   const QueueContext = ActionQueueContextHelpers.getActionQueueContext();
   const MarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
@@ -894,6 +902,12 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     quiet.forEach((spy) => spy.mockRestore());
   });
 
+  /** As `renderMixed`, with the configured chain's provider the dashboard reads through. */
+  async function renderMixedWithProvider() {
+    const mixed = await renderMixed();
+    return { ...mixed, readProvider: mockLastProps.readProvider as ReturnType<typeof readProviderFor> };
+  }
+
   /** A chain with the direct supply and the wrapped shares, and the dashboard showing both. */
   async function renderMixed() {
     const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
@@ -997,7 +1011,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(chain.borrowed).toBe(0n);
   });
 
-  it.each<[string, (wallet: Wallet, chain: Chain) => void, { queue: 'kept' | 'removed'; label?: string }]>([
+  it.each<[string, (wallet: Wallet, chain: Chain) => void, { queue: 'kept' | 'rest'; label?: string }]>([
     [
       'is declined in the wallet',
       (wallet) => wallet.sendUncheckedTransaction.mockRejectedValueOnce({ code: 4001, message: 'User rejected.' }),
@@ -1005,9 +1019,14 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     ],
     ['reverts', (_wallet, chain) => (chain.shouldRevertNext = true), { queue: 'kept', label: 'Transaction Failed' }],
     [
+      'is refused by the wallet before it handles it',
+      (wallet) => wallet.sendUncheckedTransaction.mockRejectedValueOnce({ code: 4100, message: 'Unauthorized' }),
+      { queue: 'kept', label: 'Reconnect Your Wallet' },
+    ],
+    [
       'fails in the wallet after it had the request',
       (wallet) => wallet.sendUncheckedTransaction.mockRejectedValueOnce({ code: -32603, message: 'Internal error' }),
-      { queue: 'removed' },
+      { queue: 'rest' },
     ],
   ])('sends nothing to the wrapper when the Comet step %s', async (_name, fail, expected) => {
     const { chain, wallet } = await renderMixed();
@@ -1022,7 +1041,9 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(sentCalls(wallet, 'unwrapAndWithdraw')).toHaveLength(0);
     expect(chain.shares).toBe(WRAPPED_SHARES);
     expect(chain.borrowed).toBe(0n);
-    expect(queued()).toEqual(expected.queue === 'kept' ? [entry] : []);
+    expect(queued()).toEqual(
+      expected.queue === 'kept' ? [entry] : [[ActionType.Withdraw, expect.anything(), 300_000_000n - DIRECT]]
+    );
     const stopped = positionCard().actionRules.wrappedBase.stopped;
     expect(stopped).toEqual(
       expected.label === undefined
@@ -1055,7 +1076,11 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(positionCard().transaction).toBeUndefined();
   });
 
-  it('sends nothing, and says why on the row, when the withdrawal is queued with another action', async () => {
+  it.each<[string, (collateral: ReturnType<typeof mockEthCollateralAsset>) => Action]>([
+    ['a collateral supply', (collateral) => [ActionType.SupplyCollateral, collateral, 10n ** 17n]],
+    // isSubmissionRefused refuses this borrow beside the direct supply, and the row still says why.
+    ['a borrow', () => [ActionType.Borrow, BASE_ASSET, 100_000_000n]],
+  ])('sends nothing, and says why on the row, when the withdrawal is queued with %s', async (_name, other) => {
     const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
     const collateral = mockEthCollateralAsset({ walletBalance: 10n ** 18n, allowance: MAX_UINT256 });
     const { wallet } = renderDashboard(chain, {
@@ -1063,9 +1088,9 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       position: positionOn(chain),
     });
     await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
-    const entry: Action = [ActionType.Withdraw, BASE_ASSET, 100_000_000n];
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, MAX_UINT256];
     act(() => live.queue.addOrUpdateAction(entry));
-    act(() => live.queue.addOrUpdateAction([ActionType.SupplyCollateral, collateral, 10n ** 17n]));
+    act(() => live.queue.addOrUpdateAction(other(collateral)));
 
     await submit();
 
@@ -1076,6 +1101,136 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       label: 'Submit The Withdrawal On Its Own',
     });
     expect(chain.directSupply).toBe(DIRECT);
+  });
+
+  it.each<[string, (wallet: Wallet) => void]>([
+    [
+      'the wallet still holds it (Anchorage 4900, can still complete)',
+      (wallet) => {
+        wallet.sendUncheckedTransaction.mockImplementationOnce(async () =>
+          Promise.reject({ code: 4900, message: 'The request can still complete in the wallet.' })
+        );
+      },
+    ],
+    [
+      'another transaction took its nonce',
+      (wallet) => {
+        // The step is sent, but the node never shows a receipt for it, and the nonce has passed.
+        wallet.sendUncheckedTransaction.mockImplementationOnce(async () => `0x${'ab'.repeat(32)}`);
+        wallet.getTransactionCount.mockImplementationOnce(async () => 5).mockImplementation(async () => 6);
+      },
+    ],
+  ])(
+    'holds back every further Comet step once one can still execute because %s, so two partial withdrawals never borrow',
+    async (_name, makeUnresolved) => {
+      const { chain, wallet } = await renderMixed();
+      const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
+      act(() => live.queue.addOrUpdateAction(entry));
+      makeUnresolved(wallet);
+
+      await submit();
+      await waitFor(() => expect(queued()).toEqual([]));
+      await settle();
+      expect(requestedCalls(wallet)).toEqual(['withdraw']);
+      expect(live.manager.transactions).toEqual([]);
+
+      // The same partial amount again: the fresh read still shows 250 USDC, but nothing is sent.
+      act(() => live.queue.addOrUpdateAction(entry));
+      await submit();
+      await settle();
+
+      expect(requestedCalls(wallet)).toEqual(['withdraw']);
+      expect(queued()).toEqual([entry]);
+      expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+        action: [ActionType.Withdraw, expect.anything(), entry[2]],
+        label: 'Earlier Request Still Pending',
+      });
+      expect(chain.borrowed).toBe(0n);
+    }
+  );
+
+  it('sends nothing when the session changes while the direct supply is read again', async () => {
+    const { chain, wallet, show } = await renderMixed();
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 100_000_000n]));
+    // The fresh read of the direct supply waits until the test answers it.
+    const read = held<void>();
+    const readProvider = mockLastProps.readProvider as ReturnType<typeof readProviderFor>;
+    const answer = readProvider.call.getMockImplementation();
+    if (answer === undefined) throw new Error('the provider must answer');
+    let isReadStarted = false;
+    readProvider.call.mockImplementation(async (request: { to?: string; data?: string }, ...rest: unknown[]) => {
+      if (isSame(request.to, MARKET.cometAddress) && request.data?.startsWith(COMET.getSighash('balanceOf'))) {
+        isReadStarted = true;
+        await read.promise;
+      }
+      return (answer as (...args: unknown[]) => Promise<string>)(request, ...rest);
+    });
+
+    act(() => positionCard().onSubmitClicked());
+    await waitFor(() => expect(isReadStarted).toBe(true));
+    show({ walletChainId: 8453 });
+    read.release();
+    await settle();
+
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(chain.directSupply).toBe(DIRECT);
+  });
+
+  it('refuses the Comet step while the Comet state was read for another account', async () => {
+    const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
+    const state = stateWithDirectSupply(DIRECT);
+    // As useCometState records it for another account, before the next read for this one.
+    recordCometStateSource(
+      state,
+      { chainId: 1, cometAddress: USDC_COMET },
+      '0x0000000000000000000000000000000000000bb2'
+    );
+    const { wallet } = renderDashboard(chain, { state, position: positionOn(chain) });
+    await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 100_000_000n]));
+
+    await submit();
+
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(chain.directSupply).toBe(DIRECT);
+  });
+
+  it('reads the direct supply again at a block no older than the last confirmed Comet step, so a stale dashboard never borrows', async () => {
+    const { chain, wallet, readProvider } = await renderMixedWithProvider();
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 300_000_000n]));
+    const send = wallet.sendUncheckedTransaction.getMockImplementation();
+    if (send === undefined) throw new Error('the wallet must send');
+    wallet.sendUncheckedTransaction
+      .mockImplementationOnce(send)
+      .mockRejectedValueOnce({ code: 4001, message: 'User rejected.' });
+    await submit();
+    await waitFor(() => expect(live.action.state.phase).toBe('stopped'));
+    await settle();
+    // The Comet step took the 250 USDC. The dashboard still shows it, so the 50 USDC rest plans a
+    // partial Comet step. The configured chain's provider is one block behind the wallet's node.
+    const cometReceiptBlock = live.manager.settledTransactions[0].outcome;
+    if (cometReceiptBlock.status !== 'confirmed') throw new Error('the Comet step must confirm');
+    const lagging = cometReceiptBlock.receipt.blockNumber - 1;
+    readProvider.getBlockNumber.mockImplementationOnce(async () => lagging);
+    readProvider.call.mockClear();
+    const directReads = () =>
+      readProvider.call.mock.calls.filter(
+        ([request]) =>
+          isSame(request.to, MARKET.cometAddress) && request.data === COMET.encodeFunctionData('balanceOf', [ACCOUNT])
+      );
+
+    await submit();
+    // The read waits for the provider to reach the Comet step's block, polling every 1.5 seconds.
+    await waitFor(() => expect(directReads()).toHaveLength(1), { timeout: 5_000 });
+    await settle();
+
+    expect(directReads()[0][1]).toBeGreaterThanOrEqual(cometReceiptBlock.receipt.blockNumber);
+    expect(requestedCalls(wallet)).toEqual(['withdraw', 'unwrapAndWithdraw']);
+    expect(chain.borrowed).toBe(0n);
+    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+      action: [ActionType.Withdraw, expect.anything(), 50_000_000n],
+      label: 'Balance Changed, Edit Amount',
+    });
   });
 
   it('keeps the rest queued when the wrapper step is declined after the Comet step confirmed', async () => {

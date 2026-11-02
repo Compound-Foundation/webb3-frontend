@@ -305,6 +305,7 @@ describe('isSubmissionRefused', () => {
     exit: { isEligible: false, reason: 'exits-disabled' },
   };
   const standard: LendingRoute = { kind: 'standard', writes: { isEligible: true } };
+  const wrappedClosed = wrapped;
   const baseAsset = { ...mockBaseAsset(), walletBalance: 10n ** 12n };
 
   const hydrated = (balance: bigint, market = USDC, account = ACCOUNT): CometStateWithMarket => ({
@@ -388,6 +389,8 @@ describe('isSubmissionRefused', () => {
   describe('isDirectWithdrawalRefused', () => {
     const whole = { amount: MAX_UINT256, minBalance: 250_000_000n };
     const part = { amount: 100_000_000n, minBalance: 100_000_000n };
+    // The wrapped route with its exits open, as a release opens them.
+    const wrapped = { ...wrappedClosed, exit: { isEligible: true } } as LendingRoute;
 
     it('allows the planned Comet step while the live direct supply covers what it counts on', () => {
       const live = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(250_000_000n) };
@@ -444,6 +447,28 @@ describe('isSubmissionRefused', () => {
       ).toBe(true);
     });
 
+    it('refuses it while exits are closed or the route cannot withdraw', () => {
+      const covered = hydrated(250_000_000n);
+      expect(
+        isDirectWithdrawalRefused(
+          { route: wrappedClosed, account: ACCOUNT, selectedMarket: USDC, comet: covered },
+          USDC,
+          part
+        )
+      ).toBe(true);
+      const conflicted = {
+        ...wrappedClosed,
+        exit: { isEligible: false, reason: 'connector-conflict' },
+      } as LendingRoute;
+      expect(
+        isDirectWithdrawalRefused(
+          { route: conflicted, account: ACCOUNT, selectedMarket: USDC, comet: covered },
+          USDC,
+          whole
+        )
+      ).toBe(true);
+    });
+
     it('refuses a step that counts on no supply', () => {
       const live = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(250_000_000n) };
       expect(isDirectWithdrawalRefused(live, USDC, { amount: 0n, minBalance: 0n })).toBe(true);
@@ -456,16 +481,16 @@ describe('readDirectBaseBalance', () => {
     const provider = {
       call: jest.fn(async () => '0x' + 123_456_789n.toString(16).padStart(64, '0')),
     };
-    await expect(readDirectBaseBalance(provider, USDC_COMET, ACCOUNT)).resolves.toBe(123_456_789n);
-    expect(provider.call).toHaveBeenCalledWith({
-      to: USDC_COMET,
-      data: '0x70a08231' + ACCOUNT.slice(2).toLowerCase().padStart(64, '0'),
-    });
+    await expect(readDirectBaseBalance(provider, USDC_COMET, ACCOUNT, 1_234)).resolves.toBe(123_456_789n);
+    expect(provider.call).toHaveBeenCalledWith(
+      { to: USDC_COMET, data: '0x70a08231' + ACCOUNT.slice(2).toLowerCase().padStart(64, '0') },
+      1_234
+    );
   });
 
   it('fails, rather than returning zero, when the read fails', async () => {
     const provider = { call: jest.fn(async () => Promise.reject(new Error('rate limited'))) };
-    await expect(readDirectBaseBalance(provider, USDC_COMET, ACCOUNT)).rejects.toThrow('rate limited');
+    await expect(readDirectBaseBalance(provider, USDC_COMET, ACCOUNT, 1_234)).rejects.toThrow('rate limited');
   });
 });
 
