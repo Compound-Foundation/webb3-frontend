@@ -8,7 +8,6 @@ import {
   WrappedMarketSource,
 } from '@constants/wrappedMarkets';
 import { CONNECTOR_LOCALSTORAGE_KEY } from '@helpers/constants';
-import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import {
   Eligibility,
   LendingRoute,
@@ -299,22 +298,6 @@ describe('lendingRoute', () => {
       expect(
         resolve(USDC_COMET, anchorage({ connector: { id: 'injected' } }), { conflictedRdns: new Set(['io.metamask']) }),
       ).toEqual({ kind: 'standard', writes: blocked('connector-conflict') });
-    });
-
-    it('leaves the deprecated-market rules as they are', () => {
-      // main has no deprecated-market action restriction for these markets: the only rule is
-      // deprecated price-feed handling, which flags mainnet USDT. Routing neither consumes nor
-      // changes it.
-      const flags = MOCK_MARKETS.map((market) =>
-        getIsDeprecatedwUSDMMarket(market.baseAsset, market.chainInformation),
-      );
-      for (const [, cometAddress] of CONFIGURED) resolve(cometAddress, anchorage());
-      expect(
-        MOCK_MARKETS.map((market) => getIsDeprecatedwUSDMMarket(market.baseAsset, market.chainInformation)),
-      ).toEqual(flags);
-      const usdt = getMarket(MOCK_MARKETS, 1, CONFIGURED[1][1]);
-      expect(usdt && getIsDeprecatedwUSDMMarket(usdt.baseAsset, usdt.chainInformation)).toBe(true);
-      expect(expectWrapped(resolve(CONFIGURED[1][1], anchorage())).deposit).toEqual(ELIGIBLE);
     });
   });
 

@@ -2,7 +2,6 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 
 import type { Web3 } from '@contexts/Web3Context';
 import { getBulkerTrxData } from '@helpers/bulkerActions';
-import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { planExecution, submitExecution, WrappedExecutionError } from '@helpers/wrappedActions';
@@ -151,8 +150,6 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         })
       );
       try {
-        // Mainnet USDT takes the app's deprecated price-feed path, which this Comet state read uses.
-        measured.deprecatedFeedPath = getIsDeprecatedwUSDMMarket(marketData.baseAsset, marketData.chainInformation);
         // The standard route's own writes: allow the Bulker, then supply ETH and borrow through it.
         let state = await cometState(app);
         await standardWrite(app, ({ writeComet }) =>

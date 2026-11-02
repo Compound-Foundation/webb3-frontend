@@ -255,13 +255,13 @@ contract CometQuery {
     uint utilization;
   }
 
-  function query(Comet comet, address nativeTokenToUsd, bool checkDeprecatedwUSDM) public view returns (CometState memory) {
+  function query(Comet comet, address nativeTokenToUsd) public view returns (CometState memory) {
     CometStateWithoutCollateralAssets memory response = cometStateMinusCollateralInfo(comet, nativeTokenToUsd);
     uint numAssets = comet.numAssets();
 
     CollateralAsset[] memory tokens = new CollateralAsset[](numAssets);
     for (uint8 i = 0; i < numAssets; i++) {
-      tokens[i] = collateralInfo(comet, i, checkDeprecatedwUSDM);
+      tokens[i] = collateralInfo(comet, i);
     }
 
     return
@@ -289,10 +289,9 @@ contract CometQuery {
     address nativeTokenToUsd,
     address payable account,
     address payable bulker,
-    string memory wrappedNativeTokenSymbol,
-    bool checkDeprecatedwUSDM
+    string memory wrappedNativeTokenSymbol
   ) public view returns (CometStateWithAccountState memory) {
-    CometState memory response = query(comet, nativeTokenToUsd, checkDeprecatedwUSDM);
+    CometState memory response = query(comet, nativeTokenToUsd);
 
     uint baseAssetSupplyBalance = comet.balanceOf(account);
     uint baseAssetBorrowBalance = comet.borrowBalanceOf(account);
@@ -403,51 +402,10 @@ contract CometQuery {
       });
   }
 
-  function collateralInfo(Comet comet, uint8 index, bool checkDeprecatedwUSDM) public view returns (CollateralAsset memory) {
+  function collateralInfo(Comet comet, uint8 index) public view returns (CollateralAsset memory) {
     Comet.AssetInfo memory assetInfo = comet.getAssetInfo(index);
 
-    // pumpBTC / BTC exchange rate feed on mainnet cWBTCv3, deprecated by Chainlink
-    // on 2026-09-03 (all reads revert). The market is deprecated and empty, so
-    // hardcode the feed's last published answer (1.02447384 BTC, 8 decimals).
-    if (checkDeprecatedwUSDM && 0x351a133Fd850ea81ed8a782016e308aCBADDec91 == assetInfo.priceFeed) {
-      return
-        CollateralAsset({
-          collateralAsset: assetInfo.asset,
-          collateralFactor: assetInfo.borrowCollateralFactor,
-          decimals: ERC20(assetInfo.asset).decimals(),
-          liquidateCollateralFactor: assetInfo.liquidateCollateralFactor,
-          liquidationFactor: assetInfo.liquidationFactor,
-          name: ERC20(assetInfo.asset).name(),
-          price: 102447384,
-          priceFeed: assetInfo.priceFeed,
-          supplyCap: assetInfo.supplyCap,
-          symbol: ERC20(assetInfo.asset).symbol(),
-          totalSupply: comet.totalsCollateral(assetInfo.asset)
-        });
-    }
-
-    if (checkDeprecatedwUSDM &&
-      ( 0xe3a409eD15CD53aFdEFdd191ad945cEC528A2496 == assetInfo.priceFeed 
-      || 0x13cDFB7db5e2F58e122B2e789b59dE13645349C4 == assetInfo.priceFeed
-      || 0x66228d797eb83ecf3465297751f6b1D4d42b7627 == assetInfo.priceFeed
-      || 0x7E86318Cc4bc539043F204B39Ce0ebeD9F0050Dc == assetInfo.priceFeed)
-    ) {
-      return
-        CollateralAsset({
-          collateralAsset: assetInfo.asset,
-          collateralFactor: assetInfo.borrowCollateralFactor,
-          decimals: ERC20(assetInfo.asset).decimals(),
-          liquidateCollateralFactor: assetInfo.liquidateCollateralFactor,
-          liquidationFactor: assetInfo.liquidationFactor,
-          name: ERC20(assetInfo.asset).name(),
-          price: 0,
-          priceFeed: assetInfo.priceFeed,
-          supplyCap: assetInfo.supplyCap,
-          symbol: ERC20(assetInfo.asset).symbol(),
-          totalSupply: comet.totalsCollateral(assetInfo.asset)
-        });
-    } else {
-      return
+    return
       CollateralAsset({
         collateralAsset: assetInfo.asset,
         collateralFactor: assetInfo.borrowCollateralFactor,
@@ -461,7 +419,6 @@ contract CometQuery {
         symbol: ERC20(assetInfo.asset).symbol(),
         totalSupply: comet.totalsCollateral(assetInfo.asset)
       });
-    }
   }
 
   // A reverting price feed (e.g. one Chainlink has shut down) shouldn't revert the
