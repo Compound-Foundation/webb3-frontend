@@ -26,23 +26,28 @@ import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { WriteBlockReason } from '@helpers/lendingRoute';
 import { DEFAULT_MARKET } from '@helpers/markets';
-import { MAX_UINT256 } from '@helpers/numbers';
+import { formatValue, MAX_UINT256 } from '@helpers/numbers';
 import {
   isWrapperRouted,
   planQueuedExecution,
   QueuedExecutionPlan,
   QueuedWrapperAction,
+  splitWrappedWithdrawal,
+  WithdrawalSplit,
   wrappedEntryBlockLabel,
 } from '@helpers/queuedExecution';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
-import { SendWithdrawnError } from '@helpers/walletErrors';
+import { classifyWalletError, NotSentError, SendWithdrawnError, WalletErrorKind } from '@helpers/walletErrors';
 import { isDirectExecution, WrappedBlockReason, WrappedExecutionError } from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
+  getWrappedRouteWithdrawalLimits,
+  isDirectWithdrawalRefused,
   isSameWalletSession,
   isSubmissionRefused,
   LiveSubmissionState,
   MarketIdentity,
+  readDirectBaseBalance,
   supplyIncentivesForRoute,
   WalletSession,
   withWrappedSupply,
@@ -71,6 +76,7 @@ import {
   Token,
   TokenWithAccountState,
   Transaction,
+  TransactionOutcome,
   TransactionState,
 } from '@types';
 
@@ -168,6 +174,45 @@ function unavailableNotice(reason: WriteBlockReason, reload: () => void): Masthe
       return { message: 'Your supplied balance is not available right now.' };
   }
 }
+
+/**
+ * What the masthead says when part of the account's balance on the wrapped route is supplied to
+ * Comet directly, outside the wrapper.
+ */
+function directSupplyNotice(amount: bigint, baseAsset: BaseAssetWithAccountState): MastheadNotice {
+  return {
+    message: `${formatValue(baseAsset.decimals, amount)} ${
+      baseAsset.symbol
+    } of your balance is supplied to Comet directly, outside the wrapper. Withdraw takes it out first.`,
+  };
+}
+
+/** The row's label when a withdrawal stopped before its Comet step because the direct supply fell. */
+const DIRECT_BALANCE_CHANGED_LABEL = 'Balance Changed, Edit Amount';
+/**
+ * The row's label when a withdrawal that takes a direct supply first is queued with other actions.
+ * Its Comet and wrapper steps are one queue row and are submitted on their own.
+ */
+const WITHDRAW_ALONE_LABEL = 'Submit The Withdrawal On Its Own';
+
+/**
+ * The Comet step of a wrapped-route withdrawal while it is being sent: the check made just before
+ * the wallet is asked, what follows the outcome, and what the wallet answered.
+ */
+type DirectStepRequest = {
+  /** The Comet address and the arguments the step's `withdraw` call must carry. */
+  cometAddress: string;
+  args: [string, string];
+  /** Throws, so that nothing is sent, unless the step may be signed now. */
+  checkBeforeSend: () => Promise<void>;
+  /** Called with the manager's answer once the request is made. */
+  onRequested: (sent: Promise<unknown>) => void;
+  onSettled: (outcome: TransactionOutcome) => void;
+  /** Set when the fresh read showed less direct supply than the step counts on. */
+  isBalanceShort?: boolean;
+  /** How the wallet's error was classified, when the wallet was asked and answered with one. */
+  walletError?: WalletErrorKind;
+};
 
 /** What a full or partial withdrawal through the wrapper can pay now, or undefined if it cannot be worked out. */
 function wrappedWithdrawalLimits(position: WrappedPosition, marketCash: bigint): WithdrawalLimits | undefined {
@@ -321,6 +366,44 @@ const Home = ({
         : Promise.reject(new SendWithdrawnError());
     return addTransaction(key, description, sendWhileCurrent, estimatedGas, trxEstimateGasFn, fnArgs, value, callback);
   };
+  // The Comet step of a wrapped-route withdrawal, which takes the account's direct supply before the
+  // wrapper step, is production's Comet base withdrawal: `withdraw` of the write state below. Its
+  // request is set only for the synchronous call that sends it, and adds a check just before the
+  // wallet is asked. A call that does not carry the planned Comet address and arguments sends nothing.
+  const directStepRequest = useRef<DirectStepRequest>();
+  const addDirectStepTransaction: AddTransaction = (key, description, trxFn, estimatedGas, estimateGasFn, fnArgs) => {
+    const request = directStepRequest.current;
+    directStepRequest.current = undefined;
+    const isPlannedCall =
+      request !== undefined &&
+      key.toLowerCase() === request.cometAddress.toLowerCase() &&
+      fnArgs.length === 2 &&
+      fnArgs[0] === request.args[0] &&
+      fnArgs[1] === request.args[1];
+    if (request === undefined || !isPlannedCall) return Promise.resolve(undefined);
+    const checkedSend: typeof trxFn = async (...args) => {
+      await request.checkBeforeSend();
+      try {
+        return await trxFn(...args);
+      } catch (error) {
+        request.walletError = classifyWalletError(error);
+        throw error;
+      }
+    };
+    const sent = addTransactionWhileCurrent(
+      key,
+      description,
+      checkedSend,
+      estimatedGas,
+      estimateGasFn,
+      fnArgs,
+      0n,
+      request.onSettled
+    );
+    request.onRequested(sent);
+    return sent;
+  };
+  const directStepWriteState = useWriteCometState(web3, addDirectStepTransaction);
   const writeState = useWriteCometState(web3, addTransactionWhileCurrent);
 
   const [openDialog, setOpenDialog] = useState<{ key: string; state: ActionModalState }>();
@@ -357,7 +440,8 @@ const Home = ({
   // awaiting confirmation or pending. These checks keep callbacks kept from earlier renders in step.
   const isQueueLocked = () => {
     const current = liveSubmission.current;
-    return (current?.kind === 'execute' && current.status.kind === 'running') || liveSent.current !== undefined;
+    const isRunning = current?.status.kind === 'running' || current?.status.kind === 'direct';
+    return (current?.kind === 'execute' && isRunning) || liveSent.current !== undefined;
   };
   // The lifecycle's state, when it belongs to this run. Until the run's draft starts, the lifecycle
   // can still show an earlier one, which this run never acts on.
@@ -509,6 +593,9 @@ const Home = ({
     let wrappedPosition: WrappedPosition | undefined;
     let notice: MastheadNotice | undefined;
     let actionRules: ActionRules = {};
+    // The account's base supply to Comet directly, outside the wrapper. A withdrawal on the wrapped
+    // route takes it first.
+    const directSupply = directBaseAsset.balance > 0n ? directBaseAsset.balance : 0n;
     if (lendingRoute.kind === 'wrapped') {
       const cometMarket = cometStateMarket.current.market;
       const isCometStateForRoute =
@@ -530,19 +617,30 @@ const Home = ({
         };
       } else if (position.status === 'unavailable') {
         notice = unavailableNotice(position.reason, reload);
+      } else if (directSupply > 0n && isCometStateForRoute && isCometStateVerifiedForAccount) {
+        notice = directSupplyNotice(directSupply, directBaseAsset);
       }
+      const readPosition = wrappedPosition;
       const limits =
-        wrappedPosition === undefined
+        readPosition === undefined
           ? undefined
-          : wrappedWithdrawalLimits(wrappedPosition, directBaseAsset.balanceOfComet);
+          : getWrappedRouteWithdrawalLimits({
+              directSupply,
+              cometCash: directBaseAsset.balanceOfComet,
+              hasShares: readPosition.shares > 0n,
+              isWithdrawPaused: readPosition.isWithdrawPaused,
+              wrapperLimitsAt: (cash) => wrappedWithdrawalLimits(readPosition, cash),
+            });
       actionRules = {
         wrappedBase: {
           supplyBlockedReason: wrappedEntryBlockLabel(lendingRoute, 'supply'),
           withdrawBlockedReason: wrappedEntryBlockLabel(lendingRoute, 'withdraw'),
           maxPartialWithdrawal: limits?.maxPartialCash,
-          canWithdrawAll: limits?.canExitFully ?? false,
-          // The cash the submission asks the wrapper for on a full exit.
-          fullExitCash: wrappedPosition?.fullExitCash,
+          canWithdrawAll: limits?.canWithdrawAll ?? false,
+          // The cash a maximum withdrawal pays: the direct supply, then the wrapper's full exit.
+          fullExitCash: wrappedPosition === undefined ? undefined : directSupply + wrappedPosition.fullExitCash,
+          directSupply:
+            directSupply > 0n && isCometStateForRoute && isCometStateVerifiedForAccount ? directSupply : undefined,
           supplyAllowance: wrappedPosition?.wrapperAllowance,
           stopped:
             submission?.kind === 'execute' && submission.status.kind === 'stopped'
@@ -789,6 +887,141 @@ const Home = ({
       return true;
     };
 
+    // A withdrawal on the wrapped route takes the account's direct Comet supply first, as one Comet
+    // base withdrawal, the transaction production sends. Any rest follows through the wrapper, which
+    // starts only once the Comet step confirms, with no other press. Both steps belong to the queue's
+    // one withdrawal row, which stays locked until the last of them ends. Nothing reaches the wrapper
+    // if the Comet step fails, is declined, or may still execute.
+    const startSplitWithdrawal = (
+      withdrawal: Extract<QueuedWrapperAction, { type: 'withdraw' }>,
+      otherCount: number
+    ) => {
+      const visitKeyAtStart = visitKey;
+      const stateBefore = liveWrappedLending.current.action.state;
+      const run = { kind: 'execute' as const, wrapper: withdrawal, directCount: 0, scope: visitIdentity, stateBefore };
+      const recordStopped = (label: string): SubmissionRecord => ({ ...run, status: { kind: 'stopped', label } });
+      const submittedMarket = { chainId: market.chainInformation.chainId, cometAddress: market.marketAddress };
+      let split: WithdrawalSplit;
+      try {
+        split = splitWrappedWithdrawal(withdrawal.action[2], directBaseAsset.balance, wrappedPosition?.shares);
+      } catch (error) {
+        if (!(error instanceof WrappedExecutionError)) throw error;
+        console.warn('The withdrawal was not sent:', error.message);
+        setSubmissionRecord(recordStopped(NOT_SENT_LABEL));
+        return;
+      }
+      const direct = split.direct;
+      if (direct === undefined) return;
+      if (otherCount > 0) {
+        setSubmissionRecord(recordStopped(WITHDRAW_ALONE_LABEL));
+        return;
+      }
+      // The visit and wallet session the press was made in are still live and usable.
+      const isSessionLive = () =>
+        isLiveVisit(visitKeyAtStart) &&
+        !liveWalletUnusable.current &&
+        isSameWalletSession(walletSession, liveWalletSession.current);
+      if (!isSessionLive() || isDirectWithdrawalRefused(liveSession.current, submittedMarket, direct)) {
+        setSubmissionRecord(recordStopped(NOT_SENT_LABEL));
+        return;
+      }
+      const record: SubmissionRecord = { ...run, status: { kind: 'direct' } };
+      // Changes the run only while it is still this one. A change of scope drops it meanwhile.
+      const endRun = (next: SubmissionRecord | undefined) =>
+        submissionStore.setRecord((current) => (current === record ? next : current));
+      const account = web3.write.account;
+      const readProvider = web3.read.provider;
+      const request: DirectStepRequest = {
+        cometAddress: market.marketAddress,
+        args: [directBaseAsset.address, direct.amount.toString()],
+        // Just before the wallet is asked: the session and the live Comet state still allow the
+        // step, and a fresh read of the direct supply still covers what the step counts on. A part
+        // larger than the supply would borrow the difference, so it goes back for a new amount.
+        checkBeforeSend: async () => {
+          if (!isSessionLive()) throw new SendWithdrawnError();
+          if (isDirectWithdrawalRefused(liveSession.current, submittedMarket, direct)) {
+            request.isBalanceShort = true;
+            throw new SendWithdrawnError('The direct supply fell below the withdrawal before it was signed.');
+          }
+          if (readProvider === undefined || account === undefined) {
+            throw new NotSentError(new Error("This market's network cannot be read right now."));
+          }
+          let balance: bigint;
+          try {
+            balance = await readDirectBaseBalance(readProvider, market.marketAddress, account);
+          } catch (error) {
+            throw new NotSentError(error);
+          }
+          if (balance < direct.minBalance) {
+            request.isBalanceShort = true;
+            throw new SendWithdrawnError('The direct supply fell below the withdrawal before it was signed.');
+          }
+          if (!isSessionLive()) throw new SendWithdrawnError();
+        },
+        onRequested: (sent) => {
+          sent.then((response) => {
+            if (response !== undefined) return;
+            if (request.isBalanceShort) {
+              endRun(recordStopped(DIRECT_BALANCE_CHANGED_LABEL));
+            } else if (request.walletError === 'rejected') {
+              // As for a wrapper action, a rejection returns the queue with nothing said.
+              endRun(undefined);
+            } else if (request.walletError === 'refused') {
+              endRun(recordStopped('Reconnect Your Wallet'));
+            } else if (request.walletError !== undefined) {
+              // The wallet had the request and can still send it, so the withdrawal leaves the queue
+              // and is never sent twice. Nothing is sent to the wrapper.
+              removeAction(withdrawal.action);
+              endRun(undefined);
+            } else {
+              endRun(recordStopped(NOT_SENT_LABEL));
+            }
+          });
+        },
+        onSettled: (outcome) => {
+          if (outcome.status === 'reverted') {
+            endRun(recordStopped('Transaction Failed'));
+            return;
+          }
+          // A replaced step can have executed as a sped-up copy, so nothing more is sent for it.
+          if (outcome.status === 'replaced' || split.request === undefined) {
+            removeAction(withdrawal.action);
+            endRun(undefined);
+            return;
+          }
+          // The queue row now holds what the wrapper still pays. A maximum stays a full exit.
+          const rest: Action =
+            split.request.kind === 'full'
+              ? withdrawal.action
+              : [ActionType.Withdraw, withdrawal.action[1] as BaseAssetWithAccountState, split.request.cash];
+          addOrUpdateAction(rest);
+          // The wrapper step follows at once while the run and its visit are live. Otherwise the rest
+          // stays queued for the next Submit, as a wrapper action that confirmed while another page
+          // was shown leaves the queue as it is.
+          if (!isLiveVisit(visitKeyAtStart) || liveSubmission.current !== record) {
+            endRun(undefined);
+            return;
+          }
+          startWrapperAction({ type: 'withdraw', action: rest, request: split.request }, 0);
+        },
+      };
+      setSubmissionRecord(record);
+      directStepRequest.current = request;
+      directStepWriteState.withdraw(
+        market,
+        directBaseAsset.address,
+        direct.amount,
+        `Withdraw ${directBaseAsset.name}`,
+        0,
+        () => undefined
+      );
+      if (directStepRequest.current === request) {
+        // The write did not start, as when the wallet session changed, so nothing was sent.
+        directStepRequest.current = undefined;
+        endRun(recordStopped(NOT_SENT_LABEL));
+      }
+    };
+
     // A wallet on another network is asked to switch first, as for direct actions, and nothing is
     // sent. A wrapper action that may still execute holds back another submission.
     const submitQueue = () => {
@@ -800,6 +1033,8 @@ const Home = ({
         switchWriteNetwork(web3.read.chainId);
       } else if (isQueueLocked()) {
         return;
+      } else if (plan.wrapper?.type === 'withdraw' && directSupply > 0n) {
+        startSplitWithdrawal(plan.wrapper, plan.direct.length);
       } else if (plan.wrapper !== undefined) {
         startWrapperAction(plan.wrapper, plan.direct.length);
       } else if (plan.direct.length > 0) {
@@ -842,7 +1077,12 @@ const Home = ({
       ...wrapperApprovals.map((transaction) => ({ ...transaction, key: directBaseAsset.address })),
     ];
     const bulkerTransaction = transactions.find((transaction) => transaction.key === market.bulkerAddress);
-    const cometTransaction = transactions.find((transaction) => transaction.key === market.marketAddress);
+    let cometTransaction = transactions.find((transaction) => transaction.key === market.marketAddress);
+    // A withdrawal's Comet step holds the dashboard from the press on, as its wrapper step does.
+    if (cometTransaction === undefined && submission?.kind === 'execute' && submission.status.kind === 'direct') {
+      const description = `Withdraw ${directBaseAsset.name}`;
+      cometTransaction = inFlightTransaction(market.marketAddress, description, market.chainInformation.chainId);
+    }
     const rewardTransaction = transactions.find((transaction) => transaction.key === market.rewardsAddress);
     let wrapperTransaction = transactions.find(
       (transaction) => isWrapperTransaction(transaction) && !isWrapperApproval(transaction)

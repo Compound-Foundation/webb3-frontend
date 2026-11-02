@@ -30,6 +30,8 @@ const approveAssetHelperText = (symbol: string) =>
 const approveWrapperHelperText = (symbol: string) =>
   `You need to approve Compound on the ${symbol} contract before you can use this asset.`;
 const CONFIRM_BUTTON_TEXT_APPROVE = 'Approve & Add';
+const directSupplyHelperText = (amount: string, symbol: string) =>
+  `${amount} ${symbol} of this balance is supplied to Comet directly. Withdraw takes it out first, then the rest through the wrapper, each in its own transaction.`;
 const UPDATE_ALLOWANCE_STRING =
   'This amount exceeds the allowance you previously set for this asset. You will be asked to approve an increase when you add this action.';
 
@@ -423,6 +425,11 @@ function getContent(
       title = `Withdraw ${baseAsset.symbol}`;
       modifier = 'withdraw';
       availableAmount = formatValue(baseAsset.decimals, earnBalance);
+      // On the wrapped route, part of the balance can be a direct Comet supply, which Withdraw takes first.
+      const directSupply = actionRules?.wrappedBase?.directSupply ?? 0n;
+      if (directSupply > 0n) {
+        actionHintString = directSupplyHelperText(formatValue(baseAsset.decimals, directSupply), baseAsset.symbol);
+      }
 
       if (maybeBigIntInputValue !== undefined && maybeBigIntInputValue > 0n) {
         ({ modifier, titleAdditionalContent, confirmButtonDisabled } = _validateAmount(maybeBigIntInputValue));

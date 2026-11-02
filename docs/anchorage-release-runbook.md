@@ -11,10 +11,10 @@ Facts from code:
 - **Only the Anchorage connector takes the wrapped route.** The route is wrapped only for the selected connector `com.anchorage.connect` on the three configured markets (`src/helpers/lendingRoute.ts:165-210`). Other wallets and watch-only sessions stay on the standard route under every setting of the controls. The rehearsal tests pin this (see [Rollback rehearsal](#rollback-rehearsal)).
 - **The controls are per market and independent.** `isDepositEnabled` gates the route's `deposit`, and `isExitEnabled` gates its `exit`. Reads depend on neither (`lendingRoute.ts:206-208`).
 - **On the wrapped route, no base supply or withdrawal goes to Comet directly, whatever the controls say.** The home page keeps its normal Supply and Withdraw entries. Approve & Add asks for an exact approval of the wrapper when a base supply is added, and a queued base supply or withdrawal goes to the wrapper at submission (`isWrapperRouted` and `planQueuedExecution` in `src/helpers/queuedExecution.ts`). The screens, labels and order are production's, with no dialog of the route's own ([queued execution](anchorage-queued-execution.md)). The direct actions are checked again before they are sent, and a base supply or withdrawal among them is refused (`isSubmissionRefused` in `src/helpers/wrappedPositions.ts`). While a release control is off, the amount form refuses its entry. Borrow, a repay up to the debt and collateral stay direct ([`anchorage-queued-execution.md`](anchorage-queued-execution.md)).
-- **A direct Comet supply on the three markets cannot be withdrawn through this route.** A base withdrawal always goes to the wrapper and takes at most what the wrapper pays. An Anchorage account that also supplies the base token to Comet directly sees both added together. The app withdraws the wrapped part alone. Mixed direct and wrapped positions are out of COM-309's scope ([Limits](anchorage-queued-execution.md#limits)). Preflight item 11 checks for such accounts.
+- **A direct Comet supply on the three markets is withdrawn through this route only while exits are open.** An Anchorage account that also supplies the base token to Comet directly sees both added together, and the masthead says how much is direct. Once `isExitEnabled` is `true`, Withdraw takes the direct part first, as production's Comet base withdrawal, then the rest through the wrapper (COM-344, [Submitting](anchorage-queued-execution.md#submitting-submit-transaction)). While exits are closed, Withdraw is refused as a whole, the direct part included. Preflight item 11 checks for such accounts.
 - **No wrapper failure falls back to Comet.** `checkWrappedStep` allows a wrapped step only as the base token's `approve` to the wrapper, or the wrapper's `supplyAndWrap` or `unwrapAndWithdraw`, with targets from the route (`src/helpers/wrappedActions.ts:348`, #64).
 
-So the first production release that contains this stack changes Anchorage sessions on the three markets, even with both controls off. Their Supply and Withdraw entries go to the wrapper, and the amount form refuses both while the controls are off. A direct Comet supply that such an account holds on these markets can no longer be withdrawn through the app. The Extensions page can still send any transaction for an Anchorage session (#64).
+So the first production release that contains this stack changes Anchorage sessions on the three markets, even with both controls off. Their Supply and Withdraw entries go to the wrapper, and the amount form refuses both while the controls are off. A direct Comet supply that such an account holds on these markets cannot be withdrawn through the app until exits open. The Extensions page can still send any transaction for an Anchorage session (#64).
 
 Do not merge the stack to `main` before Adam and Leo sign off Stage 0. The merge puts the stack into the next production release, whoever runs that release. Without a `cid` input, "Release Production" releases the newest successful `main` build (`.github/workflows/release-prod.yaml:41-49`).
 
@@ -138,7 +138,7 @@ Close every item before Stage 1, except those marked for Stage 2. Items 1, 10 an
 8. **For Stage 2, and preferably for Stage 1: verify a direct exit for a custody account.** Every position that the app opens belongs to an Anchorage custody account, because only the Anchorage connector takes the wrapped route. `cast` cannot sign for such an account. With a small authorized position, send `unwrapAndWithdraw(shares)` from an Anchorage account through an interface other than this app, as in [Direct wrapper exit](#direct-wrapper-exit). Record the interface and the transaction. Until this passes, R2 and R3 leave app-made holders with no verified way out.
 9. **For Stage 2: exercise an exit through the production app in Stage 1.** An authorized Anchorage account must hold shares for it, for example a small position that the COM-290 run leaves on one market on purpose. Decide that in COM-290's authorization.
 10. **Merge the stack after the Stage 0 signoff:** #60, #61, #64, #65, #66, #67 and this PR, each after its review. Before the first merge, record the CID and the commit that production serves: R3b releases that CID. Until Stage 0 ships, pin every production release's `cid` to that CID, because each merge builds a `main` that holds part of the stack. Merge the seven PRs in one sitting to keep that window short.
-11. **Before Stage 0: find direct Comet supplies of Anchorage accounts on the three markets.** From Stage 0, the app sends a base withdrawal for an Anchorage session on these markets to the wrapper. It cannot withdraw a direct Comet supply there ([Limits](anchorage-queued-execution.md#limits)). Ask Anchorage (Leo) which custody accounts have used these markets, and read each account's direct supply:
+11. **Before Stage 0: find direct Comet supplies of Anchorage accounts on the three markets.** From Stage 0, an Anchorage session on these markets withdraws through the wrapped route's Withdraw, which `isExitEnabled` gates. Once exits open on a market, Withdraw takes a direct Comet supply first, through Comet, then the rest through the wrapper (COM-344). Until then, the app cannot withdraw a direct supply there ([Limits](anchorage-queued-execution.md#limits)). Ask Anchorage (Leo) which custody accounts have used these markets, and read each account's direct supply:
 
     ```bash
     cast call <comet> "balanceOf(address)(uint256)" <account>
@@ -147,8 +147,9 @@ Close every item before Stage 1, except those marked for Stage 2. Items 1, 10 an
     Record each account with a nonzero balance. Before Stage 0, decide for each one:
 
     - the holder withdraws the supply before the release
-    - the holder withdraws it later, through an interface other than this app
-    - Adam and Leo accept the gap in writing
+    - the holder waits for exits to open on the market, then withdraws it through the app's Withdraw
+    - the holder withdraws it through an interface other than this app
+    - Adam and Leo accept the gap until exits open in writing
 
 The exit-specific safety checks that Stage 1 needs are items 1 to 5 for exits, and these:
 
@@ -225,7 +226,7 @@ Check the three wrapped markets as each stage describes, and these standard-mark
 3. A watch-only `?account=` view: read-only, with no write control.
 4. Screening: a deployed build screens each connected address and fails closed. An unscreened or blocked address reaches no signing flow.
 5. Recent Transactions and the Transactions page load.
-6. Anchorage on the three markets, at every stage: the normal Supply and Withdraw entries are present. A queued base supply or withdrawal goes to the wrapper, not to Comet or the Bulker. A direct Comet supply of the account is not withdrawable there (preflight item 11).
+6. Anchorage on the three markets, at every stage: the normal Supply and Withdraw entries are present. A queued base supply goes to the wrapper, not to Comet or the Bulker. A queued base withdrawal goes to the wrapper, except the part an account supplied to Comet directly, which goes first as one Comet base withdrawal. While exits are closed, neither is withdrawable there (preflight item 11).
 
 ## Stop conditions
 

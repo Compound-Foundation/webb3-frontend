@@ -170,12 +170,17 @@ type Validity = 'ok' | [false, string];
 /**
  * Why `action` would lend or withdraw the base token as a direct Comet supplier, given the base
  * balance the earlier actions leave: a base supply or a base withdrawal always would, and so would a
- * repay larger than the debt. A full repay (`MAX_UINT256`) repays the debt exactly.
+ * repay larger than the debt. A full repay (`MAX_UINT256`) repays the debt exactly. A borrow while a
+ * direct supply remains would first withdraw that supply, since Comet's `withdraw` takes the supply
+ * before it borrows.
  */
 function directBaseLendingProblem(baseAsset: BaseAssetWithAccountState, action: Action): string | undefined {
   const [actionType, , amount] = action;
   if (actionType === ActionType.Supply || actionType === ActionType.Withdraw) {
     return 'Base Lending Goes Through The Wrapper';
+  }
+  if (actionType === ActionType.Borrow && baseAsset.balance > 0n) {
+    return `Must Withdraw Full ${baseAsset.symbol} Balance`;
   }
   return actionType === ActionType.Repay ? excessRepayProblem(baseAsset, amount) : undefined;
 }
@@ -197,17 +202,26 @@ export type WrappedBaseRules = {
   /** Why a base withdrawal cannot be queued now, as the amount form shows it, or undefined. */
   withdrawBlockedReason: string | undefined;
   /**
-   * The most a partial withdrawal through the wrapper pays now, in base units: the position less
-   * the wrapper's rounding buffer, within the market's cash. Undefined until the position is read.
+   * The most a withdrawal of an amount pays now, in base units: the direct Comet supply, then the
+   * wrapped position less the wrapper's rounding buffer, within the market's cash. Undefined until
+   * the position is read.
    */
   maxPartialWithdrawal: bigint | undefined;
-  /** Whether a full exit can pay now. A maximum withdrawal is a full exit. */
+  /**
+   * Whether a maximum withdrawal can pay now: the whole direct Comet supply, then a full exit of
+   * the wrapper.
+   */
   canWithdrawAll: boolean;
   /**
-   * What a full exit pays, in base units: the position less the wrapper's rounding buffer.
-   * Undefined until the position is read.
+   * What a maximum withdrawal pays, in base units: the direct Comet supply, and the wrapped position
+   * less the wrapper's rounding buffer. Undefined until the position is read.
    */
   fullExitCash?: bigint;
+  /**
+   * The account's base supply to Comet directly, outside the wrapper, in base units. A withdrawal
+   * takes it first, through Comet. Zero or undefined when there is none.
+   */
+  directSupply?: bigint;
   /**
    * The base token's allowance to the wrapper, which a base supply spends instead of the Comet
    * allowance. Undefined until the position is read, and then treated as zero.

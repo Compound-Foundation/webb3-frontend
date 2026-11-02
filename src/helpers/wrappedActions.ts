@@ -182,6 +182,8 @@ export function isSameWrappedIdentity(
 }
 
 export type WrappedExecutionProblem =
+  /** A withdrawal needed the account's wrapper shares, and they were not loaded. */
+  | 'position-unknown'
   /** A wrapper action reached the standard queue or the Bulker. */
   | 'wrapped-action'
   /** One request held both direct actions and a wrapper action. */

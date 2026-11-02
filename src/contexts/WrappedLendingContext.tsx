@@ -26,6 +26,11 @@ export type WrappedRun =
 
 /** Where a wrapped run stands. */
 export type WrappedRunStatus =
+  /**
+   * A withdrawal's Comet step, which takes the account's direct supply before the wrapper step, is
+   * being checked, signed or followed to its receipt. The wrapper step has not started.
+   */
+  | { kind: 'direct' }
   /** Being read, checked, signed or followed to its receipt. */
   | { kind: 'running' }
   /** It stopped with nothing sent. Its queue row shows `label`, and it can be submitted again. */

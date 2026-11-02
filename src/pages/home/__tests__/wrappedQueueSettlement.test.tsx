@@ -15,10 +15,12 @@ import * as SelectedMarketContextHelpers from '@contexts/SelectedMarketContext';
 import { Web3 } from '@contexts/Web3Context';
 import { queueScope, submissionScope, WrappedLendingContext } from '@contexts/WrappedLendingContext';
 import CometAbi from '@helpers/abis/Comet';
+import { recordCometStateSource } from '@helpers/cometStateSource';
 import { LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { WrappedSession } from '@helpers/wrappedActions';
+import { WrappedPosition } from '@helpers/wrappedPositions';
 import { useActionQueue } from '@hooks/useActionQueue';
 import { useSubmissionStore } from '@hooks/useSubmissionStore';
 import { Theme } from '@hooks/useThemeManager';
@@ -28,6 +30,7 @@ import { useWriteWrappedState } from '@hooks/useWriteWrappedState';
 import { Action, ActionType, CometState, MarketData, StateType, TransactionState } from '@types';
 
 import { mockBaseAsset } from '../../../../__tests__/mocks/mockBaseAsset';
+import { mockEthCollateralAsset } from '../../../../__tests__/mocks/mockCollateralAssets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import Home from '../index';
 
@@ -80,6 +83,7 @@ const CALLS = new Interface([
   'function unwrapAndWithdraw(uint256 shares) returns (uint256 amount)',
   'function totalSupply() view returns (uint256)',
   'function isWithdrawPaused() view returns (bool)',
+  'function withdraw(address asset, uint256 amount)',
 ]);
 const COMET = new Interface(CometAbi);
 
@@ -92,6 +96,10 @@ type Chain = {
   totalAssets: bigint;
   baseSupplyIndex: bigint;
   cometCash: bigint;
+  /** The account's base supply to Comet directly, outside the wrapper. */
+  directSupply: bigint;
+  /** What Comet lent the account: a `withdraw` above the direct supply borrows the difference. */
+  borrowed: bigint;
   block: number;
   /** The next mined call reverts. */
   shouldRevertNext: boolean;
@@ -101,7 +109,7 @@ type Chain = {
  * The wrapper holds 1,000.5 USDC for 1,000 whole shares, counting its 10^12 virtual shares, of
  * which the account holds `shares`. The supply index 1.05e15 gives a buffer of 3 base units.
  */
-function chainFor({ allowance = 0n, shares = 0n } = {}): Chain {
+function chainFor({ allowance = 0n, shares = 0n, directSupply = 0n } = {}): Chain {
   return {
     balance: 10_000_000_000n,
     allowance,
@@ -110,6 +118,8 @@ function chainFor({ allowance = 0n, shares = 0n } = {}): Chain {
     totalAssets: 1_000_500_000n,
     baseSupplyIndex: 1_050_000_000_000_000n,
     cometCash: 10n ** 15n,
+    directSupply,
+    borrowed: 0n,
     block: 100,
     shouldRevertNext: false,
   };
@@ -140,6 +150,17 @@ function mine(chain: Chain, { to, data }: { to: string; data: string }): boolean
     chain.allowance -= amount;
     chain.balance -= amount;
     chain.shares += amount * 10n ** 12n;
+    return true;
+  }
+  // Comet's own base withdrawal: `MAX_UINT256` takes the whole direct supply, and more than the
+  // supply borrows the difference.
+  if (call.name === 'withdraw' && isSame(to, MARKET.cometAddress) && isSame(call.args[0], MARKET.baseTokenAddress)) {
+    const asked = BigInt(call.args[1].toString());
+    const amount = asked === MAX_UINT256 ? chain.directSupply : asked;
+    if (amount > chain.directSupply) chain.borrowed += amount - chain.directSupply;
+    chain.directSupply = amount > chain.directSupply ? 0n : chain.directSupply - amount;
+    chain.cometCash -= amount;
+    chain.balance += amount;
     return true;
   }
   if (call.name === 'unwrapAndWithdraw' && isSame(to, MARKET.wrapperAddress)) {
@@ -183,6 +204,9 @@ function readProviderFor(chain: Chain) {
       }
       if (call.name === 'balanceOf' && isSame(to, MARKET.cometAddress) && isSame(call.args[0], MARKET.wrapperAddress)) {
         return CALLS.encodeFunctionResult('balanceOf', [chain.totalAssets]);
+      }
+      if (call.name === 'balanceOf' && isSame(to, MARKET.cometAddress) && isSame(call.args[0], ACCOUNT)) {
+        return CALLS.encodeFunctionResult('balanceOf', [chain.directSupply]);
       }
       if (call.name === 'totalSupply' && isSame(to, MARKET.wrapperAddress)) {
         return CALLS.encodeFunctionResult('totalSupply', [chain.totalSupply]);
@@ -235,6 +259,18 @@ function walletFor(chain: Chain, chainId: number) {
     receipts.set(hash, { transactionHash: hash, status, blockNumber: chain.block } as TransactionReceipt);
     return hash;
   });
+  // The signer Comet's own writes use, as ethers' contracts call it. Its sends join the same list of
+  // wallet requests, so their order with the wrapper's shows.
+  const cometSigner = {
+    _isSigner: true,
+    getAddress: async () => ACCOUNT,
+    resolveName: async (name: string) => name,
+    estimateGas: jest.fn(async () => BigNumber.from(100_000)),
+    sendTransaction: jest.fn(async (request: { to: string; data: string }) => ({
+      hash: await sendUncheckedTransaction({ to: request.to, data: request.data, chainId }),
+      wait: async () => ({}),
+    })),
+  };
   return {
     holdReceipts: () => {
       receiptsReleased = new Promise((resolve) => (releaseReceipts = resolve));
@@ -251,8 +287,9 @@ function walletFor(chain: Chain, chainId: number) {
       return receipts.get(hash) ?? null;
     }),
     getTransaction: jest.fn(async () => null),
-    getSigner: jest.fn(() => ({ sendUncheckedTransaction })),
+    getSigner: jest.fn(() => ({ sendUncheckedTransaction, connectUnchecked: () => cometSigner })),
     sendUncheckedTransaction,
+    cometSigner,
   };
 }
 type Wallet = ReturnType<typeof walletFor>;
@@ -328,17 +365,21 @@ type DashboardProps = {
   readProvider: ReturnType<typeof readProviderFor>;
   walletChainId: number;
   state: CometState;
+  /** The wrapped position the dashboard shows, or none while it is read. */
+  position?: WrappedPosition;
+  /** False while another page is shown: App's hooks stay, and Home is unmounted. */
+  isHomeShown?: boolean;
 };
 
 /**
  * The dashboard as App wires it: the transaction manager, the lifecycle and the wrapped writes,
  * the queue, and App's submission store, all through the fake wallets and provider.
  */
-function Dashboard({ wallets, readProvider, walletChainId, state }: DashboardProps) {
+function Dashboard({ wallets, readProvider, walletChainId, state, position, isHomeShown = true }: DashboardProps) {
   const wallet = wallets[walletChainId];
   const web3: Web3 = {
     ...mockWeb3,
-    read: { ...mockWeb3.read, account: ACCOUNT, chainId: 1 },
+    read: { ...mockWeb3.read, account: ACCOUNT, chainId: 1, provider: readProvider as never },
     write: {
       ...mockWeb3.write,
       account: ACCOUNT,
@@ -380,7 +421,7 @@ function Dashboard({ wallets, readProvider, walletChainId, state }: DashboardPro
     route: session.route,
     action,
     write,
-    position: { status: 'loading' as const },
+    position: position === undefined ? { status: 'loading' as const } : { status: 'loaded' as const, position },
     retry: jest.fn(),
     submission,
   };
@@ -388,16 +429,18 @@ function Dashboard({ wallets, readProvider, walletChainId, state }: DashboardPro
     <WrappedLendingContext.Provider value={lending}>
       <MarketContext.Provider value={SELECTED as never}>
         <QueueContext.Provider value={queue}>
-          <Home
-            transactions={manager.transactions}
-            web3={web3}
-            selectedMarketData={SELECTED as never}
-            cometState={state}
-            addTransaction={manager.addTransaction}
-            switchWriteNetwork={switchWriteNetwork}
-            estimatedGasMap={new Map()}
-            theme={Theme.Dark}
-          />
+          {isHomeShown && (
+            <Home
+              transactions={manager.transactions}
+              web3={web3}
+              selectedMarketData={SELECTED as never}
+              cometState={state}
+              addTransaction={manager.addTransaction}
+              switchWriteNetwork={switchWriteNetwork}
+              estimatedGasMap={new Map()}
+              theme={Theme.Dark}
+            />
+          )}
         </QueueContext.Provider>
       </MarketContext.Provider>
     </WrappedLendingContext.Provider>
@@ -418,7 +461,10 @@ async function submit() {
   await settle();
 }
 
-function renderDashboard(chain: Chain) {
+function renderDashboard(
+  chain: Chain,
+  { state = COMET_STATE, position }: { state?: CometState; position?: WrappedPosition } = {}
+) {
   window.localStorage.clear();
   const wallets = { 1: walletFor(chain, 1), 8453: walletFor(chain, 8453) };
   const props: DashboardProps = {
@@ -426,10 +472,10 @@ function renderDashboard(chain: Chain) {
     readProvider: withTotals(chain, readProviderFor(chain)),
     walletChainId: 1,
     state: [StateType.Loading, undefined] as unknown as CometState,
+    position,
   };
   const view = render(<Dashboard {...props} />);
-  const show = (changes: Partial<DashboardProps>) =>
-    view.rerender(<Dashboard {...props} {...changes} state={COMET_STATE} />);
+  const show = (changes: Partial<DashboardProps>) => view.rerender(<Dashboard {...props} {...changes} state={state} />);
   show({});
   return { wallet: wallets[1], show };
 }
@@ -782,5 +828,300 @@ describe('a queued wrapper action when the wallet session breaks while it is bei
         'The wallet stopped responding while it had the request. The request can still be approved in the wallet.',
       isStoppedBySessionFailure: true,
     });
+  });
+});
+
+/** 250 USDC supplied to Comet directly, outside the wrapper. */
+const DIRECT = 250_000_000n;
+const WRAPPED_SHARES = 250n * 10n ** 18n;
+
+/** The Comet state with `directSupply` supplied to Comet directly, as useCometState reads it for the account. */
+function stateWithDirectSupply(directSupply: bigint, collateralAssets: unknown[] = []): CometState {
+  const state = [
+    StateType.Hydrated,
+    { ...COMET_STATE[1], baseAsset: { ...BASE_ASSET, balance: directSupply }, collateralAssets },
+  ] as unknown as CometState;
+  recordCometStateSource(state, { chainId: 1, cometAddress: USDC_COMET }, ACCOUNT);
+  return state;
+}
+
+/** The account's wrapped position on the chain, as useWrappedPosition reads it. */
+function positionOn(chain: Chain): WrappedPosition {
+  const grossAssets = (chain.shares * (chain.totalAssets + 1n)) / (chain.totalSupply + 10n ** 12n);
+  return {
+    shares: chain.shares,
+    shareDecimals: 18,
+    grossAssets,
+    baseDecimals: 6,
+    baseWalletBalance: chain.balance,
+    wrapperAllowance: chain.allowance,
+    redeemBuffer: chain.baseSupplyIndex / 10n ** 15n + 2n,
+    fullExitCash: exitCashAt(chain, chain.shares),
+    isWithdrawPaused: false,
+    snapshot: {
+      totalSupply: chain.totalSupply,
+      totalAssets: chain.totalAssets,
+      baseSupplyIndex: chain.baseSupplyIndex,
+    },
+  };
+}
+
+/** The wallet's requests in the order the dashboard made them, by method. */
+const requestedCalls = (wallet: Wallet) =>
+  wallet.sendUncheckedTransaction.mock.calls.map(([request]) => CALLS.parseTransaction(request).name);
+
+/** The Comet base withdrawals the wallet was asked for: the contract, the data and its arguments. */
+const cometWithdrawals = (wallet: Wallet) =>
+  sentCalls(wallet, 'withdraw').map(([request]) => {
+    const call = CALLS.parseTransaction(request);
+    return { to: request.to, data: request.data, args: [String(call.args[0]), BigInt(call.args[1].toString())] };
+  });
+
+/** Comet's `withdraw(asset, amount)` as production's useWriteCometState encodes it. */
+const productionWithdrawData = (amount: bigint) =>
+  COMET.encodeFunctionData('withdraw', [MARKET.baseTokenAddress, amount.toString()]);
+
+describe('a withdrawal on the wrapped route from an account with a direct Comet supply', () => {
+  let quiet: jest.SpyInstance[] = [];
+  beforeEach(() => {
+    mockNextId = 0;
+    quiet = [
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined),
+      jest.spyOn(console, 'log').mockImplementation(() => undefined),
+    ];
+  });
+  afterEach(() => {
+    quiet.forEach((spy) => spy.mockRestore());
+  });
+
+  /** A chain with the direct supply and the wrapped shares, and the dashboard showing both. */
+  async function renderMixed() {
+    const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
+    const { wallet, show } = renderDashboard(chain, {
+      state: stateWithDirectSupply(DIRECT),
+      position: positionOn(chain),
+    });
+    await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
+    return { chain, wallet, show };
+  }
+
+  it.each([
+    ['below', 100_000_000n],
+    ['equal to', DIRECT],
+  ])(
+    'sends an amount %s the direct supply as one Comet base withdrawal, the transaction production sends, and never calls the wrapper',
+    async (_name, amount) => {
+      const { chain, wallet } = await renderMixed();
+      act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, amount]));
+
+      await submit();
+      await waitFor(() => expect(queued()).toEqual([]));
+
+      expect(live.manager.settledTransactions.map(({ key, outcome }) => [key, outcome.status])).toEqual([
+        [USDC_COMET, 'confirmed'],
+      ]);
+      expect(requestedCalls(wallet)).toEqual(['withdraw']);
+      expect(cometWithdrawals(wallet)).toEqual([
+        { to: USDC_COMET, data: productionWithdrawData(amount), args: [MARKET.baseTokenAddress, amount] },
+      ]);
+      expect(chain.directSupply).toBe(DIRECT - amount);
+      expect(chain.borrowed).toBe(0n);
+      expect(chain.shares).toBe(WRAPPED_SHARES);
+      expect(chain.balance).toBe(10_000_000_000n + amount);
+      expect(screen.queryByRole('dialog')).toBeNull();
+    }
+  );
+
+  it('sends a larger amount as Comet withdraw(base, max), then unwrapAndWithdraw for the rest only once the Comet step confirms', async () => {
+    const { chain, wallet } = await renderMixed();
+    const amount = 300_000_000n;
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, amount];
+    act(() => live.queue.addOrUpdateAction(entry));
+    const send = wallet.sendUncheckedTransaction.getMockImplementation();
+    if (send === undefined) throw new Error('the wallet must send');
+    const wrapperAnswer = held<void>();
+    wallet.sendUncheckedTransaction.mockImplementationOnce(send).mockImplementationOnce(async (request) => {
+      await wrapperAnswer.promise;
+      return send(request);
+    });
+    wallet.holdReceipts();
+
+    act(() => positionCard().onSubmitClicked());
+    // From the press, the dashboard is held as for a transaction to Comet.
+    expect(positionCard().transaction?.state).toBe(TransactionState.AwaitingConfirmation);
+    await waitFor(() => expect(requestedCalls(wallet)).toEqual(['withdraw']));
+    await settle();
+    // The Comet step's receipt is pending: nothing is asked of the wrapper, and the row is held.
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(cometWithdrawals(wallet)).toEqual([
+      { to: USDC_COMET, data: productionWithdrawData(MAX_UINT256), args: [MARKET.baseTokenAddress, MAX_UINT256] },
+    ]);
+    expectQueueHeld(entry);
+    expect(positionCard().transaction?.state).toBe(TransactionState.Pending);
+
+    wallet.releaseReceipts();
+    await waitFor(() => expect(requestedCalls(wallet)).toEqual(['withdraw', 'unwrapAndWithdraw']));
+    // The row now holds what the wrapper still pays, and stays held while the wallet has the request.
+    expect(queued()).toEqual([[ActionType.Withdraw, expect.anything(), amount - DIRECT]]);
+    expect(positionCard().transaction?.state).toBe(TransactionState.AwaitingConfirmation);
+    expect(chain.directSupply).toBe(0n);
+
+    const beforeExit = { ...chain };
+    wrapperAnswer.release();
+    await waitFor(() => expect(queued()).toEqual([]));
+    const [unwrap] = sentCalls(wallet, 'unwrapAndWithdraw');
+    const burned = BigInt(CALLS.parseTransaction(unwrap[0]).args[0].toString());
+    expect(beforeExit.shares - chain.shares).toBe(burned);
+    // The fewest shares that pay the rest: one share fewer pays less.
+    expect(exitCashAt(beforeExit, burned)).toBeGreaterThanOrEqual(amount - DIRECT);
+    expect(exitCashAt(beforeExit, burned - 1n)).toBeLessThan(amount - DIRECT);
+    expect(chain.borrowed).toBe(0n);
+    expect(chain.balance - 10_000_000_000n).toBeGreaterThanOrEqual(amount);
+    expect(chain.balance - 10_000_000_000n).toBeLessThan(amount + 10n);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('withdraws everything for Max: Comet withdraw(base, max), then a full exit of every share', async () => {
+    const { chain, wallet } = await renderMixed();
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, MAX_UINT256]));
+
+    await submit();
+    await waitFor(() => expect(queued()).toEqual([]));
+
+    expect(requestedCalls(wallet)).toEqual(['withdraw', 'unwrapAndWithdraw']);
+    expect(cometWithdrawals(wallet)[0].args).toEqual([MARKET.baseTokenAddress, MAX_UINT256]);
+    const [unwrap] = sentCalls(wallet, 'unwrapAndWithdraw');
+    expect(BigInt(CALLS.parseTransaction(unwrap[0]).args[0].toString())).toBe(WRAPPED_SHARES);
+    expect(chain.directSupply).toBe(0n);
+    expect(chain.shares).toBe(0n);
+    expect(chain.borrowed).toBe(0n);
+  });
+
+  it.each<[string, (wallet: Wallet, chain: Chain) => void, { queue: 'kept' | 'removed'; label?: string }]>([
+    [
+      'is declined in the wallet',
+      (wallet) => wallet.sendUncheckedTransaction.mockRejectedValueOnce({ code: 4001, message: 'User rejected.' }),
+      { queue: 'kept' },
+    ],
+    ['reverts', (_wallet, chain) => (chain.shouldRevertNext = true), { queue: 'kept', label: 'Transaction Failed' }],
+    [
+      'fails in the wallet after it had the request',
+      (wallet) => wallet.sendUncheckedTransaction.mockRejectedValueOnce({ code: -32603, message: 'Internal error' }),
+      { queue: 'removed' },
+    ],
+  ])('sends nothing to the wrapper when the Comet step %s', async (_name, fail, expected) => {
+    const { chain, wallet } = await renderMixed();
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, 300_000_000n];
+    act(() => live.queue.addOrUpdateAction(entry));
+    fail(wallet, chain);
+
+    await submit();
+    await settle();
+
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(sentCalls(wallet, 'unwrapAndWithdraw')).toHaveLength(0);
+    expect(chain.shares).toBe(WRAPPED_SHARES);
+    expect(chain.borrowed).toBe(0n);
+    expect(queued()).toEqual(expected.queue === 'kept' ? [entry] : []);
+    const stopped = positionCard().actionRules.wrappedBase.stopped;
+    expect(stopped).toEqual(
+      expected.label === undefined
+        ? undefined
+        : { action: [ActionType.Withdraw, expect.anything(), entry[2]], label: expected.label }
+    );
+    expect(positionCard().transaction).toBeUndefined();
+  });
+
+  it('leaves the rest queued, and asks the wrapper for nothing, when the Comet step confirms while another page is shown', async () => {
+    const { chain, wallet, show } = await renderMixed();
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 300_000_000n]));
+    wallet.holdReceipts();
+    act(() => positionCard().onSubmitClicked());
+    await waitFor(() => expect(requestedCalls(wallet)).toEqual(['withdraw']));
+
+    show({ isHomeShown: false });
+    wallet.releaseReceipts();
+    await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
+    await settle();
+
+    // No wallet request opens on another page. The row holds what the wrapper still pays.
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(chain.directSupply).toBe(0n);
+    expect(queued()).toEqual([[ActionType.Withdraw, expect.anything(), 50_000_000n]]);
+
+    show({ isHomeShown: true });
+    await settle();
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(positionCard().transaction).toBeUndefined();
+  });
+
+  it('sends nothing, and says why on the row, when the withdrawal is queued with another action', async () => {
+    const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
+    const collateral = mockEthCollateralAsset({ walletBalance: 10n ** 18n, allowance: MAX_UINT256 });
+    const { wallet } = renderDashboard(chain, {
+      state: stateWithDirectSupply(DIRECT, [collateral]),
+      position: positionOn(chain),
+    });
+    await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, 100_000_000n];
+    act(() => live.queue.addOrUpdateAction(entry));
+    act(() => live.queue.addOrUpdateAction([ActionType.SupplyCollateral, collateral, 10n ** 17n]));
+
+    await submit();
+
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(live.manager.transactions).toEqual([]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+      action: [ActionType.Withdraw, expect.anything(), entry[2]],
+      label: 'Submit The Withdrawal On Its Own',
+    });
+    expect(chain.directSupply).toBe(DIRECT);
+  });
+
+  it('keeps the rest queued when the wrapper step is declined after the Comet step confirmed', async () => {
+    const { chain, wallet } = await renderMixed();
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 300_000_000n]));
+    const send = wallet.sendUncheckedTransaction.getMockImplementation();
+    if (send === undefined) throw new Error('the wallet must send');
+    wallet.sendUncheckedTransaction
+      .mockImplementationOnce(send)
+      .mockRejectedValueOnce({ code: 4001, message: 'User rejected.' });
+
+    await submit();
+    await waitFor(() => expect(live.action.state.phase).toBe('stopped'));
+    await settle();
+
+    expect(requestedCalls(wallet)).toEqual(['withdraw', 'unwrapAndWithdraw']);
+    expect(chain.directSupply).toBe(0n);
+    expect(chain.shares).toBe(WRAPPED_SHARES);
+    expect(queued()).toEqual([[ActionType.Withdraw, expect.anything(), 50_000_000n]]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toBeUndefined();
+    expect(positionCard().transaction).toBeUndefined();
+  });
+
+  it('sends nothing, and asks for a new amount, when the direct supply falls below a partial amount between review and signing', async () => {
+    const { chain, wallet } = await renderMixed();
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
+    act(() => live.queue.addOrUpdateAction(entry));
+    // While the manager estimates the Comet step's gas, 150 USDC of the direct supply leaves in
+    // another transaction. The dashboard still shows the 250 USDC it read.
+    wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
+      chain.directSupply = 100_000_000n;
+      return BigNumber.from(100_000);
+    });
+
+    await submit();
+    await settle();
+
+    // A withdrawal of 200 USDC from a 100 USDC supply would borrow 100 USDC.
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(chain.borrowed).toBe(0n);
+    expect(chain.directSupply).toBe(100_000_000n);
+    expect(queued()).toEqual([entry]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+      action: [ActionType.Withdraw, expect.anything(), entry[2]],
+      label: 'Balance Changed, Edit Amount',
+    });
+    expect(live.manager.transactions).toEqual([]);
   });
 });

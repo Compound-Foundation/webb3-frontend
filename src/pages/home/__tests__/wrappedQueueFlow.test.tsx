@@ -186,6 +186,16 @@ function Dashboard({ value, state }: { value: WrappedLending; state: CometState 
   );
 }
 
+/** The Comet state with `directSupply` supplied to Comet directly, as useCometState reads it for the account. */
+function stateWithDirectSupply(directSupply: bigint): CometState {
+  const state = [
+    COMET_STATE[0],
+    { ...COMET_STATE[1], baseAsset: { ...BASE_ASSET, balance: directSupply } },
+  ] as unknown as CometState;
+  recordCometStateSource(state, { chainId: 1, cometAddress: USDC_COMET }, ACCOUNT);
+  return state;
+}
+
 // Home trusts the Comet state for the account once it arrives while the dashboard is mounted.
 function renderDashboard(value: Lending) {
   const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
@@ -346,15 +356,12 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     expect(mockWriteState.withdraw).not.toHaveBeenCalled();
   });
 
-  it('shows what a full exit pays on a Max withdrawal row, and a spinner while that is not known', async () => {
+  it('shows what a Max withdrawal pays on its row, the direct supply and a full exit, and a spinner while that is not known', async () => {
     const user = userEvent.setup();
     // 10 USDC supplied to Comet directly beside the wrapped position. The dashboard shows 260 USDC
-    // supplied, and a full exit through the wrapper pays 249.999997 USDC.
-    const mixed = [
-      COMET_STATE[0],
-      { ...COMET_STATE[1], baseAsset: { ...BASE_ASSET, balance: 10_000_000n } },
-    ] as unknown as CometState;
-    recordCometStateSource(mixed, { chainId: 1, cometAddress: USDC_COMET }, ACCOUNT);
+    // supplied. Max takes the 10 USDC from Comet, then a full exit through the wrapper pays
+    // 249.999997 USDC: 259.999997 USDC in all.
+    const mixed = stateWithDirectSupply(10_000_000n);
     const value = lending(POSITION);
     const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
     view.rerender(<Dashboard value={value} state={mixed} />);
@@ -364,14 +371,82 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     await user.click(formButton('Add Action'));
 
     const row = within(desktopQueue()).getByText('Withdraw USDC').closest('.action-queue-item') as HTMLElement;
-    expect(row).toHaveTextContent('250.0000');
-    expect(row).not.toHaveTextContent('260.0000');
+    expect(row).toHaveTextContent('260.0000');
+    expect(row).not.toHaveTextContent('250.0000');
 
     view.rerender(<Dashboard value={lending(undefined)} state={mixed} />);
 
     expect(row.querySelector('.action-queue-item__balance .load-spinner--new')).not.toBeNull();
     expect(row).not.toHaveTextContent(/share/i);
     expect(row).not.toHaveTextContent('260.0000');
+  });
+
+  it('says in the masthead notice and the Withdraw helper text how much of the balance is supplied to Comet directly', async () => {
+    const user = userEvent.setup();
+    const value = lending(POSITION);
+    const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
+    view.rerender(<Dashboard value={value} state={stateWithDirectSupply(10_000_000n)} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '10.0000 USDC of your balance is supplied to Comet directly, outside the wrapper. Withdraw takes it out first.'
+    );
+    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    expect(
+      screen.getAllByText(
+        '10.0000 USDC of this balance is supplied to Comet directly. Withdraw takes it out first, then the rest through the wrapper, each in its own transaction.'
+      )[0]
+    ).toBeInTheDocument();
+  });
+
+  it('says nothing about a direct supply when the account has none', async () => {
+    const user = userEvent.setup();
+    renderDashboard(lending(POSITION));
+
+    expect(screen.queryByRole('status')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    expect(screen.queryByText(/supplied to Comet directly/)).toBeNull();
+  });
+
+  it('takes a withdrawal of up to the direct supply and what the wrapper pays together', async () => {
+    const user = userEvent.setup();
+    const value = lending(POSITION);
+    const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
+    view.rerender(<Dashboard value={value} state={stateWithDirectSupply(10_000_000n)} />);
+
+    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    // More than the wrapper's 249.999997 USDC, within the 259.999997 USDC the two pay together.
+    const input = amountInput();
+    await user.type(input, '259.999997');
+    expect(formButton('Add Action')).toBeEnabled();
+    await user.clear(input);
+    await user.type(input, '259.999998');
+    expect((await screen.findAllByText('Amount Exceeds Withdrawable Balance'))[0]).toBeInTheDocument();
+    expect(formButton('Add Action')).toBeDisabled();
+  });
+
+  it("submits an amount within the direct supply as production's Comet base withdrawal, and asks nothing of the wrapper", async () => {
+    const user = userEvent.setup();
+    const value = lending(POSITION);
+    const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
+    view.rerender(<Dashboard value={value} state={stateWithDirectSupply(10_000_000n)} />);
+
+    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    await user.type(amountInput(), '5');
+    await user.click(formButton('Add Action'));
+    await user.click(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' }));
+
+    expect(mockWriteState.withdraw).toHaveBeenCalledTimes(1);
+    expect(mockWriteState.withdraw).toHaveBeenCalledWith(
+      USDC_MARKET,
+      USDC,
+      5_000_000n,
+      `Withdraw ${BASE_ASSET.name}`,
+      0,
+      expect.any(Function)
+    );
+    expect(value.write.withdraw).not.toHaveBeenCalled();
+    expect(mockWriteState.invokeBulker).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('keeps a queued Max repay as a repay of the whole debt after the user re-opens and updates it', async () => {
@@ -426,5 +501,41 @@ describe('the wrapped route through the normal form, queue and comparison', () =
 
     expect(screen.queryByRole('button', { name: 'Withdraw USDC' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Supply USDC' })).toBeEnabled();
+  });
+});
+
+describe('the standard route, which a direct Comet supply leaves as production has it', () => {
+  beforeEach(() => {
+    Object.values(mockWriteState).forEach((fn) => fn.mockReset());
+  });
+
+  it("shows no notice or helper text, and withdraws through production's single Comet withdraw", async () => {
+    const user = userEvent.setup();
+    // Another wallet on the same market: every action goes to Comet or the Bulker.
+    const standard: Lending = {
+      ...lending(undefined),
+      route: { kind: 'standard', writes: { isEligible: true } },
+      position: { status: 'not-applicable' },
+    };
+    const view = render(<Dashboard value={standard} state={[StateType.Loading, undefined] as never} />);
+    view.rerender(<Dashboard value={standard} state={stateWithDirectSupply(10_000_000n)} />);
+
+    expect(screen.queryByRole('status')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    expect(screen.queryByText(/supplied to Comet directly/)).toBeNull();
+    await user.type(amountInput(), '10');
+    await user.click(formButton('Add Action'));
+    await user.click(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' }));
+
+    expect(mockWriteState.withdraw).toHaveBeenCalledTimes(1);
+    expect(mockWriteState.withdraw).toHaveBeenCalledWith(
+      USDC_MARKET,
+      USDC,
+      10_000_000n,
+      `Withdraw ${BASE_ASSET.name}`,
+      0,
+      expect.any(Function)
+    );
+    expect(standard.write.withdraw).not.toHaveBeenCalled();
   });
 });
