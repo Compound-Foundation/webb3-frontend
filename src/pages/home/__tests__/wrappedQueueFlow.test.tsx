@@ -210,6 +210,17 @@ const desktopQueue = () => document.querySelector('.position-card__actions') as 
 const amountInput = () => screen.getAllByPlaceholderText('0')[0];
 const formButton = (name: string) => screen.getAllByRole('button', { name })[0];
 
+/**
+ * Opens the amount form with the user's click on `target`, then waits for the focus that each copy
+ * of the form schedules 100 ms after it opens. The dashboard renders a desktop form and a hidden
+ * mobile one, and a focus that lands while the test types sends the rest of the typing to the
+ * hidden form.
+ */
+async function openForm(user: ReturnType<typeof userEvent.setup>, target: HTMLElement) {
+  await user.click(target);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 150)));
+}
+
 describe('the wrapped route through the normal form, queue and comparison', () => {
   beforeEach(() => {
     Object.values(mockWriteState).forEach((fn) => fn.mockReset());
@@ -220,7 +231,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     const value = lending(POSITION);
     const view = renderDashboard(value);
 
-    await user.click(screen.getByRole('button', { name: 'Supply USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Supply USDC' }));
     await user.type(amountInput(), '100');
     // Production's hint, without its promise that one approval is enough: the exact approval is spent.
     expect(
@@ -243,7 +254,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     expect(within(desktopQueue()).queryByText('Approval Failed')).toBeNull();
 
     // Raising the amount above the allowance asks for an increase, as production's form does.
-    await user.click(within(desktopQueue()).getByText('Supply USDC'));
+    await openForm(user, within(desktopQueue()).getByText('Supply USDC'));
     const input = amountInput();
     await user.clear(input);
     await user.type(input, '150');
@@ -274,7 +285,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     expect(headline()).toHaveTextContent('250.00');
     expect(document.querySelector('.wrapped-position-panel')).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'Supply USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Supply USDC' }));
     await user.type(amountInput(), '100');
     await user.click(formButton('Add Action'));
     expect(mockWriteState.approve).not.toHaveBeenCalled();
@@ -287,7 +298,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     expect(headline()).toHaveTextContent('350.00');
 
     // Edit the queued supply.
-    await user.click(within(desktopQueue()).getByText('Supply USDC'));
+    await openForm(user, within(desktopQueue()).getByText('Supply USDC'));
     const input = amountInput();
     await user.clear(input);
     await user.type(input, '200');
@@ -301,14 +312,14 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     expect(headline()).toHaveTextContent('250.00');
 
     // Queue it again, and clear the queue.
-    await user.click(screen.getByRole('button', { name: 'Supply USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Supply USDC' }));
     await user.type(amountInput(), '200');
     await user.click(formButton('Add Action'));
     await user.click(within(desktopQueue()).getByText('Clear All'));
     expect(desktopQueue()).toBeNull();
 
     // Queue it once more and submit it.
-    await user.click(screen.getByRole('button', { name: 'Supply USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Supply USDC' }));
     await user.type(amountInput(), '200');
     await user.click(formButton('Add Action'));
     await user.click(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' }));
@@ -328,7 +339,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     value.write.supply.mockReturnValue(refusal);
     renderDashboard(value);
 
-    await user.click(screen.getByRole('button', { name: 'Supply USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Supply USDC' }));
     await user.type(amountInput(), '100');
     await user.click(formButton('Add Action'));
     await user.click(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' }));
@@ -343,7 +354,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     const value = lending(POSITION);
     renderDashboard(value);
 
-    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Withdraw USDC' }));
     await user.click(formButton('Max'));
     // The input shows what Max pays: the full exit's cash, the position less the wrapper's buffer.
     expect(amountInput()).toHaveValue('249.999997');
@@ -368,7 +379,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
     view.rerender(<Dashboard value={value} state={mixed} />);
 
-    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Withdraw USDC' }));
     await user.click(formButton('Max'));
     // The input shows the figure the row shows, not the 260.000000 USDC balance.
     expect(amountInput()).toHaveValue('259.999997');
@@ -394,7 +405,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     expect(screen.getByRole('status')).toHaveTextContent(
       '10.0000 USDC of your balance is supplied to Comet directly, outside the wrapper. Withdraw takes it out first.'
     );
-    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Withdraw USDC' }));
     expect(
       screen.getAllByText(
         '10.0000 USDC of this balance is supplied to Comet directly. Withdraw takes it out first, then the rest through the wrapper, each in its own transaction.'
@@ -427,7 +438,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     renderDashboard(lending(POSITION));
 
     expect(screen.queryByRole('status')).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Withdraw USDC' }));
     expect(screen.queryByText(/supplied to Comet directly/)).toBeNull();
   });
 
@@ -437,7 +448,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
     view.rerender(<Dashboard value={value} state={stateWithDirectSupply(10_000_000n)} />);
 
-    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Withdraw USDC' }));
     // More than the wrapper's 249.999997 USDC, within the 259.999997 USDC the two pay together.
     const input = amountInput();
     await user.type(input, '259.999997');
@@ -454,7 +465,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     const view = render(<Dashboard value={value} state={[StateType.Loading, undefined] as never} />);
     view.rerender(<Dashboard value={value} state={stateWithDirectSupply(10_000_000n)} />);
 
-    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Withdraw USDC' }));
     await user.type(amountInput(), '5');
     await user.click(formButton('Add Action'));
     await user.click(within(desktopQueue()).getByRole('button', { name: 'Submit Transaction' }));
@@ -488,7 +499,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     await user.click(formButton('Add Action'));
 
     // Re-open the queued repay and add it again without a change.
-    await user.click(within(desktopQueue()).getByText('Repay USDC'));
+    await openForm(user, within(desktopQueue()).getByText('Repay USDC'));
     expect(formButton('Update Action')).toBeEnabled();
     await user.click(formButton('Update Action'));
     expect(screen.queryByRole('button', { name: 'Update Action' })).toBeNull();
@@ -512,7 +523,7 @@ describe('the wrapped route through the normal form, queue and comparison', () =
     const user = userEvent.setup();
     renderDashboard(lending(POSITION));
 
-    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Withdraw USDC' }));
     await user.type(amountInput(), '250');
 
     expect(screen.getAllByText('Amount Exceeds Withdrawable Balance')[0]).toBeInTheDocument();
@@ -545,7 +556,7 @@ describe('the standard route, which a direct Comet supply leaves as production h
     view.rerender(<Dashboard value={standard} state={stateWithDirectSupply(10_000_000n)} />);
 
     expect(screen.queryByRole('status')).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
+    await openForm(user, screen.getByRole('button', { name: 'Withdraw USDC' }));
     expect(screen.queryByText(/supplied to Comet directly/)).toBeNull();
     await user.type(amountInput(), '10');
     await user.click(formButton('Add Action'));
