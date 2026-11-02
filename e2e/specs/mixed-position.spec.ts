@@ -3,8 +3,9 @@
 // Comet directly. Withdraw takes the direct part first, as production's Comet base withdrawal, then the rest
 // through the wrapper, which the app asks for only once the Comet step confirms. Max takes the whole direct
 // part, then every share. A Comet step the wallet still holds holds back the next one, whatever market is
-// shown in between. A direct supply that changes before signing still pays the queued amount. The harness's
-// dev server opens the release controls (`releaseControls.ts`).
+// shown in between, whatever the balance does, and whichever tab submits, until the held request itself is
+// found mined. A direct supply that changes before signing still pays the queued amount. The harness's dev
+// server opens the release controls (`releaseControls.ts`).
 import { decodeFunctionData, encodeFunctionData, getAddress, parseAbi, type Address, type Hash } from 'viem';
 
 import { COMET_ABI, COMET_USDC, ERC20_ABI, MAX_UINT256, USDC, WRAPPER_ABI, WRAPPER_USDC } from '../harness/contracts';
@@ -88,6 +89,25 @@ async function expectNoDialog(page: Parameters<typeof openApp>[0]) {
   await expect(page.locator('.modal--active')).toHaveCount(0);
   await expect(page.getByRole('dialog')).toHaveCount(0);
 }
+
+/** 1 WETH of collateral, so that Comet would lend what two partial withdrawals take beyond the supply. */
+async function supplyCollateral(wallet: Wallet, fork: Fork, account: Address) {
+  const deposit = await wallet.forkSend({ from: account, to: WETH, data: '0xd0e30db0', value: '0xde0b6b3a7640000' });
+  await minedOnFork(fork, deposit.hash, { from: account, to: WETH });
+  const approveWeth = encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [COMET_USDC, 10n ** 18n] });
+  await sendOnFork(wallet, fork, account, WETH, approveWeth);
+  const supplyWeth = encodeFunctionData({ abi: COMET_ABI, functionName: 'supply', args: [WETH, 10n ** 18n] });
+  await sendOnFork(wallet, fork, account, COMET_USDC, supplyWeth);
+}
+
+const debtOf = (fork: Fork, account: Address, blockNumber?: bigint) =>
+  fork.readContract({
+    address: COMET_USDC,
+    abi: BORROW_ABI,
+    functionName: 'borrowBalanceOf',
+    args: [account],
+    blockNumber,
+  });
 
 const notice = (page: Parameters<typeof openApp>[0]) =>
   page.getByText(
@@ -266,13 +286,7 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     const account = getAddress(await selectedAccount(wallet, '1000'));
     await supplyToComet(wallet, fork, account, DIRECT);
     await supplyToWrapper(wallet, fork, account, WRAPPED);
-    // 1 WETH of collateral, so that Comet would lend what two partial withdrawals take beyond the supply.
-    const deposit = await wallet.forkSend({ from: account, to: WETH, data: '0xd0e30db0', value: '0xde0b6b3a7640000' });
-    await minedOnFork(fork, deposit.hash, { from: account, to: WETH });
-    const approveWeth = encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [COMET_USDC, 10n ** 18n] });
-    await sendOnFork(wallet, fork, account, WETH, approveWeth);
-    const supplyWeth = encodeFunctionData({ abi: COMET_ABI, functionName: 'supply', args: [WETH, 10n ** 18n] });
-    await sendOnFork(wallet, fork, account, COMET_USDC, supplyWeth);
+    await supplyCollateral(wallet, fork, account);
 
     await openApp(page);
     await connectAccount(page, wallet, account, ANCHORAGE_WALLET.label);
@@ -366,5 +380,126 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
     expect(await wrapperShares(fork, account)).toBe(sharesAtStart);
     expect(await directSupply(fork, account, receipt.blockNumber)).toBeGreaterThanOrEqual(100_000_000n - 1n);
+  });
+
+  test('keeps the hold when another interface supplies 100 USDC and withdraws 301 USDC, until the held request itself executes', async ({
+    page,
+    wallet,
+    fork,
+    appOrigin,
+  }) => {
+    test.setTimeout(300_000);
+    const account = getAddress(await selectedAccount(wallet, '1000'));
+    // 450 USDC supplied directly when the 200 USDC request is held.
+    await supplyToComet(wallet, fork, account, DIRECT + 200_000_000n);
+    await supplyToWrapper(wallet, fork, account, WRAPPED);
+    await supplyCollateral(wallet, fork, account);
+
+    await openApp(page);
+    await connectAccount(page, wallet, account, ANCHORAGE_WALLET.label);
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+    const seen = new Set((await wallet.requests()).map((request) => request.id));
+
+    await submitWithdrawal(page, '200');
+    const first = await nextRequest(wallet, 'eth_sendTransaction', seen);
+    const firstTransaction = checkTransactionRequest(first, { account, appOrigin, to: COMET_USDC });
+    expect(decodeFunctionData({ abi: COMET_ABI, data: firstTransaction.data }).args).toEqual([USDC, 200_000_000n]);
+    await wallet.reject(first.id, { code: 4900, message: 'The request can still complete in the wallet.' });
+    await expect(page.getByText('After Transaction')).toHaveCount(0, { timeout: 60_000 });
+
+    // Another interface, from the same account: 100 USDC more, then 301 USDC out. About 249 USDC stay, so
+    // the held 200 USDC request can still execute. A principal rule would have taken this for it.
+    await supplyToComet(wallet, fork, account, 100_000_000n);
+    const elsewhere = encodeFunctionData({ abi: COMET_ABI, functionName: 'withdraw', args: [USDC, 301_000_000n] });
+    await sendOnFork(wallet, fork, account, COMET_USDC, elsewhere);
+    expect(await directSupply(fork, account)).toBeGreaterThan(200_000_000n);
+
+    await page.reload();
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+    await submitWithdrawal(page, '200');
+    await expect(page.getByText('Earlier Request Still Pending').first()).toBeVisible({ timeout: 60_000 });
+    await expectNoDialog(page);
+    expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
+
+    // The held request executes after all, from the wallet. Comet lends nothing.
+    const late = await wallet.forkSend({ from: account, to: COMET_USDC, data: firstTransaction.data });
+    const { receipt: lateReceipt } = await minedOnFork(fork, late.hash, { from: account, to: COMET_USDC });
+    expect(await debtOf(fork, account, lateReceipt.blockNumber)).toBe(0n);
+
+    // Its calldata is now found mined, so the hold ends and the next Comet request goes.
+    await page.reload();
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+    await submitWithdrawal(page, '30');
+    const next = await nextRequest(wallet, 'eth_sendTransaction', new Set([...seen, first.id]));
+    const nextTransaction = checkTransactionRequest(next, { account, appOrigin, to: COMET_USDC });
+    expect(decodeFunctionData({ abi: COMET_ABI, data: nextTransaction.data }).args).toEqual([USDC, 30_000_000n]);
+    const nextHash = ((await wallet.approve(next.id)) as WalletRequest).result as Hash;
+    const { receipt: nextReceipt } = await minedOnFork(fork, nextHash, { from: account, to: COMET_USDC });
+    expect(await debtOf(fork, account, nextReceipt.blockNumber)).toBe(0n);
+    expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(2);
+  });
+
+  test('asks the wallet once when a second tab submits while the first is between its estimate and the wallet', async ({
+    page,
+    context,
+    wallet,
+    fork,
+    appOrigin,
+  }) => {
+    test.setTimeout(300_000);
+    const account = getAddress(await selectedAccount(wallet, '1000'));
+    await supplyToComet(wallet, fork, account, DIRECT);
+    await supplyToWrapper(wallet, fork, account, WRAPPED);
+    await supplyCollateral(wallet, fork, account);
+
+    await openApp(page);
+    await connectAccount(page, wallet, account, ANCHORAGE_WALLET.label);
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+    const seen = new Set((await wallet.requests()).map((request) => request.id));
+
+    // The first tab's fresh read of the direct supply, just before it would ask the wallet, waits until
+    // the test lets it go.
+    let release: () => void = () => undefined;
+    let reached: () => void = () => undefined;
+    const paused = new Promise<void>((resolve) => (release = resolve));
+    const isReached = new Promise<void>((resolve) => (reached = resolve));
+    const freshRead = encodeFunctionData({ abi: COMET_ABI, functionName: 'balanceOf', args: [account] }).toLowerCase();
+    let isGated = false;
+    await page.route('**/*', async (route) => {
+      let body: { method?: string; params?: [{ to?: string; data?: string }] } | undefined;
+      try {
+        body = route.request().postDataJSON();
+      } catch {
+        body = undefined;
+      }
+      const call = body?.method === 'eth_call' ? body.params?.[0] : undefined;
+      if (!isGated && call?.to?.toLowerCase() === COMET_USDC.toLowerCase() && call.data?.toLowerCase() === freshRead) {
+        isGated = true;
+        reached();
+        await paused;
+      }
+      await route.fallback();
+    });
+    await submitWithdrawal(page, '200');
+    await isReached;
+
+    // A second tab opens, restores what storage holds, and submits the same 200 USDC.
+    const second = await context.newPage();
+    await second.goto(page.url());
+    await expect(notice(second)).toBeVisible({ timeout: 60_000 });
+    await submitWithdrawal(second, '200');
+    await expect(second.getByText('Earlier Request Still Pending').first()).toBeVisible({ timeout: 60_000 });
+    expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(0);
+
+    // The first tab goes on, and its request is the only one.
+    release();
+    const request = await nextRequest(wallet, 'eth_sendTransaction', seen);
+    const transaction = checkTransactionRequest(request, { account, appOrigin, to: COMET_USDC });
+    expect(decodeFunctionData({ abi: COMET_ABI, data: transaction.data }).args).toEqual([USDC, 200_000_000n]);
+    const hash = ((await wallet.approve(request.id)) as WalletRequest).result as Hash;
+    const { receipt } = await minedOnFork(fork, hash, { from: account, to: COMET_USDC });
+    expect(await debtOf(fork, account, receipt.blockNumber)).toBe(0n);
+    expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
+    await second.close();
   });
 });
