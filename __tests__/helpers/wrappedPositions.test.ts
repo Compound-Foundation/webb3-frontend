@@ -387,62 +387,46 @@ describe('isSubmissionRefused', () => {
   });
 
   describe('isDirectWithdrawalRefused', () => {
-    const whole = { amount: MAX_UINT256, minBalance: 250_000_000n };
-    const part = { amount: 100_000_000n, minBalance: 100_000_000n };
     // The wrapped route with its exits open, as a release opens them.
     const wrapped = { ...wrappedClosed, exit: { isEligible: true } } as LendingRoute;
 
-    it('allows the planned Comet step while the live direct supply covers what it counts on', () => {
+    it('allows the planned Comet step while the live Comet state shows a direct supply', () => {
       const live = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(250_000_000n) };
-      expect(isDirectWithdrawalRefused(live, USDC, whole)).toBe(false);
-      expect(isDirectWithdrawalRefused(live, USDC, part)).toBe(false);
+      expect(isDirectWithdrawalRefused(live, USDC)).toBe(false);
+      const dust = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(1n) };
+      expect(isDirectWithdrawalRefused(dust, USDC)).toBe(false);
     });
 
-    it('refuses it once the live direct supply is below what it counts on', () => {
-      const live = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(99_999_999n) };
-      expect(isDirectWithdrawalRefused(live, USDC, part)).toBe(true);
-      expect(isDirectWithdrawalRefused(live, USDC, whole)).toBe(true);
+    it('refuses it once the live Comet state shows no direct supply, or a borrow', () => {
+      const none = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(0n) };
+      expect(isDirectWithdrawalRefused(none, USDC)).toBe(true);
       const borrower = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(-1n) };
-      expect(isDirectWithdrawalRefused(borrower, USDC, part)).toBe(true);
+      expect(isDirectWithdrawalRefused(borrower, USDC)).toBe(true);
     });
 
     it('refuses it off the wrapped route, for another market, or without live balances for the account', () => {
       const covered = hydrated(250_000_000n);
       expect(
-        isDirectWithdrawalRefused(
-          { route: standard, account: ACCOUNT, selectedMarket: USDC, comet: covered },
-          USDC,
-          part
-        )
+        isDirectWithdrawalRefused({ route: standard, account: ACCOUNT, selectedMarket: USDC, comet: covered }, USDC)
       ).toBe(true);
       expect(
         isDirectWithdrawalRefused(
           { route: wrapped, account: ACCOUNT, selectedMarket: OTHER_ROUTED, comet: covered },
-          USDC,
-          part
+          USDC
         )
       ).toBe(true);
       const loading = { market: USDC, account: ACCOUNT, state: [StateType.Loading, undefined] as CometState };
       expect(
-        isDirectWithdrawalRefused(
-          { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: loading },
-          USDC,
-          part
-        )
+        isDirectWithdrawalRefused({ route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: loading }, USDC)
       ).toBe(true);
       const otherAccount = hydrated(250_000_000n, USDC, '0x0000000000000000000000000000000000000bb2');
       expect(
-        isDirectWithdrawalRefused(
-          { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: otherAccount },
-          USDC,
-          part
-        )
+        isDirectWithdrawalRefused({ route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: otherAccount }, USDC)
       ).toBe(true);
       expect(
         isDirectWithdrawalRefused(
           { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(250_000_000n, OTHER_ROUTED) },
-          USDC,
-          part
+          USDC
         )
       ).toBe(true);
     });
@@ -452,8 +436,7 @@ describe('isSubmissionRefused', () => {
       expect(
         isDirectWithdrawalRefused(
           { route: wrappedClosed, account: ACCOUNT, selectedMarket: USDC, comet: covered },
-          USDC,
-          part
+          USDC
         )
       ).toBe(true);
       const conflicted = {
@@ -461,17 +444,8 @@ describe('isSubmissionRefused', () => {
         exit: { isEligible: false, reason: 'connector-conflict' },
       } as LendingRoute;
       expect(
-        isDirectWithdrawalRefused(
-          { route: conflicted, account: ACCOUNT, selectedMarket: USDC, comet: covered },
-          USDC,
-          whole
-        )
+        isDirectWithdrawalRefused({ route: conflicted, account: ACCOUNT, selectedMarket: USDC, comet: covered }, USDC)
       ).toBe(true);
-    });
-
-    it('refuses a step that counts on no supply', () => {
-      const live = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(250_000_000n) };
-      expect(isDirectWithdrawalRefused(live, USDC, { amount: 0n, minBalance: 0n })).toBe(true);
     });
   });
 });

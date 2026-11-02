@@ -262,35 +262,39 @@ describe('splitWrappedWithdrawal', () => {
     });
   });
 
-  it.each([
-    ['below', 100_000_000n],
-    ['at', DIRECT],
-  ])('makes an amount %s the direct supply one Comet withdrawal of that amount, with no wrapper call', (_n, amount) => {
-    expect(splitWrappedWithdrawal(amount, DIRECT, SHARES)).toEqual({
-      direct: { amount, minBalance: amount },
+  it('makes an amount below the direct supply one Comet withdrawal of that amount, with no wrapper call', () => {
+    for (const amount of [1n, 100_000_000n, DIRECT - 1n]) {
+      expect(splitWrappedWithdrawal(amount, DIRECT, SHARES)).toEqual({ direct: { amount }, request: undefined });
+    }
+  });
+
+  it('withdraws an amount equal to the direct supply with MAX_UINT256 and no wrapper call, so it never borrows', () => {
+    // A finite withdraw(base, amount) borrows the difference if the supply falls before it executes.
+    expect(splitWrappedWithdrawal(DIRECT, DIRECT, SHARES)).toEqual({
+      direct: { amount: MAX_UINT256 },
       request: undefined,
     });
   });
 
   it('withdraws the whole direct supply with MAX_UINT256 for a larger amount, then the rest from the wrapper', () => {
     expect(splitWrappedWithdrawal(300_000_000n, DIRECT, SHARES)).toEqual({
-      direct: { amount: MAX_UINT256, minBalance: DIRECT },
+      direct: { amount: MAX_UINT256 },
       request: { kind: 'partial', cash: 50_000_000n },
     });
     // One base unit more than the direct supply takes one base unit from the wrapper.
     expect(splitWrappedWithdrawal(DIRECT + 1n, DIRECT, SHARES)).toEqual({
-      direct: { amount: MAX_UINT256, minBalance: DIRECT },
+      direct: { amount: MAX_UINT256 },
       request: { kind: 'partial', cash: 1n },
     });
   });
 
   it('makes Max the whole direct supply with MAX_UINT256, then a full exit when the account holds shares', () => {
     expect(splitWrappedWithdrawal(MAX_UINT256, DIRECT, SHARES)).toEqual({
-      direct: { amount: MAX_UINT256, minBalance: DIRECT },
+      direct: { amount: MAX_UINT256 },
       request: { kind: 'full' },
     });
     expect(splitWrappedWithdrawal(MAX_UINT256, DIRECT, 0n)).toEqual({
-      direct: { amount: MAX_UINT256, minBalance: DIRECT },
+      direct: { amount: MAX_UINT256 },
       request: undefined,
     });
   });
@@ -300,14 +304,13 @@ describe('splitWrappedWithdrawal', () => {
     expect(() => splitWrappedWithdrawal(0n, DIRECT, SHARES)).toThrow(WrappedExecutionError);
   });
 
-  it('never asks Comet for more than the direct supply it counts on, so the Comet step never borrows', () => {
+  it('never asks Comet for a finite amount at or above the direct supply, so the Comet step never borrows', () => {
     const amounts = [1n, 99_999_999n, DIRECT - 1n, DIRECT, DIRECT + 1n, 10n ** 12n, MAX_UINT256];
     for (const amount of amounts) {
       const { direct, request } = splitWrappedWithdrawal(amount, DIRECT, SHARES);
       if (direct === undefined) throw new Error('a direct supply is always withdrawn first');
-      expect(direct.amount === MAX_UINT256 || direct.amount <= direct.minBalance).toBe(true);
-      expect(direct.minBalance).toBeLessThanOrEqual(DIRECT);
-      // The two parts pay exactly the amount asked for.
+      expect(direct.amount === MAX_UINT256 || direct.amount < DIRECT).toBe(true);
+      // The two parts pay exactly the amount asked for, if Comet holds the supply the split read.
       if (amount !== MAX_UINT256) {
         const fromDirect = direct.amount === MAX_UINT256 ? DIRECT : direct.amount;
         const fromWrapper = request?.kind === 'partial' ? request.cash : 0n;

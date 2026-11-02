@@ -75,20 +75,19 @@ export function planQueuedExecution(
  * `withdraw(baseToken, amount)`.
  */
 export type DirectBaseWithdrawal = {
-  /** `withdraw`'s amount: `MAX_UINT256` for the whole direct supply, or a part of it in base units. */
-  amount: bigint;
   /**
-   * The direct supply the plan counts on, in base units: the amount itself for a part, or the whole
-   * direct supply for `MAX_UINT256`. A fresh read just before signing must show at least this much,
-   * so that a part never borrows and the wrapper pays exactly the rest.
+   * `withdraw`'s amount: `MAX_UINT256` for the whole direct supply, or a part strictly below the
+   * supply, in base units.
    */
-  minBalance: bigint;
+  amount: bigint;
 };
 
 /**
  * How a queued withdrawal on the wrapped route is carried out: `direct` first, as its own Comet
  * transaction, then `request` through the wrapper, which starts only once `direct` confirms. At least
- * one of the two is set.
+ * one of the two is set. A partial `request` is what the wrapper pays if `direct` takes exactly the
+ * direct supply it was planned from. After `direct` confirms, the rest is worked out again from what
+ * it took.
  */
 export type WithdrawalSplit = { direct: DirectBaseWithdrawal | undefined; request: WithdrawalRequest | undefined };
 
@@ -96,7 +95,9 @@ export type WithdrawalSplit = { direct: DirectBaseWithdrawal | undefined; reques
  * Splits a withdrawal of `amount` on the wrapped route between the account's direct Comet supply,
  * `directBalance`, and its wrapper shares. The direct supply pays first:
  * - With no direct supply, everything goes to the wrapper, as `planQueuedExecution` plans it.
- * - An amount at or below the direct supply is one Comet withdrawal of that amount.
+ * - An amount below the direct supply is one Comet withdrawal of that amount.
+ * - An amount equal to the direct supply withdraws it with `MAX_UINT256`, with no wrapper step, so
+ *   it never borrows if the supply falls before it executes.
  * - A larger amount withdraws the whole direct supply with `MAX_UINT256`, then the rest from the
  *   wrapper.
  * - A maximum withdraws the whole direct supply with `MAX_UINT256`, then makes a full exit when the
@@ -104,7 +105,8 @@ export type WithdrawalSplit = { direct: DirectBaseWithdrawal | undefined; reques
  *
  * With `MAX_UINT256`, Comet withdraws the supply it holds for the account and never borrows. A
  * maximum with a direct supply needs `wrappedShares`, and is refused with a `WrappedExecutionError`
- * while they are unknown.
+ * while they are unknown. Home splits a withdrawal when Submit is pressed, and again just before the
+ * wallet is asked, from a fresh read of `directBalance`.
  */
 export function splitWrappedWithdrawal(
   amount: bigint,
@@ -115,7 +117,7 @@ export function splitWrappedWithdrawal(
   if (directBalance <= 0n) {
     return { direct: undefined, request: isMax ? { kind: 'full' } : { kind: 'partial', cash: amount } };
   }
-  const wholeDirect: DirectBaseWithdrawal = { amount: MAX_UINT256, minBalance: directBalance };
+  const wholeDirect: DirectBaseWithdrawal = { amount: MAX_UINT256 };
   if (isMax) {
     if (wrappedShares === undefined) {
       throw new WrappedExecutionError('position-unknown', 'Your wrapped balance is not loaded yet. Try again.');
@@ -123,7 +125,8 @@ export function splitWrappedWithdrawal(
     return { direct: wholeDirect, request: wrappedShares > 0n ? { kind: 'full' } : undefined };
   }
   if (amount <= 0n) throw new WrappedExecutionError('unknown-entry', 'Enter an amount greater than 0.');
-  if (amount <= directBalance) return { direct: { amount, minBalance: amount }, request: undefined };
+  if (amount < directBalance) return { direct: { amount }, request: undefined };
+  if (amount === directBalance) return { direct: wholeDirect, request: undefined };
   return { direct: wholeDirect, request: { kind: 'partial', cash: amount - directBalance } };
 }
 

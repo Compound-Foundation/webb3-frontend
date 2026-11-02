@@ -1,5 +1,5 @@
 import { Interface } from '@ethersproject/abi';
-import type { JsonRpcProvider } from '@ethersproject/providers';
+import type { JsonRpcProvider, TransactionReceipt } from '@ethersproject/providers';
 import { BigNumber } from 'ethers';
 import { Contract, ContractCall } from 'ethers-multicall';
 
@@ -10,7 +10,6 @@ import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
 import { lendsBaseDirectly } from '@helpers/actions';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { getTokenValue } from '@helpers/numbers';
-import type { DirectBaseWithdrawal } from '@helpers/queuedExecution';
 import type { WithdrawalLimits } from '@helpers/wrappedWithdrawals';
 import { Action, BaseAssetWithAccountState, CometState, Currency, ProtocolAndAccountState, StateType } from '@types';
 
@@ -314,20 +313,17 @@ export function isSubmissionRefused(
  * direct supply, judged by the session as it is now. It is the one base withdrawal that goes to Comet
  * on the wrapped route, and `isSubmissionRefused` still refuses every other. It is refused unless the
  * wrapped route of `submittedMarket` is live with its exits open and eligible, the Comet state was
- * read for that market and the connected account, and that state's direct supply still covers
- * `withdrawal.minBalance`.
+ * read for that market and the connected account, and that state shows a direct supply. The amount
+ * is not judged here: Home splits the withdrawal again from a fresh read of the direct supply just
+ * before the wallet is asked (`splitWrappedWithdrawal`).
  */
-export function isDirectWithdrawalRefused(
-  live: LiveSubmissionState,
-  submittedMarket: MarketIdentity,
-  withdrawal: DirectBaseWithdrawal
-): boolean {
+export function isDirectWithdrawalRefused(live: LiveSubmissionState, submittedMarket: MarketIdentity): boolean {
   if (!isSameMarket(live.selectedMarket, submittedMarket) || live.route.kind !== 'wrapped') return true;
   // Withdraw is gated as a whole by the exit release control and the route's eligibility.
   if (!live.route.exit.isEligible) return true;
   const cometState = liveCometStateFor(live, submittedMarket);
   if (cometState === undefined) return true;
-  return withdrawal.minBalance <= 0n || cometState.baseAsset.balance < withdrawal.minBalance;
+  return cometState.baseAsset.balance <= 0n;
 }
 
 const cometInterface = new Interface(CometAbi);
@@ -348,6 +344,27 @@ export async function readDirectBaseBalance(
     blockNumber
   );
   return toBigInt(cometInterface.decodeFunctionResult('balanceOf', result)[0], 'directBaseBalance');
+}
+
+/**
+ * The base token a confirmed Comet withdrawal paid `account`, from Comet's `Withdraw(src, to, amount)`
+ * event in its receipt. With `MAX_UINT256`, Comet withdraws whatever the supply is when it executes,
+ * and the event names that amount. Undefined when the receipt holds no such event.
+ */
+export function withdrawnFromReceipt(
+  receipt: Pick<TransactionReceipt, 'logs'>,
+  cometAddress: string,
+  account: string
+): bigint | undefined {
+  const withdrawTopic = cometInterface.getEventTopic('Withdraw');
+  let withdrawn: bigint | undefined;
+  for (const log of receipt.logs ?? []) {
+    if (log.address.toLowerCase() !== cometAddress.toLowerCase() || log.topics[0] !== withdrawTopic) continue;
+    const event = cometInterface.parseLog(log);
+    if (String(event.args.src).toLowerCase() !== account.toLowerCase()) continue;
+    withdrawn = (withdrawn ?? 0n) + toBigInt(event.args.amount, 'withdrawn');
+  }
+  return withdrawn;
 }
 
 /** What a withdrawal on the wrapped route can pay now, in base units. */

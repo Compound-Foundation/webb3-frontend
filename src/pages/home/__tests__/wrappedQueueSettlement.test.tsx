@@ -103,6 +103,8 @@ type Chain = {
   block: number;
   /** The next mined call reverts. */
   shouldRevertNext: boolean;
+  /** The events the last mined call emitted, as its receipt holds them. */
+  logs: { address: string; topics: string[]; data: string }[];
 };
 
 /**
@@ -122,6 +124,7 @@ function chainFor({ allowance = 0n, shares = 0n, directSupply = 0n } = {}): Chai
     borrowed: 0n,
     block: 100,
     shouldRevertNext: false,
+    logs: [],
   };
 }
 
@@ -135,6 +138,7 @@ function exitCashAt(chain: Chain, shares: bigint): bigint {
 /** Mines a call as the base token and the wrapper do. Returns whether it succeeded. */
 function mine(chain: Chain, { to, data }: { to: string; data: string }): boolean {
   chain.block += 1;
+  chain.logs = [];
   if (chain.shouldRevertNext) {
     chain.shouldRevertNext = false;
     return false;
@@ -161,6 +165,10 @@ function mine(chain: Chain, { to, data }: { to: string; data: string }): boolean
     chain.directSupply = amount > chain.directSupply ? 0n : chain.directSupply - amount;
     chain.cometCash -= amount;
     chain.balance += amount;
+    // Comet names the amount it withdrew, the whole supply for `MAX_UINT256`.
+    chain.logs = [
+      { address: MARKET.cometAddress, ...COMET.encodeEventLog(COMET.getEvent('Withdraw'), [ACCOUNT, ACCOUNT, amount]) },
+    ];
     return true;
   }
   if (call.name === 'unwrapAndWithdraw' && isSame(to, MARKET.wrapperAddress)) {
@@ -263,7 +271,12 @@ function walletFor(chain: Chain, chainId: number) {
   const sendUncheckedTransaction = jest.fn(async (request: { to: string; data: string; chainId: number }) => {
     const hash = `0x${chainId.toString(16)}${(++sentCount).toString(16).padStart(60, '0')}`;
     const status = mine(chain, request) ? 1 : 0;
-    receipts.set(hash, { transactionHash: hash, status, blockNumber: chain.block } as TransactionReceipt);
+    receipts.set(hash, {
+      transactionHash: hash,
+      status,
+      blockNumber: chain.block,
+      logs: chain.logs,
+    } as unknown as TransactionReceipt);
     return hash;
   });
   // The signer Comet's own writes use, as ethers' contracts call it. Its sends join the same list of
@@ -920,11 +933,13 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
   }
 
   it.each([
-    ['below', 100_000_000n],
-    ['equal to', DIRECT],
+    // A part below the direct supply is withdrawn as itself.
+    ['below', 100_000_000n, 100_000_000n],
+    // An amount equal to it is withdrawn with type(uint256).max, which never borrows.
+    ['equal to', DIRECT, MAX_UINT256],
   ])(
     'sends an amount %s the direct supply as one Comet base withdrawal, the transaction production sends, and never calls the wrapper',
-    async (_name, amount) => {
+    async (_name, amount, sentAmount) => {
       const { chain, wallet } = await renderMixed();
       act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, amount]));
 
@@ -936,7 +951,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       ]);
       expect(requestedCalls(wallet)).toEqual(['withdraw']);
       expect(cometWithdrawals(wallet)).toEqual([
-        { to: USDC_COMET, data: productionWithdrawData(amount), args: [MARKET.baseTokenAddress, amount] },
+        { to: USDC_COMET, data: productionWithdrawData(sentAmount), args: [MARKET.baseTokenAddress, sentAmount] },
       ]);
       expect(chain.directSupply).toBe(DIRECT - amount);
       expect(chain.borrowed).toBe(0n);
@@ -945,6 +960,35 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       expect(screen.queryByRole('dialog')).toBeNull();
     }
   );
+
+  it('withdraws an amount equal to the direct supply without borrowing when the supply falls before signing', async () => {
+    const { chain, wallet } = await renderMixed();
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, DIRECT]));
+    // 50 USDC of the direct supply leaves in another transaction after the fresh read, before the
+    // Comet step executes. A finite withdraw(base, 250 USDC) would borrow 50 USDC.
+    const send = wallet.cometSigner.sendTransaction.getMockImplementation();
+    if (send === undefined) throw new Error('the signer must send');
+    wallet.cometSigner.sendTransaction.mockImplementationOnce(async (request) => {
+      chain.directSupply -= 50_000_000n;
+      return send(request);
+    });
+
+    await submit();
+    await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
+    await settle();
+
+    expect(cometWithdrawals(wallet).map(({ args }) => args[1])).toEqual([MAX_UINT256]);
+    expect(chain.borrowed).toBe(0n);
+    expect(chain.directSupply).toBe(0n);
+    // Comet paid the 200 USDC it held. The split planned no wrapper step, so none is asked for: the
+    // row keeps the 50 USDC rest and asks for a new amount.
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(queued()).toEqual([[ActionType.Withdraw, expect.anything(), 50_000_000n]]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+      action: [ActionType.Withdraw, expect.anything(), 50_000_000n],
+      label: 'Balance Changed, Edit Amount',
+    });
+  });
 
   it('sends a larger amount as Comet withdraw(base, max), then unwrapAndWithdraw for the rest only once the Comet step confirms', async () => {
     const { chain, wallet } = await renderMixed();
@@ -1254,29 +1298,145 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(positionCard().transaction).toBeUndefined();
   });
 
-  it('sends nothing, and asks for a new amount, when the direct supply falls below a partial amount between review and signing', async () => {
+  it('pays exactly the queued amount from Comet alone when the direct supply rose above it before signing', async () => {
+    const { chain, wallet } = await renderMixed();
+    const amount = 300_000_000n;
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, amount]));
+    // The dashboard read 250 USDC, so Submit plans withdraw(base, max) and 50 USDC from the wrapper.
+    // Another 150 USDC is supplied to Comet directly before signing.
+    chain.directSupply = 400_000_000n;
+
+    await submit();
+    await waitFor(() => expect(queued()).toEqual([]));
+    await settle();
+
+    // One Comet withdraw(base, 300 USDC), production's encoding, and nothing from the wrapper.
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(cometWithdrawals(wallet)).toEqual([
+      { to: USDC_COMET, data: productionWithdrawData(amount), args: [MARKET.baseTokenAddress, amount] },
+    ]);
+    expect(chain.balance - 10_000_000_000n).toBe(amount);
+    expect(chain.directSupply).toBe(100_000_000n);
+    expect(chain.shares).toBe(WRAPPED_SHARES);
+    expect(chain.borrowed).toBe(0n);
+  });
+
+  it('takes the fallen direct supply with max, then the rest of the queued amount from the wrapper, by what Comet took', async () => {
+    const { chain, wallet } = await renderMixed();
+    const amount = 300_000_000n;
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, amount];
+    act(() => live.queue.addOrUpdateAction(entry));
+    // 150 USDC of the direct supply leaves in another transaction while the manager estimates the
+    // Comet step's gas. The dashboard still shows the 250 USDC it read.
+    wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
+      chain.directSupply = 100_000_000n;
+      return BigNumber.from(100_000);
+    });
+    // Between the fresh read and execution the supply earns 7 base units, which max also takes.
+    const send = wallet.cometSigner.sendTransaction.getMockImplementation();
+    if (send === undefined) throw new Error('the signer must send');
+    wallet.cometSigner.sendTransaction.mockImplementationOnce(async (request) => {
+      chain.directSupply += 7n;
+      return send(request);
+    });
+    const send2 = wallet.sendUncheckedTransaction.getMockImplementation();
+    if (send2 === undefined) throw new Error('the wallet must send');
+    const wrapperAnswer = held<void>();
+    wallet.sendUncheckedTransaction.mockImplementationOnce(send2).mockImplementationOnce(async (request) => {
+      await wrapperAnswer.promise;
+      return send2(request);
+    });
+
+    await submit();
+    await waitFor(() => expect(requestedCalls(wallet)).toEqual(['withdraw', 'unwrapAndWithdraw']));
+    // Comet withdrew the 100.000007 USDC it held. The row shows the queued amount less that.
+    expect(cometWithdrawals(wallet).map(({ args }) => args[1])).toEqual([MAX_UINT256]);
+    expect(queued()).toEqual([[ActionType.Withdraw, expect.anything(), amount - 100_000_007n]]);
+    const beforeExit = { ...chain };
+    wrapperAnswer.release();
+    await waitFor(() => expect(queued()).toEqual([]));
+
+    const [unwrap] = sentCalls(wallet, 'unwrapAndWithdraw');
+    const burned = BigInt(CALLS.parseTransaction(unwrap[0]).args[0].toString());
+    // The fewest shares that pay the 199.999993 USDC rest, from the wrapper's state then.
+    expect(exitCashAt(beforeExit, burned)).toBeGreaterThanOrEqual(amount - 100_000_007n);
+    expect(exitCashAt(beforeExit, burned - 1n)).toBeLessThan(amount - 100_000_007n);
+    // The payout is the queued amount, short of the shares' rounding: at most what one share pays.
+    const paid = chain.balance - 10_000_000_000n;
+    expect(paid).toBeGreaterThanOrEqual(amount);
+    expect(paid - amount).toBeLessThanOrEqual(exitCashAt(beforeExit, burned) - exitCashAt(beforeExit, burned - 1n));
+    expect(chain.directSupply).toBe(0n);
+    expect(chain.borrowed).toBe(0n);
+  });
+
+  it('keeps the rest by the fresh read, and asks the wrapper for nothing, when the Comet receipt names no amount', async () => {
+    const { chain, wallet } = await renderMixed();
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 300_000_000n]));
+    const lookUp = wallet.getTransactionReceipt.getMockImplementation();
+    if (lookUp === undefined) throw new Error('the wallet must look up receipts');
+    wallet.getTransactionReceipt.mockImplementation(async (hash: string) => {
+      const receipt = await lookUp(hash);
+      return receipt === null ? null : ({ ...receipt, logs: [] } as unknown as TransactionReceipt);
+    });
+
+    await submit();
+    await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
+    await settle();
+
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(chain.directSupply).toBe(0n);
+    expect(queued()).toEqual([[ActionType.Withdraw, expect.anything(), 50_000_000n]]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+      action: [ActionType.Withdraw, expect.anything(), 50_000_000n],
+      label: 'Balance Changed, Edit Amount',
+    });
+  });
+
+  it('sends nothing, and asks for a new amount, when the direct supply is gone before signing', async () => {
     const { chain, wallet } = await renderMixed();
     const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
     act(() => live.queue.addOrUpdateAction(entry));
-    // While the manager estimates the Comet step's gas, 150 USDC of the direct supply leaves in
-    // another transaction. The dashboard still shows the 250 USDC it read.
+    // While the manager estimates the Comet step's gas, the whole direct supply leaves in another
+    // transaction. The dashboard still shows the 250 USDC it read.
     wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
-      chain.directSupply = 100_000_000n;
+      chain.directSupply = 0n;
       return BigNumber.from(100_000);
     });
 
     await submit();
     await settle();
 
-    // A withdrawal of 200 USDC from a 100 USDC supply would borrow 100 USDC.
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     expect(chain.borrowed).toBe(0n);
-    expect(chain.directSupply).toBe(100_000_000n);
     expect(queued()).toEqual([entry]);
     expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
       action: [ActionType.Withdraw, expect.anything(), entry[2]],
       label: 'Balance Changed, Edit Amount',
     });
     expect(live.manager.transactions).toEqual([]);
+  });
+
+  it('sends nothing when the direct supply fell further than the wrapper can make up before signing', async () => {
+    // A 10 USDC wrapped position beside the 250 USDC direct supply.
+    const chain = chainFor({ shares: 10n * 10n ** 18n, directSupply: DIRECT });
+    const { wallet } = renderDashboard(chain, { state: stateWithDirectSupply(DIRECT), position: positionOn(chain) });
+    await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, 255_000_000n];
+    act(() => live.queue.addOrUpdateAction(entry));
+    // 200 USDC of the direct supply leaves, so the wrapper would have to pay 205 USDC.
+    wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
+      chain.directSupply = 50_000_000n;
+      return BigNumber.from(100_000);
+    });
+
+    await submit();
+    await settle();
+
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(queued()).toEqual([entry]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+      action: [ActionType.Withdraw, expect.anything(), entry[2]],
+      label: 'Balance Changed, Edit Amount',
+    });
   });
 });
