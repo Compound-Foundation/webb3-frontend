@@ -7,6 +7,7 @@ import { Web3 } from '@contexts/Web3Context';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { filterMap } from '@helpers/functions';
 import { TRX_REFRESH_INTERVAL } from '@helpers/numbers';
+import { readStoredTransactions } from '@helpers/transactionStorage';
 import {
   classifyWalletError,
   describeWalletError,
@@ -88,60 +89,6 @@ type ClearAction = [ActionType.Clear];
 
 type Action = AddAction | UpdateAction | RemoveAction | ClearAction;
 
-const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
-const TRANSACTION_HASH = /^0x[0-9a-fA-F]{64}$/;
-const UNSIGNED_INTEGER = /^[0-9]{1,78}$/;
-const SIGNED_INTEGER = /^-?[0-9]{1,78}$/;
-
-/** Whether a stored value is a well-formed `heldWithdrawal`, or is absent. */
-function isStoredHeldWithdrawal(value: unknown): value is HeldDirectWithdrawal | undefined {
-  if (value === undefined) return true;
-  if (typeof value !== 'object' || value === null) return false;
-  const held = value as Record<string, unknown>;
-  return (
-    typeof held.amount === 'string' &&
-    UNSIGNED_INTEGER.test(held.amount) &&
-    typeof held.principalBefore === 'string' &&
-    SIGNED_INTEGER.test(held.principalBefore)
-  );
-}
-
-/** Whether a stored value is a well-formed transaction record. Any script on the page can write storage. */
-function isStoredTransaction(value: unknown): value is Transaction {
-  if (typeof value !== 'object' || value === null) return false;
-  const record = value as Record<string, unknown>;
-  const isCount = (field: unknown, minimum: number) =>
-    typeof field === 'number' && Number.isSafeInteger(field) && field >= minimum;
-  return (
-    typeof record.id === 'string' &&
-    typeof record.key === 'string' &&
-    isCount(record.networkId, 1) &&
-    typeof record.networkName === 'string' &&
-    typeof record.description === 'string' &&
-    isCount(record.nonce, 0) &&
-    (record.nonceSource === undefined ||
-      record.nonceSource === 'transaction' ||
-      record.nonceSource === 'lower-bound') &&
-    (record.account === undefined || (typeof record.account === 'string' && ADDRESS.test(record.account))) &&
-    (record.step === undefined || typeof record.step === 'string') &&
-    isStoredHeldWithdrawal(record.heldWithdrawal) &&
-    (record.state === TransactionState.AwaitingConfirmation ||
-      (record.state === TransactionState.Pending &&
-        typeof record.hash === 'string' &&
-        TRANSACTION_HASH.test(record.hash)))
-  );
-}
-
-/** The well-formed stored records. Anything else is dropped at the next write. */
-function readStoredTransactions(): Transaction[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]');
-    return Array.isArray(parsed) ? parsed.filter(isStoredTransaction) : [];
-  } catch {
-    return [];
-  }
-}
-
 /** Applies `change` to the stored records. Storage that is full or unavailable never throws here. */
 function updateStoredTransactions(change: (stored: Transaction[]) => Transaction[]) {
   try {
@@ -161,9 +108,18 @@ function isWrapperStep(transaction: Transaction): boolean {
   return transaction.step !== undefined && isWrapperAddress(transaction.key);
 }
 
-/** Whether the record is a step the manager keeps after an ambiguous answer: a wrapper or direct step. */
+/**
+ * Whether the record is a step the manager keeps after an ambiguous answer or a reload: a wrapper
+ * step, or a direct withdrawal step whose wallet request was made. Home records a direct step's
+ * `heldWithdrawal` just before it asks the wallet, so a direct step without it never reached the
+ * wallet, as when its gas estimate failed, and holds nothing back.
+ */
 function isFollowedStep(transaction: Transaction): boolean {
-  return isWrapperStep(transaction) || isDirectWithdrawalStep(transaction);
+  return (
+    isWrapperStep(transaction) ||
+    (isDirectWithdrawalStep(transaction) &&
+      (transaction.state === TransactionState.Pending || transaction.heldWithdrawal !== undefined))
+  );
 }
 
 /**
@@ -321,7 +277,7 @@ export type AddTransaction = (
   fnArgs: any[],
   value?: bigint,
   callback?: (outcome: TransactionOutcome) => void,
-  options?: Pick<TransactionRequest, 'step' | 'heldWithdrawal'>
+  options?: { step?: string; onSend?: (context: SendContext) => void }
 ) => Promise<TransactionResponse | undefined>;
 
 /**
@@ -366,19 +322,26 @@ export type TransactionRequest = {
    * Asks the wallet to send the transaction. Resolves with its hash or response once broadcast.
    * Throwing `SendWithdrawnError` withdraws the request before the wallet is asked.
    */
-  send: () => Promise<TransactionResponse | string>;
+  send: (context?: SendContext) => Promise<TransactionResponse | string>;
   /** For one transaction of a multi-step action, the step it is. */
   step?: string;
-  /**
-   * For a direct withdrawal step, what its record keeps if the wallet answers with an ambiguous
-   * error, read once `send` has returned or thrown. Undefined before the step's check has read it.
-   */
-  heldWithdrawal?: () => HeldDirectWithdrawal | undefined;
   /** The sender the caller checked. Nothing is sent if the session's account differs. */
   account?: string;
   /** The chain the caller checked. Nothing is sent if the wallet reports another. */
   chainId?: number;
   onSettled?: (outcome: TransactionOutcome) => void;
+};
+
+/** What `send` can tell the manager about the request it is sending. */
+export type SendContext = {
+  /** The id of the manager's record of the request. */
+  id: string;
+  /**
+   * For a direct withdrawal step, called just before the wallet is asked: the record, in storage
+   * too, keeps `held`, what tells later whether the step executed. A direct step that an ambiguous
+   * answer or a reload interrupts is kept only once this was called.
+   */
+  holdWith: (held: HeldDirectWithdrawal) => void;
 };
 
 export type SubmitTransaction = (request: TransactionRequest) => Promise<SendResult>;
@@ -615,8 +578,13 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         updateTransactions([ActionType.Add, record]);
         if (request.onSettled !== undefined) callbacks.current.set(id, request.onSettled);
 
+        const holdWith = (held: HeldDirectWithdrawal) => {
+          if (record === undefined || !isDirectWithdrawalStep(record)) return;
+          record = { ...record, heldWithdrawal: held };
+          updateTransactions([ActionType.Update, record]);
+        };
         isSendCalled = true;
-        const response = await request.send();
+        const response = await request.send({ id, holdWith });
         const hash = typeof response === 'string' ? response : response.hash;
         // A hash alone, or a `connectUnchecked` signer's response, gives no nonce.
         const ownNonce =
@@ -661,14 +629,10 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         }
         // The wallet had the request and can still send it. A wrapper step stays, marked
         // interrupted, so the next review of its action waits until the user clears it from the list.
-        // A direct withdrawal step stays too, with what tells later whether it executed.
+        // A direct withdrawal step that reached the wallet stays too, with what tells later whether
+        // it executed.
         if (record !== undefined && isFollowedStep(record)) {
-          const heldWithdrawal = isDirectWithdrawalStep(record) ? request.heldWithdrawal?.() : undefined;
-          const interrupted = {
-            ...record,
-            isInterrupted: true,
-            ...(heldWithdrawal === undefined ? {} : { heldWithdrawal }),
-          };
+          const interrupted = { ...record, isInterrupted: true };
           updateTransactions([
             ActionType.Update,
             kind === 'pending-in-wallet' ? { ...interrupted, isPendingInWallet: true } : interrupted,
@@ -688,9 +652,9 @@ export function useTransactionManager(web3: Web3): TransactionManager {
         key,
         description,
         step: options?.step,
-        heldWithdrawal: options?.heldWithdrawal,
         onSettled: callback,
-        send: async () => {
+        send: async (context) => {
+          if (context !== undefined) options?.onSend?.(context);
           let gasLimit = estimatedGas;
           if (estimatedGas === 0) {
             const estimatedGasUsage = (await trxEstimateGasFn(...fnArgs, { value })).toNumber();

@@ -599,6 +599,8 @@ export type HeldDirectWithdrawal = {
   amount: string;
   /** The account's Comet principal, read just before the wallet was asked. */
   principalBefore: string;
+  /** The block of that read. A later judgement of the step reads a block no older. */
+  blockNumber?: number;
 };
 export type PendingTransaction = BaseTransaction & {
   state: TransactionState.Pending;

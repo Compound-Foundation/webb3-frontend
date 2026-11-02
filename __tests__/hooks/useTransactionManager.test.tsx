@@ -549,15 +549,22 @@ describe('useTransactionManager', () => {
     });
     const storedRecords = () => JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]');
 
-    async function sendDirectStep(result: { current: ReturnType<typeof useTransactionManager> }, error: unknown) {
+    /** Sends the step, which records its figures as the wallet is asked unless `isWalletAsked` is false. */
+    async function sendDirectStep(
+      result: { current: ReturnType<typeof useTransactionManager> },
+      error: unknown,
+      { isWalletAsked = true } = {}
+    ) {
       let submission: SendResult | undefined;
       await act(async () => {
         submission = await result.current.submitTransaction({
           key: COMET,
           description: 'Withdraw USDC',
           step: DIRECT_STEP,
-          heldWithdrawal: () => HELD,
-          send: async () => Promise.reject(error),
+          send: async (context) => {
+            if (isWalletAsked) context?.holdWith(HELD);
+            return Promise.reject(error);
+          },
         });
       });
       return submission;
@@ -583,6 +590,47 @@ describe('useTransactionManager', () => {
       expect(delaysCometRefresh(result.current.transactions[0])).toBe(false);
     });
 
+    it('is dropped when it fails before the wallet is asked, as when its gas estimate fails', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+
+      const submission = await sendDirectStep(result, new Error('request timed out'), { isWalletAsked: false });
+
+      expect(submission).toEqual({ status: 'provider-failure', message: expect.any(String) });
+      expect(result.current.transactions).toEqual([]);
+      expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
+    });
+
+    it('stores its figures while its wallet request is open, so a reload restores it held', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+      act(() => {
+        void result.current.submitTransaction({
+          key: COMET,
+          description: 'Withdraw USDC',
+          step: DIRECT_STEP,
+          send: async (context) => {
+            context?.holdWith(HELD);
+            return new Promise<string>(() => undefined);
+          },
+        });
+      });
+
+      await waitFor(() =>
+        expect(storedRecords()).toEqual([
+          expect.objectContaining({
+            step: DIRECT_STEP,
+            state: TransactionState.AwaitingConfirmation,
+            heldWithdrawal: HELD,
+          }),
+        ])
+      );
+      const reloaded = renderManager(web3For(ACCOUNT, walletProvider()));
+      await waitFor(() =>
+        expect(reloaded.result.current.transactions).toEqual([
+          expect.objectContaining({ step: DIRECT_STEP, isInterrupted: true, heldWithdrawal: HELD }),
+        ])
+      );
+    });
+
     it('is dropped when the user rejects it or the wallet refuses it before handling it', async () => {
       const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
 
@@ -595,17 +643,19 @@ describe('useTransactionManager', () => {
       expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
     });
 
-    it('is restored after a reload, held, whether it was held or its wallet request was open', async () => {
+    it('is restored after a reload, held, whether it was held or its wallet request was open, once it reached the wallet', async () => {
       store([
         storedHeldStep(),
-        storedHeldStep({ id: 'open-request', isInterrupted: undefined, heldWithdrawal: undefined }),
+        storedHeldStep({ id: 'open-request', isInterrupted: undefined }),
+        // Its figures are stored only as the wallet is asked, so this one never reached the wallet.
+        storedHeldStep({ id: 'never-asked', isInterrupted: undefined, heldWithdrawal: undefined }),
       ]);
       const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
 
       await waitFor(() =>
         expect(result.current.transactions).toEqual([
           expect.objectContaining({ step: DIRECT_STEP, isInterrupted: true, heldWithdrawal: HELD }),
-          expect.objectContaining({ id: 'open-request', step: DIRECT_STEP, isInterrupted: true }),
+          expect.objectContaining({ id: 'open-request', step: DIRECT_STEP, isInterrupted: true, heldWithdrawal: HELD }),
         ])
       );
       expect(storedRecords()).toHaveLength(2);
@@ -671,6 +721,7 @@ describe('useTransactionManager', () => {
       ['keyed to a Comet market with no wrapper', { key: '0x0000000000000000000000000000000000000cc3' }],
       ['with a malformed amount', { heldWithdrawal: { amount: '-1', principalBefore: '0' } }],
       ['with a principal that is not a number', { heldWithdrawal: { amount: '1', principalBefore: 'x' } }],
+      ['with a block that is not a count', { heldWithdrawal: { ...HELD, blockNumber: -1 } }],
     ])('is not restored %s', async (_name, overrides) => {
       store([storedHeldStep(overrides)]);
       const { result } = renderManager(web3For(ACCOUNT, walletProvider()));

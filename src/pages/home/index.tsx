@@ -37,6 +37,7 @@ import {
   wrappedEntryBlockLabel,
 } from '@helpers/queuedExecution';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
+import { readStoredDirectWithdrawalSteps } from '@helpers/transactionStorage';
 import { classifyWalletError, NotSentError, SendWithdrawnError, WalletErrorKind } from '@helpers/walletErrors';
 import {
   DIRECT_WITHDRAW_STEP_ID,
@@ -65,7 +66,7 @@ import {
 } from '@helpers/wrappedPositions';
 import { getWithdrawalLimits, WithdrawalLimits, WithdrawalRequest } from '@helpers/wrappedWithdrawals';
 import { Theme } from '@hooks/useThemeManager';
-import { AddTransaction } from '@hooks/useTransactionManager';
+import type { AddTransaction, SendContext } from '@hooks/useTransactionManager';
 import type { WrappedActionState } from '@hooks/useWrappedAction';
 import { useWriteCometState, WriteCometState } from '@hooks/useWriteCometState';
 import { WRAPPED_SUPPLY_STEP_IDS } from '@hooks/useWriteWrappedState';
@@ -236,8 +237,10 @@ type DirectStepRequest = {
   isBalanceShort?: boolean;
   /** Set when an earlier Comet step that can still execute held this one back. */
   isHeldBack?: boolean;
-  /** What the manager's record keeps if the wallet answers with an ambiguous error. */
+  /** What the manager's record keeps once the wallet is asked, in case it answers ambiguously. */
   heldWithdrawal?: HeldDirectWithdrawal;
+  /** The manager's handle on its record of the step, once it starts sending. */
+  sendContext?: SendContext;
   /** How the wallet's error was classified, when the wallet was asked and answered with one. */
   walletError?: WalletErrorKind;
 };
@@ -428,11 +431,23 @@ const Home = ({
     const checkedSend: typeof trxFn = async (...args) => {
       await request.checkBeforeSend();
       const sentArgs = request.sentArgs(args);
+      // The wallet is asked next: the manager's record keeps what tells later whether it executed.
+      if (request.heldWithdrawal !== undefined) request.sendContext?.holdWith(request.heldWithdrawal);
       try {
         return await trxFn(...sentArgs);
       } catch (error) {
         request.walletError = classifyWalletError(error);
         throw error;
+      }
+    };
+    // The gas is estimated for `withdraw(baseToken, type(uint256).max)`, which never borrows, so the
+    // estimate does not fail when the supply fell below a planned part: the split made at signing then
+    // sends max. A failed estimate sends nothing and holds nothing.
+    const estimateWholeSupply: typeof estimateGasFn = async (...args) => {
+      try {
+        return await estimateGasFn(args[0], MAX_UINT256.toString(), ...args.slice(2));
+      } catch (error) {
+        throw new NotSentError(error);
       }
     };
     // The manager follows the step as it follows a wrapper step: after an ambiguous answer its record
@@ -442,11 +457,16 @@ const Home = ({
       description,
       checkedSend,
       estimatedGas,
-      estimateGasFn,
+      estimateWholeSupply,
       fnArgs,
       0n,
       request.onSettled,
-      { step: DIRECT_WITHDRAW_STEP_ID, heldWithdrawal: () => request.heldWithdrawal }
+      {
+        step: DIRECT_WITHDRAW_STEP_ID,
+        onSend: (context) => {
+          request.sendContext = context;
+        },
+      }
     );
     request.onRequested(sent);
     return sent;
@@ -495,11 +515,19 @@ const Home = ({
     if (heldDirectSteps.length === 0) return;
     if (heldReadProvider === undefined || heldAccount === undefined || heldCometAddress === undefined) return;
     let isCurrent = true;
-    heldReadProvider
-      .getBlockNumber()
-      .then((blockNumber) => readDirectBaseState(heldReadProvider, heldCometAddress, heldAccount, blockNumber))
+    // Judged at a block no older than the reads the steps were held at.
+    const heldAt = heldDirectSteps.reduce<number | undefined>((newest, held) => {
+      const block = held.heldWithdrawal?.blockNumber;
+      return block === undefined || (newest !== undefined && newest >= block) ? newest : block;
+    }, undefined);
+    waitForBlock(heldReadProvider, heldAt)
+      .then((blockNumber) =>
+        blockNumber === undefined
+          ? undefined
+          : readDirectBaseState(heldReadProvider, heldCometAddress, heldAccount, blockNumber)
+      )
       .then((now) => {
-        if (!isCurrent) return;
+        if (!isCurrent || now === undefined) return;
         heldDirectSteps
           .filter((held) => isHeldWithdrawalResolved(held.heldWithdrawal, now))
           .forEach((held) => submissionStore.releaseHeldDirectStep(held.id));
@@ -1078,23 +1106,55 @@ const Home = ({
           if (readProvider === undefined || account === undefined) {
             throw new NotSentError(new Error("This market's network cannot be read right now."));
           }
+          // The earlier Comet steps of this account on the market: this tab's held ones, and every one
+          // any tab of the app has stored, so that a request open in another tab holds this one back.
+          const hold = liveWrappedLending.current.submission.directHold;
+          if (!hold.isKnown) throw new NotSentError(new Error('Your earlier transactions are not loaded yet.'));
+          const stored = readStoredDirectWithdrawalSteps(
+            account,
+            market.chainInformation.chainId,
+            market.marketAddress
+          );
+          const earlierSteps = [
+            ...hold.held,
+            ...stored.filter((step) => !hold.held.some((held) => held.id === step.id)),
+          ].filter((step) => step.id !== directStep.sendContext?.id);
+          // The read is of a block no older than the last confirmed Comet step, the reads the earlier
+          // steps were held at, and the wallet's node, so a provider behind them cannot show a supply
+          // that a step since took.
+          const walletBlock = await Promise.resolve()
+            .then(() => web3.write.provider?.getBlockNumber())
+            .catch(() => undefined);
+          const readFrom = [
+            minBlock,
+            walletBlock,
+            ...earlierSteps.map((step) => ('heldWithdrawal' in step ? step.heldWithdrawal?.blockNumber : undefined)),
+          ].reduce<number | undefined>(
+            (newest, block) => (block === undefined || (newest !== undefined && newest >= block) ? newest : block),
+            undefined
+          );
           let fresh: DirectBaseState;
+          let readBlock: number;
           try {
-            const blockNumber = await waitForBlock(readProvider, minBlock);
+            const blockNumber = await waitForBlock(readProvider, readFrom);
             if (blockNumber === undefined) throw new Error("This market's network has not shown your last withdrawal.");
+            readBlock = blockNumber;
             fresh = await readDirectBaseState(readProvider, market.marketAddress, account, blockNumber);
           } catch (error) {
             throw new NotSentError(error);
           }
-          // An earlier Comet step that can still execute is released once the fresh read shows it
-          // resolved (`isHeldWithdrawalResolved`). Otherwise it holds this one back.
-          const hold = liveWrappedLending.current.submission.directHold;
-          if (!hold.isKnown) throw new NotSentError(new Error('Your earlier transactions are not loaded yet.'));
-          const unresolved = hold.held.filter((held) => !isHeldWithdrawalResolved(held.heldWithdrawal, fresh));
+          // An earlier step that can still execute holds this one back until the fresh read shows it
+          // resolved (`isHeldWithdrawalResolved`). One with a hash is still followed, and one without
+          // the figures is about to reach the wallet in another tab, so both hold it back. This tab
+          // releases its own held steps that the read shows resolved.
+          const isResolved = (step: Transaction) =>
+            step.state === TransactionState.AwaitingConfirmation &&
+            step.heldWithdrawal !== undefined &&
+            isHeldWithdrawalResolved(step.heldWithdrawal, fresh);
           hold.held
-            .filter((held) => !unresolved.includes(held))
+            .filter(isResolved)
             .forEach((held) => liveWrappedLending.current.submission.releaseHeldDirectStep(held.id));
-          if (unresolved.length > 0) {
+          if (earlierSteps.some((step) => !isResolved(step))) {
             directStep.isHeldBack = true;
             throw new SendWithdrawnError('An earlier withdrawal from Comet can still execute.');
           }
@@ -1122,6 +1182,7 @@ const Home = ({
           directStep.heldWithdrawal = {
             amount: (replanned.direct?.amount ?? 0n).toString(),
             principalBefore: fresh.principal.toString(),
+            blockNumber: readBlock,
           };
           if (!isSessionLive()) throw new SendWithdrawnError();
         },
@@ -1163,14 +1224,15 @@ const Home = ({
           // sent for it, and the next Comet step's fresh read is of a block no older than the one the
           // wallet's node had then.
           if (outcome.status === 'replaced') {
+            // The run, and so the queue, stays held until that block is known.
             const walletProvider = web3.write.provider;
             Promise.resolve()
               .then(() => walletProvider?.getBlockNumber())
               .then((blockNumber) => {
                 if (blockNumber !== undefined) submissionStore.setDirectStep({ scope: sentScope, blockNumber });
               })
-              .catch((error) => console.warn('The block of a replaced Comet withdrawal is not known:', error));
-            keepRestOnly();
+              .catch((error) => console.warn('The block of a replaced Comet withdrawal is not known:', error))
+              .finally(keepRestOnly);
             return;
           }
           submissionStore.setDirectStep({ scope: sentScope, blockNumber: outcome.receipt.blockNumber });
