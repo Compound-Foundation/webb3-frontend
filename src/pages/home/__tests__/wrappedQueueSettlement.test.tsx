@@ -1770,6 +1770,82 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await expectHeldBack(wallet, chain, entry);
   });
 
+  /** A wallet connector on the standard route, which the wrapped route never uses. */
+  const STANDARD_CONNECTOR = 'io.metamask';
+
+  it('refuses a base withdrawal for the held account through another connector, on the standard route', async () => {
+    const { chain, wallet, show, entry } = await holdFirstStep();
+    // The same account connects through a standard-route wallet.
+    show({ connectorId: STANDARD_CONNECTOR });
+    await settle();
+    act(() => live.queue.addOrUpdateAction(entry));
+    await submit();
+    await settle();
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(queued()).toEqual([entry]);
+    // Should the held request now execute, Comet takes 200 USDC of the 250 and lends nothing.
+    executeLate(chain);
+    expect(chain.borrowed).toBe(0n);
+
+    // Its calldata is found mined at the next Comet read, and the standard withdrawal goes as on main.
+    show({ connectorId: STANDARD_CONNECTOR, state: stateWithDirectSupply(50_000_000n) });
+    await waitFor(() => expect(storedHolds()).toEqual([]));
+    const rest: Action = [ActionType.Withdraw, BASE_ASSET, 30_000_000n];
+    act(() => live.queue.clearActions());
+    act(() => live.queue.addOrUpdateAction(rest));
+    await submit();
+    await waitFor(() => expect(requestedCalls(wallet)).toEqual(['withdraw', 'withdraw']));
+    expect(cometWithdrawals(wallet).map(({ args }) => args[1])).toEqual([entry[2], 30_000_000n]);
+  });
+
+  it('sends a base withdrawal on the standard route exactly as on main when no hold is stored', async () => {
+    const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
+    const { wallet, show } = renderDashboard(chain, { state: stateWithDirectSupply(DIRECT) });
+    show({ connectorId: STANDARD_CONNECTOR, state: stateWithDirectSupply(DIRECT) });
+    await settle();
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 200_000_000n]));
+
+    await submit();
+    await waitFor(() => expect(requestedCalls(wallet)).toEqual(['withdraw']));
+    expect(cometWithdrawals(wallet)).toEqual([
+      { to: USDC_COMET, data: productionWithdrawData(200_000_000n), args: [MARKET.baseTokenAddress, 200_000_000n] },
+    ]);
+    expect(storedHolds()).toEqual([]);
+    expect(chain.directSupply).toBe(50_000_000n);
+  });
+
+  it('sends nothing on the standard route when a hold is stored while the withdrawal is estimated', async () => {
+    const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
+    const { wallet, show } = renderDashboard(chain, { state: stateWithDirectSupply(DIRECT) });
+    show({ connectorId: STANDARD_CONNECTOR, state: stateWithDirectSupply(DIRECT) });
+    await settle();
+    // An Anchorage tab of the same account stores its hold while this request's gas is estimated.
+    wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
+      window.localStorage.setItem(
+        DIRECT_WITHDRAWAL_HOLDS_KEY,
+        JSON.stringify([
+          {
+            kind: 'held',
+            id: 'anchorage-tab',
+            account: ACCOUNT.toLowerCase(),
+            chainId: 1,
+            cometAddress: USDC_COMET.toLowerCase(),
+            calldata: productionWithdrawData(200_000_000n).toLowerCase(),
+            amount: '200000000',
+            blockNumber: chain.block,
+          },
+        ])
+      );
+      return BigNumber.from(100_000);
+    });
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 200_000_000n]));
+
+    await submit();
+    await settle();
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(chain.directSupply).toBe(DIRECT);
+  });
+
   it('sends nothing when the session changes while the direct supply is read again', async () => {
     const { chain, wallet, show } = await renderMixed();
     act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 100_000_000n]));

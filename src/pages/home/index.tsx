@@ -48,7 +48,12 @@ import {
 } from '@helpers/queuedExecution';
 import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { classifyWalletError, NotSentError, SendWithdrawnError, WalletErrorKind } from '@helpers/walletErrors';
-import { isDirectExecution, WrappedBlockReason, WrappedExecutionError } from '@helpers/wrappedActions';
+import {
+  isDirectExecution,
+  isWrappedCometAddress,
+  WrappedBlockReason,
+  WrappedExecutionError,
+} from '@helpers/wrappedActions';
 import {
   CometStateWithMarket,
   getWrappedRouteWithdrawalLimits,
@@ -391,6 +396,20 @@ const Home = ({
   const liveEstimatedGasMap = useRef(estimatedGasMap);
   liveEstimatedGasMap.current = estimatedGasMap;
 
+  // A Comet base withdrawal or borrow of the connected account, on any route and through any
+  // connector, waits while a Comet step of a wrapped-route withdrawal of the account on the market is
+  // reserved or held (`directWithdrawalHolds`): together they could take more than the direct supply,
+  // and Comet would lend the rest. Only a configured wrapped market can have one. Storage that cannot
+  // be read holds nothing back here, as on main. The wrapped route refuses every other base
+  // withdrawal to Comet anyway (`isSubmissionRefused`). `baseWithdrawalHold` is set only for the
+  // synchronous call that sends such a write, which checks again just before the wallet is asked.
+  const baseWithdrawalHold = useRef<HoldKey>();
+  const isBaseWithdrawalHeld = (key: HoldKey | undefined) => {
+    if (key === undefined) return false;
+    const read = directWithdrawalHolds.read(key);
+    return read.status === 'known' && read.records.length > 0;
+  };
+
   // The manager reads the network and nonce, and can estimate gas, before it asks the wallet. If
   // the write's visit ends, Home unmounts or the session is found unusable in that time, the write
   // is withdrawn. Otherwise the wallet is asked to sign for a session, market or page the user has
@@ -406,8 +425,10 @@ const Home = ({
     callback
   ) => {
     const visitKeyBefore = liveVisitKey.current;
+    const heldKey = baseWithdrawalHold.current;
+    baseWithdrawalHold.current = undefined;
     const sendWhileCurrent: typeof trxFn = (...args) =>
-      isLiveVisit(visitKeyBefore) && !liveWalletUnusable.current
+      isLiveVisit(visitKeyBefore) && !liveWalletUnusable.current && !isBaseWithdrawalHeld(heldKey)
         ? trxFn(...args)
         : Promise.reject(new SendWithdrawnError());
     return addTransaction(key, description, sendWhileCurrent, estimatedGas, trxEstimateGasFn, fnArgs, value, callback);
@@ -766,9 +787,22 @@ const Home = ({
     const isMixedSupply = wrappedValue > 0n && directBaseAsset.balance > 0n;
     liveActionRules.current = actionRules;
 
+    // The hold a Comet base withdrawal or borrow among `actionsToSubmit` waits for, if any.
+    const baseWithdrawalHoldKey = (actionsToSubmit: Action[]): HoldKey | undefined => {
+      const account = web3.write.account;
+      const withdrawsBase = actionsToSubmit.some(
+        ([type, asset]) =>
+          (type === ActionType.Withdraw || type === ActionType.Borrow) &&
+          asset.address.toLowerCase() === directBaseAsset.address.toLowerCase()
+      );
+      if (account === undefined || !withdrawsBase || !isWrappedCometAddress(market.marketAddress)) return undefined;
+      return holdKey(account, market.chainInformation.chainId, market.marketAddress);
+    };
+
     // Dialogs keep the callbacks below, so they check the session when they run.
     const isBlockedOnLiveRoute = (actionsToSubmit: Action[]) =>
       liveWalletUnusable.current ||
+      isBaseWithdrawalHeld(baseWithdrawalHoldKey(actionsToSubmit)) ||
       // A queue holding a wrapper action in any other form is refused whole, never submitted without it.
       !isDirectExecution(actionsToSubmit) ||
       isSubmissionRefused(
@@ -800,6 +834,7 @@ const Home = ({
       }
       const description = `${directActions.length} Action${directActions.length > 1 ? 's' : ''}`;
       const estimatedGasLimit = liveEstimatedGasMap.current.get(getKeyForActions(directActions)) || 0;
+      baseWithdrawalHold.current = baseWithdrawalHoldKey(directActions);
       writeState.invokeBulker(
         market,
         directActions,
@@ -813,6 +848,7 @@ const Home = ({
           setActionModalState(undefined);
         }
       );
+      baseWithdrawalHold.current = undefined;
       setActionModalState(
         actionModalStateBulker(market, transactions, directActions, directBaseAsset, collateralAssets, onRequestClose)
       );
@@ -834,6 +870,7 @@ const Home = ({
 
       const estimatedGasLimit = liveEstimatedGasMap.current.get(getKeyForActions([singleAction])) || 0;
 
+      baseWithdrawalHold.current = baseWithdrawalHoldKey([singleAction]);
       switch (actionType) {
         case ActionType.Repay:
           writeState.supply(
@@ -900,8 +937,10 @@ const Home = ({
           );
           break;
         default:
+          baseWithdrawalHold.current = undefined;
           throw new Error(`Cannot execute ActionType ${actionType} as a single action`);
       }
+      baseWithdrawalHold.current = undefined;
     };
 
     // The direct actions go to Comet or the Bulker as before: a single action directly, except
