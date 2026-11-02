@@ -2,8 +2,10 @@
 // its wrapped position. The dashboard shows the two together, and its notice says how much is supplied to
 // Comet directly. Withdraw takes the direct part first, as production's Comet base withdrawal, then the rest
 // through the wrapper, which the app asks for only once the Comet step confirms. Max takes the whole direct
-// part, then every share. The harness's dev server opens the release controls (`releaseControls.ts`).
-import { decodeFunctionData, encodeFunctionData, getAddress, type Address, type Hash } from 'viem';
+// part, then every share. A Comet step the wallet still holds holds back the next one, whatever market is
+// shown in between. A direct supply that changes before signing still pays the queued amount. The harness's
+// dev server opens the release controls (`releaseControls.ts`).
+import { decodeFunctionData, encodeFunctionData, getAddress, parseAbi, type Address, type Hash } from 'viem';
 
 import { COMET_ABI, COMET_USDC, ERC20_ABI, MAX_UINT256, USDC, WRAPPER_ABI, WRAPPER_USDC } from '../harness/contracts';
 import { connectAccount, expect, nextRequest, openApp, selectedAccount, test } from '../harness/fixtures';
@@ -13,8 +15,13 @@ import type { WalletRequest } from '../harness/walletServer';
 
 const DIRECT = 250_000_000n;
 const WRAPPED = 100_000_000n;
+/** A withdrawal within the direct supply: one Comet request, nothing from the wrapper. */
+const WITHIN_DIRECT = 40_000_000n;
 const SPLIT = 300_000_000n;
 const SECOND_DIRECT = 50_000_000n;
+/** Mainnet WETH, collateral of the USDC Comet. */
+const WETH = getAddress('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
+const BORROW_ABI = parseAbi(['function borrowBalanceOf(address) view returns (uint256)']);
 
 type Fork = Parameters<typeof usdcBalance>[0];
 type Wallet = Parameters<typeof nextRequest>[0];
@@ -59,6 +66,22 @@ function checkTransactionRequest(
   expect(BigInt(transaction.value ?? '0x0')).toBe(0n);
   if (transaction.chainId !== undefined) expect(Number(transaction.chainId)).toBe(1);
   return transaction;
+}
+
+/** A wrapped supply of `amount`, after an exact approval of the wrapper. */
+async function supplyToWrapper(wallet: Wallet, fork: Fork, account: Address, amount: bigint) {
+  const approve = encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [WRAPPER_USDC, amount] });
+  await sendOnFork(wallet, fork, account, USDC, approve);
+  const wrap = encodeFunctionData({ abi: WRAPPER_ABI, functionName: 'supplyAndWrap', args: [amount] });
+  await sendOnFork(wallet, fork, account, WRAPPER_USDC, wrap);
+}
+
+/** Queues a withdrawal of `amount` USDC through the form and presses Submit Transaction. */
+async function submitWithdrawal(page: Parameters<typeof openApp>[0], amount: string) {
+  await page.getByRole('button', { name: 'Withdraw USDC' }).click({ timeout: 60_000 });
+  await page.getByRole('textbox', { name: '0' }).first().fill(amount);
+  await page.getByRole('button', { name: 'Add Action', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Submit Transaction' }).first().click();
 }
 
 async function expectNoDialog(page: Parameters<typeof openApp>[0]) {
@@ -106,6 +129,25 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     });
     await expect(page.locator('.wrapped-position-panel')).toHaveCount(0);
 
+    // Within the direct supply: one Comet withdraw(USDC, 40 USDC), and nothing from the wrapper.
+    const walletBeforeWithin = await usdcBalance(fork, account);
+    await submitWithdrawal(page, '40');
+    const withinRequest = await nextRequest(wallet, 'eth_sendTransaction', seen);
+    await expectNoDialog(page);
+    const withinCall = decodeFunctionData({
+      abi: COMET_ABI,
+      data: checkTransactionRequest(withinRequest, { account, appOrigin, to: COMET_USDC }).data,
+    });
+    expect(withinCall.functionName).toBe('withdraw');
+    expect(withinCall.args).toEqual([USDC, WITHIN_DIRECT]);
+    const withinHash = ((await wallet.approve(withinRequest.id)) as WalletRequest).result as Hash;
+    const { receipt: withinReceipt } = await minedOnFork(fork, withinHash, { from: account, to: COMET_USDC });
+    expect((await usdcBalance(fork, account, withinReceipt.blockNumber)) - walletBeforeWithin).toBe(WITHIN_DIRECT);
+    expect(await wrapperShares(fork, account, withinReceipt.blockNumber)).toBe(sharesAtStart);
+    await expect(page.getByText('After Transaction')).toHaveCount(0, { timeout: 60_000 });
+    expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
+    expect(await wrapperShares(fork, account)).toBe(sharesAtStart);
+
     // Split: 300 USDC is the whole direct supply through Comet, then the rest through the wrapper.
     await page.getByRole('button', { name: 'Withdraw USDC' }).click({ timeout: 60_000 });
     await expect(
@@ -126,12 +168,15 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     expect(cometCall.functionName).toBe('withdraw');
     expect(cometCall.args).toEqual([USDC, MAX_UINT256]);
     // Nothing is asked of the wrapper while the Comet step is in the wallet.
-    expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
+    expect((await wallet.requests({ method: 'eth_sendTransaction' })).map((request) => request.id)).toEqual([
+      withinRequest.id,
+      cometRequest.id,
+    ]);
     const cometHash = ((await wallet.approve(cometRequest.id)) as WalletRequest).result as Hash;
     const { receipt: cometReceipt } = await minedOnFork(fork, cometHash, { from: account, to: COMET_USDC });
     expect(await directSupply(fork, account, cometReceipt.blockNumber)).toBe(0n);
     const fromComet = (await usdcBalance(fork, account, cometReceipt.blockNumber)) - walletBefore;
-    expect(fromComet).toBeGreaterThanOrEqual(DIRECT - 1n);
+    expect(fromComet).toBeGreaterThanOrEqual(DIRECT - WITHIN_DIRECT - 1n);
 
     // Once the Comet step confirms, the app asks for the wrapper step with no other press.
     const wrapperRequest = await nextRequest(wallet, 'eth_sendTransaction', seen);
@@ -147,7 +192,21 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     expect(await wrapperShares(fork, account, wrapperReceipt.blockNumber)).toBe(sharesAtStart - burned);
     const received = (await usdcBalance(fork, account, wrapperReceipt.blockNumber)) - walletBefore;
     expect(received).toBeGreaterThanOrEqual(SPLIT);
-    expect(received).toBeLessThan(SPLIT + 1_000_000n);
+    // The wrapper's part is 300 USDC less what Comet took, paid with the fewest shares that cover it. At the
+    // Comet receipt's block, before the app read the wrapper, one share fewer paid less than that part. So
+    // the payout exceeds 300 USDC by less than what the burned shares paid beyond one share fewer, that is
+    // the shares-to-assets rounding and the interest they earned until the exit.
+    const { result: oneShareFewer } = await fork.simulateContract({
+      address: WRAPPER_USDC,
+      abi: WRAPPER_ABI,
+      functionName: 'unwrapAndWithdraw',
+      args: [burned - 1n],
+      account,
+      blockNumber: cometReceipt.blockNumber,
+    });
+    const fromWrapper = received - fromComet;
+    expect(received - SPLIT).toBeLessThanOrEqual(fromWrapper - oneShareFewer);
+    expect(fromWrapper - oneShareFewer).toBeLessThan(100n);
     await expect(page.getByText('After Transaction')).toHaveCount(0, { timeout: 60_000 });
     await expect(notice(page)).toHaveCount(0, { timeout: 60_000 });
 
@@ -186,13 +245,126 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     await expect(page.getByText('After Transaction')).toHaveCount(0, { timeout: 60_000 });
     await expectNoDialog(page);
 
-    // Four requests in the app's order: Comet, wrapper, Comet, wrapper. No Bulker call and no approval.
+    // Five requests in the app's order: Comet, Comet, wrapper, Comet, wrapper. No Bulker call and no approval.
     const sends = await wallet.requests({ method: 'eth_sendTransaction' });
     expect(sends.map((request) => request.id)).toEqual([
+      withinRequest.id,
       cometRequest.id,
       wrapperRequest.id,
       maxCometRequest.id,
       exitRequest.id,
     ]);
+  });
+
+  test('holds back a second Comet request after the wallet still holds the first (4900), across a change of market and back', async ({
+    page,
+    wallet,
+    fork,
+    appOrigin,
+  }) => {
+    test.setTimeout(240_000);
+    const account = getAddress(await selectedAccount(wallet, '1000'));
+    await supplyToComet(wallet, fork, account, DIRECT);
+    await supplyToWrapper(wallet, fork, account, WRAPPED);
+    // 1 WETH of collateral, so that Comet would lend what two partial withdrawals take beyond the supply.
+    const deposit = await wallet.forkSend({ from: account, to: WETH, data: '0xd0e30db0', value: '0xde0b6b3a7640000' });
+    await minedOnFork(fork, deposit.hash, { from: account, to: WETH });
+    const approveWeth = encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [COMET_USDC, 10n ** 18n] });
+    await sendOnFork(wallet, fork, account, WETH, approveWeth);
+    const supplyWeth = encodeFunctionData({ abi: COMET_ABI, functionName: 'supply', args: [WETH, 10n ** 18n] });
+    await sendOnFork(wallet, fork, account, COMET_USDC, supplyWeth);
+
+    await openApp(page);
+    await connectAccount(page, wallet, account, ANCHORAGE_WALLET.label);
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+    const seen = new Set((await wallet.requests()).map((request) => request.id));
+
+    // 200 USDC, within the 250 USDC direct supply: one Comet withdraw(USDC, 200 USDC). The wallet answers
+    // that the request can still complete, so the app cannot follow it.
+    await submitWithdrawal(page, '200');
+    const first = await nextRequest(wallet, 'eth_sendTransaction', seen);
+    const firstTransaction = checkTransactionRequest(first, { account, appOrigin, to: COMET_USDC });
+    expect(decodeFunctionData({ abi: COMET_ABI, data: firstTransaction.data }).args).toEqual([USDC, 200_000_000n]);
+    await wallet.reject(first.id, { code: 4900, message: 'The request can still complete in the wallet.' });
+    await expect(page.getByText('After Transaction')).toHaveCount(0, { timeout: 60_000 });
+
+    // USDT, then USDC again.
+    const choose = async (symbol: string) => {
+      await page.locator('.market-selector__selected-market').click();
+      await page
+        .locator('.market-selector__option')
+        .filter({ has: page.getByText(symbol, { exact: true }) })
+        .last()
+        .click();
+    };
+    await choose('USDT');
+    await expect(page).toHaveURL(/market=usdt-mainnet/);
+    await page.getByText('Net Supply APR').first().waitFor();
+    await choose('USDC');
+    await expect(page).toHaveURL(/market=usdc-mainnet/);
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+
+    // The same 200 USDC again: nothing reaches the wallet, and the row says why.
+    await submitWithdrawal(page, '200');
+    await expect(page.getByText('Earlier Request Still Pending').first()).toBeVisible({ timeout: 60_000 });
+    await expectNoDialog(page);
+    expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
+
+    // The held request executes after all, from the wallet. Comet lends nothing.
+    const late = await wallet.forkSend({ from: account, to: COMET_USDC, data: firstTransaction.data });
+    const { receipt: lateReceipt } = await minedOnFork(fork, late.hash, { from: account, to: COMET_USDC });
+    const debt = await fork.readContract({
+      address: COMET_USDC,
+      abi: BORROW_ABI,
+      functionName: 'borrowBalanceOf',
+      args: [account],
+      blockNumber: lateReceipt.blockNumber,
+    });
+    expect(debt).toBe(0n);
+    expect(await directSupply(fork, account, lateReceipt.blockNumber)).toBeGreaterThanOrEqual(50_000_000n - 1n);
+    expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
+  });
+
+  test('pays the queued amount, not more, when the direct supply rises between queueing and signing', async ({
+    page,
+    wallet,
+    fork,
+    appOrigin,
+  }) => {
+    test.setTimeout(240_000);
+    const account = getAddress(await selectedAccount(wallet, '1000'));
+    await supplyToComet(wallet, fork, account, DIRECT);
+    await supplyToWrapper(wallet, fork, account, WRAPPED);
+    const sharesAtStart = await wrapperShares(fork, account);
+
+    await openApp(page);
+    await connectAccount(page, wallet, account, ANCHORAGE_WALLET.label);
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+    const seen = new Set((await wallet.requests()).map((request) => request.id));
+
+    // 300 USDC against the 250 USDC direct supply the dashboard read, then 150 USDC more is supplied to
+    // Comet directly before Submit.
+    await page.getByRole('button', { name: 'Withdraw USDC' }).click({ timeout: 60_000 });
+    await page.getByRole('textbox', { name: '0' }).first().fill('300');
+    await page.getByRole('button', { name: 'Add Action', exact: true }).first().click();
+    await supplyToComet(wallet, fork, account, 150_000_000n);
+    const before = await usdcBalance(fork, account);
+    await page.getByRole('button', { name: 'Submit Transaction' }).first().click();
+
+    // The app splits again from the 400 USDC it reads just before signing: one Comet withdraw(USDC, 300 USDC).
+    const request = await nextRequest(wallet, 'eth_sendTransaction', seen);
+    const transaction = checkTransactionRequest(request, { account, appOrigin, to: COMET_USDC });
+    expect(decodeFunctionData({ abi: COMET_ABI, data: transaction.data }).args).toEqual([USDC, SPLIT]);
+    const hash = ((await wallet.approve(request.id)) as WalletRequest).result as Hash;
+    const { receipt } = await minedOnFork(fork, hash, { from: account, to: COMET_USDC });
+    await expect(page.getByText('After Transaction')).toHaveCount(0, { timeout: 60_000 });
+    await expectNoDialog(page);
+
+    // A finite Comet withdrawal pays exactly its amount, so the rounding tolerance is zero, and the wrapper
+    // is asked for nothing.
+    expect((await usdcBalance(fork, account, receipt.blockNumber)) - before).toBe(SPLIT);
+    expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
+    expect(await wrapperShares(fork, account)).toBe(sharesAtStart);
+    expect(await directSupply(fork, account, receipt.blockNumber)).toBeGreaterThanOrEqual(100_000_000n - 1n);
   });
 });
