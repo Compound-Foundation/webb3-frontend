@@ -396,10 +396,11 @@ const Home = ({
   const liveEstimatedGasMap = useRef(estimatedGasMap);
   liveEstimatedGasMap.current = estimatedGasMap;
 
-  // A Comet base withdrawal or borrow of the connected account, on any route and through any
-  // connector, waits while a Comet step of a wrapped-route withdrawal of the account on the market is
-  // reserved or held (`directWithdrawalHolds`): together they could take more than the direct supply,
-  // and Comet would lend the rest. Only a configured wrapped market can have one. Storage that cannot
+  // A Comet base withdrawal or borrow that Home sends for the connected account, on either route and
+  // through any connector, waits while a Comet step of a wrapped-route withdrawal of the account on
+  // the market is reserved or held (`directWithdrawalHolds`): together they can take more than the
+  // direct supply, and Comet then lends the rest. It only checks: a standard-route withdrawal holds
+  // nothing back itself, and the Extensions page's transactions are not checked. Only a configured wrapped market can have one. Storage that cannot
   // be read holds nothing back here, as on main. The wrapped route refuses every other base
   // withdrawal to Comet anyway (`isSubmissionRefused`). `baseWithdrawalHold` is set only for the
   // synchronous call that sends such a write, which checks again just before the wallet is asked.
@@ -538,8 +539,12 @@ const Home = ({
       if (record.kind !== 'held') continue;
       try {
         const throughBlock = await anchorBlock(readProvider, web3.write.provider, [record.blockNumber]);
+        // The node's own nonce for the hash is stored once known, so a later replacement can be judged.
+        const storeNonce = (nonce: number) => {
+          if (record.hash !== undefined) directWithdrawalHolds.recordHash(key, record.id, record.hash, nonce);
+        };
         if (
-          (await isHoldResolved(record, readProvider, throughBlock, holdScans.current)) &&
+          (await isHoldResolved(record, readProvider, throughBlock, holdScans.current, storeNonce)) &&
           (await directWithdrawalHolds.release(key, record.id))
         ) {
           isAnyReleased = true;
@@ -1074,7 +1079,7 @@ const Home = ({
         return;
       }
       // An earlier Comet withdrawal of the account on the market that can still execute holds back
-      // every new one: together they could take more than the direct supply, and Comet would lend the
+      // every new one: together they can take more than the direct supply, and Comet then lends the
       // rest. The holds are stored (`directWithdrawalHolds`), so a reload, a change of market, another
       // tab and Clear keep them. While storage cannot be read, whether one exists is unknown, and
       // nothing is sent.
@@ -1273,21 +1278,29 @@ const Home = ({
             endRun(recordStopped('Transaction Failed'));
             return;
           }
-          // Another transaction took the step's nonce, by its own nonce, so the step can no longer
-          // execute. A sped-up copy of it can have, so its row keeps only the rest, nothing more is
-          // sent for it, and the next Comet step's fresh read is of a block no older than the one the
-          // wallet's node had then.
+          // The manager found the step's nonce taken without a receipt. Its nonce can be the lower bound
+          // it read before sending, which a request queued behind another transaction passes while it
+          // is still pending, so this alone ends no hold. The row keeps only the rest, nothing more is
+          // sent for it, the next Comet step's fresh read is of a block no older than the one the
+          // wallet's node had then, and the hold ends only once `isHoldResolved` shows a receipt or
+          // the step's own nonce taken.
           if (outcome.status === 'replaced') {
-            // The run, its row and the hold stay until that block is known. A failed lookup tries again
-            // while the run is live.
+            // The run and its row stay until that block is known. A failed lookup tries again while
+            // the run is live.
             const settleReplaced = () => {
               if (readProvider === undefined) return;
               anchorBlock(readProvider, walletProvider, [minBlock]).then(
                 (blockNumber) => {
                   if (!isLiveVisit(visitKeyAtStart) || liveSubmission.current !== record) return;
                   submissionStore.setDirectStep({ scope: sentScope, blockNumber });
-                  releaseOwnHold();
                   keepRestOnly();
+                  const read = directWithdrawalHolds.read(key);
+                  if (read.status === 'known') {
+                    releaseResolvedHolds(
+                      key,
+                      read.records.filter((held) => held.id === directStep.holdId)
+                    );
+                  }
                 },
                 (error) => {
                   console.warn('The block of a replaced Comet withdrawal is not known:', error);

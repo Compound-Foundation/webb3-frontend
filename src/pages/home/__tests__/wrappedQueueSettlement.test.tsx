@@ -1258,6 +1258,15 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
   const executeLate = (chain: Chain) => mine(chain, { to: USDC_COMET, data: productionWithdrawData(200_000_000n) });
   const storedHolds = () => JSON.parse(window.localStorage.getItem(DIRECT_WITHDRAWAL_HOLDS_KEY) ?? '[]');
   const storedRecords = () => JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]');
+  /** The hash the replaced cases' wallet returns, which the node never mines. */
+  const REPLACED_HASH = `0x${'ab'.repeat(32)}`;
+  /** The configured chain's node reports `hash`'s own nonce as 5, and the account's count as 6. */
+  const reportOwnNonceTaken = (readProvider: ReturnType<typeof readProviderFor>, hash: string) => {
+    const lookUp = readProvider.getTransaction.getMockImplementation() as (hash: string) => Promise<unknown>;
+    readProvider.getTransaction.mockImplementation((async (asked: string) =>
+      asked === hash ? { nonce: 5 } : lookUp(asked)) as never);
+    readProvider.getTransactionCount.mockImplementation(async () => 6);
+  };
 
   /** A 200 USDC withdrawal whose Comet step the wallet answers with 4900, against `direct` supplied directly. */
   async function holdFirstStep(direct = DIRECT) {
@@ -1423,8 +1432,9 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await expectHeldBack(wallet, chain, entry);
   });
 
-  it('sends the next Comet step once another transaction took the nonce of the last, which can then no longer execute', async () => {
-    const { chain, wallet } = await renderMixed();
+  it('sends the next Comet step once another transaction took the own nonce of the last, which can then no longer execute', async () => {
+    const { chain, wallet, readProvider } = await renderMixed();
+    reportOwnNonceTaken(readProvider, REPLACED_HASH);
     const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
     act(() => live.queue.addOrUpdateAction(entry));
     // The step is sent, but the node never shows a receipt for it, and its own nonce has passed.
@@ -1688,7 +1698,8 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
   });
 
   it('keeps the row held until the block of a replaced Comet step is known', async () => {
-    const { chain, wallet } = await renderMixed();
+    const { chain, wallet, readProvider } = await renderMixed();
+    reportOwnNonceTaken(readProvider, REPLACED_HASH);
     const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
     act(() => live.queue.addOrUpdateAction(entry));
     wallet.sendUncheckedTransaction.mockImplementationOnce(async () => `0x${'ab'.repeat(32)}`);
@@ -1712,6 +1723,40 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
 
     block.release();
     await waitFor(() => expect(queued()).toEqual([]));
+    await waitFor(() => expect(storedHolds()).toEqual([]));
+  });
+
+  it('keeps the hold when the manager judges the step replaced by the nonce it read before sending, while the node does not know it', async () => {
+    const { chain, wallet, show } = await renderMixed();
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
+    act(() => live.queue.addOrUpdateAction(entry));
+    // Another transaction of the account is pending at nonce 5, so the step is sent at 6. The node
+    // does not know the step yet, and nonce 5 mines: the manager reports the step replaced.
+    wallet.sendUncheckedTransaction.mockImplementationOnce(async () => REPLACED_HASH);
+    wallet.getTransactionCount.mockImplementationOnce(async () => 5).mockImplementation(async () => 6);
+
+    await submit();
+    await waitFor(() =>
+      expect(live.manager.settledTransactions.map(({ outcome }) => outcome.status)).toEqual(['replaced'])
+    );
+    await settle();
+    expect(storedHolds()).toEqual([expect.objectContaining({ hash: REPLACED_HASH })]);
+
+    // The same 200 USDC again is held back.
+    act(() => live.queue.addOrUpdateAction(entry));
+    await expectHeldBack(wallet, chain, entry);
+
+    // Once the step's own receipt is found, the hold ends.
+    chain.history.push({
+      hash: REPLACED_HASH,
+      blockNumber: chain.block,
+      from: ACCOUNT,
+      to: USDC_COMET,
+      data: productionWithdrawData(200_000_000n),
+      status: 1,
+      logs: [],
+    });
+    show({ state: stateWithDirectSupply(50_000_000n) });
     await waitFor(() => expect(storedHolds()).toEqual([]));
   });
 

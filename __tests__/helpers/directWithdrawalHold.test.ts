@@ -175,21 +175,67 @@ describe('the hold store', () => {
     await expect(store.reserve(KEY)).resolves.toEqual({ status: 'unknown' });
   });
 
+  it('keeps a hold without a hash the wallet gave in a form storage does not accept', async () => {
+    const { tab } = sharedStorage();
+    const store = tab('tab-1');
+    const reserved = await store.reserve(KEY);
+    if (reserved.status !== 'reserved') throw new Error('the tab must reserve');
+    await store.hold(KEY, reserved.id, FIGURES);
+
+    await expect(store.recordHash(KEY, reserved.id, 'ab'.repeat(32), undefined)).resolves.toBe(false);
+    await expect(store.recordHash(KEY, reserved.id, `0x${'ab'.repeat(32)} `, undefined)).resolves.toBe(false);
+    const read = tab('tab-2').read(KEY);
+    expect(read).toEqual({
+      status: 'known',
+      records: [expect.objectContaining({ kind: 'held', id: reserved.id, calldata: CALLDATA })],
+    });
+    expect(read.status === 'known' && 'hash' in read.records[0]).toBe(false);
+  });
+
+  it('puts the stored list back when the read-back differs from what was written', async () => {
+    const { tab, storage, items } = sharedStorage();
+    const store = tab('tab-1');
+    const reserved = await store.reserve(KEY);
+    if (reserved.status !== 'reserved') throw new Error('the tab must reserve');
+    const before = items.get(DIRECT_WITHDRAWAL_HOLDS_KEY);
+    // Storage keeps something else once for the list, as a full or broken store can.
+    let isBroken = true;
+    storage.setItem.mockImplementation((name: string, value: string) => {
+      const isList = name === DIRECT_WITHDRAWAL_HOLDS_KEY;
+      items.set(name, isList && isBroken ? '[{"kind":"other"}]' : value);
+      if (isList) isBroken = false;
+    });
+
+    await expect(store.hold(KEY, reserved.id, FIGURES)).resolves.toBe(false);
+    expect(items.get(DIRECT_WITHDRAWAL_HOLDS_KEY)).toBe(before);
+  });
+
+  it('turns no expired reservation into a hold, even with no other tab reserved', async () => {
+    const { tab, clock } = sharedStorage();
+    const store = tab('tab-1');
+    const reserved = await store.reserve(KEY);
+    if (reserved.status !== 'reserved') throw new Error('the tab must reserve');
+    clock.advance(RESERVATION_LEASE_MS);
+    await expect(store.hold(KEY, reserved.id, FIGURES)).resolves.toBe(false);
+  });
+
   it('gives exactly one of two tabs that reserve at once the reservation, through the storage lock', async () => {
     const { tab } = sharedStorage();
     const results = await Promise.all([tab('tab-1').reserve(KEY), tab('tab-2').reserve(KEY)]);
     expect(results.map(({ status }) => status).sort()).toEqual(['held-back', 'reserved']);
   });
 
-  it('takes the Web Locks API lock for the key where the browser has it', async () => {
+  it('takes one Web Locks API lock for every key, where the browser has it', async () => {
     const { storage } = sharedStorage();
     const request = jest.fn(async (_name: string, callback: () => Promise<unknown>) => callback());
     const store = createHoldStore({ storage: () => storage, locks: () => ({ request } as never), tabId: 'tab-1' });
     await expect(store.reserve(KEY)).resolves.toMatchObject({ status: 'reserved' });
-    expect(request).toHaveBeenCalledWith(
-      `webb3-direct-withdrawal:1:${KEY.cometAddress}:${KEY.account}`,
-      expect.any(Function)
-    );
+    // One lock for every key: they share the stored list.
+    await expect(store.reserve(holdKey(OTHER, 1, USDC_COMET))).resolves.toMatchObject({ status: 'reserved' });
+    expect(request.mock.calls.map(([name]) => name)).toEqual([
+      DIRECT_WITHDRAWAL_HOLDS_KEY,
+      DIRECT_WITHDRAWAL_HOLDS_KEY,
+    ]);
   });
 
   it('ignores a malformed record that any script could write', async () => {
@@ -223,6 +269,11 @@ describe('anchorBlock', () => {
     const failing = { getBlockNumber: jest.fn(async () => Promise.reject(new Error('timeout'))) };
     await expect(anchorBlock(reader(105), failing, [], FAST)).rejects.toThrow('timeout');
     await expect(anchorBlock(reader(105), undefined, [], FAST)).rejects.toThrow("The wallet's network cannot be read.");
+  });
+
+  it("throws when the wallet node's block does not come in time", async () => {
+    const silent = { getBlockNumber: jest.fn(() => new Promise<number>(() => undefined)) };
+    await expect(anchorBlock(reader(105), silent, [], FAST)).rejects.toThrow('did not answer in time');
   });
 
   it("throws when the configured chain's provider stays behind the wallet node or a floor", async () => {
@@ -275,7 +326,7 @@ describe('isHoldResolved', () => {
     expect(node.getLogs).toHaveBeenCalledWith({
       address: KEY.cometAddress,
       topics: [COMET.getEventTopic('Withdraw'), hexZeroPad(KEY.account, 32)],
-      fromBlock: 100,
+      fromBlock: 101,
       toBlock: 110,
     });
   });
@@ -307,6 +358,10 @@ describe('isHoldResolved', () => {
       { hash: hash(1), blockNumber: 102, from: ACCOUNT, to: BULKER, data: CALLDATA },
     ],
     ['before the hold’s block', { hash: hash(1), blockNumber: 99, from: ACCOUNT, to: USDC_COMET, data: CALLDATA }],
+    [
+      'in the hold’s own block, read before the request was made',
+      { hash: hash(1), blockNumber: 100, from: ACCOUNT, to: USDC_COMET, data: CALLDATA },
+    ],
   ])('keeps a hashless hold beside a withdrawal of %s', async (_name, mined) => {
     await expect(isHoldResolved(HOLD, asReader(nodeWith([mined])), 110, new Map())).resolves.toBe(false);
   });
@@ -323,11 +378,11 @@ describe('isHoldResolved', () => {
     const scanned = new Map<string, number>();
     await expect(isHoldResolved(HOLD, asReader(node), far + 10, scanned)).resolves.toBe(false);
     expect(node.getLogs).toHaveBeenCalledTimes(5);
-    expect(scanned.get(HOLD.id)).toBe(HOLD.blockNumber + 5 * LOG_BLOCK_RANGE - 1);
+    expect(scanned.get(HOLD.id)).toBe(HOLD.blockNumber + 5 * LOG_BLOCK_RANGE);
 
     await expect(isHoldResolved(HOLD, asReader(node), far + 10, scanned)).resolves.toBe(true);
     // The second look starts where the first stopped, and finds the transaction in its second range.
-    expect(node.getLogs.mock.calls[5][0]).toMatchObject({ fromBlock: HOLD.blockNumber + 5 * LOG_BLOCK_RANGE });
+    expect(node.getLogs.mock.calls[5][0]).toMatchObject({ fromBlock: HOLD.blockNumber + 5 * LOG_BLOCK_RANGE + 1 });
   });
 
   it('throws, so the hold stays, when the node cannot be read', async () => {
@@ -352,6 +407,19 @@ describe('isHoldResolved', () => {
     const dropped = nodeWith([]);
     dropped.getTransactionCount.mockResolvedValue(8);
     await expect(isHoldResolved({ ...withHash, nonce: 7 }, asReader(dropped), 110, new Map())).resolves.toBe(true);
+  });
+
+  it("reports the node's own nonce for the hash when the hold has none, and never judges by a lower bound", async () => {
+    const withHash = { ...HOLD, hash: hash(9) };
+    const pending = nodeWith([]);
+    pending.getTransaction.mockResolvedValue({ nonce: 6 } as never);
+    pending.getTransactionCount.mockResolvedValue(6);
+    const onNonce = jest.fn();
+    await expect(isHoldResolved(withHash, asReader(pending), 110, new Map(), onNonce)).resolves.toBe(false);
+    expect(onNonce).toHaveBeenCalledWith(6);
+    onNonce.mockClear();
+    await isHoldResolved({ ...withHash, nonce: 6 }, asReader(pending), 110, new Map(), onNonce);
+    expect(onNonce).not.toHaveBeenCalled();
   });
 
   it('keeps a hold with a hash while it is pending, and never ends one by calldata alone', async () => {

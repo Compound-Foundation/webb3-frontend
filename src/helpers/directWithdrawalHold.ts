@@ -6,18 +6,19 @@ import CometAbi from '@helpers/abis/Comet';
 import { BlockWait, DEFAULT_BLOCK_WAIT, waitForBlock } from '@helpers/wrappedPositions';
 
 // The hold on a Comet base withdrawal that a withdrawal on the wrapped route sends for the account's
-// direct supply. While one such request can still execute, a second one could take more than the
-// direct supply together with it, and Comet would lend the account the rest. So every Comet base
-// withdrawal of the account on the market waits until the first one can no longer execute.
+// direct supply. While one such request can still execute, a second one can take more than the
+// direct supply together with it, and Comet then lends the account the rest. So the Comet base
+// withdrawals that Home sends for the account on the market wait until the first one can no longer
+// execute.
 //
 // A hold starts as a reservation before the wallet is asked, and becomes a hold with the request's
 // calldata just before the wallet is asked. Only evidence about the request itself ends it: its
-// receipt or its taken nonce when the wallet gave its hash, or else a transaction from the account to
-// Comet with the same calldata, mined at or after the hold's block. Nothing else does: no balance,
-// time, Clear, reload or change of market.
+// receipt or its own nonce taken when the wallet gave its hash, or else a transaction from the
+// account to Comet with the same calldata, mined after the hold's block. Nothing else does: no
+// balance, time, Clear, reload or change of market.
 //
 // Holds are stored apart from the transaction manager's records, under their own key, and every
-// change to them is made under a lock that other tabs of the app respect.
+// change to them is made under one lock that other tabs of the app respect.
 
 /** Where the holds are stored. */
 export const DIRECT_WITHDRAWAL_HOLDS_KEY = 'webb3-direct-withdrawal-holds';
@@ -71,7 +72,7 @@ export type ReserveResult =
   | { status: 'reserved'; id: string }
   /** Another request of the key is reserved or held. */
   | { status: 'held-back'; records: HoldRecord[] }
-  /** Storage could not be read or written, so nothing is reserved. */
+  /** Storage was not read or written, so nothing is reserved. */
   | { status: 'unknown' };
 
 /** What a hold stores when the wallet is asked. */
@@ -179,19 +180,37 @@ export function createHoldStore({
 
   const isLive = (record: HoldRecord) => record.kind === 'held' || record.expiresAt > now();
 
-  /** Writes `records`, less expired reservations, and reads them back. Whether storage now holds them. */
+  /**
+   * Writes `records`, less expired reservations, and reads them back. Whether storage now holds them.
+   * A record that fails `isHoldRecord`, which a read drops, is never written. When the read-back
+   * differs, the list stored before is put back.
+   */
   const writeAll = (records: HoldRecord[]): boolean => {
     const kept = records.filter(isLive);
+    if (!kept.every(isHoldRecord)) return false;
+    let before: string | null;
     try {
+      before = storage().getItem(DIRECT_WITHDRAWAL_HOLDS_KEY);
       storage().setItem(DIRECT_WITHDRAWAL_HOLDS_KEY, JSON.stringify(kept));
     } catch {
       return false;
     }
     const readBack = readAll();
-    return readBack !== undefined && JSON.stringify(readBack) === JSON.stringify(kept);
+    if (readBack !== undefined && JSON.stringify(readBack) === JSON.stringify(kept)) return true;
+    try {
+      if (before === null) storage().removeItem(DIRECT_WITHDRAWAL_HOLDS_KEY);
+      else storage().setItem(DIRECT_WITHDRAWAL_HOLDS_KEY, before);
+    } catch {
+      // Storage refuses writes, so it still holds what a read finds.
+    }
+    return false;
   };
 
-  /** A lock through storage, for a browser without the Web Locks API. Throws if it cannot be taken. */
+  /**
+   * A lock through storage, for a browser without the Web Locks API. Throws if it cannot be taken.
+   * It is not a strict mutex: two tabs whose writes reach each other later than the 25 ms it waits
+   * can both take it.
+   */
   const withStorageLock = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
     const lockKey = `${DIRECT_WITHDRAWAL_HOLDS_KEY}:lock:${name}`;
     const owner = randomId();
@@ -223,9 +242,12 @@ export function createHoldStore({
     }
   };
 
-  /** Runs `change` under the key's lock. A failure to take the lock, or to read storage, is `onFailure`. */
-  const withLock = async <T>(key: HoldKey, onFailure: T, change: (records: HoldRecord[]) => T): Promise<T> => {
-    const name = `webb3-direct-withdrawal:${key.chainId}:${key.cometAddress}:${key.account}`;
+  /**
+   * Runs `change` under the store's lock. Every key shares the stored list, so every change takes the
+   * same lock. A failure to take the lock, or to read storage, is `onFailure`.
+   */
+  const withLock = async <T>(onFailure: T, change: (records: HoldRecord[]) => T): Promise<T> => {
+    const name = DIRECT_WITHDRAWAL_HOLDS_KEY;
     const run = async () => {
       const records = readAll();
       return records === undefined ? onFailure : change(records);
@@ -249,7 +271,7 @@ export function createHoldStore({
 
     /** Reserves the key for a new request, unless another one is reserved or held. */
     reserve(key: HoldKey): Promise<ReserveResult> {
-      return withLock<ReserveResult>(key, { status: 'unknown' }, (records) => {
+      return withLock<ReserveResult>({ status: 'unknown' }, (records) => {
         const others = records.filter((record) => isForKey(record, key) && isLive(record));
         if (others.length > 0) return { status: 'held-back', records: others };
         const reservation: DirectWithdrawalReservation = {
@@ -265,14 +287,14 @@ export function createHoldStore({
 
     /**
      * Turns the reservation `id` into a hold with `figures`, just before the wallet is asked. Whether
-     * storage now holds it: false when the reservation is gone, another request of the key is live,
+     * storage now holds it: false when the reservation is gone or expired, another request of the key is live,
      * or storage failed. The wallet is asked only on true.
      */
     hold(key: HoldKey, id: string, figures: HoldFigures): Promise<boolean> {
-      return withLock(key, false, (records) => {
+      return withLock(false, (records) => {
         const own = records.find((record) => record.id === id && isForKey(record, key));
         const others = records.filter((record) => record.id !== id && isForKey(record, key) && isLive(record));
-        if (own?.kind !== 'reserved' || others.length > 0) return false;
+        if (own?.kind !== 'reserved' || !isLive(own) || others.length > 0) return false;
         const held: DirectWithdrawalHold = {
           ...key,
           kind: 'held',
@@ -287,12 +309,14 @@ export function createHoldStore({
 
     /** Adds the transaction's hash, and its nonce when known, to the hold `id`. */
     recordHash(key: HoldKey, id: string, hash: string, nonce: number | undefined): Promise<boolean> {
-      return withLock(key, false, (records) => {
+      return withLock(false, (records) => {
         const own = records.find((record) => record.id === id && isForKey(record, key));
-        if (own?.kind !== 'held') return false;
+        const lowerHash = hash.toLowerCase();
+        // A hash that fails the format a read accepts leaves the hold as it is, without it.
+        if (own?.kind !== 'held' || !HASH.test(lowerHash)) return false;
         const withHash: DirectWithdrawalHold = {
           ...own,
-          hash: hash.toLowerCase(),
+          hash: lowerHash,
           ...(isCount(nonce) ? { nonce } : {}),
         };
         return writeAll(records.map((record) => (record.id === id ? withHash : record)));
@@ -301,7 +325,7 @@ export function createHoldStore({
 
     /** Removes the record `id`: its request never reached the wallet, or can no longer execute. */
     release(key: HoldKey, id: string): Promise<boolean> {
-      return withLock(key, false, (records) =>
+      return withLock(false, (records) =>
         writeAll(records.filter((record) => !(record.id === id && isForKey(record, key))))
       );
     },
@@ -321,7 +345,8 @@ export function directWithdrawalCalldata(baseToken: string, amount: bigint | str
 /**
  * The block a read about the hold must be of: no older than the wallet node's newest block and
  * every one of `floors`, read from the configured chain's provider once it has reached it. Throws
- * when the wallet's node cannot be read or the provider does not reach the block in time, and then
+ * when the wallet's node cannot be read or answers late, or the provider does not reach the block
+ * in time, and then
  * nothing that depends on the read happens: no hold ends, no row unlocks and nothing is sent.
  */
 export async function anchorBlock(
@@ -331,7 +356,14 @@ export async function anchorBlock(
   wait: BlockWait = DEFAULT_BLOCK_WAIT
 ): Promise<number> {
   if (walletProvider === undefined) throw new Error("The wallet's network cannot be read.");
-  const walletBlock = await walletProvider.getBlockNumber();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("The wallet's network did not answer in time.")),
+      wait.attempts * wait.intervalMs
+    );
+  });
+  const walletBlock = await Promise.race([walletProvider.getBlockNumber(), late]).finally(() => clearTimeout(timer));
   if (!isCount(walletBlock)) throw new Error("The wallet's network gave no block.");
   const required = floors.reduce<number>(
     (newest, floor) => (floor !== undefined && floor > newest ? floor : newest),
@@ -352,10 +384,12 @@ export type HoldEvidenceReader = Pick<
 /**
  * Whether the held request can no longer execute, by evidence about the request itself up to
  * `throughBlock`, a block from `anchorBlock`:
- * - With a hash: the transaction has a receipt, success or revert, or its nonce is taken, by itself
- *   or by another transaction that replaced it.
+ * - With a hash: the transaction has a receipt, success or revert, or its own nonce is taken, by
+ *   itself or by another transaction that replaced it. The own nonce is the one the node reports
+ *   for the hash, or the one the hold stores. `onNonce` gets the node's when the hold has none, so
+ *   that it can be stored. The lower bound the transaction manager reads before sending is never used.
  * - Without one: a transaction from the account to Comet with the hold's calldata, byte for byte,
- *   was mined at or after the hold's block. Comet's `Withdraw` logs for the account find the
+ *   was mined after the hold's block, the block the fresh read before the wallet was asked. Comet's `Withdraw` logs for the account find the
  *   candidates. `scanned` keeps the last block looked through for each hold, so the next look
  *   continues from there, at most `LOG_BLOCK_RANGE × 5` blocks each time.
  *
@@ -366,18 +400,21 @@ export async function isHoldResolved(
   hold: DirectWithdrawalHold,
   reader: HoldEvidenceReader,
   throughBlock: number,
-  scanned: Map<string, number>
+  scanned: Map<string, number>,
+  onNonce?: (nonce: number) => void
 ): Promise<boolean> {
   if (hold.hash !== undefined) {
     if (await reader.getTransactionReceipt(hold.hash)) return true;
     const reported = (await reader.getTransaction(hold.hash))?.nonce;
+    if (isCount(reported) && hold.nonce === undefined) onNonce?.(reported);
     const nonce = isCount(reported) ? reported : hold.nonce;
     if (nonce === undefined) return false;
     return (await reader.getTransactionCount(hold.account, throughBlock)) > nonce;
   }
 
   const withdrawTopic = cometInterface.getEventTopic('Withdraw');
-  let fromBlock = Math.max(hold.blockNumber, (scanned.get(hold.id) ?? hold.blockNumber - 1) + 1);
+  // The hold's block was read before the wallet was asked, so the request is mined after it.
+  let fromBlock = Math.max(hold.blockNumber + 1, (scanned.get(hold.id) ?? hold.blockNumber) + 1);
   for (let request = 0; request < LOG_REQUESTS_PER_LOOK && fromBlock <= throughBlock; request++) {
     const toBlock = Math.min(throughBlock, fromBlock + LOG_BLOCK_RANGE - 1);
     const logs = await reader.getLogs({
