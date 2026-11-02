@@ -345,6 +345,8 @@ describe('the wrapped route through the normal form, queue and comparison', () =
 
     await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
     await user.click(formButton('Max'));
+    // The input shows what Max pays: the full exit's cash, the position less the wrapper's buffer.
+    expect(amountInput()).toHaveValue('249.999997');
     await user.click(formButton('Add Action'));
 
     expect(within(desktopQueue()).getByText('Withdraw USDC')).toBeInTheDocument();
@@ -368,6 +370,8 @@ describe('the wrapped route through the normal form, queue and comparison', () =
 
     await user.click(screen.getByRole('button', { name: 'Withdraw USDC' }));
     await user.click(formButton('Max'));
+    // The input shows the figure the row shows, not the 260.000000 USDC balance.
+    expect(amountInput()).toHaveValue('259.999997');
     await user.click(formButton('Add Action'));
 
     const row = within(desktopQueue()).getByText('Withdraw USDC').closest('.action-queue-item') as HTMLElement;

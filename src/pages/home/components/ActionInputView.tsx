@@ -442,10 +442,14 @@ function getContent(
           }
         };
       }
+      // On the wrapped route, Max pays the direct supply and the wrapper's full exit, which is less
+      // than the balance by the wrapper's buffer. The input shows what Max pays, as its queue row
+      // does, and the action stays a maximum.
+      const maxWithdrawal = actionRules?.wrappedBase?.fullExitCash ?? earnBalance;
       onMaxButtonClicked = () => {
         setPendingActionAmount(MAX_UINT256);
         setMaxClicked(true);
-        setInput(stringFromBigInt(earnBalance, baseAsset.decimals));
+        setInput(stringFromBigInt(maxWithdrawal, baseAsset.decimals));
       };
       break;
     }
