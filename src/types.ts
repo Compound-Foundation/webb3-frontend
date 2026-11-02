@@ -584,6 +584,21 @@ export type AwaitingConfirmationTransaction = BaseTransaction & {
    * `@helpers/walletErrors`). Only the wording of the interrupted request reads it.
    */
   isPendingInWallet?: boolean;
+  /**
+   * For an interrupted Comet step of a withdrawal on the wrapped route, what tells whether it
+   * executed after all (`isHeldWithdrawalResolved` in `@helpers/wrappedPositions`).
+   */
+  heldWithdrawal?: HeldDirectWithdrawal;
+};
+/**
+ * A Comet base withdrawal on the wrapped route that the wallet had and answered with an ambiguous
+ * error, so it can still execute. Both figures are decimal strings, as storage keeps them.
+ */
+export type HeldDirectWithdrawal = {
+  /** `withdraw`'s amount in base units, or `MAX_UINT256` for the whole direct supply. */
+  amount: string;
+  /** The account's Comet principal, read just before the wallet was asked. */
+  principalBefore: string;
 };
 export type PendingTransaction = BaseTransaction & {
   state: TransactionState.Pending;

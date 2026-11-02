@@ -55,6 +55,7 @@ function App({ Component, pageProps }: any) {
     addTransaction,
     submitTransaction,
     clearTransactions,
+    releaseHeldDirectWithdrawal,
   } = useTransactionManager(web3);
   const rewardsState = useRewardsState(web3, transactions);
   const { theme, setTheme } = useThemeManager();
@@ -242,6 +243,10 @@ function App({ Component, pageProps }: any) {
     transactions,
     settledTransactions,
     removeAction: actionQueue.removeAction,
+    wallet: { provider: web3.write.provider, account: web3.write.account, chainId: web3.write.chainId },
+    market: marketIdentity,
+    restoredSession,
+    releaseHeldDirectWithdrawal,
   });
   const wrappedLending = {
     route: lendingRoute,

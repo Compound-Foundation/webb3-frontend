@@ -9,9 +9,17 @@ import ERC20Abi from '@helpers/abis/ERC20';
 import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
 import { lendsBaseDirectly } from '@helpers/actions';
 import { LendingRoute } from '@helpers/lendingRoute';
-import { getTokenValue } from '@helpers/numbers';
+import { getTokenValue, MAX_UINT256 } from '@helpers/numbers';
 import type { WithdrawalLimits } from '@helpers/wrappedWithdrawals';
-import { Action, BaseAssetWithAccountState, CometState, Currency, ProtocolAndAccountState, StateType } from '@types';
+import {
+  Action,
+  BaseAssetWithAccountState,
+  CometState,
+  Currency,
+  HeldDirectWithdrawal,
+  ProtocolAndAccountState,
+  StateType,
+} from '@types';
 
 /** The wrapper's divisor for Comet's supply index in its redeem buffer. */
 const BASE_INDEX_SCALE = 10n ** 15n;
@@ -328,22 +336,70 @@ export function isDirectWithdrawalRefused(live: LiveSubmissionState, submittedMa
 
 const cometInterface = new Interface(CometAbi);
 
+/** The account's direct Comet position at one block, as the Comet step's fresh read gives it. */
+export type DirectBaseState = {
+  /** `balanceOf`: the direct supply of the base token, in base units. Zero for a borrower. */
+  balance: bigint;
+  /** `userBasic(account).principal`, which interest does not change. Negative for a borrower. */
+  principal: bigint;
+  /** `totalsBasic().baseSupplyIndex`, as Comet last stored it. */
+  baseSupplyIndex: bigint;
+};
+
 /**
- * The account's direct Comet supply of the base token, in base units, at `blockNumber`. Comet's
- * `balanceOf` reports the supply only, and zero for a borrower. Read just before the wallet is asked
- * to sign a direct withdrawal, so a part is never more than the supply.
+ * The account's direct Comet supply of the base token at `blockNumber`: Comet's `balanceOf`, which
+ * reports the supply only and zero for a borrower, with the account's principal and the stored supply
+ * index from the same block. Read just before the wallet is asked to sign a direct withdrawal, so the
+ * withdrawal is split from the supply as it is, and so that a held one can be judged.
  */
-export async function readDirectBaseBalance(
+export async function readDirectBaseState(
   provider: Pick<JsonRpcProvider, 'call'>,
   cometAddress: string,
   account: string,
   blockNumber: number
-): Promise<bigint> {
-  const result = await provider.call(
-    { to: cometAddress, data: cometInterface.encodeFunctionData('balanceOf', [account]) },
-    blockNumber
-  );
-  return toBigInt(cometInterface.decodeFunctionResult('balanceOf', result)[0], 'directBaseBalance');
+): Promise<DirectBaseState> {
+  const read = (name: 'balanceOf' | 'userBasic' | 'totalsBasic', args: unknown[]) =>
+    provider
+      .call({ to: cometAddress, data: cometInterface.encodeFunctionData(name, args) }, blockNumber)
+      .then((result) => cometInterface.decodeFunctionResult(name, result));
+  const [balance, userBasic, totalsBasic] = await Promise.all([
+    read('balanceOf', [account]),
+    read('userBasic', [account]),
+    read('totalsBasic', []),
+  ]);
+  return {
+    balance: toBigInt(balance[0], 'directBaseBalance'),
+    principal: toBigInt(userBasic.principal, 'principal'),
+    baseSupplyIndex: toBigInt(totalsBasic[0].baseSupplyIndex, 'baseSupplyIndex'),
+  };
+}
+
+/** Comet's scale for its base supply index. */
+const COMET_BASE_INDEX_SCALE = 10n ** 15n;
+
+/**
+ * Whether a held direct withdrawal step (`HeldDirectWithdrawal`) is resolved by `now`, a read of the
+ * account's Comet position after the step was held. It is resolved once the account has no direct
+ * supply, since no Comet step is planned then and Comet's `withdraw` of a part would borrow, or once
+ * its principal has fallen since the step was held by at least the principal of the step's amount.
+ *
+ * The principal is compared rather than `balanceOf`, because a supply earns interest: after a
+ * withdrawal of `amount`, `balanceOf` can still be above the balance before it less `amount`. When
+ * the step executes at supply index `i`, Comet lowers the principal by at least `amount × 10^15 / i`,
+ * and `now.baseSupplyIndex` is at least `i`, so the test below is met once the step has executed.
+ * Comet rounds each conversion down, so a withdrawal by other means of one or two base units less
+ * than `amount` can meet it too. A step for the whole supply (`MAX_UINT256`), or one held without the figures, resolves only once
+ * the account has no direct supply.
+ */
+export function isHeldWithdrawalResolved(held: HeldDirectWithdrawal | undefined, now: DirectBaseState): boolean {
+  if (now.balance <= 0n) return true;
+  if (held === undefined || now.baseSupplyIndex <= 0n) return false;
+  const amount = BigInt(held.amount);
+  if (amount >= MAX_UINT256) return false;
+  const principalTaken = BigInt(held.principalBefore) - now.principal;
+  // Rounded up: the principal Comet takes is a whole number at least the exact quotient.
+  const scaled = amount * COMET_BASE_INDEX_SCALE;
+  return principalTaken >= (scaled + now.baseSupplyIndex - 1n) / now.baseSupplyIndex;
 }
 
 /**

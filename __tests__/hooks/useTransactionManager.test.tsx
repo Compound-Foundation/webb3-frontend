@@ -536,6 +536,150 @@ describe('useTransactionManager', () => {
     });
   });
 
+  describe('the Comet step of a split withdrawal on the wrapped route', () => {
+    const DIRECT_STEP = 'wrapped-route-direct-withdraw';
+    const HELD = { amount: '200000000', principalBefore: '238095238' };
+    const storedHeldStep = (overrides: Record<string, unknown> = {}) => ({
+      ...storedRecord('', { key: COMET, step: DIRECT_STEP }),
+      state: TransactionState.AwaitingConfirmation,
+      hash: undefined,
+      isInterrupted: true,
+      heldWithdrawal: HELD,
+      ...overrides,
+    });
+    const storedRecords = () => JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]');
+
+    async function sendDirectStep(result: { current: ReturnType<typeof useTransactionManager> }, error: unknown) {
+      let submission: SendResult | undefined;
+      await act(async () => {
+        submission = await result.current.submitTransaction({
+          key: COMET,
+          description: 'Withdraw USDC',
+          step: DIRECT_STEP,
+          heldWithdrawal: () => HELD,
+          send: async () => Promise.reject(error),
+        });
+      });
+      return submission;
+    }
+
+    it('stays, marked interrupted with what tells whether it executed, when the wallet stops waiting on it with 4900', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+
+      const submission = await sendDirectStep(result, STOPPED_WAITING);
+
+      expect(submission).toEqual({ status: 'pending-in-wallet', message: `${STOPPED_WAITING_MESSAGE} (4900)` });
+      const held = expect.objectContaining({
+        key: COMET,
+        step: DIRECT_STEP,
+        state: TransactionState.AwaitingConfirmation,
+        isInterrupted: true,
+        isPendingInWallet: true,
+        heldWithdrawal: HELD,
+      });
+      expect(result.current.transactions).toEqual([held]);
+      expect(storedRecords()).toEqual([held]);
+      // It has no hash to follow, so Comet refreshes run past it.
+      expect(delaysCometRefresh(result.current.transactions[0])).toBe(false);
+    });
+
+    it('is dropped when the user rejects it or the wallet refuses it before handling it', async () => {
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+
+      expect(await sendDirectStep(result, { code: 4001, message: 'User rejected.' })).toEqual({ status: 'rejected' });
+      expect(await sendDirectStep(result, UNAUTHORIZED)).toEqual({
+        status: 'refused',
+        message: 'Unauthorized (4100)',
+      });
+      expect(result.current.transactions).toEqual([]);
+      expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
+    });
+
+    it('is restored after a reload, held, whether it was held or its wallet request was open', async () => {
+      store([
+        storedHeldStep(),
+        storedHeldStep({ id: 'open-request', isInterrupted: undefined, heldWithdrawal: undefined }),
+      ]);
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
+
+      await waitFor(() =>
+        expect(result.current.transactions).toEqual([
+          expect.objectContaining({ step: DIRECT_STEP, isInterrupted: true, heldWithdrawal: HELD }),
+          expect.objectContaining({ id: 'open-request', step: DIRECT_STEP, isInterrupted: true }),
+        ])
+      );
+      expect(storedRecords()).toHaveLength(2);
+    });
+
+    it('stays when the list is cleared, while other transactions go', async () => {
+      store([storedHeldStep()]);
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 7 } })));
+      await waitFor(() => expect(result.current.transactions).toHaveLength(1));
+      await act(async () => {
+        await result.current.addTransaction(COMET, 'Borrow USDC', sent(tx('sent'), 7), 1, jest.fn(), []);
+      });
+
+      act(() => result.current.clearTransactions());
+
+      expect(result.current.transactions).toEqual([expect.objectContaining({ step: DIRECT_STEP })]);
+      expect(storedRecords()).toEqual([expect.objectContaining({ step: DIRECT_STEP })]);
+    });
+
+    it('is released only as a held direct withdrawal step', async () => {
+      store([storedHeldStep(), storedRecord(tx('pending'))]);
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider({ confirmedNonces: { [ACCOUNT]: 0 } })));
+      await waitFor(() => expect(result.current.transactions).toHaveLength(2));
+
+      act(() => result.current.releaseHeldDirectWithdrawal(`id-${tx('pending')}`));
+      expect(result.current.transactions).toHaveLength(2);
+
+      act(() => result.current.releaseHeldDirectWithdrawal('id-'));
+      expect(hashes(result.current.transactions)).toEqual([tx('pending')]);
+      expect(storedHashes()).toEqual([tx('pending')]);
+    });
+
+    it('is reported replaced only by its own nonce, never by the lower bound read before sending', async () => {
+      const chain: Chain = { confirmedNonces: { [ACCOUNT]: 7 } };
+      const { result, rerender } = renderManager(web3For(ACCOUNT, walletProvider(chain)));
+      await act(async () => {
+        await result.current.addTransaction(
+          COMET,
+          'Withdraw USDC',
+          sent(tx('withdraw'), null),
+          1,
+          jest.fn(),
+          [],
+          0n,
+          undefined,
+          { step: DIRECT_STEP }
+        );
+      });
+      expect(result.current.transactions).toEqual([
+        expect.objectContaining({ step: DIRECT_STEP, nonce: 7, nonceSource: 'lower-bound' }),
+      ]);
+
+      chain.confirmedNonces = { [ACCOUNT]: 8 };
+      const provider = walletProvider(chain);
+      rerender({ web3: web3For(ACCOUNT, provider) });
+      await waitFor(() => expect(provider.getTransactionReceipt).toHaveBeenCalled());
+      await settleLookups();
+      expect(hashes(result.current.transactions)).toEqual([tx('withdraw')]);
+      expect(result.current.settledTransactions).toEqual([]);
+    });
+
+    it.each<[string, Record<string, unknown>]>([
+      ['keyed to a Comet market with no wrapper', { key: '0x0000000000000000000000000000000000000cc3' }],
+      ['with a malformed amount', { heldWithdrawal: { amount: '-1', principalBefore: '0' } }],
+      ['with a principal that is not a number', { heldWithdrawal: { amount: '1', principalBefore: 'x' } }],
+    ])('is not restored %s', async (_name, overrides) => {
+      store([storedHeldStep(overrides)]);
+      const { result } = renderManager(web3For(ACCOUNT, walletProvider()));
+      await settleLookups();
+      expect(result.current.transactions).toEqual([]);
+      expect(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY)).toBe('[]');
+    });
+  });
+
   describe('after the wallet provider is rebuilt', () => {
     it('keeps looking up a pending transaction while the new provider detects its network', async () => {
       jest.useFakeTimers();

@@ -16,6 +16,7 @@ import { Web3 } from '@contexts/Web3Context';
 import { queueScope, submissionScope, WrappedLendingContext } from '@contexts/WrappedLendingContext';
 import CometAbi from '@helpers/abis/Comet';
 import { recordCometStateSource } from '@helpers/cometStateSource';
+import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
 import { LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
@@ -240,6 +241,11 @@ function readProviderFor(chain: Chain) {
 function withTotals(chain: Chain, provider: ReturnType<typeof readProviderFor>) {
   const read = provider.call.getMockImplementation();
   provider.call.mockImplementation(async (request: { from?: string; to?: string; data?: string }) => {
+    // The account's principal, which interest does not change: its direct supply at the supply index.
+    if (request.data?.startsWith(COMET.getSighash('userBasic')) && isSame(request.to, MARKET.cometAddress)) {
+      const principal = (chain.directSupply * 10n ** 15n) / chain.baseSupplyIndex;
+      return COMET.encodeFunctionResult('userBasic', [principal, 0n, 0n, 0n, 0n]);
+    }
     if (request.data?.startsWith(COMET.getSighash('totalsBasic')) && isSame(request.to, MARKET.cometAddress)) {
       return COMET.encodeFunctionResult('totalsBasic', [
         {
@@ -302,6 +308,7 @@ function walletFor(chain: Chain, chainId: number) {
     estimateGas: jest.fn(async () => BigNumber.from(100_000)),
     getNetwork: jest.fn(async () => ({ chainId, name: chainId === 1 ? 'homestead' : 'base' })),
     getTransactionCount: jest.fn(async () => 5),
+    getBlockNumber: jest.fn(async () => chain.block),
     getTransactionReceipt: jest.fn(async (hash: string) => {
       await receiptsReleased;
       return receipts.get(hash) ?? null;
@@ -389,13 +396,23 @@ type DashboardProps = {
   position?: WrappedPosition;
   /** False while another page is shown: App's hooks stay, and Home is unmounted. */
   isHomeShown?: boolean;
+  /** The market App's submission store is for. Another one is selected while another market is shown. */
+  storeMarket?: { chainId: number; cometAddress: string };
 };
 
 /**
  * The dashboard as App wires it: the transaction manager, the lifecycle and the wrapped writes,
  * the queue, and App's submission store, all through the fake wallets and provider.
  */
-function Dashboard({ wallets, readProvider, walletChainId, state, position, isHomeShown = true }: DashboardProps) {
+function Dashboard({
+  wallets,
+  readProvider,
+  walletChainId,
+  state,
+  position,
+  isHomeShown = true,
+  storeMarket = { chainId: 1, cometAddress: USDC_COMET },
+}: DashboardProps) {
   const wallet = wallets[walletChainId];
   const web3: Web3 = {
     ...mockWeb3,
@@ -425,13 +442,17 @@ function Dashboard({ wallets, readProvider, walletChainId, state, position, isHo
     connector: 'uid-1',
     status: 'connected',
   });
-  const market = { chainId: 1, cometAddress: USDC_COMET };
+  const market = storeMarket;
   const submission = useSubmissionStore({
     scope: submissionScope(web3.write, market),
     queueScope: queueScope(web3.write, market),
     transactions: manager.transactions,
     settledTransactions: manager.settledTransactions,
     removeAction: queue.removeAction,
+    wallet: { provider: web3.write.provider, account: web3.write.account, chainId: web3.write.chainId },
+    market,
+    restoredSession: manager.restoredSession,
+    releaseHeldDirectWithdrawal: manager.releaseHeldDirectWithdrawal,
   });
   live = { queue, manager, action };
   mockLastProps.readProvider = readProvider;
@@ -495,10 +516,16 @@ function renderDashboard(
     state: [StateType.Loading, undefined] as unknown as CometState,
     position,
   };
-  const view = render(<Dashboard {...props} />);
-  const show = (changes: Partial<DashboardProps>) => view.rerender(<Dashboard {...props} {...changes} state={state} />);
+  let view = render(<Dashboard {...props} />);
+  const show = (changes: Partial<DashboardProps>) => view.rerender(<Dashboard {...props} state={state} {...changes} />);
   show({});
-  return { wallet: wallets[1], show };
+  // A reload: App and every hook start again from what storage holds, with the same wallet.
+  const reload = (changes: Partial<DashboardProps> = {}) => {
+    view.unmount();
+    view = render(<Dashboard {...props} {...changes} />);
+    view.rerender(<Dashboard {...props} {...changes} state={state} />);
+  };
+  return { wallet: wallets[1], show, reload };
 }
 
 /**
@@ -924,12 +951,12 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
   /** A chain with the direct supply and the wrapped shares, and the dashboard showing both. */
   async function renderMixed() {
     const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
-    const { wallet, show } = renderDashboard(chain, {
+    const { wallet, show, reload } = renderDashboard(chain, {
       state: stateWithDirectSupply(DIRECT),
       position: positionOn(chain),
     });
     await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
-    return { chain, wallet, show };
+    return { chain, wallet, show, reload };
   }
 
   it.each([
@@ -1147,51 +1174,185 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(chain.directSupply).toBe(DIRECT);
   });
 
-  it.each<[string, (wallet: Wallet) => void]>([
-    [
-      'the wallet still holds it (Anchorage 4900, can still complete)',
-      (wallet) => {
-        wallet.sendUncheckedTransaction.mockImplementationOnce(async () =>
-          Promise.reject({ code: 4900, message: 'The request can still complete in the wallet.' })
-        );
-      },
-    ],
-    [
-      'another transaction took its nonce',
-      (wallet) => {
-        // The step is sent, but the node never shows a receipt for it, and the nonce has passed.
-        wallet.sendUncheckedTransaction.mockImplementationOnce(async () => `0x${'ab'.repeat(32)}`);
-        wallet.getTransactionCount.mockImplementationOnce(async () => 5).mockImplementation(async () => 6);
-      },
-    ],
-  ])(
-    'holds back every further Comet step once one can still execute because %s, so two partial withdrawals never borrow',
-    async (_name, makeUnresolved) => {
-      const { chain, wallet } = await renderMixed();
-      const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
-      act(() => live.queue.addOrUpdateAction(entry));
-      makeUnresolved(wallet);
+  /** Anchorage's answer to a request it still holds: it can still complete in the wallet. */
+  const answer4900 = (wallet: Wallet) =>
+    wallet.sendUncheckedTransaction.mockImplementationOnce(async () =>
+      Promise.reject({ code: 4900, message: 'The request can still complete in the wallet.' })
+    );
+  /** The held 200 USDC request executes after all, from the wallet, outside the app. */
+  const executeLate = (chain: Chain) => {
+    chain.directSupply -= 200_000_000n;
+    chain.balance += 200_000_000n;
+  };
+  const storedRecords = () => JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]');
 
-      await submit();
-      await waitFor(() => expect(queued()).toEqual([]));
-      await settle();
-      expect(requestedCalls(wallet)).toEqual(['withdraw']);
-      expect(live.manager.transactions).toEqual([]);
+  /** A 200 USDC withdrawal whose Comet step the wallet answers with 4900, then the same again, queued. */
+  async function holdFirstStep() {
+    const mixed = await renderMixed();
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
+    act(() => live.queue.addOrUpdateAction(entry));
+    answer4900(mixed.wallet);
+    await submit();
+    await waitFor(() => expect(queued()).toEqual([]));
+    await settle();
+    expect(requestedCalls(mixed.wallet)).toEqual(['withdraw']);
+    return { ...mixed, entry };
+  }
 
-      // The same partial amount again: the fresh read still shows 250 USDC, but nothing is sent.
-      act(() => live.queue.addOrUpdateAction(entry));
-      await submit();
-      await settle();
+  /** Submits `entry` again and checks that nothing reaches the wallet and the row says why. */
+  async function expectHeldBack(wallet: Wallet, chain: Chain, entry: Action) {
+    await submit();
+    await settle();
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(queued()).toEqual([entry]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+      action: [ActionType.Withdraw, expect.anything(), entry[2]],
+      label: 'Earlier Request Still Pending',
+    });
+    // Should the held request now execute, Comet takes 200 of the 250 USDC and lends nothing.
+    executeLate(chain);
+    expect(chain.borrowed).toBe(0n);
+  }
 
-      expect(requestedCalls(wallet)).toEqual(['withdraw']);
-      expect(queued()).toEqual([entry]);
-      expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
-        action: [ActionType.Withdraw, expect.anything(), entry[2]],
-        label: 'Earlier Request Still Pending',
-      });
-      expect(chain.borrowed).toBe(0n);
-    }
-  );
+  it("keeps a Comet step the wallet still holds (Anchorage 4900) in the manager's stored records, with what tells whether it executed", async () => {
+    const { chain } = await holdFirstStep();
+
+    // Not shown as a transaction to follow: the dashboard is free, and the next Comet step is held.
+    expect(positionCard().transaction).toBeUndefined();
+    expect(live.manager.transactions).toEqual([
+      expect.objectContaining({
+        key: USDC_COMET,
+        step: 'wrapped-route-direct-withdraw',
+        state: TransactionState.AwaitingConfirmation,
+        isInterrupted: true,
+        isPendingInWallet: true,
+        heldWithdrawal: {
+          amount: '200000000',
+          principalBefore: ((DIRECT * 10n ** 15n) / chain.baseSupplyIndex).toString(),
+        },
+      }),
+    ]);
+    expect(storedRecords()).toEqual([expect.objectContaining({ step: 'wrapped-route-direct-withdraw' })]);
+  });
+
+  it('holds back a second partial withdrawal after a 4900, so the two never borrow', async () => {
+    const { chain, wallet, entry } = await holdFirstStep();
+    act(() => live.queue.addOrUpdateAction(entry));
+    await expectHeldBack(wallet, chain, entry);
+  });
+
+  it('keeps the hold after a change of market and back', async () => {
+    const { chain, wallet, show, entry } = await holdFirstStep();
+    // USDT is selected, then USDC again: App's store follows the other market meanwhile.
+    show({
+      isHomeShown: false,
+      storeMarket: { chainId: 1, cometAddress: '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840' },
+    });
+    await settle();
+    show({ isHomeShown: true });
+    await settle();
+    act(() => live.queue.addOrUpdateAction(entry));
+    await expectHeldBack(wallet, chain, entry);
+  });
+
+  it('keeps the hold when the row is removed and added again, or edited', async () => {
+    const { chain, wallet, entry } = await holdFirstStep();
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 150_000_000n]));
+    act(() => live.queue.removeAction([ActionType.Withdraw, BASE_ASSET, 150_000_000n]));
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 100_000_000n]));
+    // Edited to the same 200 USDC.
+    act(() => live.queue.addOrUpdateAction(entry));
+    await expectHeldBack(wallet, chain, entry);
+  });
+
+  it('keeps the hold across a reload, from what storage holds', async () => {
+    const { chain, wallet, reload, entry } = await holdFirstStep();
+    reload();
+    // The manager restores the stored step for this account and chain before anything is sent.
+    await waitFor(() => expect(live.manager.restoredSession).toBeDefined());
+    await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
+    act(() => live.queue.addOrUpdateAction(entry));
+    await expectHeldBack(wallet, chain, entry);
+  });
+
+  it('keeps the hold when the transaction list is cleared', async () => {
+    const { chain, wallet, entry } = await holdFirstStep();
+    act(() => live.manager.clearTransactions());
+    await settle();
+    act(() => live.queue.addOrUpdateAction(entry));
+    await expectHeldBack(wallet, chain, entry);
+  });
+
+  it('ends the hold once a fresh read shows the held request executed, and then sends the next Comet step', async () => {
+    const { chain, wallet, entry } = await holdFirstStep();
+    executeLate(chain);
+    // 30 USDC more: within the 50 USDC the direct supply still holds.
+    const next: Action = [ActionType.Withdraw, BASE_ASSET, 30_000_000n];
+    act(() => live.queue.addOrUpdateAction(next));
+
+    await submit();
+    await waitFor(() => expect(queued()).toEqual([]));
+
+    expect(cometWithdrawals(wallet).map(({ args }) => args[1])).toEqual([entry[2], 30_000_000n]);
+    expect(live.manager.transactions).toEqual([]);
+    expect(storedRecords()).toEqual([]);
+    expect(chain.directSupply).toBe(20_000_000n);
+    expect(chain.borrowed).toBe(0n);
+  });
+
+  it('ends the hold once the Comet state is read again and the held request has executed', async () => {
+    const { chain, show } = await holdFirstStep();
+    executeLate(chain);
+    // useCometState reads the account again, and finds 50 USDC.
+    show({ state: stateWithDirectSupply(50_000_000n) });
+    await waitFor(() => expect(live.manager.transactions).toEqual([]));
+    expect(storedRecords()).toEqual([]);
+  });
+
+  it('ends the hold once the account has no direct supply, so no Comet step is planned', async () => {
+    const { chain, show } = await holdFirstStep();
+    chain.directSupply = 0n;
+    show({ state: stateWithDirectSupply(0n) });
+    await waitFor(() => expect(live.manager.transactions).toEqual([]));
+  });
+
+  it('keeps the hold while the supply earns interest and the held request has not executed', async () => {
+    const { chain, wallet, entry } = await holdFirstStep();
+    // The supply grows, and so its balance, but its principal stays: nothing executed.
+    chain.baseSupplyIndex += 10n ** 12n;
+    act(() => live.queue.addOrUpdateAction(entry));
+    await submit();
+    await settle();
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+      action: [ActionType.Withdraw, expect.anything(), entry[2]],
+      label: 'Earlier Request Still Pending',
+    });
+    expect(live.manager.transactions).toHaveLength(1);
+  });
+
+  it('sends the next Comet step once another transaction took the nonce of the last, which can then no longer execute', async () => {
+    const { chain, wallet } = await renderMixed();
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
+    act(() => live.queue.addOrUpdateAction(entry));
+    // The step is sent, but the node never shows a receipt for it, and its own nonce has passed.
+    wallet.sendUncheckedTransaction.mockImplementationOnce(async () => `0x${'ab'.repeat(32)}`);
+    wallet.getTransaction.mockImplementation(async () => ({ nonce: 5 } as never));
+    wallet.getTransactionCount.mockImplementationOnce(async () => 5).mockImplementation(async () => 6);
+
+    await submit();
+    await waitFor(() => expect(queued()).toEqual([]));
+    await settle();
+    expect(live.manager.transactions).toEqual([]);
+    expect(live.manager.settledTransactions.map(({ outcome }) => outcome.status)).toEqual(['replaced']);
+
+    act(() => live.queue.addOrUpdateAction(entry));
+    await submit();
+    await waitFor(() => expect(queued()).toEqual([]));
+
+    expect(cometWithdrawals(wallet).map(({ args }) => args[1])).toEqual([entry[2], entry[2]]);
+    expect(chain.borrowed).toBe(0n);
+  });
 
   it('sends nothing when the session changes while the direct supply is read again', async () => {
     const { chain, wallet, show } = await renderMixed();

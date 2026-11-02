@@ -6,7 +6,7 @@ import type { WrappedActionType } from '@helpers/wrappedActions';
 import { IDLE_WRAPPED_ACTION, WrappedActionController, WrappedActionState } from '@hooks/useWrappedAction';
 import { WrappedPositionState } from '@hooks/useWrappedPosition';
 import { IDLE_WRITE_WRAPPED_STATE, WriteWrappedState } from '@hooks/useWriteWrappedState';
-import type { Action } from '@types';
+import type { Action, AwaitingConfirmationTransaction } from '@types';
 
 /**
  * A wrapper action the dashboard started, and what became of it:
@@ -70,17 +70,22 @@ export type SentWrapperAction = {
 };
 
 /**
- * The Comet step of the account's last split withdrawal on the wrapped route, while it matters to
- * the next one. It belongs to the `queueScope` it was sent in, which leaves out the wallet's network.
- * - `unresolved`: the wallet had the request and answered with an error, or another transaction took
- *   its nonce, so it can still execute. No further Comet step is sent in its scope: two partial
- *   withdrawals could together take more than the direct supply, and Comet would borrow the rest.
- * - `confirmed`: it executed in block `blockNumber`. A later Comet step's fresh read is of that block
- *   or a newer one, so a read provider behind the wallet's node cannot show the supply it took.
+ * The block a confirmed Comet step of a split withdrawal on the wrapped route executed in, or the
+ * block the wallet's node had when another transaction took its nonce. A later Comet step's fresh
+ * read in the same `queueScope` is of that block or a newer one, so a read provider behind the
+ * wallet's node cannot show the supply the step took. It is kept in memory across a change of scope,
+ * and a return to the scope finds it again.
  */
-export type DirectStepRecord =
-  | { scope: string; status: 'unresolved' }
-  | { scope: string; status: 'confirmed'; blockNumber: number };
+export type DirectStepRecord = { scope: string; blockNumber: number };
+
+/**
+ * The Comet steps of split withdrawals that can still execute, for the connected account on the
+ * selected market (`isHeldDirectWithdrawal` in `@hooks/useTransactionManager`). They are the
+ * transaction manager's stored records, so they survive a reload, a change of market and Clear.
+ * `isKnown` is false until the manager has restored the live wallet session's stored records, while
+ * `held` can still lack one sent before a reload.
+ */
+export type DirectStepHold = { isKnown: boolean; held: readonly AwaitingConfirmationTransaction[] };
 
 /**
  * The account, connector, connection status and market the queue belongs to. The wallet's network
@@ -127,9 +132,13 @@ export type SubmissionStore = {
   /** The wrapper action submitted from the queue, until what became of its last step is known. */
   sent: SentWrapperAction | undefined;
   setSent: (sent: SentWrapperAction | undefined) => void;
-  /** The Comet step of the last split withdrawal, in the current `queueScope`. */
+  /** Where the last confirmed Comet step of a split withdrawal executed, in the current `queueScope`. */
   directStep: DirectStepRecord | undefined;
   setDirectStep: (record: DirectStepRecord | undefined) => void;
+  /** The Comet steps of split withdrawals that can still execute, for this account and market. */
+  directHold: DirectStepHold;
+  /** Ends the hold of a step in `directHold.held`, once Home has found it resolved. */
+  releaseHeldDirectStep: (id: string) => void;
 };
 
 /**
@@ -161,6 +170,8 @@ export const STANDARD_LENDING: WrappedLending = Object.freeze({
     setSent: () => undefined,
     directStep: undefined,
     setDirectStep: () => undefined,
+    directHold: { isKnown: true, held: [] },
+    releaseHeldDirectStep: () => undefined,
   },
 });
 
