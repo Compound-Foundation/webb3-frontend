@@ -1,7 +1,6 @@
 import { Interface } from '@ethersproject/abi';
 import { hexZeroPad } from '@ethersproject/bytes';
 import type { JsonRpcProvider } from '@ethersproject/providers';
-import { v4 as uuidv4 } from 'uuid';
 
 import CometAbi from '@helpers/abis/Comet';
 import { BlockWait, DEFAULT_BLOCK_WAIT, waitForBlock } from '@helpers/wrappedPositions';
@@ -124,6 +123,15 @@ const isForKey = (record: HoldRecord, key: HoldKey) =>
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** A random id for a record, a tab or a lock's owner. */
+function randomId(): string {
+  const { crypto } = globalThis;
+  if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 /** How long the storage lock is held at most, and how long a tab waits for it. */
 const STORAGE_LOCK_LEASE_MS = 10_000;
 const STORAGE_LOCK_WAIT_MS = 10_000;
@@ -156,7 +164,7 @@ export function createHoldStore({
 }: HoldStoreOptions = {}) {
   // Made when first needed, so that loading the module makes no id.
   let ownTabId = tabId;
-  const currentTabId = () => (ownTabId ??= uuidv4());
+  const currentTabId = () => (ownTabId ??= randomId());
   /** Every well-formed stored record, or undefined when storage cannot be read. */
   const readAll = (): HoldRecord[] | undefined => {
     try {
@@ -186,7 +194,7 @@ export function createHoldStore({
   /** A lock through storage, for a browser without the Web Locks API. Throws if it cannot be taken. */
   const withStorageLock = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
     const lockKey = `${DIRECT_WITHDRAWAL_HOLDS_KEY}:lock:${name}`;
-    const owner = uuidv4();
+    const owner = randomId();
     const ownerOf = () => {
       const raw = storage().getItem(lockKey);
       if (raw === null) return undefined;
@@ -247,7 +255,7 @@ export function createHoldStore({
         const reservation: DirectWithdrawalReservation = {
           ...key,
           kind: 'reserved',
-          id: uuidv4(),
+          id: randomId(),
           tabId: currentTabId(),
           expiresAt: now() + RESERVATION_LEASE_MS,
         };

@@ -16,10 +16,6 @@ import {
 } from '@helpers/directWithdrawalHold';
 import { MAX_UINT256 } from '@helpers/numbers';
 
-// uuid ships ESM only, which Jest does not load here.
-let mockNextId = 0;
-jest.mock('uuid', () => ({ v4: () => `id-${++mockNextId}` }));
-
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER = '0x0000000000000000000000000000000000000bb2';
 const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
@@ -46,7 +42,6 @@ function sharedStorage() {
 }
 
 beforeEach(() => {
-  mockNextId = 0;
   jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
 afterEach(() => jest.restoreAllMocks());
