@@ -5,11 +5,16 @@ import '@testing-library/jest-dom';
 
 import { TransactionHistoryItem } from '@types';
 
+import { MockMarketsProvider } from '../../../../__tests__/mocks/mockMarkets';
 import { mockBulkTransaction, mockLiquidationTransaction } from '../../../../__tests__/mocks/mockTransactions';
 import BulkTransaction from '../components/BulkTransaction';
 
 const renderBulkTransaction = (transaction: TransactionHistoryItem) => {
-  return render(<BulkTransaction transaction={transaction} account={'0x123'} index={1} />);
+  return render(
+    <MockMarketsProvider>
+      <BulkTransaction transaction={transaction} account={'0x123'} index={1} />
+    </MockMarketsProvider>
+  );
 };
 
 describe('Bulk Transaction', () => {

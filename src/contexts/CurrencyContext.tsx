@@ -2,9 +2,9 @@ import { Context, createContext, Dispatch, ReactNode, SetStateAction, useContext
 import { useSearchParams } from 'react-router';
 
 import { MARKET_LOCAL_STORAGE_KEY, PREFERRED_CURRENCY_KEY } from '@helpers/constants';
-import { getMarkets, DEFAULT_MARKET } from '@helpers/markets';
+import { useMarkets } from '@hooks/useMarkets';
 import { parseMarketKeyOrDefault } from '@hooks/useSelectedMarket';
-import { Currency, MarketData } from '@types';
+import { Currency, MarketData, StateType } from '@types';
 
 type CurrencyManagerContext = {
   currency: Currency;
@@ -91,17 +91,20 @@ export const CurrencyContextProvider = ({ children }: { children: ReactNode | Re
   const [pressDownAnimate, setPressDownAnimate] = useState(false);
   const [pressUpAnimate, setPressUpAnimate] = useState(false);
   const [showCurrencyToggle, updateShowCurrencyToggle] = useState(false);
-  const getPreferredCurrency = () => {
-    const market = getMarketData();
-    return loadPreferredCurrency(market);
-  };
+  const [marketsStateType, marketsState] = useMarkets();
 
-  const getMarketData = () => {
+  const marketData = (() => {
+    if (marketsStateType !== StateType.Hydrated) return undefined;
     const marketKey = searchParams.get('market') ?? window.localStorage.getItem(MARKET_LOCAL_STORAGE_KEY);
-    return parseMarketKeyOrDefault(getMarkets(true), DEFAULT_MARKET, marketKey);
+    return parseMarketKeyOrDefault(marketsState.markets, marketsState.defaultMarket, marketKey);
+  })();
+
+  const getPreferredCurrency = () => {
+    // Until the market list loads there is no market to derive the currency from
+    return marketData !== undefined ? loadPreferredCurrency(marketData) : initialCurrencyManagerContext.currency;
   };
 
-  const baseAssetSymbol = getMarketData().baseAsset.symbol;
+  const baseAssetSymbol = marketData?.baseAsset.symbol ?? initialCurrencyManagerContext.baseAssetSymbol;
   const preferredCurrency = getPreferredCurrency() as Currency;
 
   const [currency, setCurrency] = useState<Currency>(preferredCurrency);
@@ -114,18 +117,16 @@ export const CurrencyContextProvider = ({ children }: { children: ReactNode | Re
     setCurrency(preferredCurrency);
   }
 
-  const [counterCurrency, setCounterCurrency] = useState<Currency>(getCounterCurrency(currency, baseAssetSymbol));
+  const counterCurrency = getCounterCurrency(currency, baseAssetSymbol);
 
   // toggle between baseAsset and $, within the same market
   const toggleCurrency = (currency: Currency): void => {
     // toggle between base asset  and usd
     if (currency === baseAssetSymbol) {
       setCurrency(Currency.USD);
-      setCounterCurrency(baseAssetSymbol);
       window.localStorage.setItem(PREFERRED_CURRENCY_KEY, Currency.USD);
     } else {
       setCurrency(baseAssetSymbol as Currency);
-      setCounterCurrency(Currency.USD);
       window.localStorage.setItem(PREFERRED_CURRENCY_KEY, baseAssetSymbol as Currency);
     }
   };

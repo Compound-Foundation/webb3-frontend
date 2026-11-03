@@ -2,8 +2,9 @@ import { assetIconForAssetSymbol } from '@helpers/assets';
 import { getMarketDescriptors } from '@helpers/markets';
 import { formatUnitsWithTruncation } from '@helpers/numbers';
 import { getBlockExplorerUrlForTransactionHistory } from '@helpers/urls';
+import { useMarkets } from '@hooks/useMarkets';
 import { convertTransactionTypeToPassiveVerb, shortenAddress } from '@hooks/useTransactionHistory';
-import { HistoryItemType, TransactionActionType, TransactionHistoryItem } from '@types';
+import { HistoryItemType, StateType, TransactionActionType, TransactionHistoryItem } from '@types';
 
 import { CircleMinus, CirclePlus, CircleRightArrow, ExternalLink } from './Icons';
 import { SimpleLink } from './SimpleLink';
@@ -84,6 +85,8 @@ export type WalletTrxHistoryRowProps = {
   trxHistoryItem: TransactionHistoryItem;
 };
 export const WalletTrxHistoryRow = ({ connectedAccount, trxHistoryItem }: WalletTrxHistoryRowProps) => {
+  const [marketsStateType, marketsState] = useMarkets();
+  const markets = marketsStateType === StateType.Hydrated ? marketsState.markets : [];
   const { transactionHash, itemType, actions, initiatedBy, network } = trxHistoryItem;
   const { chainId } = network;
   const initiatedBySuffix =
@@ -161,7 +164,7 @@ export const WalletTrxHistoryRow = ({ connectedAccount, trxHistoryItem }: Wallet
           <ExternalLink className={`svg--icon--3 wallet-trx-history-row__external-link`} />
         </div>
         <span className="meta L4 text-color--2">
-          {getMarketDescriptors(address, chainId).join(' ')} {initiatedBySuffix}
+          {getMarketDescriptors(markets, address, chainId).join(' ')} {initiatedBySuffix}
         </span>
       </div>
     </a>

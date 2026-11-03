@@ -22,6 +22,19 @@
     }
   }
 
+  &__unavailable-label-container {
+    padding: 0 1rem;
+    height: 2.75rem;
+    display: flex;
+    align-items: center;
+    border-radius: 0.5rem;
+    background: $red--90;
+  }
+
+  &__unavailable-label {
+    color: $red--30;
+  }
+
   &__selected-market {
     align-items: center;
     background: none;
@@ -67,6 +80,14 @@
     width: 100%;
     text-transform: none;
 
+    .icon-disabled {
+      opacity: 0.3;
+    }
+
+    .tooltip-container {
+      margin-left: auto;
+    }
+
     .new-badge {
       margin-left: 0.375rem;
     }
@@ -91,6 +112,16 @@
       }
     }
 
+    &__exclamation {
+      display: flex;
+      margin-left: auto;
+    }
+
+    &__exclamation-icon {
+      width: 0.875rem;
+      height: 0.875rem;
+    }
+
     .icon + .market-selector__option__info {
       margin-left: 0.5rem;
     }
@@ -103,6 +134,15 @@
     &--arrow {
       margin-left: 0.75rem;
     }
+  }
+
+  &__tooltip-text {
+    font-weight: 400;
+    line-height: 1rem;
+    font-size: 11px;
+    width: 100%;
+    max-width: 10.125rem;
+    display: block;
   }
 
   @media (max-width: $device--sm) {

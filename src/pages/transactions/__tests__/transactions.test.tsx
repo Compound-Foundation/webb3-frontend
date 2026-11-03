@@ -6,13 +6,16 @@ import { Web3 } from '@contexts/Web3Context';
 import { Transaction } from '@types';
 
 import TransactionHistory from '..';
+import { MockMarketsProvider } from '../../../../__tests__/mocks/mockMarkets';
 import { mockUnitTransactionTransfer } from '../../../../__tests__/mocks/mockTransactions';
 import { mockWeb3, mockWeb3NoWallet } from '../../../../__tests__/mocks/mockWeb3';
 
-const renderTransactionsPage = (transactions: Transaction[], web3: Web3) => {
+const renderTransactionsPage = (transactions: Transaction[], web3: Web3, marketsLoading = false) => {
   return render(
     <MemoryRouter initialEntries={['?market=usdc-mainnet']}>
-      <TransactionHistory transactions={transactions} web3={web3}></TransactionHistory>
+      <MockMarketsProvider isLoading={marketsLoading}>
+        <TransactionHistory transactions={transactions} web3={web3}></TransactionHistory>
+      </MockMarketsProvider>
     </MemoryRouter>
   );
 };
@@ -43,6 +46,12 @@ describe('Transaction History Page', () => {
     expect(await screen.getAllByLabelText('Transaction loader').length).toBe(5);
     expect(await screen.getAllByLabelText('Transaction title loader').length).toBe(5);
     expect(await screen.getAllByLabelText('Transaction description loader').length).toBe(5);
+  });
+
+  test('renders the loading state while the market list is loading', async () => {
+    renderTransactionsPage([] as Transaction[], mockWeb3NoWallet, true);
+    expect(screen.getAllByLabelText('Transaction loader').length).toBe(5);
+    expect(screen.queryByText('No wallet connected')).not.toBeInTheDocument();
   });
 
   test('renders Transaction History no wallet', async () => {

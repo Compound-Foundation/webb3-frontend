@@ -1,14 +1,18 @@
 import { getMarketDescriptors } from '@helpers/markets';
-import { HistoryItemType, TransactionHistoryItem } from '@types';
+import { useMarkets } from '@hooks/useMarkets';
+import { HistoryItemType, StateType, TransactionHistoryItem } from '@types';
 
 import BulkTransaction from './BulkTransaction';
 import UnitTransaction from './UnitTransaction';
 
-export const renderMarketDescriptorElement = (address: string, chainId: number) => {
+export const MarketDescriptor = ({ address, chainId }: { address: string; chainId: number }) => {
+  const [marketsStateType, marketsState] = useMarkets();
+  const markets = marketsStateType === StateType.Hydrated ? marketsState.markets : [];
+  const [assetSymbol, chainName] = getMarketDescriptors(markets, address, chainId);
   return (
     <>
-      <span className="meta L3">{getMarketDescriptors(address, chainId)[0]} </span>
-      {getMarketDescriptors(address, chainId)[1]}
+      <span className="meta L3">{assetSymbol} </span>
+      {chainName}
     </>
   );
 };

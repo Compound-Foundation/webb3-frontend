@@ -6,12 +6,14 @@ import type { QueueSession } from '@hooks/useActionQueue';
 import { GasEstimateScope, useGasEstimates } from '@hooks/useGasEstimates';
 import { MarketData } from '@types';
 
+import { MOCK_MARKETS } from '../mocks/mockMarkets';
+
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000bb2';
 const SESSION: QueueSession = { account: ACCOUNT, connector: 'connector-uid-1', status: 'connected' };
-const MAINNET_USDC = getMarket(1, '0xc3d688B66703497DAA19211EEdff47f25384cdc3') as MarketData;
-const MAINNET_ETH = getMarket(1, '0xA17581A9E3356d9A858b789D68B4d866e593aE94') as MarketData;
-const POLYGON_USDC = getMarket(137, '0xF25212E676D1F7F89Cd72fFEe66158f541246445') as MarketData;
+const MAINNET_USDC = getMarket(MOCK_MARKETS, 1, '0xc3d688B66703497DAA19211EEdff47f25384cdc3') as MarketData;
+const MAINNET_ETH = getMarket(MOCK_MARKETS, 1, '0xA17581A9E3356d9A858b789D68B4d866e593aE94') as MarketData;
+const POLYGON_USDC = getMarket(MOCK_MARKETS, 137, '0xF25212E676D1F7F89Cd72fFEe66158f541246445') as MarketData;
 const SCOPE: GasEstimateScope = { session: SESSION, walletChainId: 1, market: MAINNET_USDC };
 
 const BORROW_KEY = ':borrow-USDC-1000000000';
