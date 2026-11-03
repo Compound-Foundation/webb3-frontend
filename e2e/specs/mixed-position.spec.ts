@@ -541,6 +541,7 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     blocked,
     wallet,
     fork,
+    lane,
   }) => {
     test.setTimeout(300_000);
     const account = getAddress(await selectedAccount(wallet, '1000'));
@@ -561,6 +562,7 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
       appOrigin,
       wallet,
       blocked,
+      lane: lane.index,
       harnessWallet: METAMASK_WALLET,
     });
     try {
