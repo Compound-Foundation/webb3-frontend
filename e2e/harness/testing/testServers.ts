@@ -3,6 +3,7 @@
 import http from 'node:http';
 
 export type Call = { method: string; params: unknown[]; headers: http.IncomingHttpHeaders };
+/** Answers one call. A handler can return a promise, to delay its answer or never answer. */
 export type Handler = (params: unknown[]) => unknown;
 
 export type FakeNode = {
@@ -19,21 +20,22 @@ export function startFakeNode(handlers: Record<string, Handler> = {}): Promise<F
   const server = http.createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => {
+    request.on('end', async () => {
       const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null');
-      const answer = (call: { id?: unknown; method: string; params?: unknown[] }) => {
+      const answer = async (call: { id?: unknown; method: string; params?: unknown[] }) => {
         calls.push({ method: call.method, params: call.params ?? [], headers: request.headers });
         const handler = table.get(call.method);
         if (handler === undefined)
           return { jsonrpc: '2.0', id: call.id, error: { code: -32601, message: `no ${call.method}` } };
         try {
-          return { jsonrpc: '2.0', id: call.id, result: handler(call.params ?? []) };
+          return { jsonrpc: '2.0', id: call.id, result: await handler(call.params ?? []) };
         } catch (error) {
           return { jsonrpc: '2.0', id: call.id, error: { code: -32000, message: (error as Error).message } };
         }
       };
+      const body = Array.isArray(parsed) ? await Promise.all(parsed.map(answer)) : await answer(parsed);
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify(Array.isArray(parsed) ? parsed.map(answer) : answer(parsed)));
+      response.end(JSON.stringify(body));
     });
   });
   return new Promise((resolve) =>
@@ -47,8 +49,8 @@ export function startFakeNode(handlers: Record<string, Handler> = {}): Promise<F
             server.closeAllConnections();
             server.close(() => done());
           }),
-      })
-    )
+      }),
+    ),
   );
 }
 

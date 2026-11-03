@@ -81,14 +81,14 @@ function raw(
   path: string,
   headers: Record<string, string>,
   method = 'GET',
-  body?: string
+  body?: string,
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const request = http.request({ host: '127.0.0.1', port: wallet.port, path, method, headers }, (response) => {
       const chunks: Buffer[] = [];
       response.on('data', (chunk: Buffer) => chunks.push(chunk));
       response.on('end', () =>
-        resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') })
+        resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }),
       );
     });
     request.on('error', reject);
@@ -228,7 +228,7 @@ describe('the request queue', () => {
     expect(node.calls.every((call) => call.headers.host === new URL(node.url).host)).toBe(true);
     const events = await client.events(0);
     expect(events.events.map((event) => [event.type, event.data])).toEqual(
-      expect.arrayContaining([['chainChanged', '0x2105']])
+      expect.arrayContaining([['chainChanged', '0x2105']]),
     );
     // Off chain 1, the wallet forwards no read and sends nothing.
     expect(await client.walletRpc(ORIGIN, 'eth_blockNumber', [])).toEqual({
@@ -385,7 +385,7 @@ describe('checks on each request', () => {
   test('answers a send only once anvil has mined it, because anvil 1.9.0 answers before it mines', async () => {
     let polls = 0;
     node.handlers.set('eth_getTransactionReceipt', () =>
-      ++polls < 3 ? null : { transactionHash: `0x${'ab'.repeat(32)}`, status: '0x1' }
+      ++polls < 3 ? null : { transactionHash: `0x${'ab'.repeat(32)}`, status: '0x1' },
     );
     const address = await connectedAccount();
     const sending = client.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: address, to: address }]);
@@ -404,7 +404,7 @@ describe('checks on each request', () => {
       return `0x${'ab'.repeat(32)}`;
     });
     node.handlers.set('eth_getTransactionReceipt', () =>
-      ++pollsSinceSend < 2 ? null : { transactionHash: `0x${'ab'.repeat(32)}`, status: '0x1' }
+      ++pollsSinceSend < 2 ? null : { transactionHash: `0x${'ab'.repeat(32)}`, status: '0x1' },
     );
     const address = await connectedAccount();
     const sends = [0, 1].map(() => client.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: address, to: address }]));
@@ -416,7 +416,7 @@ describe('checks on each request', () => {
     const methods = node.calls
       .map((call) => call.method)
       .filter((method) =>
-        ['evm_setNextBlockTimestamp', 'eth_sendTransaction', 'eth_getTransactionReceipt'].includes(method)
+        ['evm_setNextBlockTimestamp', 'eth_sendTransaction', 'eth_getTransactionReceipt'].includes(method),
       );
     expect(methods).toEqual([
       'evm_setNextBlockTimestamp',
@@ -429,6 +429,14 @@ describe('checks on each request', () => {
       'eth_getTransactionReceipt',
     ]);
   });
+
+  /** The node's `anvil_dropTransaction` calls, read after they arrive: the wallet does not wait for the drop. */
+  const drops = async () => {
+    const dropCalls = () => node.calls.filter((call) => call.method === 'anvil_dropTransaction');
+    for (let attempt = 0; attempt < 50 && dropCalls().length === 0; attempt += 1)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    return dropCalls().map((call) => call.params);
+  };
 
   test('a send that anvil does not mine in time fails, and the page gets an error, not the hash', async () => {
     const quick = await startWalletServer({
@@ -453,13 +461,13 @@ describe('checks on each request', () => {
       expect('result' in answer).toBe(false);
       expect(JSON.stringify(answer)).toContain('was not mined within 0.3 s');
       // anvil may still mine it, so the wallet refuses every later send until a reset, and sends nothing.
-      expect(node.calls.filter((call) => call.method === 'anvil_dropTransaction').map((call) => call.params)).toEqual([
-        [`0x${'ab'.repeat(32)}`],
-      ]);
+      expect(await drops()).toEqual([[`0x${'ab'.repeat(32)}`]]);
       const sent = node.calls.filter((call) => call.method === 'eth_sendTransaction').length;
       const second = quickClient.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: address, to: address }]);
       await quickClient.approve((await quickClient.waitForRequest({ method: 'eth_sendTransaction' })).id);
-      expect(JSON.stringify(await second)).toContain('a send timed out, so the fork state is unknown until a reset');
+      expect(JSON.stringify(await second)).toContain(
+        'a send was not confirmed, so the fork state is unknown until a reset',
+      );
       expect(node.calls.filter((call) => call.method === 'eth_sendTransaction')).toHaveLength(sent);
       await quickClient.reset();
       node.handlers.set('eth_getTransactionReceipt', () => ({
@@ -477,6 +485,96 @@ describe('checks on each request', () => {
     } finally {
       await quick.close();
     }
+  });
+
+  /** Runs `check` against a wallet whose mining wait is 300 ms, with one connected harness account. */
+  const withQuickWallet = async (check: (quickClient: ControlClient, address: string) => Promise<void>) => {
+    const quick = await startWalletServer({
+      fork: { localUrl: node.url },
+      target: { number: FORK_BLOCK, hash: FORK_HASH },
+      upstreamUrl: UPSTREAM_URL,
+      token: TOKEN,
+      screening,
+      mineTimeoutMs: 300,
+    });
+    const quickClient = new ControlClient(quick.url, TOKEN);
+    try {
+      const { address } = await quickClient.newAccount({ usdc: '0' });
+      await quickClient.select(address);
+      const permission = quickClient.walletRpc(ORIGIN, 'wallet_requestPermissions', [{ eth_accounts: {} }]);
+      await quickClient.approve((await quickClient.waitForRequest({ method: 'wallet_requestPermissions' })).id);
+      await permission;
+      await check(quickClient, address);
+    } finally {
+      await quick.close();
+    }
+  };
+
+  /** Sends from `address`, approves the send and returns the page's answer with the time it took after approval. */
+  const timedSend = async (quickClient: ControlClient, address: string) => {
+    const sending = quickClient.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: address, to: address }]);
+    const { id } = await quickClient.waitForRequest({ method: 'eth_sendTransaction' });
+    const approvedAt = Date.now();
+    await quickClient.approve(id);
+    const answer = await sending;
+    return { answer, elapsedMs: Date.now() - approvedAt };
+  };
+
+  test('a send whose receipt read fails gets an error, and later sends are refused until a reset succeeds', async () => {
+    node.handlers.set('eth_getTransactionReceipt', () => {
+      throw new Error('connection reset');
+    });
+    await withQuickWallet(async (quickClient, address) => {
+      const { answer } = await timedSend(quickClient, address);
+      expect('result' in answer).toBe(false);
+      expect(JSON.stringify(answer)).toContain('connection reset');
+      const sent = node.calls.filter((call) => call.method === 'eth_sendTransaction').length;
+      node.handlers.set('eth_getTransactionReceipt', () => ({
+        transactionHash: `0x${'ab'.repeat(32)}`,
+        status: '0x1',
+      }));
+      const second = await timedSend(quickClient, address);
+      expect(JSON.stringify(second.answer)).toContain('the fork state is unknown until a reset');
+      // A reset that fails keeps the refusal, for a new account too.
+      node.handlers.set('anvil_reset', () => {
+        throw new Error('upstream unavailable');
+      });
+      await expect(quickClient.reset()).rejects.toThrow();
+      const { address: fresh } = await quickClient.newAccount({ usdc: '0' });
+      await quickClient.select(fresh);
+      const permission = quickClient.walletRpc(ORIGIN, 'wallet_requestPermissions', [{ eth_accounts: {} }]);
+      await quickClient.approve((await quickClient.waitForRequest({ method: 'wallet_requestPermissions' })).id);
+      await permission;
+      const third = await timedSend(quickClient, fresh);
+      expect(JSON.stringify(third.answer)).toContain('the fork state is unknown until a reset');
+      expect(node.calls.filter((call) => call.method === 'eth_sendTransaction')).toHaveLength(sent);
+    });
+  });
+
+  test('a receipt that arrives after the mining wait is not accepted, and the page hears within the wait', async () => {
+    node.handlers.set(
+      'eth_getTransactionReceipt',
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ transactionHash: `0x${'ab'.repeat(32)}`, status: '0x1' }), 1_500),
+        ),
+    );
+    await withQuickWallet(async (quickClient, address) => {
+      const { answer, elapsedMs } = await timedSend(quickClient, address);
+      expect(JSON.stringify(answer)).toContain('was not mined within 0.3 s');
+      expect(elapsedMs).toBeLessThan(1_000);
+    });
+  });
+
+  test('the page hears of a mining timeout without waiting for anvil to drop the transaction', async () => {
+    node.handlers.set('eth_getTransactionReceipt', () => null);
+    node.handlers.set('anvil_dropTransaction', () => new Promise(() => undefined));
+    await withQuickWallet(async (quickClient, address) => {
+      const { answer, elapsedMs } = await timedSend(quickClient, address);
+      expect(JSON.stringify(answer)).toContain('was not mined within 0.3 s');
+      expect(elapsedMs).toBeLessThan(1_000);
+      expect(await drops()).toEqual([[`0x${'ab'.repeat(32)}`]]);
+    });
   });
 
   test('refuses to send when the node is not the expected fork, and sends nothing', async () => {
@@ -505,17 +603,17 @@ describe('checks on each request', () => {
   ])('the real fork check refuses a node with %s', async (_, overrides) => {
     const other = await startFakeNode(anvilHandlers(overrides));
     await expect(verifyFork({ localUrl: other.url }, { number: FORK_BLOCK, hash: FORK_HASH })).rejects.toThrow(
-      'not the expected fork'
+      'not the expected fork',
     );
     await other.close();
   });
 
   test('the real fork check refuses a node that is not on 127.0.0.1', async () => {
     await expect(
-      verifyFork({ localUrl: 'http://192.0.2.1:8545' }, { number: FORK_BLOCK, hash: FORK_HASH })
+      verifyFork({ localUrl: 'http://192.0.2.1:8545' }, { number: FORK_BLOCK, hash: FORK_HASH }),
     ).rejects.toThrow('127.0.0.1');
     await expect(
-      verifyFork({ localUrl: 'https://eth.example' }, { number: FORK_BLOCK, hash: FORK_HASH })
+      verifyFork({ localUrl: 'https://eth.example' }, { number: FORK_BLOCK, hash: FORK_HASH }),
     ).rejects.toThrow('127.0.0.1');
   });
 });
@@ -548,8 +646,8 @@ describe('signing', () => {
         typed.domain,
         { Check: typed.types.Check },
         typed.message,
-        (signature as { result: string }).result
-      )
+        (signature as { result: string }).result,
+      ),
     ).toBe(address);
     const wrongChain = await client.walletRpc(ORIGIN, 'eth_signTypedData_v4', [
       address,
@@ -597,7 +695,7 @@ describe('reset', () => {
     expect(await pending).toEqual({ error: { code: 4900, message: 'harness: the wallet was reset' } });
     await expect(client.approve(request.id)).rejects.toThrow('404');
     expect(
-      node.calls.filter((call) => call.method === 'anvil_stopImpersonatingAccount').map((call) => call.params)
+      node.calls.filter((call) => call.method === 'anvil_stopImpersonatingAccount').map((call) => call.params),
     ).toEqual([[address.toLowerCase()]]);
     // anvil_reset to the fork block from the harness's upstream proxy, named again so that a reset by
     // another process to another upstream does not outlast the test. The wallet takes no snapshot.
@@ -615,7 +713,7 @@ describe('reset', () => {
         permittedOrigin: null,
         selected: [],
         accounts: [],
-      })
+      }),
     );
     // The old account is no longer a harness account, so nothing can be sent from it.
     await expect(client.forkSend({ from: address, to: address })).rejects.toThrow('400');
@@ -647,7 +745,7 @@ test('a request record holds what tests assert', async () => {
       selectedAccount: address,
       status: 'pending',
       generation: 0,
-    })
+    }),
   );
   expect(screening.behaviours.get(address.toLowerCase())).toBe('allowed');
   await client.reject(request.id);
