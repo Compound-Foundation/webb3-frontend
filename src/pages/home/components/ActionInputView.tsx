@@ -37,6 +37,9 @@ const SINGLE_ACTION_HINT =
 const UPDATE_ALLOWANCE_STRING =
   'This amount exceeds the allowance you previously set for this asset. You will be asked to approve an increase when you add this action.';
 
+const directSupplyHelperText = (amount: string, symbol: string) =>
+  `${amount} ${symbol} of this balance is supplied to Comet directly. Withdraw takes it out first, then the rest through the wrapper, each in its own transaction.`;
+
 type ActionInputViewProps = {
   actions: Action[];
   baseAsset: BaseAssetWithAccountState;
@@ -427,6 +430,12 @@ function getContent(
       title = `Withdraw ${baseAsset.symbol}`;
       modifier = 'withdraw';
       availableAmount = formatValue(baseAsset.decimals, earnBalance);
+      // On the wrapped route, part of the balance can be a direct Comet supply, which Withdraw takes
+      // first. While withdrawals are closed the form says so instead.
+      const directSupply = actionRules?.wrappedBase?.directSupply ?? 0n;
+      if (directSupply > 0n && actionRules?.wrappedBase?.withdrawBlockedReason === undefined) {
+        actionHintString = directSupplyHelperText(formatValue(baseAsset.decimals, directSupply), baseAsset.symbol);
+      }
 
       if (maybeBigIntInputValue !== undefined && maybeBigIntInputValue > 0n) {
         ({ modifier, titleAdditionalContent, confirmButtonDisabled } = _validateAmount(maybeBigIntInputValue));
@@ -437,10 +446,14 @@ function getContent(
           }
         };
       }
+      // On the wrapped route, Max pays the direct supply and the wrapper's full exit, which is less
+      // than the balance by the wrapper's buffer. The input shows what Max pays, as its queue row
+      // does, and the action stays a maximum.
+      const maxWithdrawal = actionRules?.wrappedBase?.fullExitCash ?? earnBalance;
       onMaxButtonClicked = () => {
         setPendingActionAmount(MAX_UINT256);
         setMaxClicked(true);
-        setInput(stringFromBigInt(earnBalance, baseAsset.decimals));
+        setInput(stringFromBigInt(maxWithdrawal, baseAsset.decimals));
       };
       break;
     }
