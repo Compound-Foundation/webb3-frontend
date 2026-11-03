@@ -324,6 +324,20 @@ describe('validateAddingAction with base lending through the wrapper', () => {
   const supply = (amount: bigint) => mockBaseAction({ actionType: ActionType.Supply, amount });
   const withdraw = (amount: bigint) => mockBaseAction({ actionType: ActionType.Withdraw, amount });
 
+  it('takes a withdrawal of up to the direct supply and what the wrapper pays, with the limit Home works out', () => {
+    // 250 USDC supplied to Comet directly, beside a wrapped position that pays 2,000 USDC.
+    const mixed: ActionRules = {
+      wrappedBase: { ...OPEN_BASE, maxPartialWithdrawal: 2_250_000_000n, directSupply: 250_000_000n },
+    };
+    const base = noAllowance({ balance: 250_000_000n });
+    expect(validateAddingAction(base, collateralAssetsPre(), [], withdraw(2_250_000_000n), mixed)).toBe('ok');
+    expect(validateAddingAction(base, collateralAssetsPre(), [], withdraw(100_000_000n), mixed)).toBe('ok');
+    expect(validateAddingAction(base, collateralAssetsPre(), [], withdraw(2_250_000_001n), mixed)).toEqual([
+      false,
+      'Amount Exceeds Withdrawable Balance',
+    ]);
+  });
+
   it("checks a base supply against the allowance to the wrapper, not Comet's", () => {
     const action = supply(1_000_000_000n);
     const withWrapperAllowance = (supplyAllowance: bigint | undefined): ActionRules => ({
@@ -628,6 +642,15 @@ describe('lendsBaseDirectly', () => {
       mockBaseAction({ actionType: ActionType.Repay, amount: MAX_UINT256 }),
     ];
     expect(lendsBaseDirectly(mockBaseAsset({ balance: -10000000000n }), collateralAssetsPre(), actions)).toBe(false);
+  });
+
+  it('finds a borrow while a direct supply remains, which Comet withdraws before it borrows', () => {
+    const borrow = [mockBaseAction({ actionType: ActionType.Borrow, amount: 1_000_000_000n })];
+    expect(lendsBaseDirectly(mockBaseAsset({ balance: 250_000_000n }), collateralAssetsPre(), borrow)).toBe(true);
+    expect(lendsBaseDirectly(mockBaseAsset({ balance: 1n }), collateralAssetsPre(), borrow)).toBe(true);
+    // No direct supply, or a borrow already, leaves nothing for the borrow to withdraw first.
+    expect(lendsBaseDirectly(mockBaseAsset({ balance: 0n }), collateralAssetsPre(), borrow)).toBe(false);
+    expect(lendsBaseDirectly(mockBaseAsset({ balance: -10n }), collateralAssetsPre(), borrow)).toBe(false);
   });
 });
 
