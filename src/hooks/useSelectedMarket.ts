@@ -143,11 +143,15 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
       stateType === StateType.Loading
     ) {
       try {
-        const state = await getState(web3.read.provider.connection, market);
+        const [hydratedType, hydratedMarket] = await getState(web3.read.provider.connection, market);
         // Only update state if market key has not changed since the start of this callback
         // We compare to a ref because the `market` in the callback can be stale
         if (marketKey(market) === marketRef.current) {
-          setState(state);
+          // The market list may have refreshed the statuses while this request ran
+          setState(([, latest]) => [
+            hydratedType,
+            { ...hydratedMarket, status: latest?.status, collaterals: latest?.collaterals },
+          ]);
           setIsError(false);
         }
       } catch (e) {
