@@ -161,6 +161,22 @@ describe('useSubmissionStore', () => {
     expect(result.current.sent).toBeUndefined();
   });
 
+  it("keeps where a split withdrawal's Comet step executed for its queue's scope, and finds it again on a return", () => {
+    const { result, rerender } = renderStore();
+    act(() => result.current.setDirectStep({ scope: 'queue-scope', blockNumber: 101 }));
+    expect(result.current.directStep).toEqual({ scope: 'queue-scope', blockNumber: 101 });
+
+    rerender({ scope: 'scope-on-base' });
+    expect(result.current.directStep).toEqual({ scope: 'queue-scope', blockNumber: 101 });
+
+    // Another market is selected: the record is not for it.
+    rerender({ queueScope: 'other-market' });
+    expect(result.current.directStep).toBeUndefined();
+    // Back on the market, the next fresh read still waits for the block.
+    rerender({ queueScope: 'queue-scope' });
+    expect(result.current.directStep).toEqual({ scope: 'queue-scope', blockNumber: 101 });
+  });
+
   it('drops a sent action with the queue, after a change of account, connector, connection or market', () => {
     const { result, rerender, removeAction } = renderStore({ transactions: [pending()] });
     act(() => result.current.setSent(SENT));
