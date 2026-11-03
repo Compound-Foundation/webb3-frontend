@@ -1015,14 +1015,48 @@ export function promoteForkCache({
 }
 
 /**
+ * `startCacheableProxy`, with the proxy's stop registered through `addStop` as soon as it listens. Stops run
+ * in the reverse order of registration, so anvil, whose stop is registered after this one, stops while the
+ * proxy still holds the fixed port: no other process can take the port and answer anvil's last reads. The
+ * stop is idempotent, so the failure path can call it too.
+ */
+export async function startHeldProxy(
+  endpoint: Endpoint,
+  {
+    printable,
+    cachePort,
+    addStop,
+  }: {
+    printable: (text: unknown) => string;
+    cachePort?: number;
+    addStop: (stop: { name: string; run: () => Promise<void> }) => void;
+  }
+) {
+  const { proxy, offReason } = await startCacheableProxy(endpoint, { printable, cachePort });
+  let isStopped = false;
+  const stopProxy = async () => {
+    if (isStopped) return;
+    isStopped = true;
+    proxy.server.closeAllConnections();
+    await new Promise<void>((resolve) => proxy.server.close(() => resolve()));
+  };
+  addStop({ name: 'upstream proxy', run: stopProxy });
+  return { proxy, offReason, stopProxy };
+}
+
+/**
  * `promoteForkCache` after the root passes `checkCacheRoot` again. It never throws: a failed check or a file
  * system error becomes the promotion's reason. A file system error is named by its code alone, because its
  * message names the paths, and with them the user name.
  */
 export function promoteSafely({
   cacheRoot,
+  isProxyListening,
   ...promotion
-}: Parameters<typeof promoteForkCache>[0] & { cacheRoot: string }): Promotion {
+}: Parameters<typeof promoteForkCache>[0] & { cacheRoot: string; isProxyListening: boolean }): Promotion {
+  // A proxy that no longer listened when anvil stopped had freed the fixed port, and another process could
+  // have answered anvil's last reads there.
+  if (!isProxyListening) return { isPromoted: false, reason: 'the upstream proxy stopped before anvil' };
   try {
     checkCacheRoot(cacheRoot);
   } catch {

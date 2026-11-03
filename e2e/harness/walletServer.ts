@@ -306,9 +306,19 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     await call('evm_setNextBlockTimestamp', [hex(Number(latest.timestamp) + BLOCK_SECONDS)]);
   };
 
+  /**
+   * The generation in which a send timed out. anvil can still mine a transaction it has begun to execute after
+   * it was dropped, so the fork state is unknown until the next reset, and every later send in the generation
+   * is refused.
+   */
+  let unknownForkGeneration: number | undefined;
+
   /** Sends a transaction from an impersonated harness account on the verified fork. */
   const sendOnFork = (transaction: Record<string, unknown>) =>
     serially(async () => {
+      if (unknownForkGeneration === generation) {
+        throw new WalletError(-32603, 'harness: a send timed out, so the fork state is unknown until a reset');
+      }
       await verifiedFork();
       const from = transaction.from as string;
       if (!impersonated.has(from.toLowerCase()))
@@ -341,8 +351,11 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     const deadline = Date.now() + timeoutMs;
     while ((await call<unknown>('eth_getTransactionReceipt', [hash])) === null) {
       if (Date.now() > deadline) {
-        // Dropped from the pool, so that it cannot be mined later in the test after the page was told it failed.
-        await call('anvil_dropTransaction', [hash]).catch(() => undefined);
+        unknownForkGeneration = generation;
+        // Dropped from the pool when anvil has not begun to execute it. One it has begun can still be mined.
+        await call('anvil_dropTransaction', [hash]).catch((error) =>
+          log(`dropping ${hash} failed: ${(error as Error)?.message ?? error}`)
+        );
         throw new Error(`transaction ${hash} was not mined within ${timeoutMs / 1000} s`);
       }
       await new Promise((resolve) => setTimeout(resolve, 50));

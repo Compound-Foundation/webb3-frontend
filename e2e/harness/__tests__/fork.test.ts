@@ -14,6 +14,7 @@ import {
   isCacheAnvil,
   promoteSafely,
   startCacheableProxy,
+  startHeldProxy,
   anvilCacheFile,
   checkCacheRoot,
   createRedactor,
@@ -762,6 +763,7 @@ describe('promotion at teardown', () => {
       methods: ALWAYS_LOGGED_METHODS,
       hasExitedCleanly: true,
       anvilVersion: 'anvil Version: 1.9.0-stable',
+      isProxyListening: true,
     });
 
   test('checks the root again, and names only that it failed', () => {
@@ -780,5 +782,38 @@ describe('promotion at teardown', () => {
 
   test('promotes when the root passes', () => {
     expect(promote()).toEqual({ isPromoted: true, reason: 'promoted' });
+  });
+
+  test('refuses when the upstream proxy no longer held its port when anvil stopped', () => {
+    expect(
+      promoteSafely({
+        cacheRoot: root,
+        runHome,
+        sharedFile: sharedCacheFile(root, 'public', BLOCK),
+        blockNumber: BLOCK,
+        forkUrl: FORK_URL,
+        methods: ALWAYS_LOGGED_METHODS,
+        hasExitedCleanly: true,
+        anvilVersion: 'anvil Version: 1.9.0-stable',
+        isProxyListening: false,
+      })
+    ).toEqual({ isPromoted: false, reason: 'the upstream proxy stopped before anvil' });
+  });
+});
+
+describe('the held proxy', () => {
+  const endpoint = { label: 'test', url: 'http://127.0.0.1:9/', isPrivate: false, secretPatterns: [] };
+
+  test("registers its stop as soon as it listens, so a stop registered later, as anvil's is, runs while it still listens", async () => {
+    const stops: { name: string; run: () => Promise<void> | void }[] = [];
+    const held = await startHeldProxy(endpoint, { printable: String, addStop: (stop) => stops.push(stop) });
+    expect(stops.map((stop) => stop.name)).toEqual(['upstream proxy']);
+    let wasListeningAtAnvilStop: boolean | undefined;
+    stops.push({ name: 'anvil', run: () => void (wasListeningAtAnvilStop = held.proxy.server.listening) });
+    for (const stop of [...stops].reverse()) await stop.run();
+    expect(wasListeningAtAnvilStop).toBe(true);
+    expect(held.proxy.server.listening).toBe(false);
+    // A second stop, as on the failure path, does nothing.
+    await held.stopProxy();
   });
 });

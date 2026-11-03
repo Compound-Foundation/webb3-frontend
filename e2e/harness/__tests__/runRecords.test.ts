@@ -145,3 +145,33 @@ test("recovery stops a cached run's anvil only when it still runs in the recorde
   other.kill('SIGKILL');
   for (const directory of [runs, tools, killedCwd, otherCwd]) fs.rmSync(directory, { recursive: true, force: true });
 });
+
+test('recovery stops an orphan whose working directory was removed, and not an anvil in another directory', async () => {
+  const runs = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-runs-'));
+  const tools = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-tools-'));
+  const fakeAnvil = path.join(tools, 'anvil');
+  fs.writeFileSync(fakeAnvil, '#!/bin/sh\nsleep 60\n', { mode: 0o755 });
+  const removedCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-browser-anvil-'));
+  const otherCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-browser-anvil-'));
+  const recordedCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-browser-anvil-'));
+  const forkArgs = ['--fork-url', 'http://127.0.0.1:18546/'];
+  const orphan = spawn(fakeAnvil, forkArgs, { stdio: 'ignore', cwd: removedCwd });
+  const other = spawn(fakeAnvil, forkArgs, { stdio: 'ignore', cwd: otherCwd });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  fs.rmSync(removedCwd, { recursive: true, force: true });
+  const write = (run: string, record: object) => {
+    fs.mkdirSync(path.join(runs, run));
+    fs.writeFileSync(path.join(runs, run, 'processes.json'), JSON.stringify(record));
+  };
+  const base = { runnerPid: deadPid(), upstreamProxyPort: 18546, privateDir: '/tmp/none' };
+  write('removed', { ...base, anvilPid: orphan.pid, anvilCwd: removedCwd });
+  // Another session's cached anvil, in a directory that exists but is not the recorded one.
+  write('other', { ...base, anvilPid: other.pid, anvilCwd: recordedCwd });
+  const done = recoverKilledRuns(runs);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(done).toContain(`stopped anvil ${orphan.pid} of run removed`);
+  expect(isAlive(orphan.pid as number)).toBe(false);
+  expect(isAlive(other.pid as number)).toBe(true);
+  other.kill('SIGKILL');
+  for (const directory of [runs, tools, otherCwd, recordedCwd]) fs.rmSync(directory, { recursive: true, force: true });
+});

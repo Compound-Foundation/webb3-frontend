@@ -452,10 +452,28 @@ describe('checks on each request', () => {
       const answer = await sending;
       expect('result' in answer).toBe(false);
       expect(JSON.stringify(answer)).toContain('was not mined within 0.3 s');
-      // The transaction is dropped from anvil's pool, so it cannot be mined later in the test.
+      // anvil may still mine it, so the wallet refuses every later send until a reset, and sends nothing.
       expect(node.calls.filter((call) => call.method === 'anvil_dropTransaction').map((call) => call.params)).toEqual([
         [`0x${'ab'.repeat(32)}`],
       ]);
+      const sent = node.calls.filter((call) => call.method === 'eth_sendTransaction').length;
+      const second = quickClient.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: address, to: address }]);
+      await quickClient.approve((await quickClient.waitForRequest({ method: 'eth_sendTransaction' })).id);
+      expect(JSON.stringify(await second)).toContain('a send timed out, so the fork state is unknown until a reset');
+      expect(node.calls.filter((call) => call.method === 'eth_sendTransaction')).toHaveLength(sent);
+      await quickClient.reset();
+      node.handlers.set('eth_getTransactionReceipt', () => ({
+        transactionHash: `0x${'ab'.repeat(32)}`,
+        status: '0x1',
+      }));
+      const { address: fresh } = await quickClient.newAccount({ usdc: '0' });
+      await quickClient.select(fresh);
+      const again = quickClient.walletRpc(ORIGIN, 'wallet_requestPermissions', [{ eth_accounts: {} }]);
+      await quickClient.approve((await quickClient.waitForRequest({ method: 'wallet_requestPermissions' })).id);
+      await again;
+      const afterReset = quickClient.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: fresh, to: fresh }]);
+      await quickClient.approve((await quickClient.waitForRequest({ method: 'eth_sendTransaction' })).id);
+      expect(await afterReset).toEqual({ result: `0x${'ab'.repeat(32)}` });
     } finally {
       await quick.close();
     }

@@ -45,6 +45,14 @@ export const isRecordedAnvil = (command: string, record: ProcessRecord) =>
  * The working directory of the process `pid`, as `lsof` reads it, or undefined when it cannot be read.
  */
 function processCwd(pid: number): string | undefined {
+  // Linux names a removed directory with a ` (deleted)` suffix; lsof gives its last path.
+  if (fs.existsSync(`/proc/${pid}/cwd`)) {
+    try {
+      return fs.readlinkSync(`/proc/${pid}/cwd`).replace(/ \(deleted\)$/, '');
+    } catch {
+      return undefined;
+    }
+  }
   try {
     const output = execFileSync('lsof', ['-b', '-w', '-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {
       encoding: 'utf8',
@@ -67,11 +75,12 @@ const runsInRecordedCwd = (pid: number, record: ProcessRecord) => {
   if (record.anvilCwd === undefined) return true;
   const cwd = processCwd(pid);
   if (cwd === undefined) return false;
+  // The parent is resolved, not the directory, which the run's anvil may outlive: its `mkdtemp` name is new for
+  // each run, so the match stays unique.
   let recorded = record.anvilCwd;
   try {
-    recorded = fs.realpathSync(recorded);
+    recorded = path.join(fs.realpathSync(path.dirname(recorded)), path.basename(recorded));
   } catch {
-    // A directory that is gone cannot be the process's working directory.
     return false;
   }
   return cwd === recorded || cwd === record.anvilCwd;

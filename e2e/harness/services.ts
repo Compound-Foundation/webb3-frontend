@@ -43,8 +43,8 @@ import {
   promoteSafely,
   recordLoggedMethods,
   sharedCacheFile,
-  startCacheableProxy,
   startFork,
+  startHeldProxy,
   startUpstreamProxy,
   stopChild,
   toolVersion,
@@ -308,19 +308,14 @@ export async function startServices({
         continue;
       }
       // A cached fork needs the proxy at its fixed port, so that the fork URL, and with it anvil's cache
-      // file, is the same in every run.
-      const { proxy, offReason } = await startCacheableProxy(endpoint, { printable: redactor.printable, cachePort });
-      // The proxy's stop is registered before anvil starts, so the teardown stops anvil first. The proxy holds
-      // the fixed port until anvil has written its cache, and no other process can take the port to answer
-      // anvil in between.
-      let isProxyStopped = false;
-      const stopProxy = async () => {
-        if (isProxyStopped) return;
-        isProxyStopped = true;
-        proxy.server.closeAllConnections();
-        await new Promise<void>((resolve) => proxy.server.close(() => resolve()));
-      };
-      addStop({ name: 'upstream proxy', run: stopProxy });
+      // file, is the same in every run. The proxy's stop is registered before anvil starts, so the teardown
+      // stops anvil first.
+      const { proxy, offReason, stopProxy } = await startHeldProxy(endpoint, {
+        printable: redactor.printable,
+        cachePort,
+        addStop,
+      });
+      ensureRunning();
       const trust: CacheTrust = endpoint.isPrivate ? 'private' : 'public';
       const blockNumber = target.number;
       const forkUrl = proxy.url;
@@ -340,6 +335,7 @@ export async function startServices({
         cache = reason === undefined ? { state: 'off' } : { state: 'off', reason };
       }
       anvilMethods.clear();
+      ensureRunning();
       try {
         let child: Parameters<typeof stopChild>[0] | undefined;
         fork = await startFork({
@@ -364,18 +360,17 @@ export async function startServices({
                 // Only the anvil that became the run's verified fork, after it wrote its cache on SIGTERM, and
                 // only while this run's proxy still held the fixed port, so that nothing else answered anvil.
                 if (spawned === forkChild && cacheRoot !== undefined && sharedFile !== undefined) {
-                  cachePromotion = !proxy.server.listening
-                    ? { isPromoted: false, reason: 'the upstream proxy stopped before anvil' }
-                    : promoteSafely({
-                        cacheRoot,
-                        runHome,
-                        sharedFile,
-                        blockNumber,
-                        forkUrl,
-                        methods: anvilMethods,
-                        hasExitedCleanly: spawned.exitCode === 0,
-                        anvilVersion: anvil.version,
-                      });
+                  cachePromotion = promoteSafely({
+                    cacheRoot,
+                    runHome,
+                    sharedFile,
+                    blockNumber,
+                    forkUrl,
+                    methods: anvilMethods,
+                    hasExitedCleanly: spawned.exitCode === 0,
+                    anvilVersion: anvil.version,
+                    isProxyListening: proxy.server.listening,
+                  });
                 }
               },
             });
