@@ -42,6 +42,51 @@ export const isRecordedAnvil = (command: string, record: ProcessRecord) =>
   command.includes(`--fork-url http://127.0.0.1:${record.upstreamProxyPort}/`);
 
 /**
+ * The working directory of the process `pid`, as `lsof` reads it, or undefined when it cannot be read.
+ */
+function processCwd(pid: number): string | undefined {
+  // Linux names a removed directory with a ` (deleted)` suffix; lsof gives its last path.
+  if (fs.existsSync(`/proc/${pid}/cwd`)) {
+    try {
+      return fs.readlinkSync(`/proc/${pid}/cwd`).replace(/ \(deleted\)$/, '');
+    } catch {
+      return undefined;
+    }
+  }
+  try {
+    const output = execFileSync('lsof', ['-b', '-w', '-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {
+      encoding: 'utf8',
+    });
+    return output
+      .split('\n')
+      .find((line) => line.startsWith('n'))
+      ?.slice(1);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether the process `pid` still runs in the recorded anvil working directory, or the record has none. Every
+ * cached run forks from the same proxy URL, so only the directory, which is new for each run, tells two cached
+ * runs' anvils apart. A directory that cannot be read does not match.
+ */
+const runsInRecordedCwd = (pid: number, record: ProcessRecord) => {
+  if (record.anvilCwd === undefined) return true;
+  const cwd = processCwd(pid);
+  if (cwd === undefined) return false;
+  // The parent is resolved, not the directory, which the run's anvil may outlive: its `mkdtemp` name is new for
+  // each run, so the match stays unique.
+  let recorded = record.anvilCwd;
+  try {
+    recorded = path.join(fs.realpathSync(path.dirname(recorded)), path.basename(recorded));
+  } catch {
+    return false;
+  }
+  return cwd === recorded || cwd === record.anvilCwd;
+};
+
+/**
  * Stops the anvil and removes the private directory of each earlier run whose runner is gone, as after the
  * runner was killed with SIGKILL. Returns what it did, for the log.
  */
@@ -68,7 +113,7 @@ export function recoverKilledRuns(runsDir = RUNS_DIR): string[] {
       } catch {
         command = '';
       }
-      if (isRecordedAnvil(command, record)) {
+      if (isRecordedAnvil(command, record) && runsInRecordedCwd(record.anvilPid, record)) {
         process.kill(record.anvilPid, 'SIGKILL');
         done.push(`stopped anvil ${record.anvilPid} of run ${run}`);
       } else {
