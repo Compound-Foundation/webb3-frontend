@@ -380,7 +380,19 @@ export async function startServices({
     const envDir = emptyEnvDir(directory);
     const apiUrl = v3ApiUrl();
     const baseEnvironment = {
-      VITE_V3_RPC_PROVIDER_HOST: rpcProxy.host,
+      VITE_SEPOLIA_URL: `https://${rpcProxy.host}/ethereum-sepolia`,
+      VITE_MAINNET_URL: `https://${rpcProxy.host}/ethereum-mainnet`,
+      VITE_POLYGON_URL: `https://${rpcProxy.host}/polygon-mainnet`,
+      VITE_ARBITRUM_URL: `https://${rpcProxy.host}/arbitrum-mainnet`,
+      VITE_SCROLL_URL: `https://${rpcProxy.host}/scroll-mainnet`,
+      VITE_OPTIMISM_URL: `https://${rpcProxy.host}/optimism-mainnet`,
+      VITE_AVALANCHE_URL: `https://${rpcProxy.host}/avalanche-mainnet`,
+      VITE_FUJI_URL: `https://${rpcProxy.host}/avalanche-fuji`,
+      VITE_BASE_MAINNET_URL: `https://${rpcProxy.host}/base-mainnet`,
+      VITE_MANTLE_URL: `https://${rpcProxy.host}/mantle-mainnet`,
+      VITE_LINEA_URL: `https://${rpcProxy.host}/linea-mainnet`,
+      VITE_UNICHAIN_URL: `https://${rpcProxy.host}/unichain-mainnet`,
+      VITE_RONIN_URL: `https://${rpcProxy.host}/ronin-mainnet`,
       ...(apiUrl === undefined ? {} : { VITE_V3_API_HOST: apiUrl }),
     };
     let production: Manifest['production'];

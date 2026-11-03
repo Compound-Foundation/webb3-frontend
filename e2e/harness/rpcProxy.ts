@@ -1,5 +1,5 @@
-// The HTTPS JSON-RPC proxy that the app's RPC URLs point at. `envVars.ts` builds every RPC URL as
-// `https://${VITE_V3_RPC_PROVIDER_HOST}/<network>`, so the harness sets that host to this proxy's address.
+// The HTTPS JSON-RPC proxy that the app's RPC URLs point at. The harness sets each
+// per-network VITE_*_URL to this proxy with its network route.
 // `/ethereum-mainnet` goes to the local anvil fork, for reads only. Every other network answers a JSON-RPC
 // error: the harness forks Ethereum alone and has no other-chain passthrough.
 import https from 'node:https';
@@ -27,6 +27,7 @@ export const APP_READ_METHODS: ReadonlySet<string> = new Set([
   'eth_maxPriorityFeePerGas',
 ]);
 
+// Works with active RPC proxies initiated by `node-provider-proxy` Cloudflare worker.
 export const FORK_ROUTE = '/ethereum-mainnet';
 export const MAX_RPC_BODY_BYTES = 10 * 1024 * 1024;
 
