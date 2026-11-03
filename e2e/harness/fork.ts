@@ -12,7 +12,7 @@
 //   (`isLogArray`). The proxy reads at most 64 MB of any answer.
 // - anvil starts with `--accounts 0`, so it holds no unlocked account and can sign nothing.
 // - The harness runs anvil 1.9.0, and a fork of the pinned block reuses the state earlier runs read
-//   (`loadForkCache`, `promoteForkCache`).
+//   (`loadForkCache`, `promoteLaneCaches`).
 // - The matrix, verdict and retry rules of the wrapped lending suite are left out.
 import { ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -401,7 +401,7 @@ export function withheldMessage(message: unknown): string {
 export const methodName = (method: unknown) =>
   typeof method === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(method) ? method : '<invalid>';
 
-export const countIn = (counts: Map<string, number>, key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
+export const countIn = <Key>(counts: Map<Key, number>, key: Key) => counts.set(key, (counts.get(key) ?? 0) + 1);
 
 type Entry = { id?: unknown; result?: unknown; error?: RpcError | null };
 
@@ -558,6 +558,10 @@ export type UpstreamStats = {
   errorAnswers: number;
   firstError: string | undefined;
   pending: number;
+  /** The most requests open to the upstream at once. */
+  peakPending: number;
+  /** The requests started in each second, by the second since the epoch. */
+  perSecond: Map<number, number>;
   lastFailureAt: number | undefined;
   methods: Map<string, number>;
   refused: Map<string, number>;
@@ -583,6 +587,8 @@ export function startUpstreamProxy(
     errorAnswers: 0,
     firstError: undefined,
     pending: 0,
+    peakPending: 0,
+    perSecond: new Map(),
     lastFailureAt: undefined,
     methods: new Map(),
     refused: new Map(),
@@ -636,6 +642,8 @@ export function startUpstreamProxy(
       for (const method of methods) countIn(stats.methods, method);
       stats.requests += 1;
       stats.pending += 1;
+      stats.peakPending = Math.max(stats.peakPending, stats.pending);
+      countIn(stats.perSecond, Math.floor(Date.now() / 1000));
       try {
         const upstream = await fetch(endpoint.url, {
           method: 'POST',
@@ -945,8 +953,6 @@ export function recordLoggedMethods(text: string, methods: Set<string>): void {
   }
 }
 
-export type Promotion = { isPromoted: boolean; reason: string };
-
 /**
  * Whether `version`, anvil's `--version` line, is anvil 1.9.0, whose cache format, reset and method log the
  * cache relies on. An earlier anvil cannot read the cache file.
@@ -962,56 +968,273 @@ export const ALWAYS_LOGGED_METHODS = ['eth_chainId', 'anvil_metadata'];
 /** The most method names a promotion's reason lists. */
 const MAX_LISTED_METHODS = 5;
 
+/** What one lane's anvil left for the promotion: its home, its log's methods, and how it stopped. */
+export type LaneCache = {
+  lane: number;
+  /** Which start of the lane this was: 0, unless its anvil exited during the run and was started again. */
+  generation: number;
+  runHome: string;
+  methods: Iterable<string>;
+  hasExitedCleanly: boolean;
+  anvilVersion: string;
+  /** Whether the upstream proxy still held its port when this lane's anvil stopped. */
+  isProxyListening: boolean;
+};
+
+export type LaneGate = { isEligible: true; file: string } | { isEligible: false; reason: string };
+
 /**
- * Replaces the shared cache file with the one anvil wrote in the run's home for `forkUrl`. It does so only
- * when the anvil was 1.9.0 and exited cleanly, its log shows every method in `ALWAYS_LOGGED_METHODS`, and it
- * shows none that `methodsBlockingPromotion` names. The copy goes to a new file beside the shared one, which
- * is then renamed over it. A reader never sees half a file, and a symbolic link at the shared path is
- * replaced, not written through. If the rename fails, the new file is removed.
+ * Whether one lane's cache file may be merged into the shared file: the upstream proxy still held its port
+ * when the lane's anvil stopped, so nothing else answered its last reads; the anvil was 1.9.0 and exited
+ * cleanly; its log shows every method in `ALWAYS_LOGGED_METHODS` and none that `methodsBlockingPromotion`
+ * names; and it wrote a cache of the block.
  */
-export function promoteForkCache({
+export function laneCacheGate({
   runHome,
-  sharedFile,
   blockNumber,
   forkUrl,
   methods,
   hasExitedCleanly,
   anvilVersion,
-}: {
-  runHome: string;
-  sharedFile: string;
-  blockNumber: number;
-  forkUrl: string;
-  methods: Iterable<string>;
-  hasExitedCleanly: boolean;
-  anvilVersion: string;
-}): Promotion {
-  if (!isCacheAnvil(anvilVersion)) {
-    return { isPromoted: false, reason: 'the cache is promoted only from anvil 1.9.0' };
-  }
-  if (!hasExitedCleanly) return { isPromoted: false, reason: 'anvil did not exit cleanly' };
+  isProxyListening,
+}: Omit<LaneCache, 'lane' | 'generation'> & { blockNumber: number; forkUrl: string }): LaneGate {
+  const refuse = (reason: string): LaneGate => ({ isEligible: false, reason });
+  if (!isProxyListening) return refuse('the upstream proxy stopped before anvil');
+  if (!isCacheAnvil(anvilVersion)) return refuse('the cache is promoted only from anvil 1.9.0');
+  if (!hasExitedCleanly) return refuse('anvil did not exit cleanly');
   const logged = new Set(methods);
   if (!ALWAYS_LOGGED_METHODS.every((method) => logged.has(method))) {
-    return { isPromoted: false, reason: "anvil's log does not show the calls the harness makes" };
+    return refuse("anvil's log does not show the calls the harness makes");
   }
   const blocking = methodsBlockingPromotion(logged);
   if (blocking.length > 0) {
     const listed = blocking.slice(0, MAX_LISTED_METHODS).join(', ');
     const more = blocking.length > MAX_LISTED_METHODS ? ` and ${blocking.length - MAX_LISTED_METHODS} more` : '';
-    return { isPromoted: false, reason: `the fork was sent ${listed}${more}` };
+    return refuse(`the fork was sent ${listed}${more}`);
   }
-  const runFile = anvilCacheFile(runHome, blockNumber, forkUrl);
-  if (cachedBlock(runFile) !== blockNumber) return { isPromoted: false, reason: 'anvil wrote no cache of the block' };
-  fs.mkdirSync(path.dirname(sharedFile), { recursive: true, mode: 0o700 });
+  const file = anvilCacheFile(runHome, blockNumber, forkUrl);
+  if (cachedBlock(file) !== blockNumber) return refuse('anvil wrote no cache of the block');
+  return { isEligible: true, file };
+}
+
+/** The sections of anvil 1.9.0's cache file. A file with any other top-level member is not merged. */
+const CACHE_SECTIONS = ['meta', 'accounts', 'storage', 'block_hashes', 'block_hash_cache_version'];
+/** The `block_hash_cache_version` of anvil 1.9.0's cache file, the only one the harness merges. */
+const MERGED_CACHE_VERSION = 1;
+
+type CacheContent = {
+  meta: { block_env?: { number?: unknown }; fork_hash?: unknown } & Record<string, unknown>;
+  accounts: Record<string, unknown>;
+  storage: Record<string, Record<string, unknown>>;
+  block_hashes: Record<string, unknown>;
+  block_hash_cache_version: number;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** `value` as JSON with every object's keys sorted, so that two equal values give the same text. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_, each) =>
+    isRecord(each) ? Object.fromEntries(Object.entries(each).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : each
+  );
+
+/** The decoded cache file, or undefined when it is not a regular file of zstd-compressed JSON. */
+function readCacheFile(file: string): unknown {
+  try {
+    if (!fs.lstatSync(file).isFile()) return undefined;
+    return JSON.parse(zstd.zstdDecompressSync(fs.readFileSync(file)).toString('utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Why `content` cannot be merged as a cache of `blockNumber` forked at `forkHash`, or undefined. */
+function cacheProblem(content: unknown, blockNumber: number, forkHash: string): string | undefined {
+  if (!isRecord(content) || !isRecord(content.meta) || !isRecord(content.meta.block_env)) {
+    return 'anvil wrote no cache of the block';
+  }
+  if (content.meta.block_env.number !== hex(blockNumber)) return 'anvil wrote no cache of the block';
+  const isKnownFormat =
+    Object.keys(content).every((key) => CACHE_SECTIONS.includes(key)) &&
+    content.block_hash_cache_version === MERGED_CACHE_VERSION &&
+    isRecord(content.accounts) &&
+    isRecord(content.block_hashes) &&
+    isRecord(content.storage) &&
+    Object.values(content.storage).every(isRecord);
+  if (!isKnownFormat) return 'its cache is in a format the harness does not merge';
+  if (content.meta.fork_hash !== forkHash) return 'its cache is of another fork';
+  return undefined;
+}
+
+export type LanePromotion = { lane: number; generation: number; isMerged: boolean; reason: string };
+export type Promotion = { isPromoted: boolean; reason: string; lanes?: LanePromotion[] };
+
+/** Each entry of a cache file under one key, its section and the names that locate it, with its value. */
+function entriesOf(content: CacheContent): Map<string, unknown> {
+  const entries = new Map<string, unknown>();
+  for (const [address, value] of Object.entries(content.accounts)) entries.set(`accounts\0${address}`, value);
+  for (const [number, value] of Object.entries(content.block_hashes)) entries.set(`block_hashes\0${number}`, value);
+  for (const [address, slots] of Object.entries(content.storage)) {
+    for (const [slot, value] of Object.entries(slots)) entries.set(`storage\0${address}\0${slot}`, value);
+  }
+  return entries;
+}
+
+/** Adds the entry under `key` to `content`. */
+function addEntry(content: CacheContent, key: string, value: unknown): void {
+  const [section, name, slot] = key.split('\0');
+  if (section === 'storage') (content.storage[name] ??= {})[slot] = value;
+  else content[section as 'accounts' | 'block_hashes'][name] = value;
+}
+
+const entryCount = (count: number) => `${count} ${count === 1 ? 'entry' : 'entries'}`;
+
+/**
+ * Replaces the shared cache file with the union of what it holds and what each eligible lane's anvil read.
+ *
+ * The root passes `checkCacheRoot` again first. Each start of each lane passes `laneCacheGate` on its own and
+ * holds a cache of the block, forked at `forkHash`, in the format of anvil 1.9.0; the first lane merged sets
+ * the fork that every other file must match in full. The shared file is read again now, so that a promotion by
+ * another run since this one started is kept, and is left out if it is of another fork.
+ *
+ * The pinned block's state never changes, so two plain reads of one entry from the upstream agree. anvil's
+ * cache holds only such reads, never a change made on the fork. An entry that two files disagree on is
+ * therefore not a plain read in one of them, and nothing shows which: the union leaves it out, the shared
+ * file's copy included, so that the next run reads it from the upstream again. Every other entry is merged.
+ *
+ * The union goes to a new file beside the shared one, which is then renamed over it, so a reader never sees
+ * half a file and a symbolic link at the shared path is replaced, not written through. Nothing is written when
+ * no lane is eligible or the union equals the shared file. It never throws: a file system error is named by its
+ * code alone, because its message names paths, and with them the user name.
+ */
+export function promoteLaneCaches({
+  cacheRoot,
+  sharedFile,
+  blockNumber,
+  forkHash,
+  forkUrl,
+  lanes,
+}: {
+  cacheRoot: string;
+  sharedFile: string;
+  blockNumber: number;
+  forkHash: string;
+  forkUrl: string;
+  lanes: LaneCache[];
+}): Promotion & { lanes: LanePromotion[] } {
+  try {
+    checkCacheRoot(cacheRoot);
+  } catch {
+    return { isPromoted: false, reason: 'the cache root failed its check', lanes: [] };
+  }
+  const results: LanePromotion[] = [];
+  const candidates: { result: LanePromotion; content: CacheContent }[] = [];
+  let reference: string | undefined;
+  for (const each of lanes) {
+    const result: LanePromotion = { lane: each.lane, generation: each.generation, isMerged: false, reason: '' };
+    results.push(result);
+    const gate = laneCacheGate({ ...each, blockNumber, forkUrl });
+    if (!gate.isEligible) {
+      result.reason = gate.reason;
+      continue;
+    }
+    const content = readCacheFile(gate.file);
+    const problem = cacheProblem(content, blockNumber, forkHash);
+    const meta = problem === undefined ? canonical((content as CacheContent).meta) : undefined;
+    if (problem !== undefined || (reference !== undefined && meta !== reference)) {
+      result.reason = problem ?? 'its cache is of another fork';
+      continue;
+    }
+    reference ??= meta;
+    result.isMerged = true;
+    candidates.push({ result, content: content as CacheContent });
+  }
+  if (candidates.length === 0) return { isPromoted: false, reason: 'no lane passed the gates', lanes: results };
+
+  const shared = readCacheFile(sharedFile);
+  let sharedEntries = new Map<string, unknown>();
+  let isSharedKept = false;
+  let replacedNote = '';
+  if (shared !== undefined) {
+    if (
+      cacheProblem(shared, blockNumber, forkHash) === undefined &&
+      canonical((shared as CacheContent).meta) === reference
+    ) {
+      sharedEntries = entriesOf(shared as CacheContent);
+      isSharedKept = true;
+    } else {
+      replacedNote = '; the shared file was of another fork and was replaced';
+    }
+  }
+  const laneEntries = candidates.map(({ content }) => entriesOf(content));
+  // The canonical values each entry has across the shared file and the lanes, to find those in dispute.
+  const values = new Map<string, Set<string>>();
+  for (const entries of [sharedEntries, ...laneEntries]) {
+    for (const [key, value] of entries) {
+      let seen = values.get(key);
+      if (seen === undefined) values.set(key, (seen = new Set()));
+      seen.add(canonical(value));
+    }
+  }
+  const disputed = new Set([...values].filter(([, seen]) => seen.size > 1).map(([key]) => key));
+
+  const merged: CacheContent = {
+    meta: candidates[0].content.meta,
+    accounts: {},
+    storage: {},
+    block_hashes: {},
+    block_hash_cache_version: MERGED_CACHE_VERSION,
+  };
+  const held = new Set<string>();
+  for (const [key, value] of sharedEntries) {
+    if (disputed.has(key)) continue;
+    addEntry(merged, key, value);
+    held.add(key);
+  }
+  let added = 0;
+  candidates.forEach(({ result }, index) => {
+    let laneAdded = 0;
+    let laneDisputed = 0;
+    for (const [key, value] of laneEntries[index]) {
+      if (disputed.has(key)) laneDisputed += 1;
+      else if (!held.has(key)) {
+        addEntry(merged, key, value);
+        held.add(key);
+        laneAdded += 1;
+      }
+    }
+    added += laneAdded;
+    result.reason = `merged ${laneAdded} new ${laneAdded === 1 ? 'entry' : 'entries'}${
+      laneDisputed === 0 ? '' : `; left out ${entryCount(laneDisputed)} another file disagrees on`
+    }`;
+  });
+  const isSharedChanged = [...sharedEntries.keys()].some((key) => disputed.has(key));
+  if (isSharedKept && added === 0 && !isSharedChanged) {
+    return { isPromoted: false, reason: 'the shared file already held everything the lanes read', lanes: results };
+  }
+  const disputedNote = disputed.size === 0 ? '' : `; left out ${entryCount(disputed.size)} the files disagree on`;
   const temporaryFile = `${sharedFile}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   try {
-    fs.copyFileSync(runFile, temporaryFile, fs.constants.COPYFILE_EXCL);
+    fs.mkdirSync(path.dirname(sharedFile), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(temporaryFile, zstd.zstdCompressSync(JSON.stringify(merged)), { flag: 'wx', mode: 0o600 });
     fs.renameSync(temporaryFile, sharedFile);
   } catch (error) {
     fs.rmSync(temporaryFile, { force: true });
-    throw error;
+    const code = (error as NodeJS.ErrnoException)?.code;
+    return {
+      isPromoted: false,
+      reason: typeof code === 'string' ? `the promotion failed (${code})` : 'the promotion failed',
+      lanes: results,
+    };
   }
-  return { isPromoted: true, reason: 'promoted' };
+  return {
+    isPromoted: true,
+    reason: `promoted the union of ${candidates.length} lane${
+      candidates.length === 1 ? '' : 's'
+    }${disputedNote}${replacedNote}`,
+    lanes: results,
+  };
 }
 
 /**
@@ -1042,35 +1265,6 @@ export async function startHeldProxy(
   };
   addStop({ name: 'upstream proxy', run: stopProxy });
   return { proxy, offReason, stopProxy };
-}
-
-/**
- * `promoteForkCache` after the root passes `checkCacheRoot` again. It never throws: a failed check or a file
- * system error becomes the promotion's reason. A file system error is named by its code alone, because its
- * message names the paths, and with them the user name.
- */
-export function promoteSafely({
-  cacheRoot,
-  isProxyListening,
-  ...promotion
-}: Parameters<typeof promoteForkCache>[0] & { cacheRoot: string; isProxyListening: boolean }): Promotion {
-  // A proxy that no longer listened when anvil stopped had freed the fixed port, and another process could
-  // have answered anvil's last reads there.
-  if (!isProxyListening) return { isPromoted: false, reason: 'the upstream proxy stopped before anvil' };
-  try {
-    checkCacheRoot(cacheRoot);
-  } catch {
-    return { isPromoted: false, reason: 'the cache root failed its check' };
-  }
-  try {
-    return promoteForkCache(promotion);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException)?.code;
-    return {
-      isPromoted: false,
-      reason: typeof code === 'string' ? `the promotion failed (${code})` : 'the promotion failed',
-    };
-  }
 }
 
 /**
