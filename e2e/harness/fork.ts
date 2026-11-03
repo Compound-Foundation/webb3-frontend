@@ -38,7 +38,10 @@ export const PUBLIC_ENDPOINTS = [
 ];
 /** A recent fork stays this many blocks behind the endpoint's latest. */
 export const RECENT_BLOCK_LAG = 8;
-/** The EVM rules the fork runs: Prague, as COM-289's runner pinned. Mainnet runs Osaka. */
+/**
+ * The EVM rules the fork runs: Prague, against which the harness's assertions were written. anvil 1.9.0 gives
+ * the same gas under it as anvil 1.2.3 did. Mainnet runs Osaka.
+ */
 export const HARDFORK = 'prague';
 /** The largest JSON-RPC body the proxy forwards. */
 export const MAX_PROXY_BODY_BYTES = 10 * 1024 * 1024;
@@ -803,11 +806,12 @@ export function forkCacheRoot(
 
 /**
  * Creates the cache root, with mode 0700, when it is missing, and refuses it unless it is a directory, not a
- * symbolic link, that this user owns and no one else can read or write. A local user who could write in it
- * could give every later run false fork state. A user who could rename an entry in one of its parent
- * directories could swap the root for a directory of their own, so each parent must belong to this user or
- * to root, and a parent that others can write must have the sticky bit, which stops them renaming this
- * user's entries. The harness checks again before it loads the cache and before it promotes a run's copy.
+ * symbolic link, that this user owns and no one else can read or write. A local user who can write in it
+ * decides the fork state of every later run. A user who can rename an entry in a parent directory, or change
+ * a symbolic link on the way to the root, can swap the root for a directory of their own. So each directory
+ * and link on the path as given, and each parent the path resolves to, must belong to this user or to root.
+ * A directory that others can write must also have the sticky bit, which stops them renaming this user's
+ * entries. The harness checks again before it loads the cache and before it promotes a run's copy.
  */
 export function checkCacheRoot(root: string): void {
   try {
@@ -822,14 +826,25 @@ export function checkCacheRoot(root: string): void {
       `The fork cache directory ${root} must be a directory you own, with mode 0700, and not a symbolic link.`
     );
   }
-  for (let parent = fs.realpathSync(path.dirname(root)); ; parent = path.dirname(parent)) {
-    const parentStat = fs.lstatSync(parent);
-    const isTrustedOwner = uid === undefined || parentStat.uid === uid || parentStat.uid === 0;
-    const isOpenWithoutSticky = (parentStat.mode & 0o022) !== 0 && (parentStat.mode & 0o1000) === 0;
-    if (!isTrustedOwner || isOpenWithoutSticky) {
-      throw new Error(`The fork cache directory ${root} is inside ${parent}, which another user can change.`);
+  const isTrusted = (entry: string) => {
+    const entryStat = fs.lstatSync(entry);
+    const isTrustedOwner = uid === undefined || entryStat.uid === uid || entryStat.uid === 0;
+    const isOpenWithoutSticky =
+      entryStat.isDirectory() && (entryStat.mode & 0o022) !== 0 && (entryStat.mode & 0o1000) === 0;
+    return isTrustedOwner && !isOpenWithoutSticky;
+  };
+  const withAncestors = (start: string) => {
+    const entries: string[] = [];
+    for (let entry = start; ; entry = path.dirname(entry)) {
+      entries.push(entry);
+      if (entry === path.dirname(entry)) return entries;
     }
-    if (parent === path.dirname(parent)) break;
+  };
+  const parent = path.dirname(path.resolve(root));
+  for (const entry of new Set([...withAncestors(parent), ...withAncestors(fs.realpathSync(parent))])) {
+    if (!isTrusted(entry)) {
+      throw new Error(`The fork cache directory ${root} is inside ${entry}, which another user can change.`);
+    }
   }
 }
 
@@ -900,6 +915,7 @@ export function loadForkCache({
 
 /** The anvil methods the harness calls. None of them changes the upstream the fork's cache file is named for. */
 const HARNESS_ANVIL_METHODS: ReadonlySet<string> = new Set([
+  'anvil_dropTransaction',
   'anvil_impersonateAccount',
   'anvil_metadata',
   'anvil_reset',
@@ -931,8 +947,11 @@ export function recordLoggedMethods(text: string, methods: Set<string>): void {
 
 export type Promotion = { isPromoted: boolean; reason: string };
 
-/** The anvil whose cache format and method log the promotion relies on. */
-export const CACHE_ANVIL_VERSION = 'anvil Version: 1.9.0';
+/**
+ * Whether `version`, anvil's `--version` line, is anvil 1.9.0, whose cache format, reset and method log the
+ * cache relies on. An earlier anvil cannot read the cache file.
+ */
+export const isCacheAnvil = (version: string) => /^anvil Version: 1\.9\.0(?:\D|$)/.test(version);
 
 /**
  * Methods that `verifyFork` sends to every fork the harness uses, and that anvil logs. Their absence from the
@@ -967,7 +986,7 @@ export function promoteForkCache({
   hasExitedCleanly: boolean;
   anvilVersion: string;
 }): Promotion {
-  if (!/^anvil Version: 1\.9\.0(?:\D|$)/.test(anvilVersion)) {
+  if (!isCacheAnvil(anvilVersion)) {
     return { isPromoted: false, reason: 'the cache is promoted only from anvil 1.9.0' };
   }
   if (!hasExitedCleanly) return { isPromoted: false, reason: 'anvil did not exit cleanly' };
@@ -993,6 +1012,51 @@ export function promoteForkCache({
     throw error;
   }
   return { isPromoted: true, reason: 'promoted' };
+}
+
+/**
+ * `promoteForkCache` after the root passes `checkCacheRoot` again. It never throws: a failed check or a file
+ * system error becomes the promotion's reason. A file system error is named by its code alone, because its
+ * message names the paths, and with them the user name.
+ */
+export function promoteSafely({
+  cacheRoot,
+  ...promotion
+}: Parameters<typeof promoteForkCache>[0] & { cacheRoot: string }): Promotion {
+  try {
+    checkCacheRoot(cacheRoot);
+  } catch {
+    return { isPromoted: false, reason: 'the cache root failed its check' };
+  }
+  try {
+    return promoteForkCache(promotion);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    return {
+      isPromoted: false,
+      reason: typeof code === 'string' ? `the promotion failed (${code})` : 'the promotion failed',
+    };
+  }
+}
+
+/**
+ * Starts the upstream proxy at `cachePort` when one is given, and on a free port otherwise. When `cachePort`
+ * is taken, as by a second run, the proxy listens on a free port, and `offReason` says why the run is not
+ * cached. Any other error to listen is thrown.
+ */
+export async function startCacheableProxy(
+  endpoint: Endpoint,
+  { printable, cachePort }: { printable: (text: unknown) => string; cachePort?: number }
+): Promise<{ proxy: Awaited<ReturnType<typeof startUpstreamProxy>>; offReason?: string }> {
+  if (cachePort !== undefined) {
+    try {
+      return { proxy: await startUpstreamProxy(endpoint, { printable, port: cachePort }) };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'EADDRINUSE') throw error;
+      return { proxy: await startUpstreamProxy(endpoint, { printable }), offReason: `port ${cachePort} is in use` };
+    }
+  }
+  return { proxy: await startUpstreamProxy(endpoint, { printable }) };
 }
 
 export const hasExited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;

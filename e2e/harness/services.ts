@@ -31,6 +31,7 @@ import {
 import {
   CACHED_PROXY_PORT,
   checkCacheRoot,
+  isCacheAnvil,
   createRedactor,
   failedToStartOnUpstream,
   findAnvil,
@@ -39,9 +40,10 @@ import {
   hasExited,
   forkTarget,
   loadForkCache,
-  promoteForkCache,
+  promoteSafely,
   recordLoggedMethods,
   sharedCacheFile,
+  startCacheableProxy,
   startFork,
   startUpstreamProxy,
   stopChild,
@@ -53,7 +55,7 @@ import {
   type Promotion,
 } from './fork';
 import { BINDING_NAME, installHarnessProvider, PROVIDER_ICON, PROVIDER_NAME, PROVIDER_RDNS } from './injectedProvider';
-import { RUNS_DIR } from './paths';
+import { homeRelative, RUNS_DIR } from './paths';
 import { openWrappedReleaseControls } from './releaseControls';
 import { startRpcProxy } from './rpcProxy';
 import { cleanUpSynchronously, recoverKilledRuns, type ProcessRecord } from './runRecords';
@@ -86,6 +88,8 @@ export type Manifest = {
     anvilPid: number;
     upstreamProxyUrl: string;
     cache: ForkCache;
+    /** Whether the teardown promoted the run's cache file, written when the run finishes. */
+    cachePromotion?: Promotion;
   };
   tools: Record<string, string | undefined>;
   git: { head: string | undefined; isDirty: boolean | undefined };
@@ -276,8 +280,13 @@ export async function startServices({
       throw new Error("BROWSER_FORK_BLOCK must be 'pinned' (the default) or 'latest'.");
     }
     // Before any endpoint is contacted, so that a wrong setting or an unsafe directory stops the run first.
-    const cacheRoot = forkCacheRoot(process.env, blockOption);
-    if (cacheRoot !== undefined) checkCacheRoot(cacheRoot);
+    const configuredCacheRoot = forkCacheRoot(process.env, blockOption);
+    if (configuredCacheRoot !== undefined) checkCacheRoot(configuredCacheRoot);
+    // The checked root, resolved once, so that no link on its path can change between the checks and the reads.
+    const cacheRoot = configuredCacheRoot === undefined ? undefined : fs.realpathSync(configuredCacheRoot);
+    const anvilOffReason =
+      cacheRoot === undefined || isCacheAnvil(anvil.version) ? undefined : 'the installed anvil cannot read the cache';
+    const cachePort = cacheRoot !== undefined && anvilOffReason === undefined ? CACHED_PROXY_PORT : undefined;
     // anvil's home for the run, in the private directory: anvil writes only here, never to the shared cache.
     const runHome = path.join(directory, 'anvil-home');
     const anvilMethods = new Set<string>();
@@ -299,26 +308,24 @@ export async function startServices({
         continue;
       }
       // A cached fork needs the proxy at its fixed port, so that the fork URL, and with it anvil's cache
-      // file, is the same in every run. When the port is taken, as by a second run, the run is not cached.
-      let cachedProxy: Awaited<ReturnType<typeof startUpstreamProxy>> | undefined;
-      cache = { state: 'off' };
-      if (cacheRoot !== undefined) {
-        try {
-          cachedProxy = await startUpstreamProxy(endpoint, {
-            printable: redactor.printable,
-            port: CACHED_PROXY_PORT,
-          });
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException)?.code !== 'EADDRINUSE') throw error;
-          cache = { state: 'off', reason: `port ${CACHED_PROXY_PORT} is in use` };
-        }
-      }
-      const proxy = cachedProxy ?? (await startUpstreamProxy(endpoint, { printable: redactor.printable }));
+      // file, is the same in every run.
+      const { proxy, offReason } = await startCacheableProxy(endpoint, { printable: redactor.printable, cachePort });
+      // The proxy's stop is registered before anvil starts, so the teardown stops anvil first. The proxy holds
+      // the fixed port until anvil has written its cache, and no other process can take the port to answer
+      // anvil in between.
+      let isProxyStopped = false;
+      const stopProxy = async () => {
+        if (isProxyStopped) return;
+        isProxyStopped = true;
+        proxy.server.closeAllConnections();
+        await new Promise<void>((resolve) => proxy.server.close(() => resolve()));
+      };
+      addStop({ name: 'upstream proxy', run: stopProxy });
       const trust: CacheTrust = endpoint.isPrivate ? 'private' : 'public';
       const blockNumber = target.number;
       const forkUrl = proxy.url;
       const sharedFile =
-        cacheRoot !== undefined && cachedProxy !== undefined
+        cacheRoot !== undefined && cachePort !== undefined && offReason === undefined
           ? sharedCacheFile(cacheRoot, trust, blockNumber)
           : undefined;
       if (cacheRoot !== undefined && sharedFile !== undefined) {
@@ -326,11 +333,13 @@ export async function startServices({
         cache = {
           state: loadForkCache({ sharedFile, runHome, blockNumber, forkUrl }),
           trust,
-          directory: cacheRoot,
+          directory: homeRelative(cacheRoot),
         };
+      } else {
+        const reason = offReason ?? anvilOffReason;
+        cache = reason === undefined ? { state: 'off' } : { state: 'off', reason };
       }
       anvilMethods.clear();
-      const stopProxy = () => new Promise<void>((resolve) => proxy.server.close(() => resolve()));
       try {
         let child: Parameters<typeof stopChild>[0] | undefined;
         fork = await startFork({
@@ -352,27 +361,21 @@ export async function startServices({
               run: async () => {
                 await stopChild(spawned);
                 fs.rmSync(directory, { recursive: true, force: true });
-                // Only the anvil that became the run's verified fork, after it wrote its cache on SIGTERM.
+                // Only the anvil that became the run's verified fork, after it wrote its cache on SIGTERM, and
+                // only while this run's proxy still held the fixed port, so that nothing else answered anvil.
                 if (spawned === forkChild && cacheRoot !== undefined && sharedFile !== undefined) {
-                  try {
-                    checkCacheRoot(cacheRoot);
-                    cachePromotion = promoteForkCache({
-                      runHome,
-                      sharedFile,
-                      blockNumber,
-                      forkUrl,
-                      methods: anvilMethods,
-                      hasExitedCleanly: spawned.exitCode === 0,
-                      anvilVersion: anvil.version,
-                    });
-                  } catch (error) {
-                    // The error's code alone: its message names the paths, and with them the user name.
-                    const code = (error as NodeJS.ErrnoException)?.code;
-                    cachePromotion = {
-                      isPromoted: false,
-                      reason: typeof code === 'string' ? `the promotion failed (${code})` : 'the promotion failed',
-                    };
-                  }
+                  cachePromotion = !proxy.server.listening
+                    ? { isPromoted: false, reason: 'the upstream proxy stopped before anvil' }
+                    : promoteSafely({
+                        cacheRoot,
+                        runHome,
+                        sharedFile,
+                        blockNumber,
+                        forkUrl,
+                        methods: anvilMethods,
+                        hasExitedCleanly: spawned.exitCode === 0,
+                        anvilVersion: anvil.version,
+                      });
                 }
               },
             });
@@ -386,10 +389,8 @@ export async function startServices({
         void child;
         upstream = proxy;
         chosen = endpoint;
-        addStop({ name: 'upstream proxy', run: () => (proxy.server.closeAllConnections(), stopProxy()) });
         break;
       } catch (error) {
-        proxy.server.closeAllConnections();
         await stopProxy();
         if (
           error instanceof ForkStartError &&
@@ -608,7 +609,11 @@ export async function startServices({
         // directory: the keys and the private URL are known only to this process.
         const errors = await stop();
         process.off('exit', exitHandler);
-        const finished = { ...manifest, finishedAt: new Date().toISOString() };
+        const finished = {
+          ...manifest,
+          finishedAt: new Date().toISOString(),
+          fork: { ...manifest.fork, cachePromotion },
+        };
         fs.writeFileSync(manifestPath, JSON.stringify(finished, null, 2));
         fs.writeFileSync(
           path.join(runDir, 'stats.json'),

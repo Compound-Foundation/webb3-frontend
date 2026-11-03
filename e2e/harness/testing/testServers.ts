@@ -63,6 +63,7 @@ export function anvilHandlers(overrides: Record<string, Handler> = {}): Record<s
     anvil_metadata: () => ({ forkedNetwork: { forkBlockNumber: FORK_BLOCK, forkBlockHash: FORK_HASH } }),
     eth_getBlockByNumber: () => ({ hash: FORK_HASH, timestamp: '0x6a000000', number: '0x1907a18' }),
     anvil_reset: () => null,
+    anvil_dropTransaction: () => null,
     evm_setNextBlockTimestamp: () => null,
     anvil_impersonateAccount: () => null,
     anvil_stopImpersonatingAccount: () => null,

@@ -396,6 +396,40 @@ describe('checks on each request', () => {
     expect(methods.indexOf('eth_getTransactionReceipt')).toBeGreaterThan(methods.indexOf('eth_sendTransaction'));
   });
 
+  test('a second send sets its block time only after the first is mined', async () => {
+    // Each transaction's receipt is missing at its first poll, as anvil 1.9.0 answers before it mines.
+    let pollsSinceSend = 0;
+    node.handlers.set('eth_sendTransaction', () => {
+      pollsSinceSend = 0;
+      return `0x${'ab'.repeat(32)}`;
+    });
+    node.handlers.set('eth_getTransactionReceipt', () =>
+      ++pollsSinceSend < 2 ? null : { transactionHash: `0x${'ab'.repeat(32)}`, status: '0x1' }
+    );
+    const address = await connectedAccount();
+    const sends = [0, 1].map(() => client.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: address, to: address }]));
+    const requests = async () =>
+      (await client.requests()).filter((request) => request.method === 'eth_sendTransaction');
+    while ((await requests()).length < 2) await new Promise((resolve) => setTimeout(resolve, 20));
+    await Promise.all((await requests()).map((request) => client.approve(request.id)));
+    await Promise.all(sends);
+    const methods = node.calls
+      .map((call) => call.method)
+      .filter((method) =>
+        ['evm_setNextBlockTimestamp', 'eth_sendTransaction', 'eth_getTransactionReceipt'].includes(method)
+      );
+    expect(methods).toEqual([
+      'evm_setNextBlockTimestamp',
+      'eth_sendTransaction',
+      'eth_getTransactionReceipt',
+      'eth_getTransactionReceipt',
+      'evm_setNextBlockTimestamp',
+      'eth_sendTransaction',
+      'eth_getTransactionReceipt',
+      'eth_getTransactionReceipt',
+    ]);
+  });
+
   test('a send that anvil does not mine in time fails, and the page gets an error, not the hash', async () => {
     const quick = await startWalletServer({
       fork: { localUrl: node.url },
@@ -418,6 +452,10 @@ describe('checks on each request', () => {
       const answer = await sending;
       expect('result' in answer).toBe(false);
       expect(JSON.stringify(answer)).toContain('was not mined within 0.3 s');
+      // The transaction is dropped from anvil's pool, so it cannot be mined later in the test.
+      expect(node.calls.filter((call) => call.method === 'anvil_dropTransaction').map((call) => call.params)).toEqual([
+        [`0x${'ab'.repeat(32)}`],
+      ]);
     } finally {
       await quick.close();
     }

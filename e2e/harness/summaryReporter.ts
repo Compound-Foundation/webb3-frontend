@@ -10,13 +10,12 @@
 // INCOMPLETE, and the summary names the tests it left out.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 
 import { REQUIRED_ACCEPTANCE_CASES, type RequiredCase } from './acceptance';
-import { REPO_ROOT } from './paths';
+import { homeRelative, REPO_ROOT } from './paths';
 import { findSecrets, outputsUnder, registeredSecretCount } from './secrets';
 
 type Row = { title: string; project: string; tags: string[]; status: string; reason: string; durationMs: number };
@@ -29,14 +28,6 @@ const firstLine = (text: string | undefined) =>
     .find((line) => line.trim() !== '')
     ?.trim()
     .slice(0, 240) ?? '';
-
-/** A path under the home directory as `~/...`, so that the summary does not show the user name. */
-const homeRelative = (directory: string) => {
-  const home = os.homedir();
-  return directory === home || directory.startsWith(`${home}${path.sep}`)
-    ? `~${directory.slice(home.length)}`
-    : directory;
-};
 
 /** The fork cache as the manifest records it: its state, with why it is off, or its trust class and root. */
 const forkCacheText = (cache: { state?: string; reason?: string; trust?: string; directory?: string } | undefined) => {

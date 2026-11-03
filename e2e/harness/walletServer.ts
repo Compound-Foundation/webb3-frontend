@@ -340,7 +340,11 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     const timeoutMs = options.mineTimeoutMs ?? 30_000;
     const deadline = Date.now() + timeoutMs;
     while ((await call<unknown>('eth_getTransactionReceipt', [hash])) === null) {
-      if (Date.now() > deadline) throw new Error(`transaction ${hash} was not mined within ${timeoutMs / 1000} s`);
+      if (Date.now() > deadline) {
+        // Dropped from the pool, so that it cannot be mined later in the test after the page was told it failed.
+        await call('anvil_dropTransaction', [hash]).catch(() => undefined);
+        throw new Error(`transaction ${hash} was not mined within ${timeoutMs / 1000} s`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
   };
@@ -620,9 +624,9 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       for (const wake of [...eventWaiters]) wake();
       screening.reset();
       for (const address of stale) await call('anvil_stopImpersonatingAccount', [address]);
-      // A reset re-forks the block from the harness's upstream proxy and drops every change made on the fork.
-      // anvil 1.8 and later keep what they read from the upstream, which `evm_revert` discards. Naming the
-      // proxy again ends a reset by another process to another upstream.
+      // The reset forks the block again from the harness's upstream proxy and drops every change made on the
+      // fork. anvil 1.8 and later keep what they read from the upstream across a reset. The reset names the
+      // proxy, so it also ends a reset by another process to another upstream.
       await call('anvil_reset', [{ forking: { jsonRpcUrl: options.upstreamUrl, blockNumber: target.number } }]);
       await verifiedFork();
       log(`reset to generation ${generation}`);

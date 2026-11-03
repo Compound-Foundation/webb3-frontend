@@ -11,6 +11,9 @@ import path from 'node:path';
 import { server as mswServer } from '../../../handlers/server';
 import {
   ALWAYS_LOGGED_METHODS,
+  isCacheAnvil,
+  promoteSafely,
+  startCacheableProxy,
   anvilCacheFile,
   checkCacheRoot,
   createRedactor,
@@ -499,6 +502,7 @@ describe('the shared fork cache', () => {
           'web3_clientVersion',
           'anvil_metadata',
           'anvil_reset',
+          'anvil_dropTransaction',
           'anvil_setBalance',
           'anvil_setStorageAt',
           'anvil_impersonateAccount',
@@ -682,5 +686,99 @@ describe("anvil 1.9.0's retry rule", () => {
     expect(withheldMessage('maximum number of concurrent requests reached for key sk-123')).toBe(
       "maximum number of concurrent requests (the rest of the private upstream's message is withheld)"
     );
+  });
+});
+
+describe('the cacheable proxy', () => {
+  const endpoint = { label: 'test', url: 'http://127.0.0.1:9/', isPrivate: false, secretPatterns: [] };
+  const freePort = async () => {
+    const probe = await startUpstreamProxy(endpoint, { printable: String });
+    const { port } = probe.server.address() as { port: number };
+    await new Promise((resolve) => probe.server.close(resolve));
+    return port;
+  };
+
+  test('without a cache port, listens on a free port and says nothing', async () => {
+    const { proxy, offReason } = await startCacheableProxy(endpoint, { printable: String });
+    expect(offReason).toBeUndefined();
+    expect(proxy.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+    proxy.server.close();
+  });
+
+  test('with a cache port, listens there; when it is taken, listens on a free port and says why', async () => {
+    const cachePort = await freePort();
+    const first = await startCacheableProxy(endpoint, { printable: String, cachePort });
+    expect(first.offReason).toBeUndefined();
+    expect(first.proxy.url).toBe(`http://127.0.0.1:${cachePort}/`);
+    const second = await startCacheableProxy(endpoint, { printable: String, cachePort });
+    expect(second.offReason).toBe(`port ${cachePort} is in use`);
+    expect(second.proxy.url).not.toBe(`http://127.0.0.1:${cachePort}/`);
+    first.proxy.server.close();
+    second.proxy.server.close();
+  });
+});
+
+describe('the anvil that can read the cache', () => {
+  test('is 1.9.0, by its --version line', () => {
+    expect(isCacheAnvil('anvil Version: 1.9.0-stable (6056c5845d 2026-11-02T20:16:54.701302000Z)')).toBe(true);
+    expect(isCacheAnvil('anvil Version: 1.9.0')).toBe(true);
+    for (const version of [
+      'anvil Version: 1.2.3-stable',
+      'anvil Version: 1.9.01',
+      'anvil Version: 1.10.0',
+      'forge 1.9.0',
+    ]) {
+      expect(isCacheAnvil(version)).toBe(false);
+    }
+  });
+});
+
+describe('promotion at teardown', () => {
+  const BLOCK = 26244888;
+  const FORK_URL = 'http://127.0.0.1:18546/';
+  let scratch: string;
+  let root: string;
+  let runHome: string;
+  beforeEach(() => {
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-fork-cache-test-'));
+    root = path.join(scratch, 'root');
+    runHome = path.join(scratch, 'private', 'anvil-home');
+    const runFile = anvilCacheFile(runHome, BLOCK, FORK_URL);
+    fs.mkdirSync(path.dirname(runFile), { recursive: true });
+    fs.writeFileSync(
+      runFile,
+      zstd.zstdCompressSync(JSON.stringify({ meta: { block_env: { number: `0x${BLOCK.toString(16)}` } } }))
+    );
+  });
+  afterEach(() => fs.rmSync(scratch, { recursive: true, force: true }));
+
+  const promote = () =>
+    promoteSafely({
+      cacheRoot: root,
+      runHome,
+      sharedFile: sharedCacheFile(root, 'public', BLOCK),
+      blockNumber: BLOCK,
+      forkUrl: FORK_URL,
+      methods: ALWAYS_LOGGED_METHODS,
+      hasExitedCleanly: true,
+      anvilVersion: 'anvil Version: 1.9.0-stable',
+    });
+
+  test('checks the root again, and names only that it failed', () => {
+    fs.mkdirSync(root, { recursive: true });
+    fs.chmodSync(root, 0o755);
+    expect(promote()).toEqual({ isPromoted: false, reason: 'the cache root failed its check' });
+  });
+
+  test("names a file system error by its code alone, not by its message's paths", () => {
+    fs.mkdirSync(path.join(sharedCacheFile(root, 'public', BLOCK), 'entry'), { recursive: true });
+    fs.chmodSync(root, 0o700);
+    const result = promote();
+    expect(result.isPromoted).toBe(false);
+    expect(result.reason).toMatch(/^the promotion failed \(E[A-Z]+\)$/);
+  });
+
+  test('promotes when the root passes', () => {
+    expect(promote()).toEqual({ isPromoted: true, reason: 'promoted' });
   });
 });
