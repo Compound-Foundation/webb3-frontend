@@ -186,13 +186,77 @@ test('the proxies section says whether the run promoted its fork cache, and why 
     upstream: { methods: {}, refused: {}, failures: 0, errorAnswers: 0 },
     cleanupErrors: [],
   };
-  const promoted = { ...STATS, forkCachePromotion: { isPromoted: true, reason: 'promoted' } };
+  const promoted = {
+    ...STATS,
+    forkCachePromotion: {
+      isPromoted: true,
+      reason: 'promoted the union of 1 lane',
+      lanes: [
+        { lane: 0, generation: 0, isMerged: true, reason: 'merged 3 new entries' },
+        { lane: 1, generation: 0, isMerged: false, reason: 'anvil did not exit cleanly' },
+        { lane: 1, generation: 1, isMerged: true, reason: 'merged 1 new entry' },
+      ],
+    },
+  };
   expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, promoted)).toContain(
-    '- Fork cache after the run: promoted to the shared cache'
+    '- Fork cache after the run: promoted the union of 1 lane to the shared cache (lane 0: merged 3 new entries; lane 1: anvil did not exit cleanly; lane 1 after restart 1: merged 1 new entry)'
   );
   const refused = { ...STATS, forkCachePromotion: { isPromoted: false, reason: 'the fork was sent anvil_setRpcUrl' } };
   expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, refused)).toContain(
     '- Fork cache after the run: not promoted (the fork was sent anvil_setRpcUrl)'
   );
   expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, STATS)).not.toContain('Fork cache after the run');
+});
+
+test('the run section gives the worker count, how it was chosen, the signals it could not read, and the lanes started', async () => {
+  const selection = {
+    workers: 2,
+    source: 'estimate',
+    reasons: ['CPU: 16 CPUs at 50 % idle leave 8.0; 2 for shared services and 2 per worker allow 3', 'memory: allow 2'],
+    missing: ['spec file count'],
+  };
+  const manifest = {
+    ...MANIFEST,
+    concurrency: { workers: 2, selection, isCliOverride: false },
+    lanes: {
+      count: 2,
+      started: [
+        { index: 0, generation: 0, cache: 'warm' },
+        { index: 1, generation: 0, cache: 'warm' },
+        { index: 1, generation: 1, cache: 'warm' },
+      ],
+    },
+  };
+  const summary = await summaryOf(FULL, () => FULL.map(id), manifest);
+  expect(summary).toContain(
+    '- Workers: 2, by estimate: CPU: 16 CPUs at 50 % idle leave 8.0; 2 for shared services and 2 per worker allow 3; memory: allow 2. Signals not read: spec file count.'
+  );
+  expect(summary).toContain('- Fork lanes: 2 of 2 started; lane 1 restarted once');
+  const overridden = { ...manifest, concurrency: { workers: 1, selection, isCliOverride: true } };
+  expect(await summaryOf(FULL, () => FULL.map(id), overridden)).toContain(
+    '- Workers: 1, set by --workers (the estimate was 2)'
+  );
+  // A manifest from before fork lanes has no worker line.
+  expect(await summaryOf(FULL, () => FULL.map(id))).not.toContain('- Workers:');
+});
+
+test('the proxies section gives the upstream bursts and the reads by lane', async () => {
+  const stats = {
+    rpcProxy: { forwarded: {}, refused: {}, unserved: {}, lanes: { '0': 10, '1': 4 } },
+    upstream: {
+      requests: 40,
+      methods: {},
+      refused: {},
+      failures: 0,
+      errorAnswers: 1,
+      peakPending: 6,
+      peakPerSecond: 9,
+    },
+    cleanupErrors: [],
+  };
+  const summary = await summaryOf(FULL, () => FULL.map(id), MANIFEST, stats);
+  expect(summary).toContain('- App RPC proxy reads by lane: {"0":10,"1":4}');
+  expect(summary).toContain(
+    '- Upstream bursts: 40 requests in all, at most 6 open at once and 9 started in one second'
+  );
 });
