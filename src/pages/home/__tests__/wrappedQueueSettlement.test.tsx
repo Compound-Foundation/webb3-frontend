@@ -1903,6 +1903,74 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(chain.directSupply).toBe(DIRECT);
   });
 
+  /** Makes the stored holds unreadable: a read of their key throws, or finds no JSON list. */
+  const UNREADABLE_HOLDS: [string, () => () => void][] = [
+    [
+      'a read of the key throws',
+      () => {
+        const read = Storage.prototype.getItem;
+        const getItem = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, name) {
+          if (name === DIRECT_WITHDRAWAL_HOLDS_KEY) throw new Error('SecurityError');
+          return read.call(this, name);
+        });
+        return () => getItem.mockRestore();
+      },
+    ],
+    [
+      'the key holds invalid JSON',
+      () => {
+        window.localStorage.setItem(DIRECT_WITHDRAWAL_HOLDS_KEY, '{not json');
+        return () => undefined;
+      },
+    ],
+  ];
+
+  it.each(UNREADABLE_HOLDS)(
+    'refuses a base withdrawal on the standard route at Submit while the holds are unreadable, when %s',
+    async (_name, makeUnreadable) => {
+      const { chain, wallet, show, entry } = await holdFirstStep();
+      show({ connectorId: STANDARD_CONNECTOR });
+      await settle();
+      const restore = makeUnreadable();
+      try {
+        act(() => live.queue.addOrUpdateAction(entry));
+        await submit();
+        await settle();
+        expect(requestedCalls(wallet)).toEqual(['withdraw']);
+        expect(queued()).toEqual([entry]);
+      } finally {
+        restore();
+      }
+      // Should the held request now execute, Comet takes 200 USDC of the 250 and lends nothing.
+      executeLate(chain);
+      expect(chain.borrowed).toBe(0n);
+    }
+  );
+
+  it.each(UNREADABLE_HOLDS)(
+    'sends nothing on the standard route when the holds become unreadable while the withdrawal is estimated, when %s',
+    async (_name, makeUnreadable) => {
+      const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
+      const { wallet, show } = renderDashboard(chain, { state: stateWithDirectSupply(DIRECT) });
+      show({ connectorId: STANDARD_CONNECTOR, state: stateWithDirectSupply(DIRECT) });
+      await settle();
+      let restore = () => undefined as void;
+      wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
+        restore = makeUnreadable();
+        return BigNumber.from(100_000);
+      });
+      act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 200_000_000n]));
+      try {
+        await submit();
+        await settle();
+        expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+        expect(chain.directSupply).toBe(DIRECT);
+      } finally {
+        restore();
+      }
+    }
+  );
+
   it('sends nothing when the session changes while the direct supply is read again', async () => {
     const { chain, wallet, show } = await renderMixed();
     act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 100_000_000n]));

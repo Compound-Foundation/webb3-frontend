@@ -400,15 +400,17 @@ const Home = ({
   // through any connector, waits while a Comet step of a wrapped-route withdrawal of the account on
   // the market is reserved or held (`directWithdrawalHolds`): together they can take more than the
   // direct supply, and Comet then lends the rest. It only checks: a standard-route withdrawal holds
-  // nothing back itself, and the Extensions page's transactions are not checked. Only a configured wrapped market can have one. Storage that cannot
-  // be read holds nothing back here, as on main. The wrapped route refuses every other base
-  // withdrawal to Comet anyway (`isSubmissionRefused`). `baseWithdrawalHold` is set only for the
-  // synchronous call that sends such a write, which checks again just before the wallet is asked.
+  // nothing back itself, and the Extensions page's transactions are not checked. Only a configured
+  // wrapped market can have one. Storage that cannot be read, or holds no list, is unknown, never
+  // empty, and holds the withdrawal back too. Storage read cleanly with no record for the key sends
+  // as on main. The wrapped route refuses every other base withdrawal to Comet anyway
+  // (`isSubmissionRefused`). `baseWithdrawalHold` is set only for the synchronous call that sends
+  // such a write, which checks again just before the wallet is asked.
   const baseWithdrawalHold = useRef<HoldKey>();
   const isBaseWithdrawalHeld = (key: HoldKey | undefined) => {
     if (key === undefined) return false;
     const read = directWithdrawalHolds.read(key);
-    return read.status === 'known' && read.records.length > 0;
+    return read.status === 'unknown' || read.records.length > 0;
   };
 
   // The manager reads the network and nonce, and can estimate gas, before it asks the wallet. If
