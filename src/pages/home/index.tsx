@@ -259,7 +259,10 @@ type DirectStepRequest = {
   freshBalance?: bigint;
   /** The withdrawal split again from `freshBalance`, which decides the Comet step's amount. */
   replanned?: WithdrawalSplit;
-  /** Set when the fresh read left nothing for the Comet step, or more than the wrapper pays now. */
+  /**
+   * Set when the read before or after the gas estimate left nothing for the Comet step, more than
+   * the wrapper pays now, or less than a finite part above it.
+   */
   isBalanceShort?: boolean;
   /** Set when an earlier Comet step that can still execute held this one back. */
   isHeldBack?: boolean;
@@ -467,8 +470,8 @@ const Home = ({
     const checkedSend: typeof trxFn = async (...args) => {
       const sentArgs = request.sentArgs(args);
       // The wallet is asked for exactly the call whose gas was estimated, and for nothing when no
-      // estimate was made. Both are built from `replanned`, set once, so this asserts an invariant
-      // that no current path breaks: a later change that re-plans after the estimate sends nothing.
+      // estimate was made. `replanned` and `estimatedCalldata` are both set only in
+      // `estimatePlannedCall`, which the manager calls once, so this check fails only if that changes.
       const calldata = directWithdrawalCalldata(sentArgs[0], sentArgs[1]);
       if (request.estimatedCalldata === undefined || calldata !== request.estimatedCalldata) {
         throw new NotSentError(new Error('The withdrawal changed after its gas was estimated.'));
@@ -1170,10 +1173,10 @@ const Home = ({
         const id = directStep.holdId;
         if (id !== undefined) directWithdrawalHolds.release(key, id);
       };
-      // Reads the direct supply at a block from `anchorBlock`, no older than `floors`, the wallet
-      // node's and the last confirmed Comet step's, and splits the withdrawal from it. Throws, so
-      // that nothing is sent, when the read fails, no direct supply is left, or the wrapper cannot
-      // pay what the direct supply no longer does; the row then asks for a new amount.
+      // Reads the direct supply at a block from `anchorBlock`, no older than the wallet node's block
+      // and every block in `floors`, and splits the withdrawal from it. Throws, so that nothing is
+      // sent, when the read fails, no direct supply is left, or the wrapper cannot pay what the
+      // direct supply no longer does. The row then asks for a new amount.
       const readAndSplit = async (floors: (number | undefined)[]) => {
         if (readProvider === undefined) {
           throw new NotSentError(new Error("This market's network cannot be read right now."));
@@ -1257,12 +1260,17 @@ const Home = ({
           // the estimate never makes Comet borrow, and a whole-supply step only while the split still
           // has a direct part and a rest the wrapper can pay. Otherwise nothing is sent, and the row
           // asks for a new amount. The hold keeps the first read's block, the earlier of the two.
+          // A rise during the estimate does not stop a whole-supply step, which then pays the risen
+          // supply, as after the first read.
           const recheck = await readAndSplit([minBlock, blockNumber]);
           if (amount !== MAX_UINT256 && recheck.replanned.direct?.amount !== amount) {
             directStep.isBalanceShort = true;
             throw new SendWithdrawnError('The direct supply changed before the withdrawal was signed.');
           }
-          if (!isSessionLive()) throw new SendWithdrawnError();
+          // The session and the live Comet state still allow the step after the second read.
+          if (!isSessionLive() || isDirectWithdrawalRefused(liveSession.current, submittedMarket)) {
+            throw new SendWithdrawnError();
+          }
           const calldata = directWithdrawalCalldata(sentArgs[0], sentArgs[1]);
           if (!(await directWithdrawalHolds.hold(key, id, { calldata, amount, blockNumber }))) {
             throw new NotSentError(new Error('The withdrawal could not be stored before signing.'));

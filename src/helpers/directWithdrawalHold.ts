@@ -25,8 +25,10 @@ export const DIRECT_WITHDRAWAL_HOLDS_KEY = 'webb3-direct-withdrawal-holds';
 
 /**
  * How long a reservation keeps other tabs from reserving, in milliseconds. It covers the fresh read,
- * the gas estimate and the read after it, before the wallet is asked. Each read waits at most half a
- * minute for a block. A reservation is dropped only once it has expired.
+ * the gas estimate and the read after it, before the wallet is asked. Each read can wait up to a
+ * minute for its block: half a minute for the wallet node's, and half a minute for the provider to
+ * reach it. A step slower than the lease is not sent, since its reservation can no longer become a
+ * hold. A reservation is dropped only once it has expired.
  */
 export const RESERVATION_LEASE_MS = 120_000;
 

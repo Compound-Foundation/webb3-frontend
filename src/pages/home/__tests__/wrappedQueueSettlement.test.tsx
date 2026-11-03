@@ -2065,6 +2065,43 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(chain.directSupply).toBe(DIRECT);
   });
 
+  it('sends nothing, and holds nothing, when the Comet state shows no direct supply during the read after the gas estimate', async () => {
+    const { chain, wallet, show, readProvider } = await renderMixed();
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 100_000_000n]));
+    // The second read of the direct supply, made after the gas estimate, waits until the test answers it.
+    const read = held<void>();
+    const answer = readProvider.call.getMockImplementation();
+    if (answer === undefined) throw new Error('the provider must answer');
+    let directReads = 0;
+    let isSecondReadStarted = false;
+    readProvider.call.mockImplementation(async (request: { to?: string; data?: string }, ...rest: unknown[]) => {
+      if (
+        isSame(request.to, MARKET.cometAddress) &&
+        request.data === COMET.encodeFunctionData('balanceOf', [ACCOUNT])
+      ) {
+        directReads += 1;
+        if (directReads === 2) {
+          isSecondReadStarted = true;
+          await read.promise;
+        }
+      }
+      return (answer as (...args: unknown[]) => Promise<string>)(request, ...rest);
+    });
+
+    act(() => positionCard().onSubmitClicked());
+    await waitFor(() => expect(isSecondReadStarted).toBe(true));
+    expect(wallet.cometSigner.estimateGas).toHaveBeenCalledTimes(1);
+    // The Comet state is read again and shows no direct supply, in the same visit and session.
+    show({ state: stateWithDirectSupply(0n) });
+    read.release();
+    await settle();
+
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(storedHolds()).toEqual([]);
+    expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Not Sent, Try Again');
+    expect(chain.directSupply).toBe(DIRECT);
+  });
+
   it('refuses the Comet step while the Comet state was read for another account', async () => {
     const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
     const state = stateWithDirectSupply(DIRECT);
@@ -2243,7 +2280,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     act(() => live.queue.addOrUpdateAction(entry));
     // After the fresh read, while the manager estimates the Comet step's gas, the whole direct supply
     // leaves in another transaction. The dashboard still shows the 250 USDC it read. The finite
-    // withdraw(base, 200 USDC) would now borrow, so the read made after the estimate sends nothing.
+    // withdraw(base, 200 USDC) now borrows, so the read made after the estimate sends nothing.
     wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
       chain.directSupply = 0n;
       return BigNumber.from(100_000);
@@ -2260,6 +2297,32 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       label: 'Balance Changed, Edit Amount',
     });
     expect(live.manager.transactions).toEqual([]);
+    await waitFor(() => expect(storedHolds()).toEqual([]));
+  });
+
+  it('sends nothing when the direct supply falls below a finite part during the estimate, though the wrapper could pay the rest', async () => {
+    const { chain, wallet } = await renderMixed();
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
+    act(() => live.queue.addOrUpdateAction(entry));
+    // The fresh read shows 250 USDC, so the Comet step is withdraw(base, 200 USDC). While its gas is
+    // estimated, 150 USDC of the supply leaves. That call now borrows 100 USDC, while a split from the
+    // 100 USDC left, max then 100 USDC from the wrapper, could pay.
+    wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
+      chain.directSupply = 100_000_000n;
+      return BigNumber.from(100_000);
+    });
+
+    await submit();
+    await settle();
+
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(chain.borrowed).toBe(0n);
+    expect(queued()).toEqual([entry]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
+      action: [ActionType.Withdraw, expect.anything(), entry[2]],
+      label: 'Balance Changed, Edit Amount',
+    });
+    await waitFor(() => expect(storedHolds()).toEqual([]));
   });
 
   it('sends nothing when the direct supply fell further than the wrapper can make up before signing', async () => {
@@ -2270,10 +2333,11 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     const entry: Action = [ActionType.Withdraw, BASE_ASSET, 255_000_000n];
     act(() => live.queue.addOrUpdateAction(entry));
     // 200 USDC of the direct supply leaves after the fresh read, while the manager estimates the
-    // Comet step's gas, so the wrapper would have to pay 205 USDC.
+    // Comet step's gas, which leaves 205 USDC for a wrapper that pays at most 10 USDC.
     wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
       chain.directSupply = 50_000_000n;
       return BigNumber.from(100_000);
+      await waitFor(() => expect(storedHolds()).toEqual([]));
     });
 
     await submit();
