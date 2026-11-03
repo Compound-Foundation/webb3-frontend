@@ -7,7 +7,7 @@ The suite lives in `e2e/`: the harness in `e2e/harness/`, the browser specs in `
 ## Prerequisites
 
 - Node 22, as `package.json` pins through Volta, and `yarn install`.
-- Foundry's `anvil` 1.9.0 on `PATH`, at `~/.foundry/bin/anvil`, or named by `ANVIL`. Install it with `foundryup --install 1.9.0` (https://getfoundry.sh). COM-289's wrapped lending fork runner (`scripts/test-wrapped-lending-fork.js`) records its runs on 1.2.3. To keep 1.2.3 on `PATH` for it, install 1.9.0 elsewhere and name it with `ANVIL`. The fork cache needs 1.9.0: with an earlier anvil the suite runs uncached.
+- Foundry's `anvil` 1.9.0 on `PATH`, at `~/.foundry/bin/anvil`, or named by `ANVIL`. Install it with `foundryup --install 1.9.0` (https://getfoundry.sh). The fork cache needs 1.9.0: with an earlier anvil the suite runs uncached. COM-289's wrapped lending fork runner (`scripts/test-wrapped-lending-fork.js`) uses the same anvil; its recorded runs were on 1.2.3.
 - `openssl`, which makes the run's TLS certificate. macOS and Linux ship one.
 - Playwright's browsers, at the version `@playwright/test` pins (1.64.1, Chromium 156):
   - `npx playwright install chromium-headless-shell` for the automated suite.
