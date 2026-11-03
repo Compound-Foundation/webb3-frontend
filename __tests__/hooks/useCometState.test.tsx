@@ -48,8 +48,12 @@ const rateModel = (perSecondRate: number) => ({
   perSecondInterestRateSlopeHigh: BigNumber.from(0),
 });
 
-// The hook reports `earnAPR` as the supply rate per second times the seconds in a year.
-const cometResponse = (earnAPR: number) =>
+// The seconds in a 365-day year, written out so that expected values do not depend on the
+// constant in the code under test.
+const SECONDS_PER_YEAR = 31_536_000n;
+
+// The hook's `earnAPR` equals `supplyRatePerSecond * SECONDS_PER_YEAR`.
+const cometResponse = (supplyRatePerSecond: number) =>
   ({
     totalSupply: BigNumber.from(0),
     totalBorrow: BigNumber.from(0),
@@ -57,7 +61,7 @@ const cometResponse = (earnAPR: number) =>
     utilization: BigNumber.from(0),
     factorScale: BigNumber.from(10).pow(18),
     borrowRateModel: rateModel(0),
-    supplyRateModel: rateModel(earnAPR),
+    supplyRateModel: rateModel(supplyRatePerSecond),
     collateralAssets: [],
     baseAsset: {
       baseAsset: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
@@ -148,7 +152,7 @@ describe('useCometState', () => {
     });
 
     expect(result.current[0]).toBe(StateType.NoWallet);
-    expect(result.current[1]?.earnAPR).toBe(111n * 31_536_000n);
+    expect(result.current[1]?.earnAPR).toBe(111n * SECONDS_PER_YEAR);
   });
 
   it('drops a held-back result read for an account that is no longer connected', async () => {
