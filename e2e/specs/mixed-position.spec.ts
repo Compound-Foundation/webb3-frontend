@@ -470,7 +470,7 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(2);
   });
 
-  test('asks the wallet once when a second tab submits while the first is between its estimate and the wallet', async ({
+  test('asks the wallet once when a second tab submits while the first is between its reservation and the wallet', async ({
     page,
     context,
     wallet,
@@ -488,8 +488,8 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     await expect(notice(page)).toBeVisible({ timeout: 60_000 });
     const seen = new Set((await wallet.requests()).map((request) => request.id));
 
-    // The first tab's fresh read of the direct supply, just before it would ask the wallet, waits until
-    // the test lets it go.
+    // The first tab's fresh read of the direct supply, after its reservation and before its gas
+    // estimate, waits until the test lets it go.
     let release: () => void = () => undefined;
     let reached: () => void = () => undefined;
     const paused = new Promise<void>((resolve) => (release = resolve));

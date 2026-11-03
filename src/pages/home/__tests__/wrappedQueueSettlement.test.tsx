@@ -1493,7 +1493,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(chain.borrowed).toBe(0n);
   });
 
-  it('estimates the Comet step as withdraw(base, max), so a supply that fell below a planned part is still withdrawn', async () => {
+  it('estimates the call the fresh split sends, withdraw(base, max), when the supply fell below a planned part', async () => {
     const { chain, wallet } = await renderMixed();
     const amount = 200_000_000n;
     // As Comet's estimate does: a part above the supply would borrow, and the account has no collateral.
@@ -1516,6 +1516,37 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(requestedCalls(wallet)).toEqual(['withdraw', 'unwrapAndWithdraw']);
     expect(cometWithdrawals(wallet).map(({ args }) => args[1])).toEqual([MAX_UINT256]);
     expect(chain.balance - 10_000_000_000n).toBeGreaterThanOrEqual(amount);
+    expect(chain.borrowed).toBe(0n);
+  });
+
+  it('estimates and sends withdraw(base, 40 USDC) when Comet holds less cash than the direct supply but enough for the part', async () => {
+    const { chain, wallet } = await renderMixed();
+    const amount = 40_000_000n;
+    // Comet holds 100 USDC of cash beside the 250 USDC direct supply, so withdraw(base, max) cannot
+    // transfer, while withdraw(base, 40 USDC) can.
+    chain.cometCash = 100_000_000n;
+    wallet.cometSigner.estimateGas.mockImplementation(async (request: { data: string }) => {
+      const asked = BigInt(COMET.decodeFunctionData('withdraw', request.data)[1].toString());
+      const taken = asked === MAX_UINT256 ? chain.directSupply : asked;
+      if (taken > chain.cometCash) throw new Error('execution reverted: ERC20: transfer amount exceeds balance');
+      return BigNumber.from(100_000);
+    });
+    act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, amount]));
+
+    await submit();
+    await settle();
+
+    // The estimate is of the call the wallet is then asked for, byte for byte.
+    const estimated = wallet.cometSigner.estimateGas.mock.calls.map(([request]) => request.data);
+    expect(estimated).toEqual([productionWithdrawData(amount)]);
+    expect(positionCard().actionRules.wrappedBase.stopped).toBeUndefined();
+    await waitFor(() => expect(queued()).toEqual([]));
+    expect(requestedCalls(wallet)).toEqual(['withdraw']);
+    expect(cometWithdrawals(wallet)).toEqual([
+      { to: USDC_COMET, data: estimated[0], args: [MARKET.baseTokenAddress, amount] },
+    ]);
+    expect(chain.directSupply).toBe(DIRECT - amount);
+    expect(chain.cometCash).toBe(100_000_000n - amount);
     expect(chain.borrowed).toBe(0n);
   });
 
@@ -1583,7 +1614,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(chain.borrowed).toBe(0n);
   });
 
-  it('asks the wallet once when a second tab opens and submits while the first is between its estimate and the wallet', async () => {
+  it('asks the wallet once when a second tab opens and submits while the first is between its reservation and the wallet', async () => {
     const { chain, wallet, readProvider } = await renderMixed();
     // The first tab's fresh read of the direct supply waits until the test answers it.
     const read = held<void>();
@@ -1600,7 +1631,8 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 200_000_000n]));
     act(() => positionCard().onSubmitClicked());
     await waitFor(() => expect(isReadStarted).toBe(true));
-    expect(wallet.cometSigner.estimateGas).toHaveBeenCalled();
+    // The first tab has reserved its step, and estimates its gas only after the fresh read.
+    expect(wallet.cometSigner.estimateGas).not.toHaveBeenCalled();
 
     // A second tab opens, restores what storage holds, and submits the same 200 USDC.
     const second = renderDashboard(chain, {
@@ -2108,8 +2140,8 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     const amount = 300_000_000n;
     const entry: Action = [ActionType.Withdraw, BASE_ASSET, amount];
     act(() => live.queue.addOrUpdateAction(entry));
-    // 150 USDC of the direct supply leaves in another transaction while the manager estimates the
-    // Comet step's gas. The dashboard still shows the 250 USDC it read.
+    // 150 USDC of the direct supply leaves in another transaction after the fresh read, while the
+    // manager estimates the Comet step's gas. The dashboard still shows the 250 USDC it read.
     wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
       chain.directSupply = 100_000_000n;
       return BigNumber.from(100_000);
@@ -2178,12 +2210,9 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     const { chain, wallet } = await renderMixed();
     const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
     act(() => live.queue.addOrUpdateAction(entry));
-    // While the manager estimates the Comet step's gas, the whole direct supply leaves in another
-    // transaction. The dashboard still shows the 250 USDC it read.
-    wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
-      chain.directSupply = 0n;
-      return BigNumber.from(100_000);
-    });
+    // Before signing, the whole direct supply leaves in another transaction. The dashboard still
+    // shows the 250 USDC it read.
+    chain.directSupply = 0n;
 
     await submit();
     await settle();
@@ -2205,11 +2234,8 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
     const entry: Action = [ActionType.Withdraw, BASE_ASSET, 255_000_000n];
     act(() => live.queue.addOrUpdateAction(entry));
-    // 200 USDC of the direct supply leaves, so the wrapper would have to pay 205 USDC.
-    wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
-      chain.directSupply = 50_000_000n;
-      return BigNumber.from(100_000);
-    });
+    // 200 USDC of the direct supply leaves before signing, so the wrapper would have to pay 205 USDC.
+    chain.directSupply = 50_000_000n;
 
     await submit();
     await settle();

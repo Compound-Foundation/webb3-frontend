@@ -218,23 +218,28 @@ const DIRECT_BALANCE_CHANGED_LABEL = 'Balance Changed, Edit Amount';
 const WITHDRAW_ALONE_LABEL = 'Submit The Withdrawal On Its Own';
 
 /**
- * The Comet step of a wrapped-route withdrawal while it is being sent: the check made just before
- * the wallet is asked, what follows the outcome, and what the wallet answered.
+ * The Comet step of a wrapped-route withdrawal while it is being sent: the reservation, the fresh
+ * read and split made before its gas is estimated, the hold stored just before the wallet is asked,
+ * what follows the outcome, and what the wallet answered.
  */
 type DirectStepRequest = {
   /** The Comet address and the arguments the step's `withdraw` call must carry. */
   cometAddress: string;
   args: [string, string];
   /**
-   * Reserves the account's Comet withdrawals on the market for this step, before its gas is
-   * estimated. Throws, so that nothing is sent, while another one is reserved or held.
+   * Reserves the account's Comet withdrawals on the market for this step, before the fresh read and
+   * the gas estimate. Throws, so that nothing is sent, while another one is reserved or held.
    */
   reserve: () => Promise<void>;
-  /** Throws, so that nothing is sent, unless the step may be signed now. */
-  checkBeforeSend: () => Promise<void>;
   /**
-   * Stores the hold with the calldata of `sentArgs` and reads it back. Throws, so that nothing is
-   * sent, unless storage holds it. The wallet is asked only after this.
+   * Reads the direct supply again and splits the withdrawal from it into `replanned`, before the gas
+   * is estimated. Throws, so that nothing is sent, unless the step may be signed now.
+   */
+  planFromFreshRead: () => Promise<void>;
+  /**
+   * Checks the session again, stores the hold with the calldata of `sentArgs` and reads it back.
+   * Throws, so that nothing is sent, unless the session is live and storage holds it. The wallet is
+   * asked only after this.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   holdBeforeWallet: (sentArgs: any[]) => Promise<void>;
@@ -259,6 +264,8 @@ type DirectStepRequest = {
   isHeldBack?: boolean;
   /** The block of the fresh read, which the hold keeps. */
   readBlock?: number;
+  /** The calldata whose gas was estimated, which the wallet request must carry byte for byte. */
+  estimatedCalldata?: string;
   /** The id of this step's reservation, and then its hold, once reserved. */
   holdId?: string;
   /** How the wallet's error was classified, when the wallet was asked and answered with one. */
@@ -457,9 +464,13 @@ const Home = ({
       return notSent;
     }
     const checkedSend: typeof trxFn = async (...args) => {
-      await request.reserve();
-      await request.checkBeforeSend();
       const sentArgs = request.sentArgs(args);
+      // The wallet is asked for exactly the call whose gas was estimated, and for nothing when no
+      // estimate was made.
+      const calldata = directWithdrawalCalldata(sentArgs[0], sentArgs[1]);
+      if (request.estimatedCalldata === undefined || calldata !== request.estimatedCalldata) {
+        throw new NotSentError(new Error('The withdrawal changed after its gas was estimated.'));
+      }
       // The wallet is asked only once storage holds the request's calldata.
       await request.holdBeforeWallet(sentArgs);
       let response: TransactionResponse;
@@ -473,13 +484,16 @@ const Home = ({
       return response;
     };
     // The account's Comet withdrawals on the market are reserved for this step before anything else.
-    // The gas is estimated for `withdraw(baseToken, type(uint256).max)`, which never borrows, so the
-    // estimate does not fail when the supply fell below a planned part: the split made at signing then
-    // sends max. A failed estimate sends nothing.
-    const estimateWholeSupply: typeof estimateGasFn = async (...args) => {
+    // The withdrawal is then split again from a fresh read of the direct supply, and the gas is
+    // estimated for exactly the call that split sends: `withdraw(baseToken, amount)` or
+    // `withdraw(baseToken, type(uint256).max)`. A failed estimate sends nothing.
+    const estimatePlannedCall: typeof estimateGasFn = async (...args) => {
       await request.reserve();
+      await request.planFromFreshRead();
+      const plannedArgs = request.sentArgs(args);
+      request.estimatedCalldata = directWithdrawalCalldata(plannedArgs[0], plannedArgs[1]);
       try {
-        return await estimateGasFn(args[0], MAX_UINT256.toString(), ...args.slice(2));
+        return await estimateGasFn(...plannedArgs);
       } catch (error) {
         throw new NotSentError(error);
       }
@@ -489,7 +503,7 @@ const Home = ({
       description,
       checkedSend,
       estimatedGas,
-      estimateWholeSupply,
+      estimatePlannedCall,
       fnArgs,
       0n,
       request.onSettled
@@ -1158,9 +1172,9 @@ const Home = ({
       const directStep: DirectStepRequest = {
         cometAddress: market.marketAddress,
         args: [directBaseAsset.address, direct.amount.toString()],
-        // Before the gas estimate, under the lock every tab respects: no other Comet withdrawal of the
-        // account on the market is reserved or held, so this one is reserved. A held one that the
-        // chain shows can no longer execute is released first.
+        // Before the fresh read and the gas estimate, under the lock every tab respects: no other Comet
+        // withdrawal of the account on the market is reserved or held, so this one is reserved. A held
+        // one that the chain shows can no longer execute is released first.
         reserve: () => {
           reservation ??= (async () => {
             let reserved = await directWithdrawalHolds.reserve(key);
@@ -1178,11 +1192,12 @@ const Home = ({
           })();
           return reservation;
         },
-        // Just before the wallet is asked: the session and the live Comet state still allow the step,
-        // and the withdrawal is split again from a fresh read of the direct supply, so the two steps
-        // pay the queued amount whatever the supply is now. The read is of a block from `anchorBlock`:
-        // no older than the wallet node's and the last confirmed Comet step's.
-        checkBeforeSend: async () => {
+        // Once reserved, before the gas estimate: the session and the live Comet state still allow the
+        // step, and the withdrawal is split again from a fresh read of the direct supply, so the two
+        // steps pay the queued amount whatever the supply is now, and the estimate is of the call
+        // that split sends. The read is of a block from `anchorBlock`: no older than the wallet
+        // node's and the last confirmed Comet step's.
+        planFromFreshRead: async () => {
           if (!isSessionLive() || isDirectWithdrawalRefused(liveSession.current, submittedMarket)) {
             throw new SendWithdrawnError();
           }
@@ -1221,6 +1236,10 @@ const Home = ({
           if (!isSessionLive()) throw new SendWithdrawnError();
         },
         holdBeforeWallet: async (sentArgs) => {
+          // The session and the live Comet state still allow the step after the gas estimate.
+          if (!isSessionLive() || isDirectWithdrawalRefused(liveSession.current, submittedMarket)) {
+            throw new SendWithdrawnError();
+          }
           const id = directStep.holdId;
           const amount = directStep.replanned?.direct?.amount;
           const blockNumber = directStep.readBlock;
