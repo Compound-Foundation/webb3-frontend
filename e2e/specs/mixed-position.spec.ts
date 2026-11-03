@@ -4,14 +4,23 @@
 // through the wrapper, which the app asks for only once the Comet step confirms. Max takes the whole direct
 // part, then every share. A Comet step the wallet still holds holds back the next one, whatever market is
 // shown in between, whatever the balance does, and whichever tab submits, until the held request itself is
-// found mined. A direct supply that changes before signing still pays the queued amount. The harness's dev
-// server opens the release controls (`releaseControls.ts`).
+// found mined, in the block its log names. The same account through a standard-route wallet is refused
+// while the holds cannot be read. A direct supply that changes before signing still pays the queued
+// amount. The harness's dev server opens the release controls (`releaseControls.ts`).
 import { decodeFunctionData, encodeFunctionData, getAddress, parseAbi, type Address, type Hash } from 'viem';
 
 import { COMET_ABI, COMET_USDC, ERC20_ABI, MAX_UINT256, USDC, WRAPPER_ABI, WRAPPER_USDC } from '../harness/contracts';
-import { connectAccount, expect, nextRequest, openApp, selectedAccount, test } from '../harness/fixtures';
+import {
+  connectAccount,
+  expect,
+  harnessContext,
+  nextRequest,
+  openApp,
+  selectedAccount,
+  test,
+} from '../harness/fixtures';
 import { minedOnFork, usdcBalance } from '../harness/forkState';
-import { ANCHORAGE_WALLET } from '../harness/injectedProvider';
+import { ANCHORAGE_WALLET, METAMASK_WALLET } from '../harness/injectedProvider';
 import type { WalletRequest } from '../harness/walletServer';
 
 const DIRECT = 250_000_000n;
@@ -23,6 +32,8 @@ const SECOND_DIRECT = 50_000_000n;
 /** Mainnet WETH, collateral of the USDC Comet. */
 const WETH = getAddress('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
 const BORROW_ABI = parseAbi(['function borrowBalanceOf(address) view returns (uint256)']);
+/** Where the app stores its holds on Comet steps (`src/helpers/directWithdrawalHold.ts`). */
+const HOLDS_KEY = 'webb3-direct-withdrawal-holds';
 
 type Fork = Parameters<typeof usdcBalance>[0];
 type Wallet = Parameters<typeof nextRequest>[0];
@@ -108,6 +119,26 @@ const debtOf = (fork: Fork, account: Address, blockNumber?: bigint) =>
     args: [account],
     blockNumber,
   });
+
+/** The holds stored in `page`'s storage. */
+const storedHolds = (page: Parameters<typeof openApp>[0]) =>
+  page.evaluate((key) => JSON.parse(window.localStorage.getItem(key) ?? '[]') as unknown[], HOLDS_KEY);
+
+/** Submits 200 USDC, which the wallet answers with a 4900: the app cannot follow the Comet request. */
+async function holdFirstRequest(
+  page: Parameters<typeof openApp>[0],
+  wallet: Wallet,
+  { account, appOrigin }: { account: Address; appOrigin: string }
+) {
+  const seen = new Set((await wallet.requests()).map((request) => request.id));
+  await submitWithdrawal(page, '200');
+  const first = await nextRequest(wallet, 'eth_sendTransaction', seen);
+  const transaction = checkTransactionRequest(first, { account, appOrigin, to: COMET_USDC });
+  expect(decodeFunctionData({ abi: COMET_ABI, data: transaction.data }).args).toEqual([USDC, 200_000_000n]);
+  await wallet.reject(first.id, { code: 4900, message: 'The request can still complete in the wallet.' });
+  await expect(page.getByText('After Transaction')).toHaveCount(0, { timeout: 60_000 });
+  return { first, transaction };
+}
 
 const notice = (page: Parameters<typeof openApp>[0]) =>
   page.getByText(
@@ -501,5 +532,152 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     expect(await debtOf(fork, account, receipt.blockNumber)).toBe(0n);
     expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
     await second.close();
+  });
+  test('refuses a second Comet request from the same account through a standard-route wallet while the holds cannot be read', async ({
+    page,
+    browser,
+    manifest,
+    appOrigin,
+    blocked,
+    wallet,
+    fork,
+  }) => {
+    test.setTimeout(300_000);
+    const account = getAddress(await selectedAccount(wallet, '1000'));
+    await supplyToComet(wallet, fork, account, DIRECT);
+    await supplyToWrapper(wallet, fork, account, WRAPPED);
+    await supplyCollateral(wallet, fork, account);
+
+    await openApp(page);
+    await connectAccount(page, wallet, account, ANCHORAGE_WALLET.label);
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+    const { transaction: firstTransaction } = await holdFirstRequest(page, wallet, { account, appOrigin });
+    const stored = await page.evaluate((key) => window.localStorage.getItem(key), HOLDS_KEY);
+    expect(stored).not.toBeNull();
+
+    // The same account through a standard-route wallet, in a browser that has the hold, then cannot read it.
+    const standard = await harnessContext(browser, {
+      manifest,
+      appOrigin,
+      wallet,
+      blocked,
+      harnessWallet: METAMASK_WALLET,
+    });
+    try {
+      await standard.addInitScript(
+        ([key, value]) => window.localStorage.setItem(key, value),
+        [HOLDS_KEY, stored ?? '']
+      );
+      const other = await standard.newPage();
+      await openApp(other);
+      await connectAccount(other, wallet, account, METAMASK_WALLET.label);
+      await other.evaluate((key) => {
+        const read = Storage.prototype.getItem;
+        Storage.prototype.getItem = function (this: Storage, name: string) {
+          if (name === key) throw new DOMException('The hold key cannot be read.', 'SecurityError');
+          return read.call(this, name);
+        };
+      }, HOLDS_KEY);
+
+      // Another 200 USDC from the standard route: nothing reaches the wallet.
+      await submitWithdrawal(other, '200');
+      await expectNoDialog(other);
+      // The refused write would ask the wallet within this time; nothing positive marks the refusal.
+      await other.waitForTimeout(5_000);
+      expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
+    } finally {
+      await standard.close();
+    }
+
+    // The held request executes after all, from the wallet. Comet lends nothing.
+    const late = await wallet.forkSend({ from: account, to: COMET_USDC, data: firstTransaction.data });
+    const { receipt: lateReceipt } = await minedOnFork(fork, late.hash, { from: account, to: COMET_USDC });
+    expect(await debtOf(fork, account, lateReceipt.blockNumber)).toBe(0n);
+  });
+
+  test('keeps the hold when a reorg returns the held request to pending, and ends it once the request is mined again', async ({
+    page,
+    wallet,
+    fork,
+    appOrigin,
+  }) => {
+    test.setTimeout(300_000);
+    const account = getAddress(await selectedAccount(wallet, '1000'));
+    await supplyToComet(wallet, fork, account, DIRECT);
+    await supplyToWrapper(wallet, fork, account, WRAPPED);
+    await supplyCollateral(wallet, fork, account);
+
+    await openApp(page);
+    await connectAccount(page, wallet, account, ANCHORAGE_WALLET.label);
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+    const { first, transaction: firstTransaction } = await holdFirstRequest(page, wallet, { account, appOrigin });
+
+    // The held request is mined, and the app finds its Withdraw log. When the app reads the transaction, a
+    // reorg removes its block, and the node answers with the transaction pending again. The route is in
+    // place before the request is mined, so that no earlier look of the open page finds it.
+    // anvil's own methods, which the public client does not type.
+    const forkRpc = (method: string, params: unknown[] = []) =>
+      (fork.request as unknown as (call: { method: string; params: unknown[] }) => Promise<unknown>)({
+        method,
+        params,
+      });
+    const snapshot = await forkRpc('evm_snapshot');
+    const late: { hash?: string } = {};
+    let isClaimed = false;
+    let isReorged = false;
+    // The reorg waits until the test has seen the request mined.
+    let seenMined: () => void = () => undefined;
+    const isSeenMined = new Promise<void>((resolve) => (seenMined = resolve));
+    await page.route('**/*', async (route) => {
+      let body: { id?: number; method?: string; params?: [string] } | undefined;
+      try {
+        body = route.request().postDataJSON();
+      } catch {
+        body = undefined;
+      }
+      if (
+        !isClaimed &&
+        late.hash !== undefined &&
+        body?.method === 'eth_getTransactionByHash' &&
+        body.params?.[0]?.toLowerCase() === late.hash.toLowerCase()
+      ) {
+        isClaimed = true;
+        await isSeenMined;
+        const mined = (await forkRpc('eth_getTransactionByHash', [late.hash])) as object;
+        expect(await forkRpc('evm_revert', [snapshot])).toBe(true);
+        await forkRpc('evm_mine');
+        isReorged = true;
+        const pending = { ...mined, blockHash: null, blockNumber: null, transactionIndex: null };
+        await route.fulfill({ json: { jsonrpc: '2.0', id: body.id, result: pending } });
+        return;
+      }
+      await route.fallback();
+    });
+    const mined = await wallet.forkSend({ from: account, to: COMET_USDC, data: firstTransaction.data });
+    late.hash = mined.hash;
+    await minedOnFork(fork, mined.hash, { from: account, to: COMET_USDC });
+    seenMined();
+
+    // A reload looks at the hold, and meets the reorg.
+    await page.reload();
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+    await expect.poll(() => isReorged, { timeout: 60_000 }).toBe(true);
+
+    // The same 200 USDC again: the hold stays, and nothing reaches the wallet.
+    await submitWithdrawal(page, '200');
+    await expect(page.getByText('Earlier Request Still Pending').first()).toBeVisible({ timeout: 60_000 });
+    await expectNoDialog(page);
+    expect(await storedHolds(page)).toHaveLength(1);
+    expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
+
+    // The held request is mined again, after the reorg. Comet lends nothing, and the next look, which
+    // reads the block of the earlier log again, ends the hold.
+    const again = await wallet.forkSend({ from: account, to: COMET_USDC, data: firstTransaction.data });
+    const { receipt } = await minedOnFork(fork, again.hash, { from: account, to: COMET_USDC });
+    expect(await debtOf(fork, account, receipt.blockNumber)).toBe(0n);
+    await page.reload();
+    await expect(notice(page)).toBeVisible({ timeout: 60_000 });
+    await expect.poll(() => storedHolds(page), { timeout: 60_000 }).toHaveLength(0);
+    expect((await wallet.requests({ method: 'eth_sendTransaction' })).map((request) => request.id)).toEqual([first.id]);
   });
 });
