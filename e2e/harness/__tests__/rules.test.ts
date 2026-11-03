@@ -3,8 +3,30 @@
  */
 // Small rules: the browser egress allowlist, the optional public v3 API URL, and the Comet raw-unit oracle.
 import { BASE_INDEX_SCALE, presentValueOf, principalAfterSupply, principalAfterWithdraw } from '../contracts';
-import { allows, isAllowed, withoutQuery } from '../egress';
+import { allows, isAllowed, withLaneHeader, withoutQuery } from '../egress';
+import { LANE_HEADER } from '../laneHeader';
 import { v3ApiUrl } from '../settings';
+
+describe('the fork lane header', () => {
+  const lane = { origins: new Set(['https://127.0.0.1:6000', 'http://127.0.0.1:7000']), value: '2' };
+
+  test("names the worker's lane on each request to a lane-routed origin, over any value the page sent", () => {
+    expect(withLaneHeader({ accept: '*/*' }, 'https://127.0.0.1:6000/ethereum-mainnet', lane)).toEqual({
+      accept: '*/*',
+      [LANE_HEADER]: '2',
+    });
+    expect(
+      withLaneHeader({ 'X-CF-Harness-Lane': '0', [LANE_HEADER]: '1' }, 'http://127.0.0.1:7000/screen', lane)
+    ).toEqual({ [LANE_HEADER]: '2' });
+  });
+
+  test('leaves it off every other request, whatever the page sent', () => {
+    expect(withLaneHeader({ 'X-CF-Harness-Lane': '0', accept: '*/*' }, 'http://127.0.0.1:5173/', lane)).toEqual({
+      accept: '*/*',
+    });
+    expect(withLaneHeader({ [LANE_HEADER]: '1' }, 'not a url', lane)).toEqual({});
+  });
+});
 
 describe('egress', () => {
   const allowed = new Set(['http://127.0.0.1:5173', 'https://127.0.0.1:6000', 'https://v3-api.example.com/v3']);

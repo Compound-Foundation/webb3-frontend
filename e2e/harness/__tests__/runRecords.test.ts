@@ -78,7 +78,7 @@ test('the synchronous fallback after a start-up SIGINT stops anvil and removes i
     expect(anvilCwd).toMatch(/cf-browser-anvil-/);
     expect(fs.existsSync(anvilCwd as string)).toBe(true);
     // What the exit handler runs when SIGINT ends the runner before global setup returns its teardown.
-    cleanUpSynchronously({ anvil: fork.child, privateDir, anvilCwd });
+    cleanUpSynchronously({ anvils: [{ child: fork.child, cwd: anvilCwd }], privateDir });
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(isAlive(fork.pid)).toBe(false);
     expect(fs.existsSync(anvilCwd as string)).toBe(false);
@@ -174,4 +174,59 @@ test('recovery stops an orphan whose working directory was removed, and not an a
   expect(isAlive(other.pid as number)).toBe(true);
   other.kill('SIGKILL');
   for (const directory of [runs, tools, otherCwd, recordedCwd]) fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('recovery stops every lane anvil of a killed run, each in its own recorded directory, and removes those directories', async () => {
+  const runs = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-runs-'));
+  const tools = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-tools-'));
+  const fakeAnvil = path.join(tools, 'anvil');
+  fs.writeFileSync(fakeAnvil, '#!/bin/sh\nsleep 60\n', { mode: 0o755 });
+  const cwds = [0, 1, 2].map(() => fs.mkdtempSync(path.join(os.tmpdir(), 'cf-browser-anvil-')));
+  const forkArgs = ['--fork-url', 'http://127.0.0.1:18546/'];
+  const [laneZero, laneOne, live] = cwds.map((cwd) => spawn(fakeAnvil, forkArgs, { stdio: 'ignore', cwd }));
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const write = (run: string, record: object) => {
+    fs.mkdirSync(path.join(runs, run));
+    fs.writeFileSync(path.join(runs, run, 'processes.json'), JSON.stringify(record));
+  };
+  const base = { upstreamProxyPort: 18546, privateDir: '/tmp/none' };
+  write('killed', {
+    ...base,
+    runnerPid: deadPid(),
+    anvils: [
+      { pid: laneZero.pid, cwd: cwds[0] },
+      { pid: laneOne.pid, cwd: cwds[1] },
+    ],
+  });
+  write('live', { ...base, runnerPid: process.pid, anvils: [{ pid: live.pid, cwd: cwds[2] }] });
+  try {
+    const done = recoverKilledRuns(runs);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(done).toEqual([
+      `stopped anvil ${laneZero.pid} of run killed`,
+      `stopped anvil ${laneOne.pid} of run killed`,
+      "removed anvil's working directory of run killed",
+      "removed anvil's working directory of run killed",
+    ]);
+    expect(isAlive(laneZero.pid as number)).toBe(false);
+    expect(isAlive(laneOne.pid as number)).toBe(false);
+    expect(isAlive(live.pid as number)).toBe(true);
+    expect(cwds.map((cwd) => fs.existsSync(cwd))).toEqual([false, false, true]);
+    expect(fs.existsSync(path.join(runs, 'killed', 'processes.json'))).toBe(false);
+  } finally {
+    for (const child of [laneZero, laneOne, live]) child.kill('SIGKILL');
+    for (const directory of [runs, tools, ...cwds]) fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('the synchronous fallback stops every lane anvil it was given, and skips one that has exited', () => {
+  const running = spawn('sleep', ['60'], { stdio: 'ignore' });
+  const exited = spawn('true', [], { stdio: 'ignore' });
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-browser-anvil-'));
+  return new Promise<void>((resolve) => exited.once('exit', () => resolve())).then(async () => {
+    cleanUpSynchronously({ anvils: [{ child: exited }, { child: running, cwd }], privateDir: undefined });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(isAlive(running.pid as number)).toBe(false);
+    expect(fs.existsSync(cwd)).toBe(false);
+  });
 });

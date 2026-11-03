@@ -30,7 +30,7 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { BLOCK_SECONDS } from './blockTime';
 import { ERC20_ABI, USDC, usdcBalanceKey } from './contracts';
 import { hex, rpc, verifyFork } from './fork';
-import { SCREENING_BEHAVIOURS, isAddress, type ScreeningBehaviour, type ScreeningStub } from './screeningStub';
+import { SCREENING_BEHAVIOURS, isAddress, type ScreeningBehaviour, type ScreeningLane } from './screeningStub';
 
 /** The provider methods that queue for a decision. */
 export const QUEUED_METHODS = [
@@ -107,7 +107,8 @@ export type WalletServerOptions = {
   /** The upstream proxy that anvil forks from, which each reset names again. */
   upstreamUrl: string;
   token: string;
-  screening: ScreeningStub;
+  /** This lane's screening partition. */
+  screening: ScreeningLane;
   stats?: () => Record<string, unknown>;
   log?: (line: string) => void;
   /** Gets every key the server makes, for the run's secret scan. */
