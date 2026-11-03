@@ -1,6 +1,6 @@
 import { MouseEventHandler, MouseEvent, useState, useEffect } from 'react';
 
-import { formatRateFactor } from '@helpers/numbers';
+import { FACTOR_PRECISION, formatRateFactor } from '@helpers/numbers';
 import { StateType } from '@types';
 
 import {
@@ -33,9 +33,7 @@ type InterestRateModelHydrated = [
 ];
 
 export type HoveredRate = {
-  utilizationPercentage: number;
-  borrowRate: bigint;
-  supplyRate: bigint;
+  utilization: number;
 };
 
 export type InterestRateModelState = InterestRateModelLoading | InterestRateModelHydrated;
@@ -43,10 +41,6 @@ export type InterestRateModelState = InterestRateModelLoading | InterestRateMode
 type InterestRateModelProps = {
   state: InterestRateModelState;
 };
-
-function percentToRateFactor(percent: number, baseFactor: number): bigint {
-  return BigInt(Math.round((percent / 100) * baseFactor));
-}
 
 const InterestRateModel = ({ state }: InterestRateModelProps) => {
   const defaultUtilizationPercentage = 0.9;
@@ -65,7 +59,6 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
 
   const factorScale = 1e18;
   const utilization = state[0] === StateType.Hydrated ? state[1].utilization : undefined;
-  const utilizationDescale = factorScale / 1e2;
 
   function getUtilizationPercentage(utilizationFactor: bigint | undefined) {
     if (utilizationFactor === undefined) {
@@ -95,23 +88,18 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
   } else {
     const actualUtilizationPercentage = getUtilizationPercentage(state[1].utilization);
     // loaded state
-    const mouseMove: MouseEventHandler<SVGRectElement> = (e: MouseEvent<SVGRectElement>) => {
-      const targetElement = e.target as HTMLElement;
-      const hoveredUtilizationPercentage = e.nativeEvent.offsetX / targetElement.getBoundingClientRect().width;
-      setUtilizationPercentage(hoveredUtilizationPercentage);
-      setIsMouseOnChart(true);
-      if (state[1].onRateHover !== undefined) {
-        const hoveredBorrowPoints = borrowPoints.filter((bp) => Number(bp[0]) / factorScale <= hoveredUtilizationPercentage);
-        const hoveredSupplyPoints = supplyPoints.filter((sp) => Number(sp[0]) / factorScale <= hoveredUtilizationPercentage);
-        const [borrowUtilization, hypotheticalBorrowAPR] = hoveredBorrowPoints[hoveredBorrowPoints.length - 1];
-        const [, hypotheticalSupplyAPR] = hoveredSupplyPoints[hoveredSupplyPoints.length - 1];
+    const mouseMove: MouseEventHandler<HTMLDivElement> = (e: MouseEvent<HTMLDivElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) * width) / rect.width;
+      const utilizationPercent = Math.min(Math.max((x - minX) / (maxX - minX), 0), 1);
 
-        state[1].onRateHover({
-          utilizationPercentage: Number(borrowUtilization) / utilizationDescale,
-          borrowRate: percentToRateFactor(hypotheticalBorrowAPR, factorScale),
-          supplyRate: percentToRateFactor(hypotheticalSupplyAPR, factorScale),
-        });
-      }
+      setUtilizationPercentage(utilizationPercent);
+
+      setIsMouseOnChart(true);
+
+      state[1].onRateHover?.({
+        utilization: Math.trunc(utilizationPercent * 100)
+      });
     };
 
     const mouseLeave = () => {
@@ -187,7 +175,7 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
     if (!isMouseOnChart) {
       utilizationToDisplay = actualUtilizationPercentage * 100;
     } else {
-      utilizationToDisplay = Number(borrowUtilization) / utilizationDescale;
+      utilizationToDisplay = Number(borrowUtilization / 10n ** BigInt(Math.max(FACTOR_PRECISION, 2) - 2));
     }
     return (
       <div className="interest-rate-model">
@@ -220,7 +208,11 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
         ) : (
           <></>
         )}
-        <div className="interest-rate-model__chart">
+        <div
+          className="interest-rate-model__chart"
+          onMouseMove={mouseMove}
+          onMouseLeave={mouseLeave}
+        >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${width} ${height}`}>
             {state[1].graphConfig.isV2Graph ? (
               <>
@@ -278,16 +270,6 @@ const InterestRateModel = ({ state }: InterestRateModelProps) => {
             ) : (
               <></>
             )}
-
-            <rect
-              x={minX - 1}
-              y={0}
-              width={maxX}
-              height={height}
-              fill="transparent"
-              onMouseMove={mouseMove}
-              onMouseLeave={mouseLeave}
-            />
           </svg>
         </div>
       </div>

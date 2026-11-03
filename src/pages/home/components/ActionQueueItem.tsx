@@ -6,7 +6,9 @@ import { isUnwrappedCollateralAsset, CHAINS } from '@constants/chains';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import {
+  ActionRules,
   displayTextForActionType,
+  isSameAction,
   sanitizedAmountForAction,
   validateAddingAction,
   validateAllowanceForAction,
@@ -14,6 +16,7 @@ import {
 import { assetIconForAssetSymbol } from '@helpers/assets';
 import { noop } from '@helpers/functions';
 import {
+  MAX_UINT256,
   PRICE_PRECISION,
   formatValue,
   shouldShowValueInBaseAsset,
@@ -38,6 +41,8 @@ type ActionQueueItemDisplayState = [
     approvalTransaction?: Transaction;
     baseAsset: BaseAssetWithAccountState;
     collateralAssets: TokenWithAccountState[];
+    /** The rules the queue checks each action against, such as the wrapped route's. */
+    actionRules?: ActionRules;
   }
 ];
 type ActionQueueItemNormalState = [
@@ -47,6 +52,8 @@ type ActionQueueItemNormalState = [
     actions: Action[];
     baseAsset: BaseAssetWithAccountState;
     collateralAssets: TokenWithAccountState[];
+    /** The rules the queue checks each action against, such as the wrapped route's. */
+    actionRules?: ActionRules;
     onClick: () => void;
     onDeleteClick: () => void;
   }
@@ -59,20 +66,34 @@ type ActionQueueItemProps = {
 
 const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
   const { selectedMarket } = useContext(getSelectedMarketContext());
-  const [type, { actionIndex, actions, baseAsset, collateralAssets }] = state;
+  const [type, { actionIndex, actions, baseAsset, collateralAssets, actionRules }] = state;
   const { symbol } = baseAsset;
   const action = actions[actionIndex];
   const [actionType, asset] = action;
   const { currency } = useCurrencyContext();
-  const sanitizedAmount = sanitizedAmountForAction(baseAsset, collateralAssets, actions.slice(0, actionIndex), action);
+  // A maximum withdrawal on the wrapped route pays the full exit's cash: the position less the
+  // wrapper's rounding buffer. The row shows that cash, and a spinner while it is not known.
+  const isWrappedFullExit =
+    actionRules?.wrappedBase !== undefined && actionType === ActionType.Withdraw && action[2] === MAX_UINT256;
+  const fullExitCash = isWrappedFullExit ? actionRules?.wrappedBase?.fullExitCash : undefined;
+  const sanitizedAmount =
+    fullExitCash ?? sanitizedAmountForAction(baseAsset, collateralAssets, actions.slice(0, actionIndex), action);
+  const isAmountUnknown = isWrappedFullExit && fullExitCash === undefined;
   const amount = formatValue(asset.decimals, sanitizedAmount);
-  const actionValid = validateAddingAction(baseAsset, collateralAssets, actions.slice(0, actionIndex), action);
-  const allowanceValid = validateAllowanceForAction(baseAsset, collateralAssets, actions.slice(0, actionIndex), action);
-  const error = allowanceValid !== 'ok' ? allowanceValid[1] : actionValid !== 'ok' ? actionValid[1] : undefined;
+  const earlierActions = actions.slice(0, actionIndex);
+  const actionValid = validateAddingAction(baseAsset, collateralAssets, earlierActions, action, actionRules);
+  const allowanceValid = validateAllowanceForAction(baseAsset, collateralAssets, earlierActions, action, actionRules);
+  // A wrapper action that stopped before anything was sent says why, and can be submitted again. The
+  // queue builds its entries afresh on every render, so the entry is matched by its type and token.
+  const stopped = actionRules?.wrappedBase?.stopped;
+  const stoppedLabel = stopped !== undefined && isSameAction(stopped.action, action) ? stopped.label : undefined;
+  const error = allowanceValid !== 'ok' ? allowanceValid[1] : actionValid !== 'ok' ? actionValid[1] : stoppedLabel;
 
   const baseAssetDenominated = shouldShowValueInBaseAsset(symbol as Currency, currency);
   let currencyValue;
-  if (actionType === ActionType.ClaimRewards) {
+  if (isAmountUnknown) {
+    currencyValue = null;
+  } else if (actionType === ActionType.ClaimRewards) {
     currencyValue = formatTokenBalance(
       asset.decimals + PRICE_PRECISION,
       sanitizedAmount * asset.price,
@@ -130,7 +151,7 @@ const ActionQueueItem = ({ state }: ActionQueueItemProps) => {
         </div>
       </div>
       <div className="action-queue-item__balance">
-        <p className="body">{amount}</p>
+        {isAmountUnknown ? <LoadSpinnerNew /> : <p className="body">{amount}</p>}
         <p className="L4 meta text-color--2">{currencyValue}</p>
       </div>
       <div

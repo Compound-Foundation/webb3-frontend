@@ -111,6 +111,7 @@ const RewardsButton = ({ web3, mobile = false, onClaimClicked = () => undefined 
                 chainId !== selectedMarket[1].chainInformation.chainId.toString()
               ) {
                 queueActions(
+                  Number(chainId),
                   claimBalances[0].comet,
                   claimBalances.map((rewardState) => [
                     ActionType.ClaimRewards,

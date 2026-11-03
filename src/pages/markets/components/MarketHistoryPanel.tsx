@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import IconTextPair, { IconTextPairSize } from '@components/IconTextPair';
 import { isNonStablecoinMarket } from '@helpers/baseAssetPrice';
-import { formatRate, formatUnits, PRICE_PRECISION } from '@helpers/numbers';
+import { BASE_FACTOR, formatRateFactor, formatUnits, PRICE_PRECISION } from '@helpers/numbers';
 import { BaseAssetConfig, BaseAssetWithState, Currency, MarketHistoricalBucket } from '@types';
 
 const FULL_GRAPH_WIDTH = 600;
@@ -40,6 +40,11 @@ function calculateScaledHeight(
     scaledHeight = graphHeight;
   }
   return scaledHeight;
+}
+
+// The rate line is plotted from numbers; the exact bigint APR is kept for the hovered label
+function rateToNumber(rate: bigint): number {
+  return Number(rate) / Number(BASE_FACTOR);
 }
 
 // Calculate the xpoint for a given data value index.
@@ -141,7 +146,7 @@ type LineBucketPoints = {
 };
 
 type HistoryMapItem = {
-  rate: number;
+  rate: bigint;
   total: number;
   index: number;
 };
@@ -210,7 +215,10 @@ const MarketHistoryPanel = ({ isBorrow, totalValue, marketHistory, currency, bas
   let historyMap: Map<number, HistoryMapItem>; // Calculate a map to allow us to quickly lookup data by timestamp
   if (marketHistory.length > 0) {
     lineBucketPoints = marketHistory.map(({ blockTimestamp, supplyRate, borrowRate }) => {
-      return { timestamp: blockTimestamp, rate: isBorrow ? borrowRate : supplyRate };
+      return {
+        timestamp: blockTimestamp,
+        rate: rateToNumber(isBorrow ? borrowRate : supplyRate)
+      };
     });
 
     historyMap = new Map(
@@ -309,7 +317,7 @@ function getHoveredLabels(
   if (hoveredTime == 0 || hoveredData === undefined) {
     return <></>;
   } else {
-    const rateLabel = isBorrow ? 'Borrow APR' : 'Earn APR';
+    const rateLabel = isBorrow ? 'Borrow APR' : 'Supply APR';
     const rateHoverImage = isBorrow
       ? '/images/line-graph-hover-icn-borrow.svg'
       : '/images/line-graph-hover-icn-supply.svg';
@@ -317,14 +325,14 @@ function getHoveredLabels(
 
     const xPoint = calculateXPoint(index, barWidth, BAR_PADDING);
 
-    const yLinePoint = calculateScaledHeight(LINE_GRAPH_HEIGHT, maxRate, minRate, rate);
+    const yLinePoint = calculateScaledHeight(LINE_GRAPH_HEIGHT, maxRate, minRate, rateToNumber(rate));
     const formattedTotal = formatUnits(total, currency);
     const barScaledHeight = calculateScaledHeight(BAR_GRAPH_HEIGHT, maxBarDataValue, minBarDataValue, total);
 
     return (
       <>
         <text className="market-history-panel__hover__value" x={xPoint} y={yLinePoint - 35}>
-          {formatRate(rate)}
+          {formatRateFactor(rate)}
         </text>
         <text className="market-history-panel__hover__label" x={xPoint} y={yLinePoint - 15}>
           {rateLabel}

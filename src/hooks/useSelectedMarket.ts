@@ -7,7 +7,6 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
 import { MARKET_KEY_DELIMITER, MARKET_LOCAL_STORAGE_KEY } from '@helpers/constants';
-import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import { V2_MARKET, areSameMarket, getMarket, isV2Market, marketKey } from '@helpers/markets';
 import { REFRESH_INTERVAL } from '@helpers/numbers';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
@@ -206,12 +205,7 @@ export const queryCometData = async (
   ) {
     nativeTokenToUsdPriceFeed = market.chainInformation.extraPriceFeeds.otherBaseTokensToUsd[baseAssetSymbol];
   }
-  const checkDeprecatedwUSDM = getIsDeprecatedwUSDMMarket(market.baseAsset, market.chainInformation);
-  return sleuth.fetch<CometStateResponse, CometStateQuery>(QUERY, [
-    market.marketAddress,
-    nativeTokenToUsdPriceFeed,
-    checkDeprecatedwUSDM,
-  ]);
+  return sleuth.fetch<CometStateResponse, CometStateQuery>(QUERY, [market.marketAddress, nativeTokenToUsdPriceFeed]);
 };
 
 const getState = async (

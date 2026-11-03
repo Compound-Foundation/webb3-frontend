@@ -15,13 +15,14 @@ import { assetIconForAssetSymbol, iconNameForChainId } from '@helpers/assets';
 import { MARKETS_TOP_COLLATERAL_KEY } from '@helpers/constants';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, getMarketDescriptors } from '@helpers/markets';
-import { formatRateFactor, formatValueInDollars, PRICE_PRECISION } from '@helpers/numbers';
+import { BASE_FACTOR, formatRateFactor, formatValueInDollars, PRICE_PRECISION } from '@helpers/numbers';
 import { useLocalStorage } from '@hooks/useLocalStorage';
 import { useMarkets } from '@hooks/useMarkets';
 import useOnClickOutside from '@hooks/useOnClickOutside';
 
 import { LatestMarketSummaries, MarketSummary, StateType } from '../../../types';
 import { BoostedRateInfo } from '../BoostedRateInfo';
+import { formatPercentage } from '../helpers/rateModelLines';
 
 import InstitutionalRateInfo from './InstitutionalRateInfo';
 
@@ -330,7 +331,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
   const market = getMarket(markets, marketSummary.chainId, marketSummary.comet.address);
   const showNewBadge = market?.isNew === true;
 
-  const utilization = formatRateFactor(marketSummary.utilization);
+  const utilization = formatPercentage((Number(marketSummary.utilization) / Number(BASE_FACTOR)) * 100, 2);
 
   const netEarnAPR = formatRateFactor(marketSummary.supplyAPR + marketSummary.supplyRewardsAPR);
   const netBorrowAPR = formatRateFactor(marketSummary.borrowAPR - marketSummary.borrowRewardsAPR);
@@ -363,7 +364,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
 
   return (
     // The Link component doesn't work here because tr must be
-    // a direct child of tbody and td must be a direct child of tr.
+    // a direct child of tbody and td must be a direct child of tr
     <tr
       className={`market-overview-panels__table-row${rowModifier}`}
       onClick={isError ? undefined : handleRowClick}
