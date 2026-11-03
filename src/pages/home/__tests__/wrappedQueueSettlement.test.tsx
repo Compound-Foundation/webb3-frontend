@@ -2039,6 +2039,32 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(chain.directSupply).toBe(DIRECT);
   });
 
+  it('sends nothing, and holds nothing, when the Comet state shows no direct supply by the end of the gas estimate', async () => {
+    const { chain, wallet, show } = await renderMixed();
+    const entry: Action = [ActionType.Withdraw, BASE_ASSET, 100_000_000n];
+    act(() => live.queue.addOrUpdateAction(entry));
+    // The Comet step's gas estimate waits until the test answers it.
+    const estimate = held<void>();
+    let isEstimateStarted = false;
+    wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
+      isEstimateStarted = true;
+      await estimate.promise;
+      return BigNumber.from(100_000);
+    });
+
+    act(() => positionCard().onSubmitClicked());
+    await waitFor(() => expect(isEstimateStarted).toBe(true));
+    // The Comet state is read again and shows no direct supply, in the same visit and session.
+    show({ state: stateWithDirectSupply(0n) });
+    estimate.release();
+    await settle();
+
+    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
+    expect(storedHolds()).toEqual([]);
+    expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Not Sent, Try Again');
+    expect(chain.directSupply).toBe(DIRECT);
+  });
+
   it('refuses the Comet step while the Comet state was read for another account', async () => {
     const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
     const state = stateWithDirectSupply(DIRECT);

@@ -24,9 +24,9 @@ import { BlockWait, DEFAULT_BLOCK_WAIT, waitForBlock } from '@helpers/wrappedPos
 export const DIRECT_WITHDRAWAL_HOLDS_KEY = 'webb3-direct-withdrawal-holds';
 
 /**
- * How long a reservation keeps other tabs from reserving, in milliseconds. It covers the gas
- * estimate and the fresh read before the wallet is asked, which waits at most half a minute for a
- * block. A reservation is dropped only once it has expired.
+ * How long a reservation keeps other tabs from reserving, in milliseconds. It covers the fresh read,
+ * the gas estimate and the read after it, before the wallet is asked. Each read waits at most half a
+ * minute for a block. A reservation is dropped only once it has expired.
  */
 export const RESERVATION_LEASE_MS = 120_000;
 
@@ -55,7 +55,7 @@ export type DirectWithdrawalHold = HoldKey & {
   calldata: string;
   /** `withdraw`'s amount in base units, as a decimal string: `MAX_UINT256` for the whole supply. */
   amount: string;
-  /** The block of the fresh read made just before the wallet was asked. */
+  /** The block of the fresh read made before the gas estimate, the earlier of the two reads. */
   blockNumber: number;
   /** The transaction's hash, once the wallet gave it. */
   hash?: string;

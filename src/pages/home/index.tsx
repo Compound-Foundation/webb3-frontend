@@ -255,7 +255,7 @@ type DirectStepRequest = {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sentArgs: (args: any[]) => any[];
-  /** The direct supply the fresh read just before signing showed. */
+  /** The direct supply the fresh read before the gas estimate showed. */
   freshBalance?: bigint;
   /** The withdrawal split again from `freshBalance`, which decides the Comet step's amount. */
   replanned?: WithdrawalSplit;
@@ -467,7 +467,8 @@ const Home = ({
     const checkedSend: typeof trxFn = async (...args) => {
       const sentArgs = request.sentArgs(args);
       // The wallet is asked for exactly the call whose gas was estimated, and for nothing when no
-      // estimate was made.
+      // estimate was made. Both are built from `replanned`, set once, so this asserts an invariant
+      // that no current path breaks: a later change that re-plans after the estimate sends nothing.
       const calldata = directWithdrawalCalldata(sentArgs[0], sentArgs[1]);
       if (request.estimatedCalldata === undefined || calldata !== request.estimatedCalldata) {
         throw new NotSentError(new Error('The withdrawal changed after its gas was estimated.'));

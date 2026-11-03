@@ -321,8 +321,8 @@ export function isSubmissionRefused(
  * on the wrapped route, and `isSubmissionRefused` still refuses every other. It is refused unless the
  * wrapped route of `submittedMarket` is live with its exits open and eligible, the Comet state was
  * read for that market and the connected account, and that state shows a direct supply. The amount
- * is not judged here: Home splits the withdrawal again from a fresh read of the direct supply just
- * before the wallet is asked (`splitWrappedWithdrawal`).
+ * is not judged here: Home splits the withdrawal again from a fresh read of the direct supply before
+ * the gas estimate, and checks it against a read after the estimate (`splitWrappedWithdrawal`).
  */
 export function isDirectWithdrawalRefused(live: LiveSubmissionState, submittedMarket: MarketIdentity): boolean {
   if (!isSameMarket(live.selectedMarket, submittedMarket) || live.route.kind !== 'wrapped') return true;
@@ -337,8 +337,9 @@ const cometInterface = new Interface(CometAbi);
 
 /**
  * The account's direct Comet supply of the base token at `blockNumber`: Comet's `balanceOf`, which
- * reports the supply only and zero for a borrower. Read just before the wallet is asked to sign a
- * direct withdrawal, so the withdrawal is split from the supply as it is.
+ * reports the supply only and zero for a borrower. Read before the gas estimate of a direct
+ * withdrawal and again after it, before the wallet is asked, so the withdrawal is split from the
+ * supply as it is.
  */
 export async function readDirectBalance(
   provider: Pick<JsonRpcProvider, 'call'>,

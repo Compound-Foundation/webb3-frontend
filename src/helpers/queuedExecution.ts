@@ -105,8 +105,9 @@ export type WithdrawalSplit = { direct: DirectBaseWithdrawal | undefined; reques
  *
  * With `MAX_UINT256`, Comet withdraws the supply it holds for the account and never borrows. A
  * maximum with a direct supply needs `wrappedShares`, and is refused with a `WrappedExecutionError`
- * while they are unknown. Home splits a withdrawal when Submit is pressed, and again just before the
- * wallet is asked, from a fresh read of `directBalance`.
+ * while they are unknown. Home splits a withdrawal when Submit is pressed, again from a fresh read of
+ * `directBalance` before the gas estimate, and once more from a read after it, before the wallet is
+ * asked.
  */
 export function splitWrappedWithdrawal(
   amount: bigint,
