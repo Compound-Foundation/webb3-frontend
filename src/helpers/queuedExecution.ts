@@ -76,6 +76,68 @@ export function planQueuedExecution(
 }
 
 /**
+ * The Comet base withdrawal that pays the part of a wrapped-route withdrawal the account supplied to
+ * Comet directly, outside the wrapper. It is the call production sends: Comet's
+ * `withdraw(baseToken, amount)`.
+ */
+export type DirectBaseWithdrawal = {
+  /**
+   * `withdraw`'s amount: `MAX_UINT256` for the whole direct supply, or a part strictly below the
+   * supply, in base units.
+   */
+  amount: bigint;
+};
+
+/**
+ * How a queued withdrawal on the wrapped route is carried out: `direct` first, as its own Comet
+ * transaction, then `request` through the wrapper, which starts only once `direct` confirms. At least
+ * one of the two is set. A partial `request` is what the wrapper pays if `direct` takes exactly the
+ * direct supply it was planned from. After `direct` confirms, the rest is worked out again from what
+ * it took.
+ */
+export type WithdrawalSplit = { direct: DirectBaseWithdrawal | undefined; request: WithdrawalRequest | undefined };
+
+/**
+ * Splits a withdrawal of `amount` on the wrapped route between the account's direct Comet supply,
+ * `directBalance`, and its wrapper shares. The direct supply pays first:
+ * - With no direct supply, everything goes to the wrapper, as `planQueuedExecution` plans it.
+ * - An amount below the direct supply is one Comet withdrawal of that amount.
+ * - An amount equal to the direct supply withdraws it with `MAX_UINT256`, with no wrapper step, so
+ *   it never borrows if the supply falls before it executes.
+ * - A larger amount withdraws the whole direct supply with `MAX_UINT256`, then the rest from the
+ *   wrapper.
+ * - A maximum withdraws the whole direct supply with `MAX_UINT256`, then makes a full exit when the
+ *   account holds wrapper shares.
+ *
+ * With `MAX_UINT256`, Comet withdraws the supply it holds for the account and never borrows. A
+ * maximum with a direct supply needs `wrappedShares`, and is refused with a `WrappedExecutionError`
+ * while they are unknown. Home splits a withdrawal when Submit is pressed, again from a fresh read of
+ * `directBalance` before the gas estimate, and once more from a read after it, before the wallet is
+ * asked.
+ */
+export function splitWrappedWithdrawal(
+  amount: bigint,
+  directBalance: bigint,
+  wrappedShares: bigint | undefined
+): WithdrawalSplit {
+  const isMax = amount === MAX_UINT256;
+  if (directBalance <= 0n) {
+    return { direct: undefined, request: isMax ? { kind: 'full' } : { kind: 'partial', cash: amount } };
+  }
+  const wholeDirect: DirectBaseWithdrawal = { amount: MAX_UINT256 };
+  if (isMax) {
+    if (wrappedShares === undefined) {
+      throw new WrappedExecutionError('position-unknown', 'Your wrapped balance is not loaded yet. Try again.');
+    }
+    return { direct: wholeDirect, request: wrappedShares > 0n ? { kind: 'full' } : undefined };
+  }
+  if (amount <= 0n) throw new WrappedExecutionError('unknown-entry', 'Enter an amount greater than 0.');
+  if (amount < directBalance) return { direct: { amount }, request: undefined };
+  if (amount === directBalance) return { direct: wholeDirect, request: undefined };
+  return { direct: wholeDirect, request: { kind: 'partial', cash: amount - directBalance } };
+}
+
+/**
  * Why the amount form refuses a base supply or withdrawal on `route`, as the form shows it, or
  * undefined when it can be queued. A closed release control is named first: the route reports a
  * wallet on another network before it, and that wallet would otherwise queue an action the control
