@@ -10,7 +10,7 @@ import { utils } from 'ethers';
 import { server as mswServer } from '../../../handlers/server';
 import { ControlClient } from '../controlClient';
 import { verifyFork } from '../fork';
-import type { ScreeningStub } from '../screeningStub';
+import type { ScreeningLane } from '../screeningStub';
 import { anvilHandlers, FORK_BLOCK, FORK_HASH, startFakeNode, type FakeNode } from '../testing/testServers';
 import { startWalletServer, tokenMatches, type WalletRequest, type WalletServer } from '../walletServer';
 
@@ -19,14 +19,11 @@ const ORIGIN = 'http://127.0.0.1:5999';
 /** The upstream proxy that anvil forks from, which a reset names. */
 const UPSTREAM_URL = 'http://127.0.0.1:18546/';
 
-const fakeScreening = (): ScreeningStub & { behaviours: Map<string, string>; resets: number } => {
+const fakeScreening = (): ScreeningLane & { behaviours: Map<string, string>; resets: number } => {
   const behaviours = new Map<string, string>();
   const stub = {
     behaviours,
     resets: 0,
-    origin: 'http://127.0.0.1:1',
-    endpoint: 'http://127.0.0.1:1/screen',
-    extensionUrl: 'http://127.0.0.1:1/extension/',
     setBehaviour: (address: string, behaviour: string) => void behaviours.set(address.toLowerCase(), behaviour),
     behaviourOf: () => 'blocked' as const,
     release: () => 0,
@@ -35,9 +32,8 @@ const fakeScreening = (): ScreeningStub & { behaviours: Map<string, string>; res
       behaviours.clear();
       stub.resets += 1;
     },
-    close: async () => undefined,
   };
-  return stub as unknown as ScreeningStub & { behaviours: Map<string, string>; resets: number };
+  return stub as unknown as ScreeningLane & { behaviours: Map<string, string>; resets: number };
 };
 
 let node: FakeNode;

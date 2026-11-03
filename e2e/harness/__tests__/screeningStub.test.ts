@@ -3,22 +3,31 @@
  */
 // The screening stub: the exact answer for each behaviour, CORS for the app only, and held requests.
 import { server as mswServer } from '../../../handlers/server';
-import { startScreeningStub, type ScreeningStub } from '../screeningStub';
+import { LANE_HEADER } from '../laneHeader';
+import { startScreeningStub, type ScreeningLane, type ScreeningStub } from '../screeningStub';
 
 const APP = 'http://127.0.0.1:5999';
 const ADDRESS = '0x00000000000000000000000000000000000c0304';
 
-let stub: ScreeningStub;
+let server: ScreeningStub;
+/** Lane 0, which the tests of one lane's behaviour use. */
+let stub: ScreeningLane;
 beforeAll(() => mswServer.close());
 beforeEach(async () => {
-  stub = await startScreeningStub({ allowedOrigins: new Set([APP]) });
+  server = await startScreeningStub({ allowedOrigins: new Set([APP]), laneCount: 2 });
+  stub = server.lanes[0];
 });
-afterEach(() => stub.close());
+afterEach(() => server.close());
 
-const screen = (address = ADDRESS, origin = APP, signal?: AbortSignal) =>
-  fetch(stub.endpoint, {
+/** A screen from the app, in lane 0 unless `lane` names another, or `null` for none. */
+const screen = (address = ADDRESS, origin = APP, signal?: AbortSignal, lane: string | null = '0') =>
+  fetch(server.endpoint, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', origin },
+    headers: {
+      'content-type': 'application/json',
+      origin,
+      ...(lane === null ? {} : { [LANE_HEADER]: lane }),
+    },
     body: JSON.stringify({ address }),
     signal,
   });
@@ -75,7 +84,38 @@ test('timeout never answers, and a reset closes the held request', async () => {
 });
 
 test('serves the test extension page', async () => {
-  const page = await (await fetch(stub.extensionUrl)).text();
+  const page = await (await fetch(server.extensionUrl)).text();
   expect(page).toContain('sendWeb3');
   expect(page).toContain('Sign typed data');
+});
+
+describe('fork lanes', () => {
+  test("keeps each lane's behaviours, log and held requests apart, so one lane's reset leaves the others", async () => {
+    const [first, second] = server.lanes;
+    first.setBehaviour(ADDRESS, 'allowed');
+    second.setBehaviour(ADDRESS, 'hold');
+    expect(await (await screen(ADDRESS, APP, undefined, '0')).text()).toBe('{"flagged":false}');
+    const held = screen(ADDRESS, APP, undefined, '1');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(first.log().map((entry) => entry.outcome)).toEqual(['answered']);
+    expect(second.log().map((entry) => entry.outcome)).toEqual(['held']);
+    // A reset of lane 0, as before its next test, neither answers nor clears lane 1's request.
+    first.reset();
+    expect(first.behaviourOf(ADDRESS)).toBe('blocked');
+    expect(second.behaviourOf(ADDRESS)).toBe('hold');
+    expect(first.release(ADDRESS, 'allowed')).toBe(0);
+    expect(second.log().map((entry) => entry.outcome)).toEqual(['held']);
+    expect(second.release(ADDRESS, 'blocked')).toBe(1);
+    expect(await (await held).text()).toBe('{"flagged":true}');
+  });
+
+  test('refuses a screen with no lane, or a lane out of range, and logs it in no lane', async () => {
+    for (const lane of [null, '2', 'x', '01']) {
+      expect((await screen(ADDRESS, APP, undefined, lane)).status).toBe(403);
+    }
+    expect(server.lanes.flatMap((each) => each.log())).toEqual([]);
+    // A preflight needs no lane: the browser sends no custom header with it.
+    const preflight = await fetch(server.endpoint, { method: 'OPTIONS', headers: { origin: APP } });
+    expect(preflight.status).toBe(204);
+  });
 });
