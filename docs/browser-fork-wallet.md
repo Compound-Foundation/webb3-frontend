@@ -132,7 +132,7 @@ workers = max(1, min(cpuLimit, memoryLimit, specFiles, upstreamLimit, 4))
 
 - **CPU.** `availableCPUs` comes from `os.availableParallelism()`, capped by the Linux cgroup CPU quota when present. If that call fails, the harness uses `os.cpus().length`. An unknown count becomes 2. `idleShare` is the idle fraction over a 300 ms sample, or 50% if unavailable. The formula reserves 2 CPUs for shared services and budgets 2 per worker.
 - **Memory.** On Linux, available memory is `MemAvailable`, or the cgroup v2/v1 memory limit minus usage when lower. On macOS, it is the free, inactive and speculative pages from `vm_stat`. The fallback is `os.freemem()`. Unknown memory sets the memory limit to one worker. The formula reserves 4 GiB for shared services and headroom, then budgets 1.5 GiB per worker.
-- **Files.** The estimator counts `*.spec.ts` files in `e2e/specs`, which has 10. A file runs in one worker because `fullyParallel` is false. If the count is unavailable, this limit is omitted.
+- **Files.** The estimator counts the `*.spec.ts` files in `e2e/specs`. A file runs in one worker because `fullyParallel` is false. If the count is unavailable, this limit is omitted.
 - **Upstream.** Public endpoints without a warm shared cache file have a limit of 2, including when the cache is off. A warm cache or a private endpoint uses 4.
 - **Maximum.** The estimate never exceeds 4 workers.
 
