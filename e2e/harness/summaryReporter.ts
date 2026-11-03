@@ -15,7 +15,7 @@ import path from 'node:path';
 import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 
 import { REQUIRED_ACCEPTANCE_CASES, type RequiredCase } from './acceptance';
-import { REPO_ROOT } from './paths';
+import { homeRelative, REPO_ROOT } from './paths';
 import { findSecrets, outputsUnder, registeredSecretCount } from './secrets';
 
 type Row = { title: string; project: string; tags: string[]; status: string; reason: string; durationMs: number };
@@ -28,6 +28,13 @@ const firstLine = (text: string | undefined) =>
     .find((line) => line.trim() !== '')
     ?.trim()
     .slice(0, 240) ?? '';
+
+/** The fork cache as the manifest records it: its state, with why it is off, or its trust class and root. */
+const forkCacheText = (cache: { state?: string; reason?: string; trust?: string; directory?: string } | undefined) => {
+  if (cache?.state === undefined) return 'not recorded';
+  if (cache.directory !== undefined) return `${cache.state} (${cache.trust}), ${homeRelative(cache.directory)}`;
+  return cache.reason === undefined ? cache.state : `${cache.state} (${cache.reason})`;
+};
 
 /** A test's identity across runs: its project and its title path from the spec file down. */
 export const testId = (test: TestCase) => `${test.parent.project()?.name} › ${test.titlePath().slice(2).join(' › ')}`;
@@ -339,6 +346,7 @@ export default class SummaryReporter implements Reporter {
         '## Run',
         '',
         `- Fork: block ${manifest.fork.number} (${manifest.fork.mode}), hash ${manifest.fork.hash}, from ${manifest.fork.endpoint}`,
+        `- Fork cache: ${forkCacheText(manifest.fork.cache)}`,
         `- Tools: ${Object.entries(manifest.tools)
           .filter(([, value]) => value !== undefined)
           .map(([name, value]) => `${name} ${value}`)
@@ -362,6 +370,15 @@ export default class SummaryReporter implements Reporter {
         `- Upstream proxy forwarded: ${JSON.stringify(stats.upstream.methods)}; refused: ${JSON.stringify(
           stats.upstream.refused
         )}; upstream failures ${stats.upstream.failures}, error answers ${stats.upstream.errorAnswers}`,
+        ...(stats.forkCachePromotion === undefined
+          ? []
+          : [
+              `- Fork cache after the run: ${
+                stats.forkCachePromotion.isPromoted
+                  ? 'promoted to the shared cache'
+                  : `not promoted (${stats.forkCachePromotion.reason})`
+              }`,
+            ]),
         `- Cleanup: ${stats.cleanupErrors.length === 0 ? 'every service stopped' : stats.cleanupErrors.join('; ')}`
       );
     }
