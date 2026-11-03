@@ -214,12 +214,6 @@ const REPLACED_BLOCK_RETRY_MS = 3_000;
 /** The row's label when a withdrawal stopped before its Comet step because the direct supply fell. */
 const DIRECT_BALANCE_CHANGED_LABEL = 'Balance Changed, Edit Amount';
 /**
- * The row's label when a withdrawal that takes a direct supply first is queued with other actions.
- * Its Comet and wrapper steps are one queue row and are submitted on their own.
- */
-const WITHDRAW_ALONE_LABEL = 'Submit The Withdrawal On Its Own';
-
-/**
  * The Comet step of a wrapped-route withdrawal while it is being sent: the reservation, the fresh
  * read and split made before its gas is estimated, the hold stored just before the wallet is asked,
  * what follows the outcome, and what the wallet answered.
@@ -1059,13 +1053,10 @@ const Home = ({
     // starts only once the Comet step confirms, with no other press. Both steps belong to the queue's
     // one withdrawal row, which stays locked until the last of them ends. Nothing reaches the wrapper
     // unless the Comet step confirmed.
-    const startSplitWithdrawal = (
-      withdrawal: Extract<QueuedWrapperAction, { type: 'withdraw' }>,
-      otherCount: number
-    ) => {
+    const startSplitWithdrawal = (withdrawal: Extract<QueuedWrapperAction, { type: 'withdraw' }>) => {
       const visitKeyAtStart = visitKey;
       const stateBefore = liveWrappedLending.current.action.state;
-      const run = { kind: 'execute' as const, wrapper: withdrawal, directCount: 0, scope: visitIdentity, stateBefore };
+      const run = { kind: 'execute' as const, wrapper: withdrawal, scope: visitIdentity, stateBefore };
       const recordStopped = (label: string): SubmissionRecord => ({ ...run, status: { kind: 'stopped', label } });
       // The run stopped once its Comet step confirmed, with `rest` still to pay on its row.
       const recordStoppedOnRest = (rest: Action, label: string): SubmissionRecord => ({
@@ -1085,11 +1076,7 @@ const Home = ({
       }
       const direct = split.direct;
       if (direct === undefined) {
-        startWrapperAction(withdrawal, otherCount);
-        return;
-      }
-      if (otherCount > 0) {
-        setSubmissionRecord(recordStopped(WITHDRAW_ALONE_LABEL));
+        startWrapperAction(withdrawal);
         return;
       }
       // An earlier Comet withdrawal of the account on the market that can still execute holds back
@@ -1388,7 +1375,7 @@ const Home = ({
             endRun(undefined);
             return;
           }
-          startWrapperAction({ type: 'withdraw', action: rest.action, request: rest.request }, 0);
+          startWrapperAction({ type: 'withdraw', action: rest.action, request: rest.request });
         },
       };
       setSubmissionRecord(record);
@@ -1414,15 +1401,13 @@ const Home = ({
       if (web3.read.chainId === undefined || web3.write.chainId === undefined) return;
       const plan = planQueue();
       if (plan === undefined) return;
-      // A withdrawal with a direct part is submitted on its own, and its row says so.
-      const isSplitWithOthers = plan.wrapper?.type === 'withdraw' && directSupply > 0n && plan.direct.length > 0;
-      if (plan.direct.length > 0 && !isSplitWithOthers && isBlockedOnLiveRoute(plan.direct)) return;
+      if (plan.direct.length > 0 && isBlockedOnLiveRoute(plan.direct)) return;
       if (web3.write.chainId !== web3.read.chainId) {
         switchWriteNetwork(web3.read.chainId);
       } else if (isQueueLocked()) {
         return;
       } else if (plan.wrapper?.type === 'withdraw' && directSupply > 0n) {
-        startSplitWithdrawal(plan.wrapper, plan.direct.length);
+        startSplitWithdrawal(plan.wrapper);
       } else if (plan.wrapper !== undefined) {
         startWrapperAction(plan.wrapper);
       } else if (plan.direct.length > 0) {

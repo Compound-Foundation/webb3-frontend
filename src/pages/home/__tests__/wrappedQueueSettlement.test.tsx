@@ -21,6 +21,7 @@ import { DIRECT_WITHDRAWAL_HOLDS_KEY } from '@helpers/directWithdrawalHold';
 import { LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
+import { isSingleActionRoute } from '@helpers/queuedExecution';
 import { WrappedSession } from '@helpers/wrappedActions';
 import { WrappedPosition } from '@helpers/wrappedPositions';
 import { useActionQueue } from '@hooks/useActionQueue';
@@ -518,11 +519,12 @@ function Dashboard({
     baseSymbol: 'USDC',
     blockWait: { attempts: 200, intervalMs: 5 },
   });
-  const queue = useActionQueue(SELECTED.selectedMarket as never, () => undefined, {
-    account: ACCOUNT,
-    connector: `${connectorId}-1`,
-    status: 'connected',
-  });
+  const queue = useActionQueue(
+    SELECTED.selectedMarket as never,
+    () => undefined,
+    { account: ACCOUNT, connector: `${connectorId}-1`, status: 'connected' },
+    isSingleActionRoute(session.route)
+  );
   const market = storeMarket;
   const submission = useSubmissionStore({
     scope: submissionScope(web3.write, market),
@@ -1233,9 +1235,8 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
 
   it.each<[string, (collateral: ReturnType<typeof mockEthCollateralAsset>) => Action]>([
     ['a collateral supply', (collateral) => [ActionType.SupplyCollateral, collateral, 10n ** 17n]],
-    // isSubmissionRefused refuses this borrow beside the direct supply, and the row still says why.
     ['a borrow', () => [ActionType.Borrow, BASE_ASSET, 100_000_000n]],
-  ])('sends nothing, and says why on the row, when the withdrawal is queued with %s', async (_name, other) => {
+  ])('refuses %s beside the queued withdrawal, so the split is submitted on its own', async (_name, other) => {
     const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
     const collateral = mockEthCollateralAsset({ walletBalance: 10n ** 18n, allowance: MAX_UINT256 });
     const { wallet } = renderDashboard(chain, {
@@ -1245,17 +1246,22 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
     const entry: Action = [ActionType.Withdraw, BASE_ASSET, MAX_UINT256];
     act(() => live.queue.addOrUpdateAction(entry));
-    act(() => live.queue.addOrUpdateAction(other(collateral)));
+    // The wrapped route's queue holds one action, so the second one is refused before Submit.
+    let added: boolean | undefined;
+    act(() => {
+      added = live.queue.addOrUpdateAction(other(collateral));
+    });
+    expect(added).toBe(false);
+    expect(queued()).toEqual([entry]);
 
     await submit();
+    await waitFor(() => expect(queued()).toEqual([]));
 
-    expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
-    expect(live.manager.transactions).toEqual([]);
-    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
-      action: [ActionType.Withdraw, expect.anything(), entry[2]],
-      label: 'Submit The Withdrawal On Its Own',
-    });
-    expect(chain.directSupply).toBe(DIRECT);
+    expect(requestedCalls(wallet)).toEqual(['withdraw', 'unwrapAndWithdraw']);
+    expect(cometWithdrawals(wallet)[0].args).toEqual([MARKET.baseTokenAddress, MAX_UINT256]);
+    expect(chain.directSupply).toBe(0n);
+    expect(chain.shares).toBe(0n);
+    expect(chain.borrowed).toBe(0n);
   });
 
   /** Anchorage's answer to a request it still holds: it can still complete in the wallet. */

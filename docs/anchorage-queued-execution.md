@@ -107,7 +107,7 @@ What this leaves:
 
 A step that has a hash is also followed by the transaction manager, as any transaction is, until a receipt or a taken nonce settles it.
 
-A withdrawal with a direct part is submitted on its own: queued with other actions, its row shows "Submit The Withdrawal On Its Own" and nothing is sent.
+A withdrawal with a direct part is submitted on its own. The queue on the wrapped route holds one action (COM-342), so no other action is queued beside it.
 
 A check made before signing cannot cover the time until the transaction executes. On Anchorage that can be minutes. A finite part still borrows if the direct supply falls below it in that time, through another transaction of the same account. A `type(uint256).max` step never borrows: a fall in that time leaves the rest on the row, and a rise is paid to the account, then taken off the wrapper's part, or, past X, paid beyond it, as above.
 
@@ -119,7 +119,7 @@ A Max withdrawal's row shows the cash it pays: the direct supply, and the full e
 
 ## Mixed queues
 
-When the queue also holds direct actions, the wrapper action goes first. When it confirms, the direct actions continue at once through production's own path (`continueAfterWrapper`): one action straight to Comet, or several in one Bulker transaction, with the Bulker's own approval and transaction dialogs. A single ETH or stETH action goes through the Bulker, as in production. The direct actions also wait for the next Submit if the wallet changed network or the session became unusable meanwhile, or if the wrapper action confirmed while another page was shown, so no wallet request opens when the user returns.
+The queue on the wrapped route holds one action (COM-342), so a submission is either the wrapper action or a direct action. A direct action goes through production's own path: straight to Comet, or through the Bulker, with the Bulker's own approval and transaction dialogs. A single ETH or stETH action goes through the Bulker, as in production.
 
 The wrapper's transaction and the direct transaction are two wallet transactions. They are not atomic: the wrapper's can confirm and the direct one can then be rejected or fail, and the direct actions then stay queued. Production sends several direct actions in one Bulker transaction. A wrapper call cannot join it, because the Bulker has no wrapper action. `getBulkerTrxData` still refuses a wrapper draft or an action naming wrapper shares.
 
