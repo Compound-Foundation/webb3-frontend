@@ -222,6 +222,9 @@ function execute(chain: Chain, { to, data }: { to: string; data: string }): bool
   return false;
 }
 
+/** The hash of the simulated chain's block at `blockNumber`. */
+const blockHashAt = (blockNumber: number) => `0x${'b'.repeat(56)}${blockNumber.toString(16).padStart(8, '0')}`;
+
 /** The configured chain's public provider, at the newest block. */
 function readProviderFor(chain: Chain) {
   const minedCall = (hash: string) => chain.history.find((mined) => mined.hash === hash);
@@ -239,10 +242,19 @@ function readProviderFor(chain: Chain) {
                 mined.blockNumber <= (filter.toBlock ?? Number.MAX_SAFE_INTEGER) &&
                 (filter.topics ?? []).every((topic, index) => topic === null || isSame(log.topics[index], topic))
             )
-            .map((log) => ({ ...log, blockNumber: mined.blockNumber, transactionHash: mined.hash }))
+            .map((log) => ({
+              ...log,
+              blockNumber: mined.blockNumber,
+              blockHash: blockHashAt(mined.blockNumber),
+              transactionHash: mined.hash,
+            }))
         )
     ),
-    getTransaction: jest.fn(async (hash: string) => minedCall(hash) ?? null),
+    getTransaction: jest.fn(async (hash: string) => {
+      const mined = minedCall(hash);
+      return mined === undefined ? null : { ...mined, blockHash: blockHashAt(mined.blockNumber) };
+    }),
+    getBlock: jest.fn(async (blockNumber: number) => ({ number: blockNumber, hash: blockHashAt(blockNumber) })),
     getTransactionReceipt: jest.fn(async (hash: string) => {
       const mined = minedCall(hash);
       return mined === undefined

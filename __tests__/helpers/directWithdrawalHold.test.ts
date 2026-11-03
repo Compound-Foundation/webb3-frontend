@@ -291,8 +291,11 @@ describe('isHoldResolved', () => {
     amount: '200000000',
     blockNumber: 100,
   };
+  /** The canonical hash of the block at `blockNumber`. */
+  const blockHashAt = (blockNumber: number) => `0x${'b'.repeat(56)}${blockNumber.toString(16).padStart(8, '0')}`;
   const withdrawLog = (blockNumber: number, transactionHash: string, src = ACCOUNT) => ({
     blockNumber,
+    blockHash: blockHashAt(blockNumber),
     transactionHash,
     address: USDC_COMET,
     ...COMET.encodeEventLog(COMET.getEvent('Withdraw'), [src, src, 1n]),
@@ -312,9 +315,13 @@ describe('isHoldResolved', () => {
             )
             .map((transaction) => withdrawLog(transaction.blockNumber, transaction.hash, transaction.from))
       ),
-      getTransaction: jest.fn(async (hash: string) => mined.find((transaction) => transaction.hash === hash) ?? null),
+      getTransaction: jest.fn(async (hash: string) => {
+        const transaction = mined.find((candidate) => candidate.hash === hash);
+        return transaction === undefined ? null : { ...transaction, blockHash: blockHashAt(transaction.blockNumber) };
+      }),
       getTransactionReceipt: jest.fn(async () => null),
       getTransactionCount: jest.fn(async () => 5),
+      getBlock: jest.fn(async (blockNumber: number) => ({ number: blockNumber, hash: blockHashAt(blockNumber) })),
     };
   }
   const asReader = (node: ReturnType<typeof nodeWith>) => node as unknown as HoldEvidenceReader;
@@ -420,6 +427,44 @@ describe('isHoldResolved', () => {
     onNonce.mockClear();
     await isHoldResolved({ ...withHash, nonce: 6 }, asReader(pending), 110, new Map(), onNonce);
     expect(onNonce).not.toHaveBeenCalled();
+  });
+
+  describe('after a reorg', () => {
+    const MINED: Mined = { hash: hash(1), blockNumber: 102, from: ACCOUNT, to: USDC_COMET, data: CALLDATA };
+
+    it('keeps a hashless hold whose logged candidate a reorg returned to pending, and reads its block again', async () => {
+      const node = nodeWith([MINED]);
+      node.getTransaction.mockResolvedValueOnce({ ...MINED, blockNumber: null, blockHash: null } as never);
+      const scanned = new Map<string, number>();
+      await expect(isHoldResolved(HOLD, asReader(node), 110, scanned)).resolves.toBe(false);
+      // The next look starts at the candidate's block, and ends the hold once it is mined again there.
+      expect(scanned.get(HOLD.id)).toBe(MINED.blockNumber - 1);
+      await expect(isHoldResolved(HOLD, asReader(node), 110, scanned)).resolves.toBe(true);
+      expect(node.getLogs.mock.calls[1][0]).toMatchObject({ fromBlock: MINED.blockNumber });
+    });
+
+    it("keeps a hashless hold whose candidate is mined in a block other than the log's", async () => {
+      const node = nodeWith([MINED]);
+      node.getTransaction.mockResolvedValue({ ...MINED, blockHash: `0x${'c'.repeat(64)}` } as never);
+      const scanned = new Map<string, number>();
+      await expect(isHoldResolved(HOLD, asReader(node), 110, scanned)).resolves.toBe(false);
+      expect(scanned.get(HOLD.id)).toBe(MINED.blockNumber - 1);
+    });
+
+    it("keeps a hashless hold while the canonical block at the log's height has another hash", async () => {
+      const node = nodeWith([MINED]);
+      node.getBlock.mockResolvedValue({ number: MINED.blockNumber, hash: `0x${'c'.repeat(64)}` });
+      const scanned = new Map<string, number>();
+      await expect(isHoldResolved(HOLD, asReader(node), 110, scanned)).resolves.toBe(false);
+      expect(node.getBlock).toHaveBeenCalledWith(MINED.blockNumber);
+      expect(scanned.get(HOLD.id)).toBe(MINED.blockNumber - 1);
+    });
+
+    it('keeps a hashless hold whose candidate is mined after the anchored block', async () => {
+      const node = nodeWith([MINED]);
+      node.getTransaction.mockResolvedValue({ ...MINED, blockNumber: 111, blockHash: blockHashAt(111) } as never);
+      await expect(isHoldResolved(HOLD, asReader(node), 110, new Map())).resolves.toBe(false);
+    });
   });
 
   it('keeps a hold with a hash while it is pending, and never ends one by calldata alone', async () => {

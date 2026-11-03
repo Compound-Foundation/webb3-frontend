@@ -378,7 +378,7 @@ export async function anchorBlock(
 /** The reads that look for evidence about a held request. */
 export type HoldEvidenceReader = Pick<
   JsonRpcProvider,
-  'getLogs' | 'getTransaction' | 'getTransactionReceipt' | 'getTransactionCount'
+  'getLogs' | 'getTransaction' | 'getTransactionReceipt' | 'getTransactionCount' | 'getBlock'
 >;
 
 /**
@@ -389,9 +389,12 @@ export type HoldEvidenceReader = Pick<
  *   for the hash, or the one the hold stores. `onNonce` gets the node's when the hold has none, so
  *   that it can be stored. The lower bound the transaction manager reads before sending is never used.
  * - Without one: a transaction from the account to Comet with the hold's calldata, byte for byte,
- *   was mined after the hold's block, the block the fresh read before the wallet was asked. Comet's `Withdraw` logs for the account find the
- *   candidates. `scanned` keeps the last block looked through for each hold, so the next look
- *   continues from there, at most `LOG_BLOCK_RANGE × 5` blocks each time.
+ *   was mined after the hold's block, the block of the fresh read before the wallet was asked.
+ *   Comet's `Withdraw` logs for the account find the candidates. A candidate counts only when it is
+ *   mined in the log's own block, and that block is the canonical one at its height
+ *   (`isMinedAsLogged`). `scanned` keeps the last block looked through for each hold, so the next look
+ *   continues from there, at most `LOG_BLOCK_RANGE × 5` blocks each time. It stops before the block of
+ *   a candidate that did not count, so the next look reads that block again.
  *
  * A failed read throws, and the hold stays. An identical withdrawal of the same amount sent from
  * another interface also ends a hashless hold.
@@ -423,6 +426,9 @@ export async function isHoldResolved(
       fromBlock,
       toBlock,
     });
+    // The lowest block of a candidate that could not be shown mined where its log says. The next look
+    // starts there.
+    let unsettledFrom: number | undefined;
     for (const log of logs) {
       const transaction = await reader.getTransaction(log.transactionHash);
       if (
@@ -430,11 +436,42 @@ export async function isHoldResolved(
         transaction.to?.toLowerCase() === hold.cometAddress &&
         transaction.data?.toLowerCase() === hold.calldata
       ) {
-        return true;
+        if (await isMinedAsLogged(transaction, log, reader, throughBlock)) return true;
+        const logBlock =
+          isCount(log.blockNumber) && log.blockNumber >= fromBlock && log.blockNumber <= toBlock
+            ? log.blockNumber
+            : fromBlock;
+        unsettledFrom = Math.min(unsettledFrom ?? logBlock, logBlock);
       }
+    }
+    if (unsettledFrom !== undefined) {
+      scanned.set(hold.id, unsettledFrom - 1);
+      return false;
     }
     scanned.set(hold.id, toBlock);
     fromBlock = toBlock + 1;
   }
   return false;
+}
+
+/**
+ * Whether `transaction` is mined in the block `log` names, and that block is canonical at the
+ * anchored block: the transaction's block number and hash are the log's, the node's block at that
+ * height has the same hash, and it is no newer than `throughBlock`. A transaction a reorg returned to
+ * pending has no block, and a log or block from another branch has another hash.
+ */
+async function isMinedAsLogged(
+  transaction: { blockNumber?: number | null; blockHash?: string | null },
+  log: { blockNumber?: number; blockHash?: string },
+  reader: Pick<HoldEvidenceReader, 'getBlock'>,
+  throughBlock: number
+): Promise<boolean> {
+  const { blockNumber, blockHash } = transaction;
+  const logHash = typeof log.blockHash === 'string' ? log.blockHash.toLowerCase() : undefined;
+  if (!isCount(blockNumber) || typeof blockHash !== 'string' || logHash === undefined) return false;
+  if (blockNumber !== log.blockNumber || blockHash.toLowerCase() !== logHash || blockNumber > throughBlock) {
+    return false;
+  }
+  const block = await reader.getBlock(blockNumber);
+  return typeof block?.hash === 'string' && block.hash.toLowerCase() === logHash;
 }
