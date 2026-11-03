@@ -36,6 +36,41 @@ const forkCacheText = (cache: { state?: string; reason?: string; trust?: string;
   return cache.reason === undefined ? cache.state : `${cache.state} (${cache.reason})`;
 };
 
+type LanePromotion = { lane: number; reason: string };
+
+/** Whether the run promoted the lanes' caches, and what became of each lane's. */
+export function promotionText(promotion: { isPromoted: boolean; reason: string; lanes?: LanePromotion[] }) {
+  const lanes =
+    promotion.lanes === undefined || promotion.lanes.length === 0
+      ? ''
+      : ` (${promotion.lanes.map((lane) => `lane ${lane.lane}: ${lane.reason}`).join('; ')})`;
+  return promotion.isPromoted
+    ? `${promotion.reason} to the shared cache${lanes}`
+    : `not promoted (${promotion.reason})${lanes}`;
+}
+
+type Selection = { workers: number; source: string; reasons: string[]; missing: string[] };
+
+/** How many workers the run used, and why, from the manifest's record of the choice. */
+export function workersText(concurrency: { workers: number; selection?: Selection; isCliOverride: boolean }) {
+  const { workers, selection, isCliOverride } = concurrency;
+  if (selection === undefined) return `${workers}`;
+  if (isCliOverride) return `${workers}, set by --workers (the estimate was ${selection.workers})`;
+  const missing = selection.missing.length > 0 ? ` Signals not read: ${selection.missing.join(', ')}.` : '';
+  return `${workers}, by ${selection.source}: ${selection.reasons.join('; ')}.${missing}`;
+}
+
+/** The lanes the run started, of the lanes it allowed, and each lane started more than once. */
+export function lanesText(lanes: { count: number; started?: { index: number; generation: number }[] }) {
+  const started = lanes.started ?? [];
+  const indices = new Set(started.map((lane) => lane.index));
+  const restarts = [...indices]
+    .map((index) => [index, started.filter((lane) => lane.index === index).length - 1] as const)
+    .filter(([, count]) => count > 0)
+    .map(([index, count]) => `lane ${index} restarted ${count === 1 ? 'once' : `${count} times`}`);
+  return `${indices.size} of ${lanes.count} started${restarts.length > 0 ? `; ${restarts.join(', ')}` : ''}`;
+}
+
 /** A test's identity across runs: its project and its title path from the spec file down. */
 export const testId = (test: TestCase) => `${test.parent.project()?.name} › ${test.titlePath().slice(2).join(' › ')}`;
 
@@ -347,6 +382,8 @@ export default class SummaryReporter implements Reporter {
         '',
         `- Fork: block ${manifest.fork.number} (${manifest.fork.mode}), hash ${manifest.fork.hash}, from ${manifest.fork.endpoint}`,
         `- Fork cache: ${forkCacheText(manifest.fork.cache)}`,
+        ...(manifest.concurrency === undefined ? [] : [`- Workers: ${workersText(manifest.concurrency)}`]),
+        ...(manifest.lanes === undefined ? [] : [`- Fork lanes: ${lanesText(manifest.lanes)}`]),
         `- Tools: ${Object.entries(manifest.tools)
           .filter(([, value]) => value !== undefined)
           .map(([name, value]) => `${name} ${value}`)
@@ -370,15 +407,17 @@ export default class SummaryReporter implements Reporter {
         `- Upstream proxy forwarded: ${JSON.stringify(stats.upstream.methods)}; refused: ${JSON.stringify(
           stats.upstream.refused
         )}; upstream failures ${stats.upstream.failures}, error answers ${stats.upstream.errorAnswers}`,
-        ...(stats.forkCachePromotion === undefined
+        ...(stats.rpcProxy.lanes === undefined
+          ? []
+          : [`- App RPC proxy reads by lane: ${JSON.stringify(stats.rpcProxy.lanes)}`]),
+        ...(stats.upstream.peakPending === undefined
           ? []
           : [
-              `- Fork cache after the run: ${
-                stats.forkCachePromotion.isPromoted
-                  ? 'promoted to the shared cache'
-                  : `not promoted (${stats.forkCachePromotion.reason})`
-              }`,
+              `- Upstream bursts: ${stats.upstream.requests} requests in all, at most ${stats.upstream.peakPending} open at once and ${stats.upstream.peakPerSecond} started in one second`,
             ]),
+        ...(stats.forkCachePromotion === undefined
+          ? []
+          : [`- Fork cache after the run: ${promotionText(stats.forkCachePromotion)}`]),
         `- Cleanup: ${stats.cleanupErrors.length === 0 ? 'every service stopped' : stats.cleanupErrors.join('; ')}`
       );
     }

@@ -1,10 +1,14 @@
 // Playwright fixtures for browser tests against the harness wallet. A spec imports `test` and `expect` from
 // here instead of `@playwright/test`.
 //
-// - `wallet`: the control client (`controlClient.ts`).
-// - `fork`: a viem client for reading the fork directly from Node.
+// - `lane`: the worker's fork lane, leased from the runner by the worker's parallel index (`forkLanes.ts`).
+//   A worker that replaces another gets the same lane.
+// - `manifest`: the run's manifest, with the fork and wallet of the worker's lane.
+// - `wallet`: the control client of the lane's wallet server (`controlClient.ts`).
+// - `fork`: a viem client for reading the lane's fork directly from Node.
 // - `context` and `page`: a fresh browser context per test, limited to the harness's origins
-//   (`egress.ts`), with the harness provider injected into the app's top frame and its binding exposed.
+//   (`egress.ts`), with the harness provider injected into the app's top frame and its binding exposed. Its
+//   requests to the RPC proxy and the screening stub name the worker's lane.
 // - `harnessWallet`: the wallet the provider announces, MetaMask unless a spec sets another with
 //   `test.use({ harnessWallet: ANCHORAGE_WALLET })`.
 // - Before each test, the wallet resets: anvil resets the fork to its block from the upstream proxy, and
@@ -17,6 +21,7 @@ import { mainnet } from 'viem/chains';
 
 import { ControlClient } from './controlClient';
 import { allowLoopbackWebSocket, applyEgress, closePagesItDidNotOpen, type BlockedRequest } from './egress';
+import type { LaneInfo } from './forkLanes';
 import {
   BINDING_NAME,
   installHarnessProvider,
@@ -37,6 +42,26 @@ export function readManifest(): Manifest {
   const file = process.env.BROWSER_HARNESS_MANIFEST;
   if (file === undefined) throw new Error('BROWSER_HARNESS_MANIFEST is not set: run the suite with yarn test:browser.');
   return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+/** Leases the fork lane of worker `index` from the run's lane server. */
+export async function leaseLane(index: number, env: NodeJS.ProcessEnv = process.env): Promise<LaneInfo> {
+  const url = env.BROWSER_HARNESS_LANES_URL;
+  if (url === undefined) throw new Error('BROWSER_HARNESS_LANES_URL is not set: run the suite with yarn test:browser.');
+  return ControlClient.forUrl(url, env).request<LaneInfo>('POST', `/v1/lanes/${index}`);
+}
+
+/** `manifest` with the fork and wallet of `lane`, the worker's own, in place of lane 0's. */
+export function withLane(manifest: Manifest, lane: LaneInfo): Manifest {
+  return {
+    ...manifest,
+    fork: { ...manifest.fork, localUrl: lane.forkUrl, anvilPid: lane.anvilPid },
+    services: {
+      ...manifest.services,
+      wallet: lane.walletUrl,
+      bindings: { ...manifest.services.bindings, anvil: lane.forkUrl, wallet: lane.walletUrl },
+    },
+  };
 }
 
 export function originOf(manifest: Manifest, target: AppTarget): string {
@@ -75,7 +100,10 @@ export function bindingHandler(appOrigin: string, wallet: ControlClient) {
   };
 }
 
-/** Makes a browser context for `appOrigin`: no service workers, the harness egress, the binding and the provider. */
+/**
+ * Makes a browser context for `appOrigin` on fork lane `lane`: no service workers, the harness egress, which
+ * names the lane on each request to the RPC proxy and the screening stub, the binding and the provider.
+ */
 export async function harnessContext(
   browser: Browser,
   {
@@ -83,12 +111,14 @@ export async function harnessContext(
     appOrigin,
     wallet,
     blocked,
+    lane,
     harnessWallet = METAMASK_WALLET,
   }: {
     manifest: Manifest;
     appOrigin: string;
     wallet: ControlClient;
     blocked: BlockedRequest[];
+    lane: number;
     harnessWallet?: HarnessWallet;
   }
 ): Promise<BrowserContext> {
@@ -105,7 +135,8 @@ export async function harnessContext(
       readOnly: new Set(v3ApiReadPrefixes(manifest.v3Api.url)),
       webSocket: new Set(appOrigin === manifest.app.devOrigin ? [manifest.app.hmrOrigin] : []),
     },
-    blocked
+    blocked,
+    { origins: new Set([manifest.services.rpcProxy, manifest.services.screening]), value: String(lane) }
   );
   await context.exposeBinding(BINDING_NAME, bindingHandler(appOrigin, wallet));
   await context.addInitScript(installHarnessProvider, {
@@ -118,7 +149,7 @@ export async function harnessContext(
   return context;
 }
 
-type WorkerFixtures = { manifest: Manifest; wallet: ControlClient; fork: PublicClient };
+type WorkerFixtures = { lane: LaneInfo; manifest: Manifest; wallet: ControlClient; fork: PublicClient };
 type TestFixtures = {
   appTarget: AppTarget;
   harnessWallet: HarnessWallet;
@@ -131,9 +162,9 @@ type TestFixtures = {
 export const test = base.extend<TestFixtures, WorkerFixtures>({
   // Playwright reads a fixture's dependencies from its first parameter, so one with none takes `{}`.
   // eslint-disable-next-line no-empty-pattern
-  manifest: [async ({}, use) => use(readManifest()), { scope: 'worker' }],
-  // eslint-disable-next-line no-empty-pattern
-  wallet: [async ({}, use) => use(ControlClient.fromEnvironment()), { scope: 'worker' }],
+  lane: [async ({}, use, workerInfo) => use(await leaseLane(workerInfo.parallelIndex)), { scope: 'worker' }],
+  manifest: [async ({ lane }, use) => use(withLane(readManifest(), lane)), { scope: 'worker' }],
+  wallet: [async ({ lane }, use) => use(ControlClient.forUrl(lane.walletUrl)), { scope: 'worker' }],
   fork: [
     async ({ manifest }, use) =>
       use(createPublicClient({ chain: mainnet, transport: http(manifest.fork.localUrl) }) as PublicClient),
@@ -174,9 +205,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     },
     { auto: true },
   ],
-  context: async ({ browser, manifest, appOrigin, wallet, blocked, resetWallet, harnessWallet }, use) => {
+  context: async ({ browser, manifest, appOrigin, wallet, blocked, resetWallet, harnessWallet, lane }, use) => {
     void resetWallet;
-    const context = await harnessContext(browser, { manifest, appOrigin, wallet, blocked, harnessWallet });
+    const context = await harnessContext(browser, {
+      manifest,
+      appOrigin,
+      wallet,
+      blocked,
+      lane: lane.index,
+      harnessWallet,
+    });
     await use(context);
     await context.close();
   },

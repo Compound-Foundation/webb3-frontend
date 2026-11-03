@@ -12,6 +12,8 @@
 // not allowed fails the request before anything is sent there.
 import type { BrowserContext } from '@playwright/test';
 
+import { LANE_HEADER } from './laneHeader';
+
 /**
  * `http`: origins, or origins with a path prefix, that any method may reach. `readOnly`: prefixes that only
  * GET and HEAD may reach. `webSocket`: WebSocket origins.
@@ -175,14 +177,38 @@ export function hopHeaders(
   );
 }
 
+/** The worker's fork lane, and the origins of the services that route by it: the RPC proxy and the screening stub. */
+export type LaneRoute = { origins: ReadonlySet<string>; value: string };
+
+/**
+ * `headers` with the lane header set to the worker's lane when `url` is at one of `lane.origins`, and removed
+ * otherwise. Any value the page sent, in any letter case, is dropped, so the page cannot choose another
+ * worker's fork or screening.
+ */
+export function withLaneHeader(headers: Record<string, string>, url: string, lane: LaneRoute): Record<string, string> {
+  const rest = Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== LANE_HEADER));
+  return lane.origins.has(originOf(url) ?? '') ? { ...rest, [LANE_HEADER]: lane.value } : rest;
+}
+
 /** Whether `egress` lets a request of `method` reach `url`. */
 export function allows(egress: Egress, url: string, method: string): boolean {
   if (isAllowed(url, egress.http)) return true;
   return READ_METHODS.includes(method.toUpperCase()) && isAllowed(url, egress.readOnly ?? new Set());
 }
 
-/** Applies `egress` to `context`, and records each blocked request and redirect in `blocked`. */
-export async function applyEgress(context: BrowserContext, egress: Egress, blocked: BlockedRequest[]): Promise<void> {
+/** No service routes by lane: every request goes without the lane header. */
+const NO_LANE: LaneRoute = { origins: new Set(), value: '' };
+
+/**
+ * Applies `egress` to `context`, and records each blocked request and redirect in `blocked`. Every request,
+ * each redirect hop included, carries the lane header as `withLaneHeader` sets it for `lane`, or none.
+ */
+export async function applyEgress(
+  context: BrowserContext,
+  egress: Egress,
+  blocked: BlockedRequest[],
+  lane: LaneRoute = NO_LANE
+): Promise<void> {
   await context.route('**', async (route) => {
     const request = route.request();
     let url = request.url();
@@ -192,10 +218,15 @@ export async function applyEgress(context: BrowserContext, egress: Egress, block
       blocked.push({ kind: 'http', url: withoutQuery(url), method });
       return route.abort('blockedbyclient');
     }
-    // The first request goes as the browser made it. Each redirect hop is a request of its own, built here
-    // in full and sent through the context's request API with a URL, not the routed request: `route.fetch`
-    // reuses the routed request's body whenever none is given, which a hop that drops the body must not.
-    let headers = request.headers();
+    // The first request goes as the browser made it, except for the lane header. Headers given to
+    // `route.fetch` replace the request's, so they are given only when the lane header changes them, and then
+    // in full, cookies included. Each redirect hop is a request of its own, built here in full and sent through
+    // the context's request API with a URL, not the routed request: `route.fetch` reuses the routed request's
+    // body whenever none is given, which a hop that drops the body must not.
+    const isLaneChanged =
+      lane.origins.has(originOf(url) ?? '') ||
+      Object.keys(request.headers()).some((name) => name.toLowerCase() === LANE_HEADER);
+    let headers = withLaneHeader(isLaneChanged ? await request.allHeaders() : request.headers(), url, lane);
     let body: Buffer | undefined = request.postDataBuffer() ?? undefined;
     for (let redirects = 0; ; redirects++) {
       let response;
@@ -203,7 +234,9 @@ export async function applyEgress(context: BrowserContext, egress: Egress, block
         // No timeout: a screening request the stub holds stays open until the page gives up on it.
         response =
           redirects === 0
-            ? await route.fetch({ maxRedirects: 0, timeout: 0 })
+            ? await route.fetch(
+                isLaneChanged ? { headers, maxRedirects: 0, timeout: 0 } : { maxRedirects: 0, timeout: 0 }
+              )
             : await context.request.fetch(url, { method, headers, data: body, maxRedirects: 0, timeout: 0 });
       } catch {
         // The page went away, or the server closed the connection.
@@ -222,10 +255,11 @@ export async function applyEgress(context: BrowserContext, egress: Egress, block
         blocked.push({ kind: 'redirect', url: withoutQuery(next), from: withoutQuery(url), method: hop.method });
         return route.abort('blockedbyclient').catch(() => undefined);
       }
-      headers = hopHeaders(headers, {
-        isBodyDropped: hop.isBodyDropped,
-        isCrossOrigin: originOf(next) !== originOf(url),
-      });
+      headers = withLaneHeader(
+        hopHeaders(headers, { isBodyDropped: hop.isBodyDropped, isCrossOrigin: originOf(next) !== originOf(url) }),
+        next,
+        lane
+      );
       if (hop.isBodyDropped) body = undefined;
       method = hop.method;
       url = next;
