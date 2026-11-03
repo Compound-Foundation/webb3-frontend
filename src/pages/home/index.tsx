@@ -237,9 +237,10 @@ type DirectStepRequest = {
    */
   planFromFreshRead: () => Promise<void>;
   /**
-   * Checks the session again, stores the hold with the calldata of `sentArgs` and reads it back.
-   * Throws, so that nothing is sent, unless the session is live and storage holds it. The wallet is
-   * asked only after this.
+   * After the gas estimate: checks the session and reads the direct supply again, then stores the
+   * hold with the calldata of `sentArgs` and reads it back. Throws, so that nothing is sent, unless
+   * the session is live, the planned call is still safe by the second read, and storage holds the
+   * hold. The wallet is asked only after this.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   holdBeforeWallet: (sentArgs: any[]) => Promise<void>;
@@ -1168,6 +1169,40 @@ const Home = ({
         const id = directStep.holdId;
         if (id !== undefined) directWithdrawalHolds.release(key, id);
       };
+      // Reads the direct supply at a block from `anchorBlock`, no older than `floors`, the wallet
+      // node's and the last confirmed Comet step's, and splits the withdrawal from it. Throws, so
+      // that nothing is sent, when the read fails, no direct supply is left, or the wrapper cannot
+      // pay what the direct supply no longer does; the row then asks for a new amount.
+      const readAndSplit = async (floors: (number | undefined)[]) => {
+        if (readProvider === undefined) {
+          throw new NotSentError(new Error("This market's network cannot be read right now."));
+        }
+        let balance: bigint;
+        let readBlock: number;
+        try {
+          readBlock = await anchorBlock(readProvider, walletProvider, floors);
+          balance = await readDirectBalance(readProvider, market.marketAddress, account, readBlock);
+        } catch (error) {
+          throw new NotSentError(error);
+        }
+        const { position } = liveWrappedLending.current;
+        const shares = position.status === 'loaded' ? position.position.shares : undefined;
+        let replanned: WithdrawalSplit;
+        try {
+          replanned = splitWrappedWithdrawal(queuedAmount, balance, shares);
+        } catch (error) {
+          throw new NotSentError(error);
+        }
+        const replannedRequest = replanned.request;
+        const isShort =
+          replanned.direct === undefined ||
+          (replannedRequest?.kind === 'partial' && !canWrapperPay(replannedRequest.cash, balance));
+        if (isShort) {
+          directStep.isBalanceShort = true;
+          throw new SendWithdrawnError('The direct supply changed before the withdrawal was signed.');
+        }
+        return { balance, readBlock, replanned };
+      };
       let reservation: Promise<void> | undefined;
       const directStep: DirectStepRequest = {
         cometAddress: market.marketAddress,
@@ -1201,38 +1236,10 @@ const Home = ({
           if (!isSessionLive() || isDirectWithdrawalRefused(liveSession.current, submittedMarket)) {
             throw new SendWithdrawnError();
           }
-          if (readProvider === undefined) {
-            throw new NotSentError(new Error("This market's network cannot be read right now."));
-          }
-          let balance: bigint;
-          let readBlock: number;
-          try {
-            readBlock = await anchorBlock(readProvider, walletProvider, [minBlock]);
-            balance = await readDirectBalance(readProvider, market.marketAddress, account, readBlock);
-          } catch (error) {
-            throw new NotSentError(error);
-          }
-          const { position } = liveWrappedLending.current;
-          const shares = position.status === 'loaded' ? position.position.shares : undefined;
-          let replanned: WithdrawalSplit;
-          try {
-            replanned = splitWrappedWithdrawal(queuedAmount, balance, shares);
-          } catch (error) {
-            throw new NotSentError(error);
-          }
-          // No direct supply is left, or the wrapper cannot pay what the direct supply no longer does:
-          // nothing is sent, and the row asks for a new amount.
-          const replannedRequest = replanned.request;
-          const isShort =
-            replanned.direct === undefined ||
-            (replannedRequest?.kind === 'partial' && !canWrapperPay(replannedRequest.cash, balance));
-          if (isShort) {
-            directStep.isBalanceShort = true;
-            throw new SendWithdrawnError('The direct supply changed before the withdrawal was signed.');
-          }
-          directStep.freshBalance = balance;
-          directStep.replanned = replanned;
-          directStep.readBlock = readBlock;
+          const fresh = await readAndSplit([minBlock]);
+          directStep.freshBalance = fresh.balance;
+          directStep.replanned = fresh.replanned;
+          directStep.readBlock = fresh.readBlock;
           if (!isSessionLive()) throw new SendWithdrawnError();
         },
         holdBeforeWallet: async (sentArgs) => {
@@ -1244,6 +1251,17 @@ const Home = ({
           const amount = directStep.replanned?.direct?.amount;
           const blockNumber = directStep.readBlock;
           if (id === undefined || amount === undefined || blockNumber === undefined) throw new SendWithdrawnError();
+          // The direct supply is read again after the estimate, at a block no older than the first
+          // read's. A finite part is sent only while the supply is still above it, so a fall during
+          // the estimate never makes Comet borrow, and a whole-supply step only while the split still
+          // has a direct part and a rest the wrapper can pay. Otherwise nothing is sent, and the row
+          // asks for a new amount. The hold keeps the first read's block, the earlier of the two.
+          const recheck = await readAndSplit([minBlock, blockNumber]);
+          if (amount !== MAX_UINT256 && recheck.replanned.direct?.amount !== amount) {
+            directStep.isBalanceShort = true;
+            throw new SendWithdrawnError('The direct supply changed before the withdrawal was signed.');
+          }
+          if (!isSessionLive()) throw new SendWithdrawnError();
           const calldata = directWithdrawalCalldata(sentArgs[0], sentArgs[1]);
           if (!(await directWithdrawalHolds.hold(key, id, { calldata, amount, blockNumber }))) {
             throw new NotSentError(new Error('The withdrawal could not be stored before signing.'));

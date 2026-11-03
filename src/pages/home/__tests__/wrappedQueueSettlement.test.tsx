@@ -1730,8 +1730,11 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     wallet.sendUncheckedTransaction.mockImplementationOnce(async () => `0x${'ab'.repeat(32)}`);
     wallet.getTransaction.mockImplementation(async () => ({ nonce: 5 } as never));
     wallet.getTransactionCount.mockImplementationOnce(async () => 5).mockImplementation(async () => 6);
-    // The first lookup is the check before signing. Every later one fails.
-    wallet.getBlockNumber.mockImplementationOnce(async () => chain.block).mockRejectedValue(new Error('block timeout'));
+    // The first two lookups are the reads before and after the gas estimate. Every later one fails.
+    wallet.getBlockNumber
+      .mockImplementationOnce(async () => chain.block)
+      .mockImplementationOnce(async () => chain.block)
+      .mockRejectedValue(new Error('block timeout'));
 
     await submit();
     await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
@@ -1749,9 +1752,11 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     wallet.sendUncheckedTransaction.mockImplementationOnce(async () => `0x${'ab'.repeat(32)}`);
     wallet.getTransaction.mockImplementation(async () => ({ nonce: 5 } as never));
     wallet.getTransactionCount.mockImplementationOnce(async () => 5).mockImplementation(async () => 6);
-    // The first read is the check before signing, the second the one after the step was replaced.
+    // The first two reads are before and after the gas estimate, the third the one after the step
+    // was replaced.
     const block = held<void>();
     wallet.getBlockNumber
+      .mockImplementationOnce(async () => chain.block)
       .mockImplementationOnce(async () => chain.block)
       .mockImplementationOnce(async () => {
         await block.promise;
@@ -2210,9 +2215,13 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     const { chain, wallet } = await renderMixed();
     const entry: Action = [ActionType.Withdraw, BASE_ASSET, 200_000_000n];
     act(() => live.queue.addOrUpdateAction(entry));
-    // Before signing, the whole direct supply leaves in another transaction. The dashboard still
-    // shows the 250 USDC it read.
-    chain.directSupply = 0n;
+    // After the fresh read, while the manager estimates the Comet step's gas, the whole direct supply
+    // leaves in another transaction. The dashboard still shows the 250 USDC it read. The finite
+    // withdraw(base, 200 USDC) would now borrow, so the read made after the estimate sends nothing.
+    wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
+      chain.directSupply = 0n;
+      return BigNumber.from(100_000);
+    });
 
     await submit();
     await settle();
@@ -2234,8 +2243,12 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
     const entry: Action = [ActionType.Withdraw, BASE_ASSET, 255_000_000n];
     act(() => live.queue.addOrUpdateAction(entry));
-    // 200 USDC of the direct supply leaves before signing, so the wrapper would have to pay 205 USDC.
-    chain.directSupply = 50_000_000n;
+    // 200 USDC of the direct supply leaves after the fresh read, while the manager estimates the
+    // Comet step's gas, so the wrapper would have to pay 205 USDC.
+    wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
+      chain.directSupply = 50_000_000n;
+      return BigNumber.from(100_000);
+    });
 
     await submit();
     await settle();
