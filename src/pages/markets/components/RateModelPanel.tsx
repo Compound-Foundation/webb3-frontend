@@ -1,18 +1,16 @@
 import { useState } from 'react';
 
 import PanelWithHeader from '@components/PanelWithHeader';
-import { formatRateFactor } from '@helpers/numbers';
+import { BASE_FACTOR, formatRateFactor } from '@helpers/numbers';
 import { StateType } from '@types';
-
-import { formatPercentage } from '../helpers/rateModelLines';
 
 import InterestRateModel, { HoveredRate } from './InterestRateModel';
 
 type RateModelPanelLoading = [StateType.Loading];
 
 type RateModelHydratedData = {
-  borrowRates: [bigint, number][];
-  supplyRates: [bigint, number][];
+  borrowRates: [bigint, bigint][];
+  supplyRates: [bigint, bigint][];
   borrowAPR: bigint;
   supplyAPR: bigint;
   utilization: bigint;
@@ -21,6 +19,9 @@ type RateModelHydratedData = {
 type RateModelPanelHydrated = [StateType.Hydrated, RateModelHydratedData];
 
 export type RateModelPanelState = RateModelPanelLoading | RateModelPanelHydrated;
+
+const toChartRates = (rates: [bigint, bigint][]): [bigint, number][] =>
+  rates.map(([utilization, apr]) => [utilization, (Number(apr) / Number(BASE_FACTOR)) * 100]);
 
 const RateModelPanel = ({ state }: { state: RateModelPanelState }) => {
   if (state[0] == StateType.Loading) {
@@ -82,8 +83,8 @@ const RateModelPanelView = ({ borrowRates, supplyRates, borrowAPR, supplyAPR, ut
       state={[
         StateType.Hydrated,
         {
-          borrowRates,
-          supplyRates,
+          borrowRates: toChartRates(borrowRates),
+          supplyRates: toChartRates(supplyRates),
           borrowAPR,
           supplyAPR,
           utilization,
@@ -104,8 +105,8 @@ const RateModelPanelView = ({ borrowRates, supplyRates, borrowAPR, supplyAPR, ut
     />
   );
 
-  const shownBorrowAPR = formatRateFactor(hoveredRate ? hoveredRate.borrowRate : borrowAPR);
-  const shownSupplyAPR = formatRateFactor(hoveredRate ? hoveredRate.supplyRate : supplyAPR);
+  const shownBorrowAPR = formatRateFactor(hoveredRate ? borrowRates[hoveredRate.utilization][1] : borrowAPR);
+  const shownSupplyAPR = formatRateFactor(hoveredRate ? supplyRates[hoveredRate.utilization][1] : supplyAPR);
 
   return (
     <PanelWithHeader header="Interest Rate Model" className="grid-column--6">
