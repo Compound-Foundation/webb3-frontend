@@ -25,6 +25,8 @@ const WRITES = [
   'anvil_impersonateAccount',
   'evm_snapshot',
   'evm_revert',
+  'anvil_reset',
+  'anvil_setRpcUrl',
   'hardhat_setBalance',
   'debug_traceTransaction',
   'txpool_content',

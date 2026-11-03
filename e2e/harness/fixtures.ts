@@ -7,8 +7,8 @@
 //   (`egress.ts`), with the harness provider injected into the app's top frame and its binding exposed.
 // - `harnessWallet`: the wallet the provider announces, MetaMask unless a spec sets another with
 //   `test.use({ harnessWallet: ANCHORAGE_WALLET })`.
-// - Before each test, the wallet resets: the fork reverts to its baseline snapshot, and every account,
-//   request, permission, chain setting and screening behaviour is cleared.
+// - Before each test, the wallet resets: anvil resets the fork to its block from the upstream proxy, and
+//   every account, request, permission, chain setting and screening behaviour is cleared.
 import fs from 'node:fs';
 
 import { test as base, expect, type Browser, type BrowserContext, type Frame, type Page } from '@playwright/test';
