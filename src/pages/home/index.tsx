@@ -470,8 +470,9 @@ const Home = ({
     const checkedSend: typeof trxFn = async (...args) => {
       const sentArgs = request.sentArgs(args);
       // The wallet is asked for exactly the call whose gas was estimated, and for nothing when no
-      // estimate was made. `replanned` and `estimatedCalldata` are both set only in
-      // `estimatePlannedCall`, which the manager calls once, so this check fails only if that changes.
+      // estimate was made. `estimatedCalldata` is set in `estimatePlannedCall`, and `replanned` in
+      // `planFromFreshRead`, which only `estimatePlannedCall` calls, once, so this check fails only if
+      // that changes.
       const calldata = directWithdrawalCalldata(sentArgs[0], sentArgs[1]);
       if (request.estimatedCalldata === undefined || calldata !== request.estimatedCalldata) {
         throw new NotSentError(new Error('The withdrawal changed after its gas was estimated.'));

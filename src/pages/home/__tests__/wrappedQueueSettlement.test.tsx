@@ -2337,7 +2337,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
       chain.directSupply = 50_000_000n;
       return BigNumber.from(100_000);
-      await waitFor(() => expect(storedHolds()).toEqual([]));
     });
 
     await submit();
@@ -2349,5 +2348,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       action: [ActionType.Withdraw, expect.anything(), entry[2]],
       label: 'Balance Changed, Edit Amount',
     });
+    await waitFor(() => expect(storedHolds()).toEqual([]));
   });
 });
