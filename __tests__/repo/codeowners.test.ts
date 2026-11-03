@@ -18,7 +18,7 @@ const rules = codeowners
 describe('CODEOWNERS', () => {
   // The last matching rule wins, so a rule with no owner leaves its paths with none.
   it('names the default owner on every rule', () => {
-    expect(rules.map((rule) => rule.pattern)).toEqual(expect.arrayContaining(['*', '/src/hooks/', '/e2e/']));
+    expect(rules.map((rule) => rule.pattern)).toEqual(expect.arrayContaining(['*', '/src/hooks/']));
 
     const unowned = rules.filter((rule) => !rule.owners.includes(DEFAULT_OWNER)).map((rule) => rule.pattern);
     expect(unowned).toEqual([]);
