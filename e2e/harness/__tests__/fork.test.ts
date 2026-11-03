@@ -12,7 +12,6 @@ import { server as mswServer } from '../../../handlers/server';
 import {
   ALWAYS_LOGGED_METHODS,
   isCacheAnvil,
-  promoteSafely,
   startCacheableProxy,
   startHeldProxy,
   anvilCacheFile,
@@ -26,7 +25,7 @@ import {
   loadForkCache,
   MAX_RELAYED_LOGS,
   methodsBlockingPromotion,
-  promoteForkCache,
+  laneCacheGate,
   PUBLIC_ENDPOINTS,
   recordLoggedMethods,
   relayed,
@@ -238,6 +237,16 @@ describe('the upstream proxy', () => {
       ).toBe(403);
     }
     expect(upstream.calls.map((call) => call.method)).toEqual(['eth_getLogs']);
+  });
+
+  test('records its bursts: the most upstream requests open at once, and the most started in one second', async () => {
+    // The stand-in holds each chain ID for 200 ms, so four requests sent together are all open at once.
+    upstream.handlers.set('eth_chainId', () => new Promise((resolve) => setTimeout(() => resolve('0x1'), 200)));
+    await Promise.all([1, 2, 3, 4].map((id) => post({ jsonrpc: '2.0', id, method: 'eth_chainId' })));
+    expect(proxy.stats.peakPending).toBe(4);
+    expect(proxy.stats.pending).toBe(0);
+    expect(Math.max(...proxy.stats.perSecond.values())).toBeGreaterThanOrEqual(2);
+    expect([...proxy.stats.perSecond.values()].reduce((sum, count) => sum + count, 0)).toBe(4);
   });
 
   test('forwards eth_getLogs only by block hash, or for named addresses over a bounded range of block numbers', async () => {
@@ -527,77 +536,47 @@ describe('the shared fork cache', () => {
       ).toEqual(['anvil_setRpcUrl', 'anvil_setLoggingEnabled', 'anvil_loadState', 'evm_revert', 'debug_traceCall']);
     });
 
-    test("a clean stop with no blocking method replaces the shared file with the run's", () => {
-      writeShared(cacheJson(BLOCK, '0x1'));
+    test('a clean stop with no blocking method and a cache of the block passes the gate', () => {
       writeRunCache(cacheJson(BLOCK, '0x2'));
-      const result = promoteForkCache({
-        runHome,
-        sharedFile: shared,
-        blockNumber: BLOCK,
-        ...CLEAN_RUN,
+      expect(laneCacheGate({ runHome, blockNumber: BLOCK, isProxyListening: true, ...CLEAN_RUN })).toEqual({
+        isEligible: true,
+        file: anvilCacheFile(runHome, BLOCK, FORK_URL),
       });
-      expect(result).toEqual({ isPromoted: true, reason: 'promoted' });
-      expect(fs.readFileSync(shared)).toEqual(cacheJson(BLOCK, '0x2'));
-      expect(fs.readdirSync(path.dirname(shared))).toEqual([path.basename(shared)]);
     });
 
-    test('after a new upstream URL, an unclean stop, an unread log, another anvil, or a file of another block, the shared file stays as it was', () => {
-      writeShared(cacheJson(BLOCK, '0x1'));
+    test('a new upstream URL, an unclean stop, an unread log, another anvil, a stopped proxy, or a file of another block fail it', () => {
       writeRunCache(cacheJson(BLOCK, '0x999'));
-      const promote = (overrides: object) =>
-        promoteForkCache({
-          runHome,
-          sharedFile: shared,
-          blockNumber: BLOCK,
-          ...CLEAN_RUN,
-          ...overrides,
-        });
-      expect(promote({ methods: [...CLEAN_RUN.methods, 'anvil_reset', 'anvil_setRpcUrl'] })).toEqual({
-        isPromoted: false,
+      const gate = (overrides: object) =>
+        laneCacheGate({ runHome, blockNumber: BLOCK, isProxyListening: true, ...CLEAN_RUN, ...overrides });
+      expect(gate({ methods: [...CLEAN_RUN.methods, 'anvil_reset', 'anvil_setRpcUrl'] })).toEqual({
+        isEligible: false,
         reason: 'the fork was sent anvil_setRpcUrl',
       });
       const many = ['anvil_setRpcUrl', 'anvil_a', 'anvil_b', 'anvil_c', 'anvil_d', 'anvil_e', 'anvil_f'];
-      expect(promote({ methods: [...CLEAN_RUN.methods, ...many] })).toEqual({
-        isPromoted: false,
+      expect(gate({ methods: [...CLEAN_RUN.methods, ...many] })).toEqual({
+        isEligible: false,
         reason: 'the fork was sent anvil_setRpcUrl, anvil_a, anvil_b, anvil_c, anvil_d and 2 more',
       });
       // A log that shows none of the harness's own calls was not read as expected, as with another log format.
-      expect(promote({ methods: [] })).toEqual({
-        isPromoted: false,
+      expect(gate({ methods: [] })).toEqual({
+        isEligible: false,
         reason: "anvil's log does not show the calls the harness makes",
       });
       for (const anvilVersion of ['anvil Version: 1.2.3-stable', 'anvil Version: 1.9.1-stable']) {
-        expect(promote({ anvilVersion })).toEqual({
-          isPromoted: false,
+        expect(gate({ anvilVersion })).toEqual({
+          isEligible: false,
           reason: 'the cache is promoted only from anvil 1.9.0',
         });
       }
-      expect(promote({ hasExitedCleanly: false })).toEqual({
-        isPromoted: false,
-        reason: 'anvil did not exit cleanly',
+      expect(gate({ hasExitedCleanly: false })).toEqual({ isEligible: false, reason: 'anvil did not exit cleanly' });
+      // A proxy that no longer listened when anvil stopped had freed the fixed port, and another process could
+      // have answered anvil's last reads there.
+      expect(gate({ isProxyListening: false })).toEqual({
+        isEligible: false,
+        reason: 'the upstream proxy stopped before anvil',
       });
       writeRunCache(cacheJson(BLOCK + 1, '0x999'));
-      expect(promote({})).toEqual({ isPromoted: false, reason: 'anvil wrote no cache of the block' });
-      expect(fs.readFileSync(shared)).toEqual(cacheJson(BLOCK, '0x1'));
-    });
-
-    test('removes its new file and throws when the rename fails', () => {
-      // A directory with an entry at the shared path cannot be replaced by a file.
-      fs.mkdirSync(path.join(shared, 'entry'), { recursive: true });
-      writeRunCache(cacheJson(BLOCK));
-      expect(() => promoteForkCache({ runHome, sharedFile: shared, blockNumber: BLOCK, ...CLEAN_RUN })).toThrow();
-      expect(fs.readdirSync(path.dirname(shared))).toEqual([path.basename(shared)]);
-    });
-
-    test('replaces a symbolic link at the shared path, and never writes through it', () => {
-      const target = path.join(scratch, 'target.txt');
-      fs.writeFileSync(target, 'unchanged');
-      fs.mkdirSync(path.dirname(shared), { recursive: true, mode: 0o700 });
-      fs.symlinkSync(target, shared);
-      writeRunCache(cacheJson(BLOCK));
-      expect(promoteForkCache({ runHome, sharedFile: shared, blockNumber: BLOCK, ...CLEAN_RUN }).isPromoted).toBe(true);
-      expect(fs.readFileSync(target, 'utf8')).toBe('unchanged');
-      expect(fs.lstatSync(shared).isSymbolicLink()).toBe(false);
+      expect(gate({})).toEqual({ isEligible: false, reason: 'anvil wrote no cache of the block' });
     });
   });
 });
@@ -731,73 +710,6 @@ describe('the anvil that can read the cache', () => {
     ]) {
       expect(isCacheAnvil(version)).toBe(false);
     }
-  });
-});
-
-describe('promotion at teardown', () => {
-  const BLOCK = 26244888;
-  const FORK_URL = 'http://127.0.0.1:18546/';
-  let scratch: string;
-  let root: string;
-  let runHome: string;
-  beforeEach(() => {
-    scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-fork-cache-test-'));
-    root = path.join(scratch, 'root');
-    runHome = path.join(scratch, 'private', 'anvil-home');
-    const runFile = anvilCacheFile(runHome, BLOCK, FORK_URL);
-    fs.mkdirSync(path.dirname(runFile), { recursive: true });
-    fs.writeFileSync(
-      runFile,
-      zstd.zstdCompressSync(JSON.stringify({ meta: { block_env: { number: `0x${BLOCK.toString(16)}` } } }))
-    );
-  });
-  afterEach(() => fs.rmSync(scratch, { recursive: true, force: true }));
-
-  const promote = () =>
-    promoteSafely({
-      cacheRoot: root,
-      runHome,
-      sharedFile: sharedCacheFile(root, 'public', BLOCK),
-      blockNumber: BLOCK,
-      forkUrl: FORK_URL,
-      methods: ALWAYS_LOGGED_METHODS,
-      hasExitedCleanly: true,
-      anvilVersion: 'anvil Version: 1.9.0-stable',
-      isProxyListening: true,
-    });
-
-  test('checks the root again, and names only that it failed', () => {
-    fs.mkdirSync(root, { recursive: true });
-    fs.chmodSync(root, 0o755);
-    expect(promote()).toEqual({ isPromoted: false, reason: 'the cache root failed its check' });
-  });
-
-  test("names a file system error by its code alone, not by its message's paths", () => {
-    fs.mkdirSync(path.join(sharedCacheFile(root, 'public', BLOCK), 'entry'), { recursive: true });
-    fs.chmodSync(root, 0o700);
-    const result = promote();
-    expect(result.isPromoted).toBe(false);
-    expect(result.reason).toMatch(/^the promotion failed \(E[A-Z]+\)$/);
-  });
-
-  test('promotes when the root passes', () => {
-    expect(promote()).toEqual({ isPromoted: true, reason: 'promoted' });
-  });
-
-  test('refuses when the upstream proxy no longer held its port when anvil stopped', () => {
-    expect(
-      promoteSafely({
-        cacheRoot: root,
-        runHome,
-        sharedFile: sharedCacheFile(root, 'public', BLOCK),
-        blockNumber: BLOCK,
-        forkUrl: FORK_URL,
-        methods: ALWAYS_LOGGED_METHODS,
-        hasExitedCleanly: true,
-        anvilVersion: 'anvil Version: 1.9.0-stable',
-        isProxyListening: false,
-      })
-    ).toEqual({ isPromoted: false, reason: 'the upstream proxy stopped before anvil' });
   });
 });
 
