@@ -188,6 +188,8 @@ export type WrappedExecutionProblem =
   | 'mixed-execution'
   /** One request held more than one wrapper action. */
   | 'several-wrapped-actions'
+  /** A queue limited to one action held more than one. */
+  | 'several-actions'
   /** One request held something that is neither. */
   | 'unknown-entry';
 
