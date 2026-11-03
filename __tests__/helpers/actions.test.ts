@@ -525,6 +525,74 @@ describe('validateAddingAction with base lending through the wrapper', () => {
   });
 });
 
+describe('validateAddingAction on a single-action queue', () => {
+  const SINGLE: ActionRules = {
+    isSingleAction: true,
+    wrappedBase: {
+      supplyBlockedReason: undefined,
+      withdrawBlockedReason: undefined,
+      maxPartialWithdrawal: 2_000_000_000n,
+      canWithdrawAll: true,
+      supplyAllowance: MAX_UINT256,
+    },
+  };
+  const baseAssetPre = () => mockBaseAsset({ balance: 1_000_000_000n, walletBalance: 5_000_000_000n });
+  const collateralAssetsPre = () => [mockEthCollateralAsset({ walletBalance: 10n ** 18n })];
+  const QUEUED_FIRST = 'Submit Or Remove The Queued Action First';
+  const actionsOfEachKind = (): [string, Action][] => [
+    ['supply', mockBaseAction({ actionType: ActionType.Supply, amount: 1_000_000n })],
+    ['withdrawal', mockBaseAction({ actionType: ActionType.Withdraw, amount: 1_000_000n })],
+    ['borrow', mockBaseAction({ actionType: ActionType.Borrow, amount: 1_000_000_000n })],
+    ['collateral supply', mockCollateralAction({ actionType: ActionType.SupplyCollateral, amount: 10n ** 16n })],
+    ['collateral withdrawal', mockCollateralAction({ actionType: ActionType.WithdrawCollateral, amount: 10n ** 16n })],
+  ];
+  const distinctPairs = actionsOfEachKind().flatMap(([queuedName, queued]) =>
+    actionsOfEachKind()
+      .filter(([addedName]) => addedName !== queuedName)
+      .map(([addedName, added]): [string, string, Action, Action] => [queuedName, addedName, queued, added])
+  );
+
+  it.each(distinctPairs)('refuses, after a queued %s, a %s', (_queuedName, _addedName, queued, added) => {
+    expect(validateAddingAction(baseAssetPre(), collateralAssetsPre(), [queued], added, SINGLE)).toEqual([
+      false,
+      QUEUED_FIRST,
+    ]);
+  });
+
+  it('refuses a repay after a queued collateral supply, and the reverse', () => {
+    const borrower = mockBaseAsset({ balance: -1_000_000_000n, walletBalance: 5_000_000_000n });
+    const repay = mockBaseAction({ actionType: ActionType.Repay, amount: 1_000_000n });
+    const supplyCollateral = mockCollateralAction({ actionType: ActionType.SupplyCollateral, amount: 10n ** 16n });
+
+    expect(validateAddingAction(borrower, collateralAssetsPre(), [supplyCollateral], repay, SINGLE)).toEqual([
+      false,
+      QUEUED_FIRST,
+    ]);
+    expect(validateAddingAction(borrower, collateralAssetsPre(), [repay], supplyCollateral, SINGLE)).toEqual([
+      false,
+      QUEUED_FIRST,
+    ]);
+  });
+
+  // A withdrawal and a borrow have amount rules of their own, which other tests cover.
+  const withoutAmountRules = actionsOfEachKind().filter(([name]) => name !== 'withdrawal' && name !== 'borrow');
+
+  it.each(withoutAmountRules)('accepts a %s into an empty queue', (_name, action) => {
+    expect(validateAddingAction(baseAssetPre(), collateralAssetsPre(), [], action, SINGLE)).toBe('ok');
+  });
+
+  it('allows several actions when the queue is not limited to one', () => {
+    const batching: ActionRules = { ...SINGLE, isSingleAction: false };
+    const supply = mockBaseAction({ actionType: ActionType.Supply, amount: 1_000_000n });
+    const supplyCollateral = mockCollateralAction({ actionType: ActionType.SupplyCollateral, amount: 10n ** 16n });
+
+    expect(validateAddingAction(baseAssetPre(), collateralAssetsPre(), [supplyCollateral], supply, batching)).toBe(
+      'ok'
+    );
+    expect(validateAddingAction(baseAssetPre(), collateralAssetsPre(), [supplyCollateral], supply)).toBe('ok');
+  });
+});
+
 describe('lendsBaseDirectly', () => {
   const collateralAssetsPre = () => [mockEthCollateralAsset()];
 
