@@ -394,7 +394,7 @@ export type HoldEvidenceReader = Pick<
  *   mined in the log's own block, and that block is the canonical one at its height
  *   (`isMinedAsLogged`). `scanned` keeps the last block looked through for each hold, so the next look
  *   continues from there, at most `LOG_BLOCK_RANGE × 5` blocks each time. It stops before the block of
- *   a candidate that did not count, so the next look reads that block again.
+ *   a candidate that could not be read or did not count, so the next look reads that block again.
  *
  * A failed read throws, and the hold stays. An identical withdrawal of the same amount sent from
  * another interface also ends a hashless hold.
@@ -426,22 +426,28 @@ export async function isHoldResolved(
       fromBlock,
       toBlock,
     });
-    // The lowest block of a candidate that could not be shown mined where its log says. The next look
-    // starts there.
+    // The lowest block of a candidate that could not be read, or not shown mined where its log says.
+    // The next look starts there.
     let unsettledFrom: number | undefined;
+    const keepUnsettled = (log: { blockNumber?: number }) => {
+      const logBlock =
+        isCount(log.blockNumber) && log.blockNumber >= fromBlock && log.blockNumber <= toBlock
+          ? log.blockNumber
+          : fromBlock;
+      unsettledFrom = Math.min(unsettledFrom ?? logBlock, logBlock);
+    };
     for (const log of logs) {
       const transaction = await reader.getTransaction(log.transactionHash);
-      if (
-        transaction?.from?.toLowerCase() === hold.account &&
+      // A node can answer null for a transaction it has not indexed yet. That is no evidence either way.
+      if (transaction === null || transaction === undefined) {
+        keepUnsettled(log);
+      } else if (
+        transaction.from?.toLowerCase() === hold.account &&
         transaction.to?.toLowerCase() === hold.cometAddress &&
         transaction.data?.toLowerCase() === hold.calldata
       ) {
         if (await isMinedAsLogged(transaction, log, reader, throughBlock)) return true;
-        const logBlock =
-          isCount(log.blockNumber) && log.blockNumber >= fromBlock && log.blockNumber <= toBlock
-            ? log.blockNumber
-            : fromBlock;
-        unsettledFrom = Math.min(unsettledFrom ?? logBlock, logBlock);
+        keepUnsettled(log);
       }
     }
     if (unsettledFrom !== undefined) {

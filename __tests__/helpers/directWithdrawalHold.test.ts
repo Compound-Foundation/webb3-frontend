@@ -429,6 +429,16 @@ describe('isHoldResolved', () => {
     expect(onNonce).not.toHaveBeenCalled();
   });
 
+  it('reads a candidate again on the next look when the node could not give its transaction, and then ends the hold', async () => {
+    const node = nodeWith([{ hash: hash(1), blockNumber: 102, from: ACCOUNT, to: USDC_COMET, data: CALLDATA }]);
+    node.getTransaction.mockResolvedValueOnce(null);
+    const scanned = new Map<string, number>();
+    await expect(isHoldResolved(HOLD, asReader(node), 110, scanned)).resolves.toBe(false);
+    expect(scanned.get(HOLD.id)).toBe(101);
+    await expect(isHoldResolved(HOLD, asReader(node), 111, scanned)).resolves.toBe(true);
+    expect(node.getLogs.mock.calls[1][0]).toMatchObject({ fromBlock: 102, toBlock: 111 });
+  });
+
   describe('after a reorg', () => {
     const MINED: Mined = { hash: hash(1), blockNumber: 102, from: ACCOUNT, to: USDC_COMET, data: CALLDATA };
 
