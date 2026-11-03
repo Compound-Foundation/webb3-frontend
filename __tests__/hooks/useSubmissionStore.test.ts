@@ -119,7 +119,6 @@ describe('useSubmissionStore', () => {
   const RECORD: SubmissionRecord = {
     kind: 'execute',
     wrapper: { type: 'supply', action: ACTION, amount: 1_000_000n },
-    directCount: 0,
     scope: 'scope-1',
     status: { kind: 'running' },
     stateBefore: { phase: 'idle' },
