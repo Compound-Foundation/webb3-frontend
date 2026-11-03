@@ -582,7 +582,8 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
       // Another 200 USDC from the standard route: nothing reaches the wallet.
       await submitWithdrawal(other, '200');
       await expectNoDialog(other);
-      // The refused write would ask the wallet within this time; nothing positive marks the refusal.
+      // Without the fix, the second request reached the wallet within this time on the fork (about 3 s).
+      // Nothing on the page marks the refusal, so the wait stands in for it.
       await other.waitForTimeout(5_000);
       expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
     } finally {
@@ -625,6 +626,7 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     const late: { hash?: string } = {};
     let isClaimed = false;
     let isReorged = false;
+    let isReverted: unknown;
     // The reorg waits until the test has seen the request mined.
     let seenMined: () => void = () => undefined;
     const isSeenMined = new Promise<void>((resolve) => (seenMined = resolve));
@@ -644,7 +646,8 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
         isClaimed = true;
         await isSeenMined;
         const mined = (await forkRpc('eth_getTransactionByHash', [late.hash])) as object;
-        expect(await forkRpc('evm_revert', [snapshot])).toBe(true);
+        // Checked in the test's body: a failed check here would leave the request unanswered.
+        isReverted = await forkRpc('evm_revert', [snapshot]);
         await forkRpc('evm_mine');
         isReorged = true;
         const pending = { ...mined, blockHash: null, blockNumber: null, transactionIndex: null };
@@ -662,6 +665,7 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     await page.reload();
     await expect(notice(page)).toBeVisible({ timeout: 60_000 });
     await expect.poll(() => isReorged, { timeout: 60_000 }).toBe(true);
+    expect(isReverted).toBe(true);
 
     // The same 200 USDC again: the hold stays, and nothing reaches the wallet.
     await submitWithdrawal(page, '200');
@@ -670,8 +674,9 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     expect(await storedHolds(page)).toHaveLength(1);
     expect(await wallet.requests({ method: 'eth_sendTransaction' })).toHaveLength(1);
 
-    // The held request is mined again, after the reorg. Comet lends nothing, and the next look, which
-    // reads the block of the earlier log again, ends the hold.
+    // The held request is mined again, at a new height after the reorg. Comet lends nothing, and a look
+    // after a reload finds it and ends the hold. That the cursor stays at an unsettled block is pinned in
+    // the Jest cases of `isHoldResolved`.
     const again = await wallet.forkSend({ from: account, to: COMET_USDC, data: firstTransaction.data });
     const { receipt } = await minedOnFork(fork, again.hash, { from: account, to: COMET_USDC });
     expect(await debtOf(fork, account, receipt.blockNumber)).toBe(0n);

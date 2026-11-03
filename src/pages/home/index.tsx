@@ -401,8 +401,8 @@ const Home = ({
   // the market is reserved or held (`directWithdrawalHolds`): together they can take more than the
   // direct supply, and Comet then lends the rest. It only checks: a standard-route withdrawal holds
   // nothing back itself, and the Extensions page's transactions are not checked. Only a configured
-  // wrapped market can have one. Storage that cannot be read, or holds no list, is unknown, never
-  // empty, and holds the withdrawal back too. Storage read cleanly with no record for the key sends
+  // wrapped market can have one. Storage that cannot be read, or holds anything other than a JSON
+  // list, is unknown, never empty, and holds the withdrawal back too. Storage read cleanly with no record for the key sends
   // as on main. The wrapped route refuses every other base withdrawal to Comet anyway
   // (`isSubmissionRefused`). `baseWithdrawalHold` is set only for the synchronous call that sends
   // such a write, which checks again just before the wallet is asked.

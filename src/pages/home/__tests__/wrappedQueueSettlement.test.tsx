@@ -1934,10 +1934,14 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       const restore = makeUnreadable();
       try {
         act(() => live.queue.addOrUpdateAction(entry));
+        await settle();
+        const estimates = wallet.cometSigner.estimateGas.mock.calls.length;
         await submit();
         await settle();
         expect(requestedCalls(wallet)).toEqual(['withdraw']);
         expect(queued()).toEqual([entry]);
+        // Refused at Submit, before the manager estimates gas, not only just before the wallet.
+        expect(wallet.cometSigner.estimateGas.mock.calls.length).toBe(estimates);
       } finally {
         restore();
       }

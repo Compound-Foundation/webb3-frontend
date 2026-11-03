@@ -439,6 +439,45 @@ describe('isHoldResolved', () => {
     expect(node.getLogs.mock.calls[1][0]).toMatchObject({ fromBlock: 102, toBlock: 111 });
   });
 
+  describe('the cursor beside a candidate that did not count', () => {
+    const MINED: Mined = { hash: hash(1), blockNumber: 102, from: ACCOUNT, to: USDC_COMET, data: CALLDATA };
+
+    it('starts the next look at the lowest such block of a range', async () => {
+      const node = nodeWith([MINED, { ...MINED, hash: hash(2), blockNumber: 105 }]);
+      node.getTransaction.mockResolvedValue(null);
+      const scanned = new Map<string, number>();
+      // The later log comes last, so the lowest block is not simply the last one met.
+      node.getLogs.mockImplementationOnce(async () => [withdrawLog(102, hash(1)), withdrawLog(105, hash(2))]);
+      await expect(isHoldResolved(HOLD, asReader(node), 110, scanned)).resolves.toBe(false);
+      expect(scanned.get(HOLD.id)).toBe(101);
+    });
+
+    it('keeps what earlier ranges of the same look read through', async () => {
+      const far = HOLD.blockNumber + LOG_BLOCK_RANGE + 50;
+      const node = nodeWith([{ ...MINED, blockNumber: far }]);
+      node.getTransaction.mockResolvedValue(null);
+      const scanned = new Map<string, number>();
+      await expect(isHoldResolved(HOLD, asReader(node), far + 10, scanned)).resolves.toBe(false);
+      expect(scanned.get(HOLD.id)).toBe(far - 1);
+    });
+
+    it.each([
+      ['past the anchored block', { ...withdrawLog(111, hash(1)) }],
+      ['with no block number', { ...withdrawLog(102, hash(1)), blockNumber: undefined }],
+    ])('reads the whole range again for a log %s', async (_name, log) => {
+      const node = nodeWith([MINED]);
+      node.getLogs.mockImplementation(async () => [log] as never);
+      node.getTransaction.mockResolvedValue({ ...MINED, blockNumber: 111, blockHash: blockHashAt(111) } as never);
+      node.getBlock.mockImplementation(async (blockNumber: number) => ({
+        number: blockNumber,
+        hash: blockHashAt(111),
+      }));
+      const scanned = new Map<string, number>();
+      await expect(isHoldResolved(HOLD, asReader(node), 110, scanned)).resolves.toBe(false);
+      expect(scanned.get(HOLD.id)).toBe(HOLD.blockNumber);
+    });
+  });
+
   describe('after a reorg', () => {
     const MINED: Mined = { hash: hash(1), blockNumber: 102, from: ACCOUNT, to: USDC_COMET, data: CALLDATA };
 
