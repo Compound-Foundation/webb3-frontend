@@ -67,9 +67,9 @@ function send(
     const request = https.request(
       {
         host: '127.0.0.1',
-        // An empty name sends no SNI and stops Node from taking the name from the Host header, so
-        // the certificate is checked against 127.0.0.1 whatever Host a test sends. Node 26 refuses
-        // an IP address as the name.
+        // An empty name sends no Server Name Indication (SNI), and stops Node from taking the name
+        // from the Host header. Node then checks the certificate against 127.0.0.1, whatever Host
+        // a test sends. Node 26 refuses an IP address as the name.
         servername: '',
         port: proxy.port,
         path: route,
