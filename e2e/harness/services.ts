@@ -395,6 +395,8 @@ export async function startServices({
       let child: ChildProcess | undefined;
       let cwd: string | undefined;
       let wallet: WalletServer | undefined;
+      /** Whether the lane started and its stop belongs to the pool. Until then, its anvil has a stop of its own. */
+      let isStarted = false;
       const stopParts = async () => {
         await wallet?.close();
         if (child !== undefined) await stopChild(child);
@@ -415,6 +417,16 @@ export async function startServices({
             child = spawned;
             cwd = spawnedCwd;
             anvils.push({ child: spawned, cwd: spawnedCwd });
+            // A signal while the lane starts stops this anvil while the proxy still holds its port: the stop is
+            // registered after the proxy's, so it runs first.
+            addStop({
+              name: `lane ${index} anvil while it starts`,
+              run: async () => {
+                if (isStarted) return;
+                await stopChild(spawned);
+                fs.rmSync(spawnedCwd, { recursive: true, force: true });
+              },
+            });
             record.upstreamProxyPort = Number(new URL(proxy.url).port);
             record.anvils.push({ pid: spawned.pid, cwd: spawnedCwd });
             writeRecord();
@@ -454,6 +466,7 @@ export async function startServices({
         };
         lanesStarted.push(info);
         const spawned = fork.child;
+        isStarted = true;
         return {
           info,
           isAlive: () => !hasExited(spawned),
@@ -463,6 +476,7 @@ export async function startServices({
             if (sharedFile === undefined) return undefined;
             return {
               lane: index,
+              generation,
               runHome,
               methods,
               hasExitedCleanly: spawned.exitCode === 0,
@@ -551,7 +565,7 @@ export async function startServices({
     addStop({
       name: 'fork lanes',
       run: async () => {
-        const laneCaches = await pool.stop();
+        const { caches, errors } = await pool.stop();
         const { sharedFile, target } = forkContext;
         if (cacheRoot !== undefined && sharedFile !== undefined) {
           cachePromotion = promoteLaneCaches({
@@ -560,9 +574,10 @@ export async function startServices({
             blockNumber: target.number,
             forkHash: target.hash,
             forkUrl: forkContext.proxy.url,
-            lanes: laneCaches,
+            lanes: caches,
           });
         }
+        if (errors.length > 0) throw new Error(errors.join('; '));
       },
     });
     ensureRunning();

@@ -13,6 +13,8 @@
 //   and those endpoints limit their rate. Such a run gets a lower maximum.
 // - The default maximum, which the benchmarks in docs/browser-fork-wallet.md support.
 //
+// The signals are read once, in the runner, and only when the environment does not decide the count.
+//
 // BROWSER_TEST_WORKERS sets the count outright (1 included), and Playwright's `--workers` overrides both.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -23,19 +25,33 @@ import { forkCacheRoot, PINNED_BLOCK, sharedCacheFile } from './fork';
 
 const GIB = 1024 ** 3;
 
-/** The most workers the estimate chooses. */
+/**
+ * The most workers the estimate chooses. A spec file runs in one worker, and the two longest files take about
+ * 85 and 75 s of the suite's 290 s, so past four workers they bound the run: six workers were 6 % faster than
+ * four in the benchmarks, for 1.1 GiB more memory and half again the upstream burst.
+ */
 export const DEFAULT_MAX_WORKERS = 4;
-/** The most workers the estimate chooses for a run on the public endpoints without a warm cache. */
+/**
+ * The most workers the estimate chooses for a run on the public endpoints without a warm cache. Every lane's
+ * misses go upstream: four cold lanes sent 39 % more requests than one, at more than twice the peak rate, to
+ * endpoints whose rate limits are not published and change.
+ */
 export const PUBLIC_COLD_MAX_WORKERS = 2;
 /** The largest count BROWSER_TEST_WORKERS accepts. */
 export const MAX_OVERRIDE_WORKERS = 16;
 /** The CPUs that the runner, the dev server and the proxies use, which no worker can have. */
 export const SHARED_CPUS = 2;
-/** One worker's CPUs: its Chromium, its Node process and its anvil. */
+/**
+ * One worker's CPUs: its Chromium, its Node process and its anvil. A worker averaged 0.6 CPUs in the benchmarks
+ * and peaked at 1.6.
+ */
 export const CPUS_PER_WORKER = 2;
-/** The memory of the runner, the dev server and the production builds, with headroom for the system. */
-export const SHARED_MEMORY = 3 * GIB;
-/** One worker's memory: its Chromium, its Node process and its anvil with the fork's state. */
+/**
+ * The memory of the runner, the dev server and the production builds, about 3 GiB in the benchmarks, with
+ * 1 GiB of headroom for the system.
+ */
+export const SHARED_MEMORY = 4 * GIB;
+/** One worker's memory: its Chromium, its Node process and its anvil, about 1.1 GiB in the benchmarks. */
 export const MEMORY_PER_WORKER = 1.5 * GIB;
 /** The share of the CPUs counted as idle when the sample cannot be taken. */
 const UNKNOWN_IDLE_FRACTION = 0.5;
@@ -172,14 +188,15 @@ export function parseCgroupCpuMax(text: string): number | undefined {
 }
 
 /**
- * The memory macOS can give without swapping, from `vm_stat`: free, inactive, speculative and purgeable pages.
- * `os.freemem()` counts only free pages, which macOS keeps few of.
+ * The memory macOS can give without swapping, from `vm_stat`: free, inactive and speculative pages.
+ * `os.freemem()` counts only free pages, which macOS keeps few of. Purgeable pages are already counted among
+ * the active and inactive ones, so they are not added.
  */
 export function parseVmStatAvailable(text: string): number | undefined {
   const pageSize = /page size of (\d+) bytes/.exec(text);
   if (pageSize === null) return undefined;
   const pages = (name: string) => Number(new RegExp(`^Pages ${name}:\\s+(\\d+)\\.`, 'm').exec(text)?.[1] ?? 0);
-  return (pages('free') + pages('inactive') + pages('speculative') + pages('purgeable')) * Number(pageSize[1]);
+  return (pages('free') + pages('inactive') + pages('speculative')) * Number(pageSize[1]);
 }
 
 const readText = (file: string) => {
@@ -190,12 +207,20 @@ const readText = (file: string) => {
   }
 };
 
-/** The cgroup's memory limit less its use, on Linux with cgroup v2, or undefined. */
+/** The cgroup's memory limit less its use, on Linux with cgroup v2 or v1, or undefined. */
 function cgroupMemoryAvailable(): number | undefined {
-  const limit = readText('/sys/fs/cgroup/memory.max')?.trim();
-  const current = readText('/sys/fs/cgroup/memory.current')?.trim();
-  if (limit === undefined || current === undefined || !/^\d+$/.test(limit) || !/^\d+$/.test(current)) return undefined;
-  return Number(limit) - Number(current);
+  for (const [limitFile, usageFile] of [
+    ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory.current'],
+    ['/sys/fs/cgroup/memory/memory.limit_in_bytes', '/sys/fs/cgroup/memory/memory.usage_in_bytes'],
+  ]) {
+    const limit = readText(limitFile)?.trim();
+    const usage = readText(usageFile)?.trim();
+    // cgroup v2 writes `max` for no limit; v1 writes a number near 2^63.
+    if (limit === undefined || usage === undefined || !/^\d+$/.test(limit) || !/^\d+$/.test(usage)) continue;
+    if (Number(limit) >= 2 ** 60) continue;
+    return Number(limit) - Number(usage);
+  }
+  return undefined;
 }
 
 function availableMemory(platform: string): { bytes?: number; source?: string } {
@@ -286,4 +311,29 @@ export function readSignals(env: NodeJS.ProcessEnv, testDir: string): Concurrenc
     upstream: isPrivate ? 'private' : 'public',
     cache,
   };
+}
+
+/**
+ * The worker count for this run: from the environment when BROWSER_TEST_WORKERS or an interactive session
+ * decides it, without reading the machine, and otherwise from `read`'s signals.
+ */
+export function estimateWorkers(env: NodeJS.ProcessEnv, read: () => ConcurrencySignals): WorkerSelection {
+  const decided = env.BROWSER_WALLET_INTERACTIVE === '1' || !['', 'auto', undefined].includes(env.BROWSER_TEST_WORKERS);
+  return selectWorkers(decided ? { platform: process.platform, upstream: 'public', cache: 'off' } : read(), env);
+}
+
+/** How many workers a run used, and why: the selection, or `--workers` when it set another count. */
+export function workersText({
+  workers,
+  selection,
+  isCliOverride,
+}: {
+  workers: number;
+  selection?: Pick<WorkerSelection, 'workers' | 'source' | 'reasons' | 'missing'>;
+  isCliOverride: boolean;
+}): string {
+  if (selection === undefined) return `${workers}`;
+  if (isCliOverride) return `${workers}, set by --workers (the estimate was ${selection.workers})`;
+  const missing = selection.missing.length > 0 ? ` Signals not read: ${selection.missing.join(', ')}.` : '';
+  return `${workers}, by ${selection.source}: ${selection.reasons.join('; ')}.${missing}`;
 }

@@ -8,14 +8,14 @@ import path from 'node:path';
 
 import { defineConfig } from '@playwright/test';
 
-import { readSignals, selectWorkers, type WorkerSelection } from './harness/concurrency';
+import { estimateWorkers, readSignals, type WorkerSelection } from './harness/concurrency';
 import { REPO_ROOT, RUNS_DIR } from './harness/paths';
 
 // The run ID and the worker count are set once, in the runner, and the workers inherit them: each worker loads
 // this file again, and must not sample the machine again or choose another count.
 process.env.BROWSER_HARNESS_RUN_ID ??= `${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}`;
 process.env.BROWSER_HARNESS_CONCURRENCY ??= JSON.stringify(
-  selectWorkers(readSignals(process.env, path.join(REPO_ROOT, 'e2e/specs')), process.env)
+  estimateWorkers(process.env, () => readSignals(process.env, path.join(REPO_ROOT, 'e2e/specs')))
 );
 const selection = JSON.parse(process.env.BROWSER_HARNESS_CONCURRENCY) as WorkerSelection;
 const runDir = path.join(RUNS_DIR, process.env.BROWSER_HARNESS_RUN_ID);

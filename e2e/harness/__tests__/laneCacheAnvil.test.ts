@@ -116,7 +116,7 @@ async function lane(home: string) {
   return {
     call,
     methods,
-    stop: async (): Promise<Omit<LaneCache, 'lane'>> => {
+    stop: async (): Promise<Omit<LaneCache, 'lane' | 'generation'>> => {
       await stopChild(fork.child);
       fs.rmSync(directory, { recursive: true, force: true });
       return {
@@ -150,8 +150,8 @@ describeWithAnvil('lane caches with anvil 1.9.0', () => {
     const second = await lane(path.join(scratch, 'home-1'));
     expect(await second.call('eth_getStorageAt', [USDC, '0x9', 'latest'])).toBe(word(9));
     const lanes = [
-      { lane: 0, ...(await first.stop()) },
-      { lane: 1, ...(await second.stop()) },
+      { lane: 0, generation: 0, ...(await first.stop()) },
+      { lane: 1, generation: 0, ...(await second.stop()) },
     ];
 
     const promotion = promoteLaneCaches({
@@ -181,6 +181,23 @@ describeWithAnvil('lane caches with anvil 1.9.0', () => {
     expect(storageReads().slice(before)).toEqual([]);
     expect(await third.call('eth_getStorageAt', [USDC, '0x5', 'latest'])).toBe(word(5));
     expect(storageReads().slice(before)).toEqual(['0x5']);
-    await third.stop();
+    // anvil writes back what it loaded unchanged, so the next promotion finds no entry in dispute and merges the
+    // third lane's new reads.
+    const thirdCache = { lane: 0, generation: 0, ...(await third.stop()) };
+    const again = promoteLaneCaches({
+      cacheRoot: root,
+      sharedFile: shared,
+      blockNumber: FORK_BLOCK,
+      forkHash: FORK_HASH,
+      forkUrl,
+      lanes: [thirdCache],
+    });
+    expect(again).toEqual({
+      isPromoted: true,
+      reason: 'promoted the union of 1 lane',
+      lanes: [{ lane: 0, generation: 0, isMerged: true, reason: 'merged 1 new entry' }],
+    });
+    const secondUnion = JSON.parse(zstd.zstdDecompressSync(fs.readFileSync(shared)).toString('utf8'));
+    expect(secondUnion.storage[USDC]).toEqual({ '0x5': '0x5', '0x7': '0x7', '0x9': '0x9' });
   });
 });

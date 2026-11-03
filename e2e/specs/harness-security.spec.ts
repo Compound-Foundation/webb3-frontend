@@ -25,7 +25,7 @@ import { LANE_HEADER } from '../harness/laneHeader';
 const FAKE_TOKEN = 'not-the-run-token';
 
 type Received = { method: string; url: string };
-type Detailed = Received & { body: string; contentType?: string; authorization?: string };
+type Detailed = Received & { body: string; contentType?: string; authorization?: string; lane?: string | string[] };
 
 /** A loopback server that records each request and answers `answer(url)`, or 200 with the URL. */
 async function recordingServer(
@@ -66,6 +66,7 @@ async function detailedServer(
         body: Buffer.concat(chunks).toString(),
         contentType: request.headers['content-type'],
         authorization: request.headers.authorization,
+        lane: request.headers[LANE_HEADER],
       });
       const redirect = answer(request.url ?? '');
       if (redirect !== undefined) {
@@ -658,6 +659,54 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
     expect((await wallet.requests()).map((request) => request.method)).toEqual(['wallet_requestPermissions']);
   });
 
+  test('the lane header reaches only lane-routed origins, on every redirect hop, whatever the page sent', async ({
+    browser,
+  }) => {
+    // `routed` stands for the RPC proxy and the screening stub; `other` for every other allowed origin.
+    let otherOrigin = '';
+    const routed = await detailedServer((url) =>
+      url === '/to-other' ? { status: 307, location: `${otherOrigin}/after-routed` } : undefined
+    );
+    const other = await detailedServer((url) =>
+      url === '/to-routed' ? { status: 307, location: `${routed.origin}/after-other` } : undefined
+    );
+    otherOrigin = other.origin;
+    const blocked: BlockedRequest[] = [];
+    const context = await browser.newContext({ serviceWorkers: 'block' });
+    try {
+      await applyEgress(context, { http: new Set([routed.origin, other.origin]), webSocket: new Set() }, blocked, {
+        origins: new Set([routed.origin]),
+        value: '5',
+      });
+      const page = await context.newPage();
+      await page.goto(`${other.origin}/start`);
+      await page.evaluate(
+        async ({ urls, header }) => {
+          for (const url of urls) {
+            await fetch(url, { method: 'POST', headers: { [header]: '9', 'content-type': 'text/plain' }, body: 'x' });
+          }
+        },
+        { urls: [`${other.origin}/to-routed`, `${routed.origin}/to-other`], header: LANE_HEADER }
+      );
+      const seen = (server: { received: Detailed[] }) =>
+        server.received.filter((each) => each.method !== 'OPTIONS').map((each) => [each.url, each.lane ?? null]);
+      expect(seen(other)).toEqual([
+        ['/start', null],
+        ['/to-routed', null],
+        ['/after-routed', null],
+      ]);
+      expect(seen(routed)).toEqual([
+        ['/after-other', '5'],
+        ['/to-other', '5'],
+      ]);
+      expect(blocked).toEqual([]);
+    } finally {
+      await context.close();
+      await routed.close();
+      await other.close();
+    }
+  });
+
   test('every harness service listens on 127.0.0.1 only', async ({ manifest }) => {
     // The workers are children of the Playwright runner, which runs the services in-process.
     const runner = listeningAddresses(process.ppid);
@@ -720,12 +769,9 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
         lanes: [null, String(lane.index), String(lane.index + 1), '0', 'not a lane'],
       }
     );
-    // 7 ETH. The app's own read, with no header from the page, gets it from this lane. A read whose page named
-    // a lane either fails the RPC proxy's CORS preflight, which allows no such header, or gets the same
-    // balance, because the egress route replaces the header: it never reads another lane.
-    const [own, ...named] = balances;
-    expect(own).toBe('0x6124fee993bc0000');
-    for (const balance of named) expect(['0x6124fee993bc0000', 'failed']).toContain(balance);
+    // 7 ETH, from this lane, for every read: Playwright answers a routed request's CORS preflight itself, so
+    // each request reaches the egress route, which replaces whatever lane the page named with the worker's.
+    expect(balances).toEqual(Array(5).fill('0x6124fee993bc0000'));
   });
 
   test('the control API needs the run token, its own Host and no Origin', async ({ manifest }) => {

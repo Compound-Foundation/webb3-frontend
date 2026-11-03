@@ -5,6 +5,7 @@
 import {
   CPUS_PER_WORKER,
   DEFAULT_MAX_WORKERS,
+  estimateWorkers,
   MAX_OVERRIDE_WORKERS,
   MEMORY_PER_WORKER,
   parseCgroupCpuMax,
@@ -129,6 +130,18 @@ describe('an explicit count', () => {
   });
 });
 
+describe('the reading of the signals', () => {
+  test('is skipped when BROWSER_TEST_WORKERS or an interactive session decides the count', () => {
+    const read = jest.fn(() => ROOMY);
+    expect(estimateWorkers({ BROWSER_TEST_WORKERS: '3' }, read).workers).toBe(3);
+    expect(estimateWorkers({ BROWSER_WALLET_INTERACTIVE: '1' }, read).workers).toBe(1);
+    expect(() => estimateWorkers({ BROWSER_TEST_WORKERS: 'many' }, read)).toThrow(/BROWSER_TEST_WORKERS/);
+    expect(read).not.toHaveBeenCalled();
+    expect(estimateWorkers({ BROWSER_TEST_WORKERS: 'auto' }, read).workers).toBe(DEFAULT_MAX_WORKERS);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('the signals read from the operating system', () => {
   test("Linux's MemAvailable, in bytes", () => {
     expect(parseMeminfoAvailable('MemTotal:       16000000 kB\nMemAvailable:    8000000 kB\n')).toBe(8000000 * 1024);
@@ -142,7 +155,7 @@ describe('the signals read from the operating system', () => {
     expect(parseCgroupCpuMax('garbage')).toBeUndefined();
   });
 
-  test("macOS's reclaimable memory from vm_stat: free, inactive, speculative and purgeable pages", () => {
+  test("macOS's reclaimable memory from vm_stat: free, inactive and speculative pages", () => {
     const vmStat = [
       'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
       'Pages free:                                   100.',
@@ -152,7 +165,8 @@ describe('the signals read from the operating system', () => {
       'Pages wired down:                             999.',
       'Pages purgeable:                                4.',
     ].join('\n');
-    expect(parseVmStatAvailable(vmStat)).toBe((100 + 200 + 30 + 4) * 16384);
+    // Purgeable pages are already counted among the active and inactive ones, so they are not added again.
+    expect(parseVmStatAvailable(vmStat)).toBe((100 + 200 + 30) * 16384);
     expect(parseVmStatAvailable('nothing here')).toBeUndefined();
   });
 });

@@ -971,6 +971,8 @@ const MAX_LISTED_METHODS = 5;
 /** What one lane's anvil left for the promotion: its home, its log's methods, and how it stopped. */
 export type LaneCache = {
   lane: number;
+  /** Which start of the lane this was: 0, unless its anvil exited during the run and was started again. */
+  generation: number;
   runHome: string;
   methods: Iterable<string>;
   hasExitedCleanly: boolean;
@@ -995,7 +997,7 @@ export function laneCacheGate({
   hasExitedCleanly,
   anvilVersion,
   isProxyListening,
-}: Omit<LaneCache, 'lane'> & { blockNumber: number; forkUrl: string }): LaneGate {
+}: Omit<LaneCache, 'lane' | 'generation'> & { blockNumber: number; forkUrl: string }): LaneGate {
   const refuse = (reason: string): LaneGate => ({ isEligible: false, reason });
   if (!isProxyListening) return refuse('the upstream proxy stopped before anvil');
   if (!isCacheAnvil(anvilVersion)) return refuse('the cache is promoted only from anvil 1.9.0');
@@ -1065,56 +1067,45 @@ function cacheProblem(content: unknown, blockNumber: number, forkHash: string): 
   return undefined;
 }
 
-export type LanePromotion = { lane: number; isMerged: boolean; reason: string };
+export type LanePromotion = { lane: number; generation: number; isMerged: boolean; reason: string };
 export type Promotion = { isPromoted: boolean; reason: string; lanes?: LanePromotion[] };
 
-/**
- * Adds `content`'s entries to `merged` and returns how many were new, or the first entry whose value differs
- * from the one `merged` holds, in which case nothing is added. The pinned block's state never changes, so
- * two reads of one entry agree, and a difference means one of them is not a plain read of the upstream.
- */
-function mergeInto(merged: CacheContent, content: CacheContent): { added: number } | { conflict: string } {
-  const additions: (() => void)[] = [];
-  const check = (held: unknown, value: unknown, name: string, add: () => void): string | undefined => {
-    if (held === undefined) {
-      additions.push(add);
-      return undefined;
-    }
-    return canonical(held) === canonical(value) ? undefined : name;
-  };
-  for (const section of ['accounts', 'block_hashes'] as const) {
-    for (const [key, value] of Object.entries(content[section])) {
-      const conflict = check(merged[section][key], value, `${section} entry ${key}`, () => {
-        merged[section][key] = value;
-      });
-      if (conflict !== undefined) return { conflict };
-    }
-  }
+/** Each entry of a cache file under one key, its section and the names that locate it, with its value. */
+function entriesOf(content: CacheContent): Map<string, unknown> {
+  const entries = new Map<string, unknown>();
+  for (const [address, value] of Object.entries(content.accounts)) entries.set(`accounts\0${address}`, value);
+  for (const [number, value] of Object.entries(content.block_hashes)) entries.set(`block_hashes\0${number}`, value);
   for (const [address, slots] of Object.entries(content.storage)) {
-    for (const [slot, value] of Object.entries(slots)) {
-      const conflict = check(merged.storage[address]?.[slot], value, `storage entry ${address} ${slot}`, () => {
-        merged.storage[address] = { ...(merged.storage[address] ?? {}), [slot]: value };
-      });
-      if (conflict !== undefined) return { conflict };
-    }
+    for (const [slot, value] of Object.entries(slots)) entries.set(`storage\0${address}\0${slot}`, value);
   }
-  for (const add of additions) add();
-  return { added: additions.length };
+  return entries;
 }
+
+/** Adds the entry under `key` to `content`. */
+function addEntry(content: CacheContent, key: string, value: unknown): void {
+  const [section, name, slot] = key.split('\0');
+  if (section === 'storage') (content.storage[name] ??= {})[slot] = value;
+  else content[section as 'accounts' | 'block_hashes'][name] = value;
+}
+
+const entryCount = (count: number) => `${count} ${count === 1 ? 'entry' : 'entries'}`;
 
 /**
  * Replaces the shared cache file with the union of what it holds and what each eligible lane's anvil read.
  *
- * The root passes `checkCacheRoot` again first. Each lane passes `laneCacheGate` and holds a cache of the
- * block, forked at `forkHash`, in the format of anvil 1.9.0; the first lane merged sets the fork that every
- * other file must match in full. The shared file is read again now, so that a promotion by another run since
- * this one started is kept, and is left out if it is of another fork. A lane with an entry whose value differs
- * from one already held is left out whole. anvil's cache holds only what it read from the upstream, never a
- * change made on the fork, and a local change that leaked would show as such a difference.
+ * The root passes `checkCacheRoot` again first. Each start of each lane passes `laneCacheGate` on its own and
+ * holds a cache of the block, forked at `forkHash`, in the format of anvil 1.9.0; the first lane merged sets
+ * the fork that every other file must match in full. The shared file is read again now, so that a promotion by
+ * another run since this one started is kept, and is left out if it is of another fork.
+ *
+ * The pinned block's state never changes, so two plain reads of one entry from the upstream agree. anvil's
+ * cache holds only such reads, never a change made on the fork. An entry that two files disagree on is
+ * therefore not a plain read in one of them, and nothing shows which: the union leaves it out, the shared
+ * file's copy included, so that the next run reads it from the upstream again. Every other entry is merged.
  *
  * The union goes to a new file beside the shared one, which is then renamed over it, so a reader never sees
  * half a file and a symbolic link at the shared path is replaced, not written through. Nothing is written when
- * no lane is eligible or the lanes read nothing new. It never throws: a file system error is named by its
+ * no lane is eligible or the union equals the shared file. It never throws: a file system error is named by its
  * code alone, because its message names paths, and with them the user name.
  */
 export function promoteLaneCaches({
@@ -1138,26 +1129,55 @@ export function promoteLaneCaches({
     return { isPromoted: false, reason: 'the cache root failed its check', lanes: [] };
   }
   const results: LanePromotion[] = [];
-  const candidates: { lane: number; content: CacheContent }[] = [];
+  const candidates: { result: LanePromotion; content: CacheContent }[] = [];
   let reference: string | undefined;
   for (const each of lanes) {
+    const result: LanePromotion = { lane: each.lane, generation: each.generation, isMerged: false, reason: '' };
+    results.push(result);
     const gate = laneCacheGate({ ...each, blockNumber, forkUrl });
     if (!gate.isEligible) {
-      results.push({ lane: each.lane, isMerged: false, reason: gate.reason });
+      result.reason = gate.reason;
       continue;
     }
     const content = readCacheFile(gate.file);
     const problem = cacheProblem(content, blockNumber, forkHash);
     const meta = problem === undefined ? canonical((content as CacheContent).meta) : undefined;
     if (problem !== undefined || (reference !== undefined && meta !== reference)) {
-      results.push({ lane: each.lane, isMerged: false, reason: problem ?? 'its cache is of another fork' });
+      result.reason = problem ?? 'its cache is of another fork';
       continue;
     }
     reference ??= meta;
-    candidates.push({ lane: each.lane, content: content as CacheContent });
-    results.push({ lane: each.lane, isMerged: true, reason: '' });
+    result.isMerged = true;
+    candidates.push({ result, content: content as CacheContent });
   }
   if (candidates.length === 0) return { isPromoted: false, reason: 'no lane passed the gates', lanes: results };
+
+  const shared = readCacheFile(sharedFile);
+  let sharedEntries = new Map<string, unknown>();
+  let isSharedKept = false;
+  let replacedNote = '';
+  if (shared !== undefined) {
+    if (
+      cacheProblem(shared, blockNumber, forkHash) === undefined &&
+      canonical((shared as CacheContent).meta) === reference
+    ) {
+      sharedEntries = entriesOf(shared as CacheContent);
+      isSharedKept = true;
+    } else {
+      replacedNote = '; the shared file was of another fork and was replaced';
+    }
+  }
+  const laneEntries = candidates.map(({ content }) => entriesOf(content));
+  // The canonical values each entry has across the shared file and the lanes, to find those in dispute.
+  const values = new Map<string, Set<string>>();
+  for (const entries of [sharedEntries, ...laneEntries]) {
+    for (const [key, value] of entries) {
+      let seen = values.get(key);
+      if (seen === undefined) values.set(key, (seen = new Set()));
+      seen.add(canonical(value));
+    }
+  }
+  const disputed = new Set([...values].filter(([, seen]) => seen.size > 1).map(([key]) => key));
 
   const merged: CacheContent = {
     meta: candidates[0].content.meta,
@@ -1166,35 +1186,34 @@ export function promoteLaneCaches({
     block_hashes: {},
     block_hash_cache_version: MERGED_CACHE_VERSION,
   };
-  const shared = readCacheFile(sharedFile);
-  let isSharedKept = false;
-  let replacedNote = '';
-  if (shared !== undefined) {
-    const sharedProblem = cacheProblem(shared, blockNumber, forkHash);
-    if (sharedProblem === undefined && canonical((shared as CacheContent).meta) === reference) {
-      mergeInto(merged, shared as CacheContent);
-      isSharedKept = true;
-    } else {
-      replacedNote = '; the shared file was of another fork and was replaced';
-    }
+  const held = new Set<string>();
+  for (const [key, value] of sharedEntries) {
+    if (disputed.has(key)) continue;
+    addEntry(merged, key, value);
+    held.add(key);
   }
   let added = 0;
-  let mergedLanes = 0;
-  for (const { lane, content } of candidates) {
-    const result = results.find((each) => each.lane === lane) as LanePromotion;
-    const outcome = mergeInto(merged, content);
-    if ('conflict' in outcome) {
-      Object.assign(result, { isMerged: false, reason: `its ${outcome.conflict} differs from the one already held` });
-      continue;
+  candidates.forEach(({ result }, index) => {
+    let laneAdded = 0;
+    let laneDisputed = 0;
+    for (const [key, value] of laneEntries[index]) {
+      if (disputed.has(key)) laneDisputed += 1;
+      else if (!held.has(key)) {
+        addEntry(merged, key, value);
+        held.add(key);
+        laneAdded += 1;
+      }
     }
-    added += outcome.added;
-    mergedLanes += 1;
-    result.reason = `merged ${outcome.added} new ${outcome.added === 1 ? 'entry' : 'entries'}`;
-  }
-  if (mergedLanes === 0) return { isPromoted: false, reason: 'no lane passed the gates', lanes: results };
-  if (isSharedKept && added === 0) {
+    added += laneAdded;
+    result.reason = `merged ${laneAdded} new ${laneAdded === 1 ? 'entry' : 'entries'}${
+      laneDisputed === 0 ? '' : `; left out ${entryCount(laneDisputed)} another file disagrees on`
+    }`;
+  });
+  const isSharedChanged = [...sharedEntries.keys()].some((key) => disputed.has(key));
+  if (isSharedKept && added === 0 && !isSharedChanged) {
     return { isPromoted: false, reason: 'the shared file already held everything the lanes read', lanes: results };
   }
+  const disputedNote = disputed.size === 0 ? '' : `; left out ${entryCount(disputed.size)} the files disagree on`;
   const temporaryFile = `${sharedFile}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   try {
     fs.mkdirSync(path.dirname(sharedFile), { recursive: true, mode: 0o700 });
@@ -1211,7 +1230,9 @@ export function promoteLaneCaches({
   }
   return {
     isPromoted: true,
-    reason: `promoted the union of ${mergedLanes} lane${mergedLanes === 1 ? '' : 's'}${replacedNote}`,
+    reason: `promoted the union of ${candidates.length} lane${
+      candidates.length === 1 ? '' : 's'
+    }${disputedNote}${replacedNote}`,
     lanes: results,
   };
 }

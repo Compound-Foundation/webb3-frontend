@@ -15,6 +15,7 @@ import path from 'node:path';
 import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 
 import { REQUIRED_ACCEPTANCE_CASES, type RequiredCase } from './acceptance';
+import { workersText } from './concurrency';
 import { homeRelative, REPO_ROOT } from './paths';
 import { findSecrets, outputsUnder, registeredSecretCount } from './secrets';
 
@@ -36,28 +37,21 @@ const forkCacheText = (cache: { state?: string; reason?: string; trust?: string;
   return cache.reason === undefined ? cache.state : `${cache.state} (${cache.reason})`;
 };
 
-type LanePromotion = { lane: number; reason: string };
+type LanePromotion = { lane: number; generation?: number; reason: string };
 
 /** Whether the run promoted the lanes' caches, and what became of each lane's. */
 export function promotionText(promotion: { isPromoted: boolean; reason: string; lanes?: LanePromotion[] }) {
   const lanes =
     promotion.lanes === undefined || promotion.lanes.length === 0
       ? ''
-      : ` (${promotion.lanes.map((lane) => `lane ${lane.lane}: ${lane.reason}`).join('; ')})`;
+      : ` (${promotion.lanes
+          .map(
+            (lane) => `lane ${lane.lane}${lane.generation ? ` after restart ${lane.generation}` : ''}: ${lane.reason}`
+          )
+          .join('; ')})`;
   return promotion.isPromoted
     ? `${promotion.reason} to the shared cache${lanes}`
     : `not promoted (${promotion.reason})${lanes}`;
-}
-
-type Selection = { workers: number; source: string; reasons: string[]; missing: string[] };
-
-/** How many workers the run used, and why, from the manifest's record of the choice. */
-export function workersText(concurrency: { workers: number; selection?: Selection; isCliOverride: boolean }) {
-  const { workers, selection, isCliOverride } = concurrency;
-  if (selection === undefined) return `${workers}`;
-  if (isCliOverride) return `${workers}, set by --workers (the estimate was ${selection.workers})`;
-  const missing = selection.missing.length > 0 ? ` Signals not read: ${selection.missing.join(', ')}.` : '';
-  return `${workers}, by ${selection.source}: ${selection.reasons.join('; ')}.${missing}`;
 }
 
 /** The lanes the run started, of the lanes it allowed, and each lane started more than once. */

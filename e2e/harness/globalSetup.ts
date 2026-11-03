@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import type { FullConfig } from '@playwright/test';
 
-import type { WorkerSelection } from './concurrency';
+import { workersText, type WorkerSelection } from './concurrency';
 import { REPO_ROOT } from './paths';
 import { startServices } from './services';
 
@@ -32,7 +32,7 @@ export default async function globalSetup(config: FullConfig): Promise<() => Pro
     : undefined;
   const workers = isInteractive ? 1 : config.workers;
   const isCliOverride = selection !== undefined && workers !== selection.workers;
-  process.stdout.write(`${describeWorkers(workers, selection, isCliOverride)}\n`);
+  process.stdout.write(`Browser harness: workers ${workersText({ workers, selection, isCliOverride })}\n`);
   const services = await startServices({
     runId,
     isInteractive,
@@ -44,13 +44,4 @@ export default async function globalSetup(config: FullConfig): Promise<() => Pro
     const errors = await services.stop();
     if (errors.length > 0) throw new Error(`The harness did not stop cleanly: ${errors.join('; ')}`);
   };
-}
-
-/** One line on how many workers the run uses, and why. */
-export function describeWorkers(workers: number, selection: WorkerSelection | undefined, isCliOverride: boolean) {
-  const count = `${workers} worker${workers === 1 ? '' : 's'}`;
-  if (selection === undefined) return `Browser harness: ${count}.`;
-  if (isCliOverride) return `Browser harness: ${count}, set by --workers (the estimate was ${selection.workers}).`;
-  const missing = selection.missing.length > 0 ? ` Signals not read: ${selection.missing.join(', ')}.` : '';
-  return `Browser harness: ${count}, by ${selection.source}: ${selection.reasons.join('; ')}.${missing}`;
 }

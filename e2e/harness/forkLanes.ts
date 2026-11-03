@@ -39,8 +39,11 @@ export type LanePool = {
   /** The fork URL of lane `index`, or undefined when it has not started or the pool is stopping. */
   forkUrlOf: (index: number) => string | undefined;
   started: () => LaneInfo[];
-  /** Stops every lane, waiting for any still starting, and returns their caches by lane and start. */
-  stop: () => Promise<LaneCache[]>;
+  /**
+   * Stops every lane, waiting for any still starting, and returns their caches by lane and start, with the
+   * error of each lane whose stop failed.
+   */
+  stop: () => Promise<{ caches: LaneCache[]; errors: string[] }>;
 };
 
 export function createLanePool({
@@ -56,11 +59,17 @@ export function createLanePool({
   type Slot = { current?: StartedLane; starting?: Promise<StartedLane>; nextGeneration: number };
   const slots: Slot[] = Array.from({ length: count }, () => ({ nextGeneration: 0 }));
   const caches: { lane: number; generation: number; cache: LaneCache }[] = [];
-  let stopping: Promise<LaneCache[]> | undefined;
+  let stopping: Promise<{ caches: LaneCache[]; errors: string[] }> | undefined;
 
+  const errors: string[] = [];
+  /** Stops `lane` and keeps its cache. A failed stop is recorded, so it never keeps another lane from stopping. */
   const retire = async (lane: StartedLane) => {
-    const cache = await lane.stop();
-    if (cache !== undefined) caches.push({ lane: lane.info.index, generation: lane.info.generation, cache });
+    try {
+      const cache = await lane.stop();
+      if (cache !== undefined) caches.push({ lane: lane.info.index, generation: lane.info.generation, cache });
+    } catch (error) {
+      errors.push(`lane ${lane.info.index}: ${String((error as Error)?.message ?? error).slice(0, 300)}`);
+    }
   };
 
   if (initial !== undefined) {
@@ -111,7 +120,10 @@ export function createLanePool({
             if (lane !== undefined) await retire(lane);
           })
         );
-        return caches.sort((a, b) => a.lane - b.lane || a.generation - b.generation).map((each) => each.cache);
+        return {
+          caches: caches.sort((a, b) => a.lane - b.lane || a.generation - b.generation).map((each) => each.cache),
+          errors,
+        };
       })()),
   };
 }

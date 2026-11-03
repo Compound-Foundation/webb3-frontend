@@ -192,13 +192,14 @@ test('the proxies section says whether the run promoted its fork cache, and why 
       isPromoted: true,
       reason: 'promoted the union of 1 lane',
       lanes: [
-        { lane: 0, isMerged: true, reason: 'merged 3 new entries' },
-        { lane: 1, isMerged: false, reason: 'anvil did not exit cleanly' },
+        { lane: 0, generation: 0, isMerged: true, reason: 'merged 3 new entries' },
+        { lane: 1, generation: 0, isMerged: false, reason: 'anvil did not exit cleanly' },
+        { lane: 1, generation: 1, isMerged: true, reason: 'merged 1 new entry' },
       ],
     },
   };
   expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, promoted)).toContain(
-    '- Fork cache after the run: promoted the union of 1 lane to the shared cache (lane 0: merged 3 new entries; lane 1: anvil did not exit cleanly)'
+    '- Fork cache after the run: promoted the union of 1 lane to the shared cache (lane 0: merged 3 new entries; lane 1: anvil did not exit cleanly; lane 1 after restart 1: merged 1 new entry)'
   );
   const refused = { ...STATS, forkCachePromotion: { isPromoted: false, reason: 'the fork was sent anvil_setRpcUrl' } };
   expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, refused)).toContain(

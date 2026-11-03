@@ -15,7 +15,8 @@ const TOKEN = 'a'.repeat(64);
 
 /** A stand-in lane, with a flag for whether its anvil is still running, that records its stop. */
 function fakeLanes() {
-  const started: { index: number; generation: number; isAlive: boolean; isStopped: boolean }[] = [];
+  const started: { index: number; generation: number; isAlive: boolean; isStopped: boolean; isStopFailing: boolean }[] =
+    [];
   let failures = 0;
   const startLane = async (index: number, generation: number): Promise<StartedLane> => {
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -23,7 +24,7 @@ function fakeLanes() {
       failures -= 1;
       throw new Error(`lane ${index} failed to start`);
     }
-    const record = { index, generation, isAlive: true, isStopped: false };
+    const record = { index, generation, isAlive: true, isStopped: false, isStopFailing: false };
     started.push(record);
     const info: LaneInfo = {
       index,
@@ -39,8 +40,10 @@ function fakeLanes() {
       stop: async (): Promise<LaneCache> => {
         record.isStopped = true;
         record.isAlive = false;
+        if (record.isStopFailing) throw new Error(`lane ${index} could not remove its working directory`);
         return {
           lane: index,
+          generation,
           runHome: `/private/anvil-home-${index}-${generation}`,
           methods: [],
           hasExitedCleanly: true,
@@ -93,7 +96,7 @@ describe('the lane pool', () => {
     expect(after.forkUrl).not.toBe(before.forkUrl);
     expect(lanes.started[0].isStopped).toBe(true);
     expect(pool.forkUrlOf(0)).toBe(after.forkUrl);
-    const caches = await pool.stop();
+    const { caches } = await pool.stop();
     expect(caches.map((each) => each.runHome)).toEqual(['/private/anvil-home-0-0', '/private/anvil-home-0-1']);
   });
 
@@ -112,14 +115,26 @@ describe('the lane pool', () => {
     await pool.lease(2);
     await pool.lease(0);
     const starting = pool.lease(1);
-    const caches = await pool.stop();
+    const { caches, errors } = await pool.stop();
+    expect(errors).toEqual([]);
     await starting.catch(() => undefined);
     expect(lanes.started.every((each) => each.isStopped)).toBe(true);
     expect(caches.map((each) => each.lane)).toEqual([0, 1, 2]);
     await expect(pool.lease(0)).rejects.toThrow('the harness is stopping');
     expect(pool.forkUrlOf(0)).toBeUndefined();
     // A second stop returns the same caches and stops nothing again.
-    expect(await pool.stop()).toEqual(caches);
+    expect((await pool.stop()).caches).toEqual(caches);
+  });
+
+  test('a lane whose stop fails does not keep the other lanes from stopping, or their caches from the promotion', async () => {
+    const lanes = fakeLanes();
+    const pool = createLanePool({ count: 3, startLane: lanes.startLane });
+    await Promise.all([pool.lease(0), pool.lease(1), pool.lease(2)]);
+    for (const each of lanes.started) each.isStopFailing = each.index === 1;
+    const { caches, errors } = await pool.stop();
+    expect(lanes.started.every((each) => each.isStopped)).toBe(true);
+    expect(caches.map((each) => each.lane)).toEqual([0, 2]);
+    expect(errors).toEqual(['lane 1: lane 1 could not remove its working directory']);
   });
 
   test('a lane given at creation, as the first lane started during set-up, is leased without a new start', async () => {

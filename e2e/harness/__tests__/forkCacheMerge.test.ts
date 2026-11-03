@@ -70,12 +70,14 @@ const writeShared = (value: unknown) => {
 
 /** A lane that stopped cleanly after the harness's own calls, with `value` as its anvil's cache file. */
 const lane = (index: number, value: unknown, overrides: Partial<LaneCache> = {}): LaneCache => {
-  const runHome = path.join(scratch, 'private', `anvil-home-${index}`);
+  const generation = overrides.generation ?? 0;
+  const runHome = path.join(scratch, 'private', `anvil-home-${index}-${generation}`);
   const file = anvilCacheFile(runHome, BLOCK, FORK_URL);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (value !== undefined) fs.writeFileSync(file, encode(value));
   return {
     lane: index,
+    generation,
     runHome,
     methods: ['eth_call', 'anvil_reset', ...ALWAYS_LOGGED_METHODS],
     hasExitedCleanly: true,
@@ -117,8 +119,8 @@ test('the shared file becomes the union of its entries and every lane’s, down 
     isPromoted: true,
     reason: 'promoted the union of 2 lanes',
     lanes: [
-      { lane: 0, isMerged: true, reason: 'merged 2 new entries' },
-      { lane: 1, isMerged: true, reason: 'merged 2 new entries' },
+      { lane: 0, generation: 0, isMerged: true, reason: 'merged 2 new entries' },
+      { lane: 1, generation: 0, isMerged: true, reason: 'merged 2 new entries' },
     ],
   });
   const merged = decode(shared);
@@ -153,34 +155,74 @@ test('a lane that fails a gate is left out whole, and the other lanes are still 
     lane(4, content({ storage: { [USDC]: { '0x3': '0x4' } } })),
   ]);
   expect(result.lanes).toEqual([
-    { lane: 0, isMerged: false, reason: 'anvil did not exit cleanly' },
-    { lane: 1, isMerged: false, reason: 'the fork was sent anvil_setRpcUrl' },
-    { lane: 2, isMerged: false, reason: 'the upstream proxy stopped before anvil' },
-    { lane: 3, isMerged: false, reason: 'the cache is promoted only from anvil 1.9.0' },
-    { lane: 4, isMerged: true, reason: 'merged 1 new entry' },
+    { lane: 0, generation: 0, isMerged: false, reason: 'anvil did not exit cleanly' },
+    { lane: 1, generation: 0, isMerged: false, reason: 'the fork was sent anvil_setRpcUrl' },
+    { lane: 2, generation: 0, isMerged: false, reason: 'the upstream proxy stopped before anvil' },
+    { lane: 3, generation: 0, isMerged: false, reason: 'the cache is promoted only from anvil 1.9.0' },
+    { lane: 4, generation: 0, isMerged: true, reason: 'merged 1 new entry' },
   ]);
   const merged = decode(shared);
   expect(Object.keys(merged.accounts)).toEqual([A]);
   expect(merged.storage).toEqual({ [USDC]: { '0x3': '0x4' } });
 });
 
-test('a lane with a value that differs from one already held is left out whole: the block state never changes', () => {
+test('an entry two files disagree on is left out of the union, the shared copy included, and the rest is merged', () => {
   writeShared(content({ accounts: { [A]: account('0x1') } }));
   const result = promote([
-    // A changed balance, as a local mutation would be, beside a new account that must not be promoted either.
+    // A changed balance, as a local change that escaped the gates would be. Neither value is kept, so the next
+    // run reads the account from the upstream again; the lane's other read is merged.
     lane(0, content({ accounts: { [A]: account('0x999'), [B]: account('0x2') } })),
-    lane(1, content({ accounts: { [C]: account('0x3') }, storage: { [USDC]: { '0x0': '0x1' } } })),
+    lane(1, content({ accounts: { [C]: account('0x3') }, storage: { [USDC]: { '0x0': '0x1', '0x1': '0x5' } } })),
     lane(2, content({ storage: { [USDC]: { '0x0': '0x2' } } })),
   ]);
-  expect(result.lanes).toEqual([
-    { lane: 0, isMerged: false, reason: `its accounts entry ${A} differs from the one already held` },
-    { lane: 1, isMerged: true, reason: 'merged 2 new entries' },
-    { lane: 2, isMerged: false, reason: `its storage entry ${USDC} 0x0 differs from the one already held` },
-  ]);
+  expect(result).toEqual({
+    isPromoted: true,
+    reason: 'promoted the union of 3 lanes; left out 2 entries the files disagree on',
+    lanes: [
+      {
+        lane: 0,
+        generation: 0,
+        isMerged: true,
+        reason: 'merged 1 new entry; left out 1 entry another file disagrees on',
+      },
+      {
+        lane: 1,
+        generation: 0,
+        isMerged: true,
+        reason: 'merged 2 new entries; left out 1 entry another file disagrees on',
+      },
+      {
+        lane: 2,
+        generation: 0,
+        isMerged: true,
+        reason: 'merged 0 new entries; left out 1 entry another file disagrees on',
+      },
+    ],
+  });
   const merged = decode(shared);
-  expect(merged.accounts[A]).toEqual(account('0x1'));
-  expect(Object.keys(merged.accounts).sort()).toEqual([A, C]);
-  expect(merged.storage).toEqual({ [USDC]: { '0x0': '0x1' } });
+  expect(Object.keys(merged.accounts).sort()).toEqual([B, C]);
+  expect(merged.storage).toEqual({ [USDC]: { '0x1': '0x5' } });
+  // A later run whose lane reads the true value again promotes it: a disputed entry does not stick.
+  expect(promote([lane(0, content({ accounts: { [A]: account('0x1') } }))]).isPromoted).toBe(true);
+  expect(decode(shared).accounts[A]).toEqual(account('0x1'));
+});
+
+test('a disputed entry that leaves an address with no slots removes the address', () => {
+  writeShared(content({ storage: { [USDC]: { '0x0': '0x1' } } }));
+  expect(promote([lane(0, content({ storage: { [USDC]: { '0x0': '0x2' } } }))]).isPromoted).toBe(true);
+  expect(decode(shared).storage).toEqual({});
+});
+
+test('each start of a restarted lane passes the gates on its own, and keeps its own result', () => {
+  const result = promote([
+    lane(0, content({ accounts: { [A]: account('0x1') } }), { hasExitedCleanly: false }),
+    lane(0, content({ accounts: { [B]: account('0x2') } }), { generation: 1 }),
+  ]);
+  expect(result.lanes).toEqual([
+    { lane: 0, generation: 0, isMerged: false, reason: 'anvil did not exit cleanly' },
+    { lane: 0, generation: 1, isMerged: true, reason: 'merged 2 new entries' },
+  ]);
+  expect(Object.keys(decode(shared).accounts)).toEqual([B]);
 });
 
 test('a lane of another fork, block or format is left out, and a shared file of another fork is replaced', () => {
@@ -195,13 +237,13 @@ test('a lane of another fork, block or format is left out, and a shared file of 
     lane(5, content({ meta: { ...META, source_id: `0x${'77'.repeat(32)}` }, accounts: { [B]: account('0x2') } })),
   ]);
   expect(result.lanes).toEqual([
-    { lane: 0, isMerged: false, reason: 'its cache is of another fork' },
-    { lane: 1, isMerged: false, reason: 'its cache is in a format the harness does not merge' },
-    { lane: 2, isMerged: false, reason: 'anvil wrote no cache of the block' },
-    { lane: 3, isMerged: false, reason: 'anvil wrote no cache of the block' },
+    { lane: 0, generation: 0, isMerged: false, reason: 'its cache is of another fork' },
+    { lane: 1, generation: 0, isMerged: false, reason: 'its cache is in a format the harness does not merge' },
+    { lane: 2, generation: 0, isMerged: false, reason: 'anvil wrote no cache of the block' },
+    { lane: 3, generation: 0, isMerged: false, reason: 'anvil wrote no cache of the block' },
     // Its account and the block hash: the shared file of another fork contributed nothing.
-    { lane: 4, isMerged: true, reason: 'merged 2 new entries' },
-    { lane: 5, isMerged: false, reason: 'its cache is of another fork' },
+    { lane: 4, generation: 0, isMerged: true, reason: 'merged 2 new entries' },
+    { lane: 5, generation: 0, isMerged: false, reason: 'its cache is of another fork' },
   ]);
   expect(result.reason).toBe('promoted the union of 1 lane; the shared file was of another fork and was replaced');
   expect(Object.keys(decode(shared).accounts)).toEqual([A]);
@@ -213,12 +255,12 @@ test('nothing is written when no lane is eligible, or when the lanes read nothin
   expect(promote([lane(0, content({ accounts: { [B]: account('0x2') } }), { hasExitedCleanly: false })])).toEqual({
     isPromoted: false,
     reason: 'no lane passed the gates',
-    lanes: [{ lane: 0, isMerged: false, reason: 'anvil did not exit cleanly' }],
+    lanes: [{ lane: 0, generation: 0, isMerged: false, reason: 'anvil did not exit cleanly' }],
   });
   expect(promote([lane(0, content({ accounts: { [A]: account('0x1') } }))])).toEqual({
     isPromoted: false,
     reason: 'the shared file already held everything the lanes read',
-    lanes: [{ lane: 0, isMerged: true, reason: 'merged 0 new entries' }],
+    lanes: [{ lane: 0, generation: 0, isMerged: true, reason: 'merged 0 new entries' }],
   });
   expect(promote([])).toEqual({ isPromoted: false, reason: 'no lane passed the gates', lanes: [] });
   expect(fs.readFileSync(shared)).toEqual(before);
