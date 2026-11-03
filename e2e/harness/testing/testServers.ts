@@ -68,6 +68,7 @@ export function anvilHandlers(overrides: Record<string, Handler> = {}): Record<s
     anvil_stopImpersonatingAccount: () => null,
     anvil_setBalance: () => null,
     eth_sendTransaction: () => `0x${'ab'.repeat(32)}`,
+    eth_getTransactionReceipt: () => ({ transactionHash: `0x${'ab'.repeat(32)}`, status: '0x1' }),
     eth_blockNumber: () => '0x1907a18',
     ...overrides,
   };

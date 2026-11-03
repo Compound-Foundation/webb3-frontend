@@ -936,8 +936,7 @@ export const CACHE_ANVIL_VERSION = 'anvil Version: 1.9.0';
 
 /**
  * Methods that `verifyFork` sends to every fork the harness uses, and that anvil logs. Their absence from the
- * log means the log was not read as expected, so nothing can be promoted. anvil does not log
- * `web3_clientVersion`.
+ * log means the log was not read as expected, so nothing can be promoted.
  */
 export const ALWAYS_LOGGED_METHODS = ['eth_chainId', 'anvil_metadata'];
 

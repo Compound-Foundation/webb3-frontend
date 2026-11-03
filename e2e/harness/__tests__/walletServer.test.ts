@@ -382,6 +382,47 @@ describe('checks on each request', () => {
     ]);
   });
 
+  test('answers a send only once anvil has mined it, because anvil 1.9.0 answers before it mines', async () => {
+    let polls = 0;
+    node.handlers.set('eth_getTransactionReceipt', () =>
+      ++polls < 3 ? null : { transactionHash: `0x${'ab'.repeat(32)}`, status: '0x1' }
+    );
+    const address = await connectedAccount();
+    const sending = client.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: address, to: address }]);
+    await client.approve((await client.waitForRequest({ method: 'eth_sendTransaction' })).id);
+    expect(await sending).toEqual({ result: `0x${'ab'.repeat(32)}` });
+    expect(polls).toBe(3);
+    const methods = node.calls.map((call) => call.method);
+    expect(methods.indexOf('eth_getTransactionReceipt')).toBeGreaterThan(methods.indexOf('eth_sendTransaction'));
+  });
+
+  test('a send that anvil does not mine in time fails, and the page gets an error, not the hash', async () => {
+    const quick = await startWalletServer({
+      fork: { localUrl: node.url },
+      target: { number: FORK_BLOCK, hash: FORK_HASH },
+      upstreamUrl: UPSTREAM_URL,
+      token: TOKEN,
+      screening,
+      mineTimeoutMs: 300,
+    });
+    const quickClient = new ControlClient(quick.url, TOKEN);
+    try {
+      node.handlers.set('eth_getTransactionReceipt', () => null);
+      const { address } = await quickClient.newAccount({ usdc: '0' });
+      await quickClient.select(address);
+      const permission = quickClient.walletRpc(ORIGIN, 'wallet_requestPermissions', [{ eth_accounts: {} }]);
+      await quickClient.approve((await quickClient.waitForRequest({ method: 'wallet_requestPermissions' })).id);
+      await permission;
+      const sending = quickClient.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: address, to: address }]);
+      await quickClient.approve((await quickClient.waitForRequest({ method: 'eth_sendTransaction' })).id);
+      const answer = await sending;
+      expect('result' in answer).toBe(false);
+      expect(JSON.stringify(answer)).toContain('was not mined within 0.3 s');
+    } finally {
+      await quick.close();
+    }
+  });
+
   test('refuses to send when the node is not the expected fork, and sends nothing', async () => {
     const address = await connectedAccount();
     verifyFails = true;

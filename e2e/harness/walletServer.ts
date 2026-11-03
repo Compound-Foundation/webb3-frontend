@@ -112,6 +112,8 @@ export type WalletServerOptions = {
   providerCallLimit?: number;
   /** Checks the fork before each send. Tests replace it to see the server refuse. */
   verify?: typeof verifyFork;
+  /** How long a send waits for anvil to mine it, 30 s unless a test sets it. */
+  mineTimeoutMs?: number;
 };
 
 export type WalletServer = {
@@ -324,8 +326,24 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
         sent[field] = value;
       }
       await setNextTimestamp();
-      return call<string>('eth_sendTransaction', [sent]);
+      const hash = await call<string>('eth_sendTransaction', [sent]);
+      await mined(hash);
+      return hash;
     });
+
+  /**
+   * Waits until anvil has mined `hash`. anvil 1.9.0 answers `eth_sendTransaction` before it mines the
+   * transaction, and anvil 1.2.3 after. The wallet answers only once the receipt exists, so that the page's
+   * receipt wait finds the block it watches for, and the next send's timestamp follows this block.
+   */
+  const mined = async (hash: string) => {
+    const timeoutMs = options.mineTimeoutMs ?? 30_000;
+    const deadline = Date.now() + timeoutMs;
+    while ((await call<unknown>('eth_getTransactionReceipt', [hash])) === null) {
+      if (Date.now() > deadline) throw new Error(`transaction ${hash} was not mined within ${timeoutMs / 1000} s`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
 
   const execute = async (request: WalletRequest): Promise<unknown> => {
     if (request.generation !== generation) throw new WalletError(4900, 'harness: the wallet was reset');
