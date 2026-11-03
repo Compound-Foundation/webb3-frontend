@@ -1,4 +1,5 @@
-import type { JsonRpcProvider } from '@ethersproject/providers';
+import { Interface } from '@ethersproject/abi';
+import type { JsonRpcProvider, TransactionReceipt } from '@ethersproject/providers';
 import { BigNumber } from 'ethers';
 import { Contract, ContractCall } from 'ethers-multicall';
 
@@ -9,7 +10,15 @@ import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
 import { lendsBaseDirectly } from '@helpers/actions';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { getTokenValue } from '@helpers/numbers';
-import { Action, BaseAssetWithAccountState, CometState, Currency, StateType } from '@types';
+import type { WithdrawalLimits } from '@helpers/wrappedWithdrawals';
+import {
+  Action,
+  BaseAssetWithAccountState,
+  CometState,
+  Currency,
+  ProtocolAndAccountState,
+  StateType,
+} from '@types';
 
 /** The wrapper's divisor for Comet's supply index in its redeem buffer. */
 const BASE_INDEX_SCALE = 10n ** 15n;
@@ -271,6 +280,16 @@ function isSameMarket(a: MarketIdentity | undefined, b: MarketIdentity): boolean
   return a !== undefined && a.chainId === b.chainId && a.cometAddress.toLowerCase() === b.cometAddress.toLowerCase();
 }
 
+/** The live Comet state, when it was read for `market` and the connected account. Undefined otherwise. */
+function liveCometStateFor(live: LiveSubmissionState, market: MarketIdentity): ProtocolAndAccountState | undefined {
+  const [stateType, cometState] = live.comet.state;
+  const isLiveAccount = live.account !== undefined && live.comet.account?.toLowerCase() === live.account.toLowerCase();
+  if (stateType !== StateType.Hydrated || !isSameMarket(live.comet.market, market) || !isLiveAccount) {
+    return undefined;
+  }
+  return cometState;
+}
+
 /**
  * Whether to refuse submitting `actions` to Comet or the Bulker for `submittedMarket`, judged by
  * the session as it is now. A dialog can keep a submit callback, with its market, actions and
@@ -291,12 +310,120 @@ export function isSubmissionRefused(
   }
   if (live.route.kind !== 'wrapped') return false;
 
-  const [stateType, cometState] = live.comet.state;
-  const isLiveAccount = live.account !== undefined && live.comet.account?.toLowerCase() === live.account.toLowerCase();
-  if (stateType !== StateType.Hydrated || !isSameMarket(live.comet.market, submittedMarket) || !isLiveAccount) {
-    return true;
-  }
+  const cometState = liveCometStateFor(live, submittedMarket);
+  if (cometState === undefined) return true;
   return lendsBaseDirectly(cometState.baseAsset, cometState.collateralAssets, actions);
+}
+
+/**
+ * Whether to refuse the Comet base withdrawal that a wrapped-route withdrawal plans for the account's
+ * direct supply, judged by the session as it is now. It is the one base withdrawal that goes to Comet
+ * on the wrapped route, and `isSubmissionRefused` still refuses every other. It is refused unless the
+ * wrapped route of `submittedMarket` is live with its exits open and eligible, the Comet state was
+ * read for that market and the connected account, and that state shows a direct supply. The amount
+ * is not judged here: Home splits the withdrawal again from a fresh read of the direct supply before
+ * the gas estimate, and checks it against a read after the estimate (`splitWrappedWithdrawal`).
+ */
+export function isDirectWithdrawalRefused(live: LiveSubmissionState, submittedMarket: MarketIdentity): boolean {
+  if (!isSameMarket(live.selectedMarket, submittedMarket) || live.route.kind !== 'wrapped') return true;
+  // Withdraw is gated as a whole by the exit release control and the route's eligibility.
+  if (!live.route.exit.isEligible) return true;
+  const cometState = liveCometStateFor(live, submittedMarket);
+  if (cometState === undefined) return true;
+  return cometState.baseAsset.balance <= 0n;
+}
+
+const cometInterface = new Interface(CometAbi);
+
+/**
+ * The account's direct Comet supply of the base token at `blockNumber`: Comet's `balanceOf`, which
+ * reports the supply only and zero for a borrower. Read before the gas estimate of a direct
+ * withdrawal and again after it, before the wallet is asked, so the withdrawal is split from the
+ * supply as it is.
+ */
+export async function readDirectBalance(
+  provider: Pick<JsonRpcProvider, 'call'>,
+  cometAddress: string,
+  account: string,
+  blockNumber: number
+): Promise<bigint> {
+  const result = await provider.call(
+    { to: cometAddress, data: cometInterface.encodeFunctionData('balanceOf', [account]) },
+    blockNumber
+  );
+  return toBigInt(cometInterface.decodeFunctionResult('balanceOf', result)[0], 'directBaseBalance');
+}
+
+/**
+ * The base token a confirmed Comet withdrawal paid `account`, from Comet's `Withdraw(src, to, amount)`
+ * event in its receipt. With `MAX_UINT256`, Comet withdraws whatever the supply is when it executes,
+ * and the event names that amount. Undefined when the receipt holds no such event.
+ */
+export function withdrawnFromReceipt(
+  receipt: Pick<TransactionReceipt, 'logs'>,
+  cometAddress: string,
+  account: string
+): bigint | undefined {
+  const withdrawTopic = cometInterface.getEventTopic('Withdraw');
+  let withdrawn: bigint | undefined;
+  for (const log of receipt.logs ?? []) {
+    if (log.address.toLowerCase() !== cometAddress.toLowerCase() || log.topics[0] !== withdrawTopic) continue;
+    const event = cometInterface.parseLog(log);
+    if (String(event.args.src).toLowerCase() !== account.toLowerCase()) continue;
+    withdrawn = (withdrawn ?? 0n) + toBigInt(event.args.amount, 'withdrawn');
+  }
+  return withdrawn;
+}
+
+/** What a withdrawal on the wrapped route can pay now, in base units. */
+export type WrappedRouteWithdrawalLimits = {
+  /** The most a withdrawal of an amount can pay: the direct supply, then the wrapper's partial exit. */
+  maxPartialCash: bigint;
+  /** Whether a maximum withdrawal can pay now: the whole direct supply, then a full exit. */
+  canWithdrawAll: boolean;
+  /** What a maximum withdrawal pays: the direct supply and the wrapper's full exit. */
+  fullExitCash: bigint;
+};
+
+/**
+ * What a withdrawal on the wrapped route can pay now, for an account that may also hold a direct
+ * Comet supply. The direct supply pays first, through Comet, so the wrapper's part is limited to the
+ * cash the direct part leaves in the market. `wrapperLimitsAt(cash)` gives the wrapper's limits
+ * within `cash`. Without a direct supply these are the wrapper's own limits within `cometCash`. While
+ * Comet withdrawals are paused, nothing can be withdrawn either way.
+ */
+export function getWrappedRouteWithdrawalLimits({
+  directSupply,
+  cometCash,
+  hasShares,
+  isWithdrawPaused,
+  wrapperLimitsAt,
+}: {
+  directSupply: bigint;
+  cometCash: bigint;
+  hasShares: boolean;
+  isWithdrawPaused: boolean;
+  wrapperLimitsAt: (cash: bigint) => WithdrawalLimits | undefined;
+}): WrappedRouteWithdrawalLimits | undefined {
+  if (directSupply <= 0n) {
+    const wrapper = wrapperLimitsAt(cometCash);
+    if (wrapper === undefined) return undefined;
+    return {
+      maxPartialCash: wrapper.maxPartialCash,
+      canWithdrawAll: wrapper.canExitFully,
+      fullExitCash: wrapper.fullExitCash,
+    };
+  }
+  const isDirectCovered = directSupply <= cometCash;
+  const wrapper = wrapperLimitsAt(isDirectCovered ? cometCash - directSupply : 0n);
+  if (wrapper === undefined) return undefined;
+  const fullExitCash = directSupply + wrapper.fullExitCash;
+  if (isWithdrawPaused) return { maxPartialCash: 0n, canWithdrawAll: false, fullExitCash };
+  return {
+    maxPartialCash: isDirectCovered ? directSupply + wrapper.maxPartialCash : cometCash,
+    canWithdrawAll: isDirectCovered && (!hasShares || wrapper.canExitFully),
+    fullExitCash,
+  };
 }
 
 /**
