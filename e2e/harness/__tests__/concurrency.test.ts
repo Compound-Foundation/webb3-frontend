@@ -3,6 +3,7 @@
  */
 // The choice of how many Playwright workers, each with its own fork lane, a run of the browser suite uses.
 import {
+  cgroupLimits,
   CPUS_PER_WORKER,
   DEFAULT_MAX_WORKERS,
   estimateWorkers,
@@ -168,5 +169,105 @@ describe('the signals read from the operating system', () => {
     // Purgeable pages are already counted among the active and inactive ones, so they are not added again.
     expect(parseVmStatAvailable(vmStat)).toBe((100 + 200 + 30) * 16384);
     expect(parseVmStatAvailable('nothing here')).toBeUndefined();
+  });
+});
+
+describe("the process's own cgroup limits", () => {
+  const GIB_BYTES = 1024 ** 3;
+  /** A reader over a fake file tree. */
+  const files = (tree: Record<string, string>) => (file: string) => tree[file];
+  const V2_MOUNT =
+    '30 23 0:26 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime shared:4 - cgroup2 cgroup2 rw,nsdelegate\n';
+
+  test('cgroup v2: reads the nested scope the process is in, not the mount root, and takes the tightest ancestor', () => {
+    const limits = cgroupLimits({
+      procCgroup: '0::/user.slice/user-1000.slice/harness.scope\n',
+      mountinfo: V2_MOUNT,
+      read: files({
+        // The root has no limit; the user slice limits memory to 16 GiB, of which 10 are used.
+        '/sys/fs/cgroup/memory.max': 'max\n',
+        '/sys/fs/cgroup/cpu.max': 'max 100000\n',
+        '/sys/fs/cgroup/user.slice/memory.max': 'max\n',
+        '/sys/fs/cgroup/user.slice/user-1000.slice/memory.max': `${16 * GIB_BYTES}\n`,
+        '/sys/fs/cgroup/user.slice/user-1000.slice/memory.current': `${10 * GIB_BYTES}\n`,
+        '/sys/fs/cgroup/user.slice/user-1000.slice/cpu.max': '800000 100000\n',
+        // The scope itself allows 8 GiB, with 2 used, and 2 CPUs.
+        '/sys/fs/cgroup/user.slice/user-1000.slice/harness.scope/memory.max': `${8 * GIB_BYTES}\n`,
+        '/sys/fs/cgroup/user.slice/user-1000.slice/harness.scope/memory.current': `${2 * GIB_BYTES}\n`,
+        '/sys/fs/cgroup/user.slice/user-1000.slice/harness.scope/cpu.max': '200000 100000\n',
+      }),
+    });
+    // The slice leaves 6 GiB, less than the scope's own 6: the tightest is 6. The scope's 2 CPUs beat the slice's 8.
+    expect(limits).toEqual({ cpus: 2, memoryAvailableBytes: 6 * GIB_BYTES });
+  });
+
+  test('cgroup v2: an ancestor tighter than the scope wins', () => {
+    const limits = cgroupLimits({
+      procCgroup: '0::/ci.slice/job.scope\n',
+      mountinfo: V2_MOUNT,
+      read: files({
+        '/sys/fs/cgroup/ci.slice/memory.max': `${4 * GIB_BYTES}\n`,
+        '/sys/fs/cgroup/ci.slice/memory.current': `${3 * GIB_BYTES}\n`,
+        '/sys/fs/cgroup/ci.slice/cpu.max': '100000 100000\n',
+        '/sys/fs/cgroup/ci.slice/job.scope/memory.max': 'max\n',
+        '/sys/fs/cgroup/ci.slice/job.scope/cpu.max': 'max 100000\n',
+      }),
+    });
+    expect(limits).toEqual({ cpus: 1, memoryAvailableBytes: GIB_BYTES });
+  });
+
+  test('cgroup v2 in a private namespace: the mount root is the process cgroup', () => {
+    const limits = cgroupLimits({
+      procCgroup: '0::/\n',
+      mountinfo: '30 23 0:26 /kubepods/pod1/c1 /sys/fs/cgroup ro - cgroup2 cgroup2 rw\n',
+      read: files({
+        '/sys/fs/cgroup/memory.max': `${8 * GIB_BYTES}\n`,
+        '/sys/fs/cgroup/memory.current': `${GIB_BYTES}\n`,
+        '/sys/fs/cgroup/cpu.max': '300000 100000\n',
+      }),
+    });
+    expect(limits).toEqual({ cpus: 3, memoryAvailableBytes: 7 * GIB_BYTES });
+  });
+
+  test('cgroup v1: finds each controller’s own hierarchy and nested path, and ignores an unlimited value', () => {
+    const limits = cgroupLimits({
+      procCgroup:
+        '12:memory:/system.slice/runner.service\n4:cpu,cpuacct:/system.slice/runner.service\n1:name=systemd:/x\n',
+      mountinfo: [
+        '40 30 0:35 / /sys/fs/cgroup/memory rw - cgroup cgroup rw,memory',
+        '41 30 0:36 / /sys/fs/cgroup/cpu,cpuacct rw - cgroup cgroup rw,cpu,cpuacct',
+      ].join('\n'),
+      read: files({
+        '/sys/fs/cgroup/memory/memory.limit_in_bytes': '9223372036854771712\n',
+        '/sys/fs/cgroup/memory/system.slice/memory.limit_in_bytes': '9223372036854771712\n',
+        '/sys/fs/cgroup/memory/system.slice/runner.service/memory.limit_in_bytes': `${4 * GIB_BYTES}\n`,
+        '/sys/fs/cgroup/memory/system.slice/runner.service/memory.usage_in_bytes': `${GIB_BYTES}\n`,
+        '/sys/fs/cgroup/cpu,cpuacct/system.slice/runner.service/cpu.cfs_quota_us': '150000\n',
+        '/sys/fs/cgroup/cpu,cpuacct/system.slice/runner.service/cpu.cfs_period_us': '100000\n',
+        '/sys/fs/cgroup/cpu,cpuacct/system.slice/cpu.cfs_quota_us': '-1\n',
+        '/sys/fs/cgroup/cpu,cpuacct/system.slice/cpu.cfs_period_us': '100000\n',
+      }),
+    });
+    expect(limits).toEqual({ cpus: 1.5, memoryAvailableBytes: 3 * GIB_BYTES });
+  });
+
+  test('gives no limit with no cgroup, no matching mount, or no limit anywhere on the path', () => {
+    expect(cgroupLimits({ procCgroup: '', mountinfo: '', read: () => undefined })).toEqual({});
+    expect(cgroupLimits({ procCgroup: '0::/a.scope\n', mountinfo: '', read: () => undefined })).toEqual({});
+    expect(
+      cgroupLimits({
+        procCgroup: '0::/a.scope\n',
+        mountinfo: V2_MOUNT,
+        read: files({ '/sys/fs/cgroup/a.scope/memory.max': 'max\n', '/sys/fs/cgroup/a.scope/cpu.max': 'max 100000\n' }),
+      })
+    ).toEqual({});
+    // A process cgroup outside the mounted part of the hierarchy cannot be read, so it sets no limit.
+    expect(
+      cgroupLimits({
+        procCgroup: '0::/elsewhere\n',
+        mountinfo: '30 23 0:26 /kubepods /sys/fs/cgroup ro - cgroup2 cgroup2 rw\n',
+        read: () => '1\n',
+      })
+    ).toEqual({});
   });
 });

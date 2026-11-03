@@ -207,26 +207,116 @@ const readText = (file: string) => {
   }
 };
 
-/** The cgroup's memory limit less its use, on Linux with cgroup v2 or v1, or undefined. */
-function cgroupMemoryAvailable(): number | undefined {
-  for (const [limitFile, usageFile] of [
-    ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory.current'],
-    ['/sys/fs/cgroup/memory/memory.limit_in_bytes', '/sys/fs/cgroup/memory/memory.usage_in_bytes'],
-  ]) {
-    const limit = readText(limitFile)?.trim();
-    const usage = readText(usageFile)?.trim();
-    // cgroup v2 writes `max` for no limit; v1 writes a number near 2^63.
-    if (limit === undefined || usage === undefined || !/^\d+$/.test(limit) || !/^\d+$/.test(usage)) continue;
-    if (Number(limit) >= 2 ** 60) continue;
-    return Number(limit) - Number(usage);
-  }
-  return undefined;
+type CgroupMount = { root: string; mountPoint: string; fstype: string; superOptions: string[] };
+
+/** The cgroup mounts in `/proc/self/mountinfo`: each one's root in its hierarchy, mount point and options. */
+function cgroupMounts(mountinfo: string): CgroupMount[] {
+  return mountinfo.split('\n').flatMap((line) => {
+    const [before, after] = line.split(' - ');
+    if (after === undefined) return [];
+    const fields = before.split(' ');
+    const [fstype, , superOptions = ''] = after.split(' ');
+    if ((fstype !== 'cgroup' && fstype !== 'cgroup2') || fields.length < 5) return [];
+    return [{ root: fields[3], mountPoint: fields[4], fstype, superOptions: superOptions.split(',') }];
+  });
 }
+
+/**
+ * The directories of the process's cgroup `cgroupPath` under `mount`, from its own up to the mount point, so a
+ * limit set on any ancestor is read too. None when the cgroup is outside the mounted part of the hierarchy. A
+ * process at `/` in a private cgroup namespace is in the cgroup the mount point shows.
+ */
+function cgroupDirectories(cgroupPath: string, mount: CgroupMount): string[] {
+  const relative = path.posix.relative(mount.root, cgroupPath);
+  if (relative.startsWith('..') || path.posix.isAbsolute(relative)) {
+    return cgroupPath === '/' ? [mount.mountPoint] : [];
+  }
+  const directories: string[] = [];
+  for (let each = relative; ; each = path.posix.dirname(each)) {
+    directories.push(each === '' || each === '.' ? mount.mountPoint : path.posix.join(mount.mountPoint, each));
+    if (each === '' || each === '.') return directories;
+  }
+}
+
+const smallest = (values: (number | undefined)[]) => {
+  const known = values.filter((value): value is number => value !== undefined && Number.isFinite(value));
+  return known.length === 0 ? undefined : Math.min(...known);
+};
+
+/**
+ * The CPUs and memory the process's own cgroup allows, on Linux with cgroup v2 or v1. The process's cgroup
+ * comes from `/proc/self/cgroup` and its directory from the mounted hierarchy in `/proc/self/mountinfo`, so a
+ * nested scope's limits are read, not only the mount root's. Each limit is the tightest on the path from the
+ * process's cgroup up to the mount point: an ancestor's memory left is its limit less the use of everything
+ * under it. A value of no limit (`max`, a quota of -1, or a v1 limit near 2^63) sets none.
+ */
+export function cgroupLimits({
+  procCgroup,
+  mountinfo,
+  read,
+}: {
+  procCgroup: string;
+  mountinfo: string;
+  read: (file: string) => string | undefined;
+}): { cpus?: number; memoryAvailableBytes?: number } {
+  const mounts = cgroupMounts(mountinfo);
+  const number = (file: string) => {
+    const text = read(file)?.trim();
+    return text !== undefined && /^-?\d+$/.test(text) ? Number(text) : undefined;
+  };
+  const cpus: (number | undefined)[] = [];
+  const memory: (number | undefined)[] = [];
+  for (const line of procCgroup.split('\n')) {
+    const match = /^(\d+):([^:]*):(\/.*)$/.exec(line.trim());
+    if (match === null) continue;
+    const [, , controllers, cgroupPath] = match;
+    if (controllers === '') {
+      const mount = mounts.find((each) => each.fstype === 'cgroup2');
+      for (const directory of mount === undefined ? [] : cgroupDirectories(cgroupPath, mount)) {
+        cpus.push(parseCgroupCpuMax(read(`${directory}/cpu.max`) ?? ''));
+        const limit = number(`${directory}/memory.max`);
+        const usage = number(`${directory}/memory.current`);
+        if (limit !== undefined && usage !== undefined) memory.push(limit - usage);
+      }
+      continue;
+    }
+    const names = controllers.split(',');
+    const mount = mounts.find(
+      (each) => each.fstype === 'cgroup' && names.every((name) => each.superOptions.includes(name))
+    );
+    for (const directory of mount === undefined ? [] : cgroupDirectories(cgroupPath, mount)) {
+      if (names.includes('cpu')) {
+        const quota = number(`${directory}/cpu.cfs_quota_us`);
+        const period = number(`${directory}/cpu.cfs_period_us`);
+        if (quota !== undefined && period !== undefined && quota > 0 && period > 0) cpus.push(quota / period);
+      }
+      if (names.includes('memory')) {
+        const limit = number(`${directory}/memory.limit_in_bytes`);
+        const usage = number(`${directory}/memory.usage_in_bytes`);
+        if (limit !== undefined && usage !== undefined && limit < 2 ** 60) memory.push(limit - usage);
+      }
+    }
+  }
+  const cpuLimit = smallest(cpus);
+  const memoryLimit = smallest(memory);
+  return {
+    ...(cpuLimit === undefined ? {} : { cpus: cpuLimit }),
+    ...(memoryLimit === undefined ? {} : { memoryAvailableBytes: Math.max(0, memoryLimit) }),
+  };
+}
+
+/** The process's own cgroup limits, read from this Linux machine. */
+const ownCgroupLimits = () =>
+  cgroupLimits({
+    procCgroup: readText('/proc/self/cgroup') ?? '',
+    mountinfo: readText('/proc/self/mountinfo') ?? '',
+    read: readText,
+  });
 
 function availableMemory(platform: string): { bytes?: number; source?: string } {
   if (platform === 'linux') {
     const meminfo = parseMeminfoAvailable(readText('/proc/meminfo') ?? '');
-    const cgroup = cgroupMemoryAvailable();
+    const cgroup = ownCgroupLimits().memoryAvailableBytes;
     if (cgroup !== undefined && (meminfo === undefined || cgroup < meminfo)) return { bytes: cgroup, source: 'cgroup' };
     if (meminfo !== undefined) return { bytes: meminfo, source: 'MemAvailable' };
   }
@@ -260,12 +350,7 @@ function sampleIdleFraction(sampleMs: number): number | undefined {
 }
 
 function cgroupCpuLimit(platform: string): number | undefined {
-  if (platform !== 'linux') return undefined;
-  const v2 = readText('/sys/fs/cgroup/cpu.max');
-  if (v2 !== undefined) return parseCgroupCpuMax(v2);
-  const quota = Number(readText('/sys/fs/cgroup/cpu/cpu.cfs_quota_us'));
-  const period = Number(readText('/sys/fs/cgroup/cpu/cpu.cfs_period_us'));
-  return quota > 0 && period > 0 ? quota / period : undefined;
+  return platform === 'linux' ? ownCgroupLimits().cpus : undefined;
 }
 
 function countSpecFiles(testDir: string): number | undefined {
