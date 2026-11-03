@@ -11,18 +11,10 @@ import type { Action } from '@types';
 /**
  * A wrapper action the dashboard started, and what became of it:
  * - `approve`: Approve & Add's approval for a queued base supply. It never locks the queue.
- * - `execute`: Submit Transaction's supply or withdrawal, before the direct actions queued with it.
- *   Once it confirms, it leaves the queue, the run ends, and the direct actions are submitted as
- *   before.
+ * - `execute`: Submit Transaction's supply or withdrawal, the queue's only action. Once it
+ *   confirms, it leaves the queue and the run ends.
  */
-export type WrappedRun =
-  | { kind: 'approve'; action: Action }
-  | {
-      kind: 'execute';
-      wrapper: QueuedWrapperAction;
-      /** How many queued actions go to Comet or the Bulker after the wrapper action. */
-      directCount: number;
-    };
+export type WrappedRun = { kind: 'approve'; action: Action } | { kind: 'execute'; wrapper: QueuedWrapperAction };
 
 /** Where a wrapped run stands. */
 export type WrappedRunStatus =

@@ -506,7 +506,12 @@ export type Action =
   | [ActionType.ClaimRewards, Token & { price: bigint }, bigint, AccountRewardsState];
 
 export type ActionQueue = {
-  addOrUpdateAction: (action: Action) => void;
+  /**
+   * Adds `action`, or updates the queued action of its kind and asset. Returns false, and changes
+   * nothing, when the queue is limited to one action and already holds another, or when the
+   * callback was kept from an earlier session or market.
+   */
+  addOrUpdateAction: (action: Action) => boolean;
   clearActions: () => void;
   /** Defers `actions` until the market on `chainId` with Comet `marketAddress` is selected. */
   queueActions: (chainId: number, marketAddress: string, actions: Action[]) => void;
