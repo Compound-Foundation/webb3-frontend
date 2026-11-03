@@ -28,6 +28,8 @@ const MarketSelector = () => {
   const [, currentMarket] = selectedMarket;
   const [marketsStateType, marketsState] = useMarkets();
   const marketsByNetwork = getMarketsByNetwork(marketsStateType === StateType.Hydrated ? marketsState.markets : []);
+  // A market list refresh can drop the network picked earlier
+  const shownChainId = selectedChainId in marketsByNetwork ? selectedChainId : Number(Object.keys(marketsByNetwork)[0]);
 
   const ref = useRef(null);
 
@@ -62,12 +64,12 @@ const MarketSelector = () => {
           <div className={`dropdown__content`}>
             <SupportedNetworks
               marketsByNetwork={marketsByNetwork}
-              selectedChainId={selectedChainId}
+              selectedChainId={shownChainId}
               setSelectedChainId={setSelectedChainId}
             />
             <SupportedMarkets
               currentMarket={currentMarket}
-              markets={marketsByNetwork[selectedChainId].markets}
+              markets={marketsByNetwork[shownChainId]?.markets ?? []}
               pathname={location.pathname}
               onSelectMarket={(market: MarketData) => {
                 setMarketDropdownActive(false);
