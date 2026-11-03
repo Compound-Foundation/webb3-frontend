@@ -48,9 +48,15 @@ const MANIFEST = {
   contracts: { usdcImplementation: '0x00' },
 };
 
-async function summaryOf(selected: readonly (readonly string[])[], inventory: () => string[]) {
+async function summaryOf(
+  selected: readonly (readonly string[])[],
+  inventory: () => string[],
+  manifest: object = MANIFEST,
+  stats?: object
+) {
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-summary-'));
-  fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(MANIFEST));
+  fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(manifest));
+  if (stats !== undefined) fs.writeFileSync(path.join(runDir, 'stats.json'), JSON.stringify(stats));
   // The synthetic inventory holds none of the real required cases, which the last tests below cover.
   const reporter = new SummaryReporter({ runDir, inventory, requiredCases: [] });
   const tests = selected.map(([project, file, title]) => testCase(project, file, title));
@@ -148,4 +154,45 @@ test('a run whose full inventory cannot be listed is INCOMPLETE', async () => {
   });
   expect(summary).toContain('Verdict: **INCOMPLETE**');
   expect(summary).toContain('could not list the full suite');
+});
+
+test("the run section gives the fork cache's state, trust class and directory, with the home directory as ~", async () => {
+  const withCache = (cache: object) => ({ ...MANIFEST, fork: { ...MANIFEST.fork, cache } });
+  expect(
+    await summaryOf(
+      FULL,
+      () => FULL.map(id),
+      withCache({ state: 'warm', trust: 'public', directory: '/data/fork-cache' })
+    )
+  ).toContain('- Fork cache: warm (public), /data/fork-cache');
+  expect(
+    await summaryOf(
+      FULL,
+      () => FULL.map(id),
+      withCache({ state: 'cold', trust: 'private', directory: path.join(os.homedir(), '.cache/cf-browser-fork') })
+    )
+  ).toContain('- Fork cache: cold (private), ~/.cache/cf-browser-fork');
+  expect(await summaryOf(FULL, () => FULL.map(id), withCache({ state: 'off' }))).toContain('- Fork cache: off');
+  expect(
+    await summaryOf(FULL, () => FULL.map(id), withCache({ state: 'off', reason: 'port 18546 is in use' }))
+  ).toContain('- Fork cache: off (port 18546 is in use)');
+  // A manifest written before the cache existed.
+  expect(await summaryOf(FULL, () => FULL.map(id))).toContain('- Fork cache: not recorded');
+});
+
+test('the proxies section says whether the run promoted its fork cache, and why not', async () => {
+  const STATS = {
+    rpcProxy: { forwarded: {}, refused: {}, unserved: {} },
+    upstream: { methods: {}, refused: {}, failures: 0, errorAnswers: 0 },
+    cleanupErrors: [],
+  };
+  const promoted = { ...STATS, forkCachePromotion: { isPromoted: true, reason: 'promoted' } };
+  expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, promoted)).toContain(
+    '- Fork cache after the run: promoted to the shared cache'
+  );
+  const refused = { ...STATS, forkCachePromotion: { isPromoted: false, reason: 'the fork was sent anvil_setRpcUrl' } };
+  expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, refused)).toContain(
+    '- Fork cache after the run: not promoted (the fork was sent anvil_setRpcUrl)'
+  );
+  expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, STATS)).not.toContain('Fork cache after the run');
 });

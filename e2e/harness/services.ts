@@ -2,7 +2,8 @@
 //
 //  1. a private 0700 directory outside the repository, for the TLS key and the control token
 //  2. the fork: the read-only upstream proxy and anvil, verified, moving to the next public endpoint when
-//     the upstream fails anvil's start-up
+//     the upstream fails anvil's start-up. A fork of the pinned block starts from the fork cache, and a
+//     clean stop promotes what anvil read back to it.
 //  3. the HTTPS RPC proxy, the screening stub and the wallet server, with a new per-run token
 //  4. unless skipped, the two production builds (no screening endpoint, and an allowed control) and their
 //     static servers
@@ -28,19 +29,28 @@ import {
   type BlockedRequest,
 } from './egress';
 import {
+  CACHED_PROXY_PORT,
+  checkCacheRoot,
   createRedactor,
   failedToStartOnUpstream,
   findAnvil,
+  forkCacheRoot,
   ForkStartError,
   hasExited,
   forkTarget,
+  loadForkCache,
+  promoteForkCache,
+  recordLoggedMethods,
+  sharedCacheFile,
   startFork,
   startUpstreamProxy,
   stopChild,
   toolVersion,
   upstreamEndpoints,
   verifyFork,
+  type CacheTrust,
   type ForkTarget,
+  type Promotion,
 } from './fork';
 import { BINDING_NAME, installHarnessProvider, PROVIDER_ICON, PROVIDER_NAME, PROVIDER_RDNS } from './injectedProvider';
 import { RUNS_DIR } from './paths';
@@ -70,7 +80,13 @@ export type Manifest = {
   startedAt: string;
   finishedAt?: string;
   isInteractive: boolean;
-  fork: ForkTarget & { endpoint: string; localUrl: string; anvilPid: number; upstreamProxyUrl: string };
+  fork: ForkTarget & {
+    endpoint: string;
+    localUrl: string;
+    anvilPid: number;
+    upstreamProxyUrl: string;
+    cache: ForkCache;
+  };
   tools: Record<string, string | undefined>;
   git: { head: string | undefined; isDirty: boolean | undefined };
   app: {
@@ -112,6 +128,14 @@ export type Manifest = {
   tokenFile: string;
 };
 
+/**
+ * The fork cache for the run: off, with why when the cache is on but the run could not use it, or its root
+ * and the trust class of the run's upstream, with whether that class's cache held state of the block.
+ */
+export type ForkCache =
+  | { state: 'off'; reason?: string }
+  | { state: 'cold' | 'warm'; trust: CacheTrust; directory: string };
+
 type Stop = { name: string; run: () => Promise<void> | void };
 
 export type Services = {
@@ -149,6 +173,9 @@ export async function startServices({
   let anvilChild: ChildProcess | undefined;
   let anvilCwd: string | undefined;
   let privateDir: string | undefined;
+  /** The anvil that became the run's verified fork, and what became of its cache when it stopped. */
+  let forkChild: ChildProcess | undefined;
+  let cachePromotion: Promotion | undefined;
   let stopped: Promise<string[]> | undefined;
   /** The production builds and `dist/`, scanned for the run's secrets before the private directory goes. */
   let bundleRoots: string[] = [];
@@ -248,6 +275,13 @@ export async function startServices({
     ) {
       throw new Error("BROWSER_FORK_BLOCK must be 'pinned' (the default) or 'latest'.");
     }
+    // Before any endpoint is contacted, so that a wrong setting or an unsafe directory stops the run first.
+    const cacheRoot = forkCacheRoot(process.env, blockOption);
+    if (cacheRoot !== undefined) checkCacheRoot(cacheRoot);
+    // anvil's home for the run, in the private directory: anvil writes only here, never to the shared cache.
+    const runHome = path.join(directory, 'anvil-home');
+    const anvilMethods = new Set<string>();
+    let cache: ForkCache = { state: 'off' };
     const problems: string[] = [];
     let fork: Awaited<ReturnType<typeof startFork>> | undefined;
     let target: ForkTarget | undefined;
@@ -264,7 +298,38 @@ export async function startServices({
         problems.push(`${endpoint.label}: does not serve block ${blockOption}`);
         continue;
       }
-      const proxy = await startUpstreamProxy(endpoint, { printable: redactor.printable });
+      // A cached fork needs the proxy at its fixed port, so that the fork URL, and with it anvil's cache
+      // file, is the same in every run. When the port is taken, as by a second run, the run is not cached.
+      let cachedProxy: Awaited<ReturnType<typeof startUpstreamProxy>> | undefined;
+      cache = { state: 'off' };
+      if (cacheRoot !== undefined) {
+        try {
+          cachedProxy = await startUpstreamProxy(endpoint, {
+            printable: redactor.printable,
+            port: CACHED_PROXY_PORT,
+          });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code !== 'EADDRINUSE') throw error;
+          cache = { state: 'off', reason: `port ${CACHED_PROXY_PORT} is in use` };
+        }
+      }
+      const proxy = cachedProxy ?? (await startUpstreamProxy(endpoint, { printable: redactor.printable }));
+      const trust: CacheTrust = endpoint.isPrivate ? 'private' : 'public';
+      const blockNumber = target.number;
+      const forkUrl = proxy.url;
+      const sharedFile =
+        cacheRoot !== undefined && cachedProxy !== undefined
+          ? sharedCacheFile(cacheRoot, trust, blockNumber)
+          : undefined;
+      if (cacheRoot !== undefined && sharedFile !== undefined) {
+        checkCacheRoot(cacheRoot);
+        cache = {
+          state: loadForkCache({ sharedFile, runHome, blockNumber, forkUrl }),
+          trust,
+          directory: cacheRoot,
+        };
+      }
+      anvilMethods.clear();
       const stopProxy = () => new Promise<void>((resolve) => proxy.server.close(() => resolve()));
       try {
         let child: Parameters<typeof stopChild>[0] | undefined;
@@ -272,8 +337,12 @@ export async function startServices({
           anvil: anvil.command,
           upstreamUrl: proxy.url,
           target,
-          log: (text) => writeLog(anvilLog, text),
+          log: (text) => {
+            recordLoggedMethods(text, anvilMethods);
+            writeLog(anvilLog, text);
+          },
           redactor,
+          cacheHome: sharedFile === undefined ? undefined : runHome,
           onChild: (spawned, directory) => {
             child = spawned;
             anvilChild = spawned;
@@ -283,6 +352,28 @@ export async function startServices({
               run: async () => {
                 await stopChild(spawned);
                 fs.rmSync(directory, { recursive: true, force: true });
+                // Only the anvil that became the run's verified fork, after it wrote its cache on SIGTERM.
+                if (spawned === forkChild && cacheRoot !== undefined && sharedFile !== undefined) {
+                  try {
+                    checkCacheRoot(cacheRoot);
+                    cachePromotion = promoteForkCache({
+                      runHome,
+                      sharedFile,
+                      blockNumber,
+                      forkUrl,
+                      methods: anvilMethods,
+                      hasExitedCleanly: spawned.exitCode === 0,
+                      anvilVersion: anvil.version,
+                    });
+                  } catch (error) {
+                    // The error's code alone: its message names the paths, and with them the user name.
+                    const code = (error as NodeJS.ErrnoException)?.code;
+                    cachePromotion = {
+                      isPromoted: false,
+                      reason: typeof code === 'string' ? `the promotion failed (${code})` : 'the promotion failed',
+                    };
+                  }
+                }
               },
             });
             writeRecord({
@@ -330,6 +421,7 @@ export async function startServices({
     ).json();
     if (!Array.isArray(unlocked.result) || unlocked.result.length !== 0)
       throw new Error('anvil started with unlocked accounts');
+    forkChild = forkInfo.child;
     const usdcImplementation = await readUsdcImplementation(forkInfo.localUrl);
 
     // 3. Proxy, stub and wallet.
@@ -366,6 +458,7 @@ export async function startServices({
     const wallet = await startWalletServer({
       fork: forkInfo,
       target,
+      upstreamUrl: upstream.url,
       token,
       screening,
       stats,
@@ -453,6 +546,7 @@ export async function startServices({
         localUrl: forkInfo.localUrl,
         anvilPid: forkInfo.pid,
         upstreamProxyUrl: upstream.url,
+        cache,
       },
       tools: {
         anvil: anvil.version,
@@ -518,7 +612,11 @@ export async function startServices({
         fs.writeFileSync(manifestPath, JSON.stringify(finished, null, 2));
         fs.writeFileSync(
           path.join(runDir, 'stats.json'),
-          JSON.stringify({ ...stats(), bundleSecretScan, cleanupErrors: errors }, null, 2)
+          JSON.stringify(
+            { ...stats(), forkCachePromotion: cachePromotion, bundleSecretScan, cleanupErrors: errors },
+            null,
+            2
+          )
         );
         return errors;
       },

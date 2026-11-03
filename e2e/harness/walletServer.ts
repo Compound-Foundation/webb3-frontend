@@ -100,6 +100,8 @@ type Account = { address: Address; key?: Hex };
 export type WalletServerOptions = {
   fork: { localUrl: string; child?: ChildProcess };
   target: { number: number; hash: string };
+  /** The upstream proxy that anvil forks from, which each reset names again. */
+  upstreamUrl: string;
   token: string;
   screening: ScreeningStub;
   stats?: () => Record<string, unknown>;
@@ -169,7 +171,6 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     rpc<T>(fork.localUrl, method, params, { timeoutMs: 60_000 });
 
   let generation = 0;
-  let baseline = await call<string>('evm_snapshot');
   const accounts = new Map<string, Account>();
   const impersonated = new Set<string>();
   let selected: Address[] = [];
@@ -601,8 +602,10 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       for (const wake of [...eventWaiters]) wake();
       screening.reset();
       for (const address of stale) await call('anvil_stopImpersonatingAccount', [address]);
-      if ((await call<boolean>('evm_revert', [baseline])) !== true) throw new Error('evm_revert failed');
-      baseline = await call<string>('evm_snapshot');
+      // A reset re-forks the block from the harness's upstream proxy and drops every change made on the fork.
+      // anvil 1.8 and later keep what they read from the upstream, which `evm_revert` discards. Naming the
+      // proxy again ends a reset by another process to another upstream.
+      await call('anvil_reset', [{ forking: { jsonRpcUrl: options.upstreamUrl, blockNumber: target.number } }]);
       await verifiedFork();
       log(`reset to generation ${generation}`);
       return { generation };

@@ -57,14 +57,12 @@ export const FORK_HASH = '0x440c51a6a6953b880568c1b60e4ad59044f3fa783e340e34d667
 
 /** The handlers of a node that passes `verifyFork` for the pinned block. */
 export function anvilHandlers(overrides: Record<string, Handler> = {}): Record<string, Handler> {
-  let snapshot = 0;
   return {
     eth_chainId: () => '0x1',
-    web3_clientVersion: () => 'anvil/v1.2.3',
+    web3_clientVersion: () => 'anvil/v1.9.0',
     anvil_metadata: () => ({ forkedNetwork: { forkBlockNumber: FORK_BLOCK, forkBlockHash: FORK_HASH } }),
     eth_getBlockByNumber: () => ({ hash: FORK_HASH, timestamp: '0x6a000000', number: '0x1907a18' }),
-    evm_snapshot: () => `0x${(++snapshot).toString(16)}`,
-    evm_revert: () => true,
+    anvil_reset: () => null,
     evm_setNextBlockTimestamp: () => null,
     anvil_impersonateAccount: () => null,
     anvil_stopImpersonatingAccount: () => null,

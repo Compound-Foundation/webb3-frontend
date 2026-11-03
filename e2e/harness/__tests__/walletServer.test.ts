@@ -16,6 +16,8 @@ import { startWalletServer, tokenMatches, type WalletRequest, type WalletServer 
 
 const TOKEN = 'a'.repeat(64);
 const ORIGIN = 'http://127.0.0.1:5999';
+/** The upstream proxy that anvil forks from, which a reset names. */
+const UPSTREAM_URL = 'http://127.0.0.1:18546/';
 
 const fakeScreening = (): ScreeningStub & { behaviours: Map<string, string>; resets: number } => {
   const behaviours = new Map<string, string>();
@@ -57,6 +59,7 @@ beforeEach(async () => {
   wallet = await startWalletServer({
     fork: { localUrl: node.url },
     target: { number: FORK_BLOCK, hash: FORK_HASH },
+    upstreamUrl: UPSTREAM_URL,
     token: TOKEN,
     screening,
     onSecret: (secret) => keys.push(secret),
@@ -253,7 +256,7 @@ describe('one decision per request', () => {
     node.handlers.set('web3_clientVersion', () => {
       const until = Date.now() + 300;
       while (Date.now() < until);
-      return 'anvil/v1.2.3';
+      return 'anvil/v1.9.0';
     });
   };
   const sends = () => node.calls.filter((call) => call.method === 'eth_sendTransaction').length;
@@ -488,7 +491,7 @@ describe('signing', () => {
 });
 
 describe('reset', () => {
-  test('starts a new generation: reverts the fork, stops every impersonation, and clears accounts, requests and screening', async () => {
+  test('starts a new generation: resets the fork from its upstream, stops every impersonation, and clears accounts, requests and screening', async () => {
     const address = await connectedAccount();
     const pending = client.walletRpc(ORIGIN, 'personal_sign', ['0x00', address]);
     const request = await client.waitForRequest({ method: 'personal_sign' });
@@ -499,7 +502,12 @@ describe('reset', () => {
     expect(
       node.calls.filter((call) => call.method === 'anvil_stopImpersonatingAccount').map((call) => call.params)
     ).toEqual([[address.toLowerCase()]]);
-    expect(node.calls.filter((call) => call.method === 'evm_revert').map((call) => call.params)).toEqual([['0x1']]);
+    // anvil_reset to the fork block from the harness's upstream proxy, named again so that a reset by
+    // another process to another upstream does not outlast the test. The wallet takes no snapshot.
+    expect(node.calls.filter((call) => call.method === 'anvil_reset').map((call) => call.params)).toEqual([
+      [{ forking: { jsonRpcUrl: UPSTREAM_URL, blockNumber: FORK_BLOCK } }],
+    ]);
+    expect(node.calls.some((call) => call.method === 'evm_snapshot' || call.method === 'evm_revert')).toBe(false);
     expect(screening.resets).toBe(1);
     const state = await client.state();
     expect(state).toEqual(
@@ -552,6 +560,7 @@ test('a provider-call record past its limit reports the overflow instead of drop
   const small = await startWalletServer({
     fork: { localUrl: node.url },
     target: { number: FORK_BLOCK, hash: FORK_HASH },
+    upstreamUrl: UPSTREAM_URL,
     token: TOKEN,
     screening,
     providerCallLimit: 3,
