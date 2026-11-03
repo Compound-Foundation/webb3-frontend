@@ -7,12 +7,12 @@ The suite lives in `e2e/`: the harness in `e2e/harness/`, the browser specs in `
 ## Prerequisites
 
 - Node 22, as `package.json` pins through Volta, and `yarn install`.
-- Foundry's `anvil` 1.2.3 on `PATH`, at `~/.foundry/bin/anvil`, or named by `ANVIL`. Install it with `foundryup --install 1.2.3` (https://getfoundry.sh).
+- Foundry's `anvil` 1.9.0 on `PATH`, at `~/.foundry/bin/anvil`, or named by `ANVIL`. Install it with `foundryup --install 1.9.0` (https://getfoundry.sh). The fork cache needs 1.9.0: with an earlier anvil the suite runs uncached. COM-289's wrapped lending fork runner (`scripts/test-wrapped-lending-fork.js`) uses the same anvil; its recorded runs were on 1.2.3.
 - `openssl`, which makes the run's TLS certificate. macOS and Linux ship one.
 - Playwright's browsers, at the version `@playwright/test` pins (1.64.1, Chromium 156):
   - `npx playwright install chromium-headless-shell` for the automated suite.
   - `npx playwright install chromium` as well for the headed interactive session.
-- Network access to a mainnet RPC that serves state at block 26244888. By default the harness tries public endpoints, in COM-289's order: drpc, Tenderly, Blast, MEV Blocker, PublicNode. Public endpoints rate-limit; see [Private configuration](#private-configuration).
+- Network access to a mainnet RPC that serves state at block 26244888. By default the harness tries public endpoints, in COM-289's order: drpc, Tenderly, Blast, MEV Blocker, PublicNode. Public endpoints rate-limit; see [Private configuration](#private-configuration). Once a run has filled [the fork cache](#the-fork-cache), later runs read most of their state from it, but each start and each reset still needs the endpoint.
 
 ## Commands
 
@@ -96,9 +96,32 @@ None of these is a `VITE_*` variable, because Vite embeds every `VITE_*` variabl
 | `BROWSER_TEST_V3_API_URL`   | A public, credential-free HTTPS base URL for the production v3 API, for interactive use. The harness refuses one with a user name, password, query, fragment or key-like path segment, and the browser may only GET or HEAD the paths the app reads under it (`/market`, `/governance`, `/account`, `/legacy`). Its displays are production data, not fork state, and the manifest says so. Keep a credentialed API behind a proxy of your own. |
 | `BROWSER_TEST_SKIP_PROD=1`  | Skips the production builds, as `yarn test:browser:dev` does. The summary then marks AC7's production coverage INCOMPLETE.                                                                                                                                                                                                                                                                                                                      |
 | `BROWSER_WALLET_HEADLESS=1` | Runs the interactive session headless, for an agent with no display.                                                                                                                                                                                                                                                                                                                                                                            |
+| `BROWSER_FORK_CACHE`        | `on` (the default) starts a fork of the pinned block from the fork cache, and promotes what it reads back to it. `off` reads all state from the upstream and leaves the cache as it is. Any other value stops the run before it contacts an endpoint.                                                                                                                                                                                           |
+| `BROWSER_FORK_CACHE_DIR`    | An absolute path for the fork cache, in place of `$XDG_CACHE_HOME/cf-browser-fork` or `~/.cache/cf-browser-fork`. It must be a directory you own with mode 0700, or a path the harness can create. Otherwise, or with a relative path, the run stops before it contacts an endpoint.                                                                                                                                                            |
 | `ANVIL`                     | The anvil binary to use.                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 When public endpoints rate-limit, anvil can fail to start. The harness then moves to the next public endpoint, as COM-289's runner does. It never retries in the middle of a run. If every endpoint fails, set `BROWSER_FORK_RPC_URL` or try again later.
+
+### The fork cache
+
+A fork of the pinned block reuses the state earlier tests and runs read. The state at that block never changes, so an account, its code or a storage slot read once from the upstream serves later tests and later runs without a request. A fork of the latest block is never cached.
+
+- **The reset.** Before each test, the wallet resets the fork with `anvil_reset` to its block. Since anvil 1.8.0, a reset to the same block writes what anvil read from the upstream to its cache file and reads it back. `evm_revert` discards what anvil read after the snapshot.
+- **Where.** The cache's root is `BROWSER_FORK_CACHE_DIR`, else `cf-browser-fork` under an absolute `$XDG_CACHE_HOME`, else `~/.cache/cf-browser-fork`. The harness creates a missing root with mode 0700. Whoever can write in the root decides the fork state of later runs. The harness therefore refuses a root that is a symbolic link, that another user owns, or that anyone else can read or write. It also refuses a root whose path passes a directory or link that another user can change. The default root is outside the repository, so every worktree shares it.
+- **Two trust classes.** The root holds `public/mainnet-26244888.json` for the answers of public endpoints, and `private/mainnet-26244888.json` for those of `BROWSER_FORK_RPC_URL`. A run with the private endpoint never reads what a public endpoint answered.
+- **A fixed port.** anvil 1.9.0 names its cache file for the fork URL, which is the upstream proxy's, and checks the URL when it reads the file. The proxy of a cached run therefore listens on port 18546. When that port is taken, as by a second run at the same time, the run uses a free port and is not cached. When the installed anvil is not 1.9.0, the run is not cached either. The summary says why.
+- **During the run.** The harness copies the cache file into an anvil home in the run's private directory, and anvil keeps its storage cache there. anvil writes that copy on each reset, and when it stops on SIGTERM or SIGINT. It never writes to the shared file. Changes made on the fork, such as the balances the harness sets and the transactions it mines, never reach the copy. The copy records the proxy's `127.0.0.1` address, never an upstream URL.
+- **After the run.** The teardown stops anvil before the upstream proxy, so the proxy holds the fixed port until anvil has written its copy. It then promotes the copy to the shared file. It does so only when anvil 1.9.0 exited cleanly and its log shows no method other than the `eth_`, `net_` and `web3_` methods and the harness's own.
+- **Other local processes.** anvil's port has no credential. A process that resets the fork to its own upstream fills that upstream's cache file, which is never promoted, and the harness's next reset names its own upstream again. A process that calls `anvil_setRpcUrl`, or `anvil_setLoggingEnabled` to hide its calls, stops the promotion. Such a call can change the run it reaches, but not a later run. The promotion writes a new file beside the shared one and renames it over the shared file, so two runs never leave half a file.
+- **Sends.** anvil 1.9.0 answers `eth_sendTransaction` before it mines the transaction. The wallet answers the page only once anvil has the receipt. The app's receipt wait then finds the block it watches for, and each send's block comes 12 s after the one before. The wait takes at most 30 s, receipt reads included. When anvil has not mined the transaction by then, or a receipt read fails, the page gets an error and the wallet asks anvil to drop the transaction, without waiting for the answer. anvil can still mine one it has begun to execute, so the wallet refuses every later send until a reset succeeds.
+- **What a run records.** The manifest and the summary give the cache's state, with its trust class and root, the home directory shown as `~`: `off`, with why when the cache is on but the run cannot use it; `cold`, when no file of the block that anvil can read was there at the start; or `warm`. Both say whether the teardown promoted the run's copy, and why not. The summary's upstream counts show what the run still read from the upstream.
+- **Limits.** Each start and each reset makes about eight upstream requests, so a run with a cache still needs an endpoint. A read the cache does not hold goes to the upstream as before. Each test's fresh random accounts are read from the upstream and kept, so the file grows with every run. anvil 1.9.0 also asks the upstream for `anvil_nodeInfo`, `eth_getAccountInfo` and `eth_getBlockAccessList`. The upstream proxy refuses them, the summary counts them as refused, and anvil falls back to the reads the proxy forwards.
+
+The cache keeps a wrong answer. If an upstream once answered a read with wrong state, later runs read that state from the cache. If a test fails on fork state and passes with `BROWSER_FORK_CACHE=off`, delete the trust class's file. It is the only file the harness writes there:
+
+```bash
+rm ~/.cache/cf-browser-fork/public/mainnet-26244888.json   # or private/; under $XDG_CACHE_HOME/cf-browser-fork, or BROWSER_FORK_CACHE_DIR, when set
+```
 
 ## Startup, reset and cleanup
 
@@ -107,21 +130,22 @@ The global setup:
 1. stops what an earlier run left behind if its runner was killed (see below);
 2. makes a private 0700 directory under the system's temporary directory, outside the repository, for the TLS key, the 0600 control token file and the production builds;
 3. finds an endpoint that serves the pinned block with the recorded hash, starts the upstream proxy and anvil, verifies the fork, and checks that anvil has no unlocked account;
-4. starts the RPC proxy, the screening stub and the wallet server, with a new random token, and takes the fork's baseline snapshot;
+4. starts the RPC proxy, the screening stub and the wallet server, with a new random token;
 5. builds and serves the two production builds, unless skipped;
 6. starts the dev server, and loads the app once, so Vite's first dependency optimization is not charged to a test, and to check the browser's trust in the certificate.
 
 Each service registers its own stop as soon as it starts, so a failure at any step stops everything started before it. `startup-failure.txt` says why.
 
-Before each test, the wallet resets: anvil reverts to the baseline snapshot and takes a new one; every account is forgotten and its impersonation stopped (a revert does not stop one); pending requests fail with 4900; delayed decisions are cancelled; long polls end; the chain returns to 1 with only chain 1 known; policies return to manual; and screening behaviours are cleared. The reset starts a new generation, and a request from an earlier generation can no longer be decided. Each test also makes fresh random accounts.
+Before each test, the wallet resets: anvil resets the fork to its block from the upstream proxy (`anvil_reset`), which drops every change made on the fork; every account is forgotten and its impersonation stopped; pending requests fail with 4900; delayed decisions are cancelled; long polls end; the chain returns to 1 with only chain 1 known; policies return to manual; and screening behaviours are cleared. The reset starts a new generation, and a request from an earlier generation can no longer be decided. Each test also makes fresh random accounts.
 
-The teardown scans the production bundles for the run's secrets, stops every service, stops anvil with SIGTERM and then SIGKILL after 5 s, and removes the private directory. On Ctrl-C, Playwright runs the same teardown. On SIGTERM the harness runs it and then exits. A signal during start-up stops what has started, and no further service starts. On process exit, as after a Ctrl-C during start-up, anvil is killed through its process handle, and anvil's working directory and the private directory are removed, synchronously, as a last resort.
+The teardown scans the production bundles for the run's secrets, stops every service, and removes the private directory. It stops anvil with SIGTERM, and with SIGKILL if anvil is still running 5 s later. After a SIGTERM, anvil writes its cache, which the teardown can promote to the fork cache. On Ctrl-C, Playwright runs the same teardown. On SIGTERM the harness runs it and then exits. A signal during start-up stops what has started, and no further service starts. On process exit, as after a Ctrl-C during start-up, anvil is killed through its process handle, and anvil's working directory and the private directory are removed, synchronously, as a last resort.
 
-**After a killed runner.** If the runner is killed with SIGKILL, it cannot stop anvil. The next run stops it: each run records its runner's PID, anvil's PID, anvil's working directory and the upstream proxy's port in `test-results/browser-fork/<run ID>/processes.json`. A later run stops a recorded anvil only when that run's runner is gone and the process is anvil forked from that run's own proxy port, so it never touches another session's anvil, such as COM-289's. If a live process at the recorded PID is not that anvil, the record stays for a person to check. To do it by hand:
+**After a killed runner.** If the runner is killed with SIGKILL, it cannot stop anvil. The next run stops it: each run records its runner's PID, anvil's PID, anvil's working directory and the upstream proxy's port in `test-results/browser-fork/<run ID>/processes.json`. A later run stops a recorded anvil only when that run's runner is gone, the process is anvil forked from that run's proxy port, and it still runs in that run's anvil working directory. It never touches another session's anvil, such as COM-289's, or another cached run's anvil, which forks from the same fixed port. The working directory is read with `lsof`; when it cannot be read, the anvil is not stopped. If a live process at the recorded PID is not that anvil, the record stays for a person to check. To do it by hand:
 
 ```bash
 cat test-results/browser-fork/<run ID>/processes.json   # runnerPid, anvilPid, anvilCwd, upstreamProxyPort, privateDir
 ps -p <anvilPid> -o command=                              # check that it is anvil --fork-url http://127.0.0.1:<upstreamProxyPort>/
+lsof -a -p <anvilPid> -d cwd -Fn                          # check that it runs in <anvilCwd>
 kill <anvilPid>
 rm -rf <privateDir> <anvilCwd>
 ```
@@ -239,7 +263,7 @@ Limits:
 - The wrapped specs run on the dev server only, not against the production builds.
 - Transactions are never signed, so transaction serialization and EIP-1559 signing are not covered.
 - Impersonation cannot sign messages.
-- The fork runs Prague, the latest that anvil 1.2.3 knows. Mainnet runs Osaka. Gas figures can differ.
+- The fork runs Prague, as COM-289's runner pinned. Mainnet runs Osaka. Gas figures can differ.
 - Only Ethereum is forked. Other chains answer a JSON-RPC error, and nothing else runs on them.
 - The app calls wagmi's `switchChain`, which does not reject to its caller, so `switchWriteNetwork`'s own `catch` branches for 4902, 4001 and -32002 never run. wagmi's connector handles 4902 by adding the chain. The tests assert that sequence and do not cover the app's catch branches.
 - The production builds run with `NODE_ENV=production`, as `vite build` does when `NODE_ENV` is unset. A build run with `NODE_ENV=development` compiles `DEV=true`, and with it the dev-only screening bypass, whatever its mode. The harness sets `NODE_ENV` itself, so it does not test that case. The case is a `test.fixme` in `prod-build.spec.ts`, so the summary reports AC7, and the acceptance, INCOMPLETE until the product fix to `envVars.ts` lands and the test runs.
