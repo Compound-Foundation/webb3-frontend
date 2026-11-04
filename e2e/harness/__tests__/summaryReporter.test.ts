@@ -213,7 +213,7 @@ test('the run section gives the worker count, how it was chosen, the signals it 
     workers: 2,
     source: 'estimate',
     reasons: ['CPU: 16 CPUs at 50 % idle leave 8.0; 2 for shared services and 2 per worker allow 3', 'memory: allow 2'],
-    missing: ['spec file count'],
+    missing: ['CPU idle share'],
   };
   const manifest = {
     ...MANIFEST,
@@ -229,7 +229,7 @@ test('the run section gives the worker count, how it was chosen, the signals it 
   };
   const summary = await summaryOf(FULL, () => FULL.map(id), manifest);
   expect(summary).toContain(
-    '- Workers: 2, by estimate: CPU: 16 CPUs at 50 % idle leave 8.0; 2 for shared services and 2 per worker allow 3; memory: allow 2. Signals not read: spec file count.'
+    '- Workers: 2, by estimate: CPU: 16 CPUs at 50 % idle leave 8.0; 2 for shared services and 2 per worker allow 3; memory: allow 2. Signals not read: CPU idle share.'
   );
   expect(summary).toContain('- Fork lanes: 2 of 2 started; lane 1 restarted once');
   const overridden = { ...manifest, concurrency: { workers: 1, selection, isCliOverride: true } };
