@@ -2,6 +2,7 @@ import { Interface } from '@ethersproject/abi';
 import { TransactionReceipt } from '@ethersproject/providers';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { BigNumber } from 'ethers';
+import { useMemo, useRef } from 'react';
 
 import {
   ANCHORAGE_CONNECTOR_ID,
@@ -16,7 +17,7 @@ import { queueScope, submissionScope, WrappedLendingContext } from '@contexts/Wr
 import CometAbi from '@helpers/abis/Comet';
 import { recordCometStateSource } from '@helpers/cometStateSource';
 import { TRANSACTION_LOCALSTORAGE_KEY } from '@helpers/constants';
-import { DIRECT_WITHDRAWAL_HOLDS_KEY } from '@helpers/directWithdrawalHold';
+import * as DirectWithdrawalHold from '@helpers/directWithdrawalHold';
 import { LendingSession, resolveLendingRoute, wrappedRouteKey } from '@helpers/lendingRoute';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
@@ -436,6 +437,9 @@ export type Live = {
   queue: ReturnType<typeof useActionQueue>;
   manager: ReturnType<typeof useTransactionManager>;
   action: ReturnType<typeof useWrappedAction>;
+  submission: ReturnType<typeof useSubmissionStore>;
+  /** The writes handed to the transaction manager that have not returned yet. */
+  writes: Set<Promise<unknown>>;
 };
 export let live: Live;
 /** Every open tab's hooks, by tab. */
@@ -474,6 +478,7 @@ export function Dashboard({
   tab = 'a',
 }: DashboardProps) {
   const wallet = wallets[walletChainId];
+  const writes = useRef(new Set<Promise<unknown>>()).current;
   const web3: Web3 = {
     ...mockWeb3,
     read: { ...mockWeb3.read, account: ACCOUNT, chainId: 1, provider: readProvider as never },
@@ -486,7 +491,11 @@ export function Dashboard({
       provider: wallet as never,
     },
   };
-  const manager = useTransactionManager(web3);
+  const managed = useTransactionManager(web3);
+  // The manager, with each write it is handed kept in `writes` until it returns.
+  const addTransaction = useMemo(() => tracked(writes, managed.addTransaction), [managed.addTransaction]);
+  const submitTransaction = useMemo(() => tracked(writes, managed.submitTransaction), [managed.submitTransaction]);
+  const manager = { ...managed, addTransaction, submitTransaction };
   const session = sessionFor(wallet, walletChainId, connectorId);
   const action = useWrappedAction({ session, manager, readProvider });
   useSignWhenReady(action);
@@ -511,7 +520,7 @@ export function Dashboard({
     settledTransactions: manager.settledTransactions,
     removeAction: queue.removeAction,
   });
-  lives[tab] = { queue, manager, action };
+  lives[tab] = { queue, manager, action, submission, writes };
   if (tab === 'a') {
     live = lives[tab];
     mockLastProps.readProvider = readProvider;
@@ -553,16 +562,72 @@ export function Dashboard({
 
 export const switchWriteNetwork = jest.fn(async () => true);
 
+/** `write`, which keeps each call's promise in `writes` until it settles. */
+function tracked<A extends unknown[], R>(writes: Set<Promise<unknown>>, write: (...args: A) => Promise<R>) {
+  return (...args: A) => {
+    const pending = write(...args);
+    writes.add(pending);
+    const forget = () => writes.delete(pending);
+    pending.then(forget, forget);
+    return pending;
+  };
+}
+
 export const queued = () => live.queue.getActions(BASE_ASSET, [], [StateType.Loading]);
 export const positionCard = () => mockLastProps.PositionCard.state[1];
 
-/** Lets the reads, the wallet and the receipt poll run. */
-export const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+/** Whether `record` is a wrapped run still being checked, signed or followed to its receipt. */
+export const isRunInFlight = (record = live.submission.record) =>
+  record !== undefined && record.status.kind !== 'stopped';
 
-/** Presses Submit Transaction and lets whatever it starts run. */
+/** Whether a change to the stored holds is in progress: the store's lock lease is in storage. */
+export const isHoldStoreChanging = () =>
+  Object.keys(window.localStorage).some((key) =>
+    key.startsWith(`${DirectWithdrawalHold.DIRECT_WITHDRAWAL_HOLDS_KEY}:lock:`)
+  );
+
+/**
+ * Waits until no wrapped run is in flight, no wrapper action it sent still locks the queue, no change
+ * to the stored holds is in progress, and every write handed to the manager has returned.
+ */
+export const waitForIdle = () =>
+  waitFor(() => {
+    expect(isRunInFlight()).toBe(false);
+    expect(live.submission.sent).toBeUndefined();
+    expect(isHoldStoreChanging()).toBe(false);
+    expect(live.writes.size).toBe(0);
+  });
+
+/**
+ * Presses Submit Transaction and waits until the run and the writes the press started have ended,
+ * the queue is unlocked again and the run's changes to the stored holds are done. A press that
+ * starts no run or write returns at once.
+ */
 export async function submit() {
+  const recordBefore = live.submission.record;
+  const writesBefore = new Set(live.writes);
   act(() => positionCard().onSubmitClicked());
-  await settle();
+  // A run sets its record in the press itself.
+  const isRunStarted = live.submission.record !== recordBefore;
+  await waitFor(() => {
+    if (isRunStarted) {
+      expect(isRunInFlight()).toBe(false);
+      expect(live.submission.sent).toBeUndefined();
+      expect(isHoldStoreChanging()).toBe(false);
+    }
+    expect([...live.writes].filter((write) => !writesBefore.has(write))).toEqual([]);
+  });
+}
+
+/** Every look at whether a stored hold's request can no longer execute. */
+export const holdLooks = jest.spyOn(DirectWithdrawalHold, 'isHoldResolved');
+
+/** Waits for a look at the stored holds after the first `since`, and until every such look has ended. */
+export async function waitForHoldLook(since: number) {
+  await waitFor(() => expect(holdLooks.mock.calls.length).toBeGreaterThan(since));
+  await act(async () => {
+    await Promise.allSettled(holdLooks.mock.results.slice(since).map(({ value }) => value));
+  });
 }
 
 export function renderDashboard(
@@ -708,7 +773,8 @@ export const answer4900 = (wallet: Wallet) =>
  */
 export const executeLate = (chain: Chain) =>
   mine(chain, { to: USDC_COMET, data: productionWithdrawData(200_000_000n) });
-export const storedHolds = () => JSON.parse(window.localStorage.getItem(DIRECT_WITHDRAWAL_HOLDS_KEY) ?? '[]');
+export const storedHolds = () =>
+  JSON.parse(window.localStorage.getItem(DirectWithdrawalHold.DIRECT_WITHDRAWAL_HOLDS_KEY) ?? '[]');
 export const storedRecords = () => JSON.parse(window.localStorage.getItem(TRANSACTION_LOCALSTORAGE_KEY) ?? '[]');
 /** The hash the replaced cases' wallet returns, which the node never mines. */
 export const REPLACED_HASH = `0x${'ab'.repeat(32)}`;
@@ -729,8 +795,7 @@ export async function holdFirstStep(direct = DIRECT) {
   act(() => live.queue.addOrUpdateAction(entry));
   answer4900(view.wallet);
   await submit();
-  await waitFor(() => expect(queued()).toEqual([]));
-  await settle();
+  expect(queued()).toEqual([]);
   expect(requestedCalls(view.wallet)).toEqual(['withdraw']);
   return { ...view, chain, entry };
 }
@@ -738,7 +803,6 @@ export async function holdFirstStep(direct = DIRECT) {
 /** Submits `entry` again and checks that nothing reaches the wallet and the row says why. */
 export async function expectHeldBack(wallet: Wallet, chain: Chain, entry: Action) {
   await submit();
-  await settle();
   expect(requestedCalls(wallet)).toEqual(['withdraw']);
   expect(queued()).toEqual([entry]);
   expect(positionCard().actionRules.wrappedBase.stopped).toEqual({

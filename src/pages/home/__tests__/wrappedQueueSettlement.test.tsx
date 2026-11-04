@@ -18,7 +18,6 @@ import {
   renderDashboard,
   sendThenSwitchNetwork,
   sentCalls,
-  settle,
   submit,
   switchWriteNetwork,
 } from '../../../../__tests__/mocks/wrappedQueueSettlement';
@@ -78,7 +77,8 @@ describe('a queued wrapper action sent before a change of network', () => {
     wallet.releaseReceipts();
     await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
     await waitFor(() => expect(queued()).toEqual([]));
-    await settle();
+    // Nothing is left to follow, so nothing more can be sent.
+    await waitFor(() => expect(live.manager.transactions).toEqual([]));
 
     expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(1);
     expect(chain.balance).toBe(10_000_000_000n - AMOUNT);
@@ -114,10 +114,9 @@ describe('a queued wrapper action sent before a change of network', () => {
     wallet.releaseReceipts();
     show({ walletChainId: 1 });
     await waitFor(() => expect(live.manager.settledTransactions[0]?.outcome.status).toBe('reverted'));
-    await settle();
 
     // It is queued again, and Submit sends it again, with no dialog.
-    expect(queued()).toHaveLength(1);
+    await waitFor(() => expect(queued()).toHaveLength(1));
     await submit();
     await waitFor(() => expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(2));
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -181,8 +180,7 @@ describe('the wrapped route through the real hooks, in the production order', ()
     wallet.sendUncheckedTransaction.mockRejectedValueOnce({ code: 4001, message: 'User rejected the request.' });
 
     await submit();
-    await waitFor(() => expect(live.action.state.phase).toBe('stopped'));
-    await settle();
+    expect(live.action.state.phase).toBe('stopped');
 
     expect(queued()).toEqual([supply]);
     expect(positionCard().transaction).toBeUndefined();
@@ -303,18 +301,20 @@ describe('a queued wrapper action when the wallet session breaks while it is bei
 
     await breakSessionByAnotherWrite();
     await waitFor(() => expect(live.action.state.phase).toBe('stopped'));
-    await settle();
 
     // Nothing reached the wallet, so the action stays queued, and its row asks for another try.
+    await waitFor(() =>
+      expect(positionCard().actionRules.wrappedBase.stopped).toEqual({ action: entry, label: 'Not Sent, Try Again' })
+    );
     expect(queued()).toEqual([entry]);
-    expect(positionCard().actionRules.wrappedBase.stopped).toEqual({ action: entry, label: 'Not Sent, Try Again' });
     const stopped = live.action.state;
     if (stopped.phase !== 'stopped') throw new Error('the action must be stopped');
     expect(stopped.steps[stopped.stepIndex]).toEqual({ status: 'blocked', reason: 'session-unusable' });
 
     // The read answers late. The request is withdrawn at its next check, before the wallet.
+    expect(live.writes.size).toBe(1);
     read.release(undefined);
-    await settle();
+    await waitFor(() => expect(live.writes.size).toBe(0));
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     expect(live.manager.transactions).toEqual([]);
 
@@ -338,10 +338,9 @@ describe('a queued wrapper action when the wallet session breaks while it is bei
 
     await breakSessionByAnotherWrite();
     await waitFor(() => expect(live.action.state.phase).toBe('stopped'));
-    await settle();
 
     // The wallet can still send it, so it leaves the queue, as any stop that can still execute does.
-    expect(queued()).toEqual([]);
+    await waitFor(() => expect(queued()).toEqual([]));
     expect(positionCard().actionRules.wrappedBase.stopped).toBeUndefined();
     await submit();
     expect(wallet.sendUncheckedTransaction).toHaveBeenCalledTimes(1);
