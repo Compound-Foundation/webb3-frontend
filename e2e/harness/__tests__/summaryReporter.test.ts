@@ -49,6 +49,9 @@ const MANIFEST = {
   contracts: { usdcImplementation: '0x00' },
 };
 
+/** What the reporter's last `onEnd` in `summaryOf` returned to Playwright and printed to the console. */
+let lastEnd: { result: unknown; console: string } = { result: undefined, console: '' };
+
 async function summaryOf(
   selected: readonly (readonly string[])[],
   inventory: () => string[],
@@ -66,9 +69,14 @@ async function summaryOf(
   reporter.onBegin({ projects: [] } as unknown as FullConfig, { allTests: () => tests } as unknown as Suite);
   for (const each of tests) reporter.onTestEnd(each, passed);
   const write = process.stdout.write;
-  process.stdout.write = (() => true) as typeof process.stdout.write;
+  const printed: string[] = [];
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    printed.push(chunk.toString());
+    return true;
+  }) as typeof process.stdout.write;
   try {
-    await reporter.onEnd({ status: 'passed' } as never);
+    const result = await reporter.onEnd({ status: 'passed' } as never);
+    lastEnd = { result, console: printed.join('') };
   } finally {
     process.stdout.write = write;
   }
@@ -274,6 +282,10 @@ describe('the secret scan', () => {
     expect(summary).toContain('Verdict: **FAIL**');
     expect(summary).toContain('**1 secret(s) found:** the control token in trace.log');
     expect(summary).not.toContain(TOKEN);
+    // The reporter's result is what fails the Playwright run.
+    expect(lastEnd.result).toEqual({ status: 'failed' });
+    expect(lastEnd.console).toContain('FAIL');
+    expect(lastEnd.console).not.toContain(TOKEN);
   });
 
   test('the summary counts the outputs it scanned, which it lists once', async () => {
@@ -285,5 +297,6 @@ describe('the secret scan', () => {
       /No secret found\. \d+ secrets were registered, and 4 files and trace members were scanned/
     );
     expect(outputsUnder).toHaveBeenCalledTimes(1);
+    expect(lastEnd.result).toBeUndefined();
   });
 });
