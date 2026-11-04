@@ -21,6 +21,17 @@ const screeningEndpoint = import.meta.env.VITE_SCREENING_ENDPOINT || 'SCREENING_
 
 export const SCREENING_URL = screeningEndpoint;
 
+/** The values of `import.meta.env` that decide whether the dev server skips screening. */
+export type ScreeningBypassEnv = { DEV: boolean; MODE: string; VITE_SCREENING_ENDPOINT?: string };
+
+/**
+ * Whether `useAddressScreening` skips the screening endpoint: only on the local dev server with no
+ * endpoint configured. See `SCREENING_DISABLED`.
+ */
+export function isScreeningBypassed({ DEV, MODE, VITE_SCREENING_ENDPOINT }: ScreeningBypassEnv): boolean {
+  return Boolean(DEV) && MODE === 'development' && !VITE_SCREENING_ENDPOINT;
+}
+
 /**
  * Local-dev escape hatch for wallet screening.
  *
@@ -29,10 +40,23 @@ export const SCREENING_URL = screeningEndpoint;
  * the connected wallet out of view. When this is true, `useAddressScreening` skips
  * the network call and treats the address as allowed.
  *
- * Two conditions, both required:
- *  - `import.meta.env.DEV` — only the dev server. Vite statically replaces this with
- *    `false` in `vite build`, so a deployed build can never take this path.
+ * Three conditions, all required:
+ *  - `import.meta.env.MODE` is `development`. Vite sets the mode from `--mode`: the dev
+ *    server (`vite`, `yarn dev`) uses `development`, and `vite build` uses `production`
+ *    whatever NODE_ENV says.
+ *  - `import.meta.env.DEV` is true. Vite derives `DEV` and `PROD` from NODE_ENV, not
+ *    from the mode, so `NODE_ENV=development vite build` compiles DEV=true and
+ *    PROD=false. Neither flag alone tells the dev server from such a build, so the mode
+ *    check above is what keeps the bypass off in every `vite build`.
  *  - no `VITE_SCREENING_ENDPOINT` — set it locally (e.g. in `.env.local`) to point at
  *    a reachable worker and screening runs normally, fail-closed behavior included.
+ *
+ * Do not rely on a build removing the branch that reads this flag. Whether Rollup
+ * drops it depends on how the expression is written. The flag is false in every
+ * `vite build` either way.
  */
-export const SCREENING_DISABLED = Boolean(import.meta.env.DEV) && !import.meta.env.VITE_SCREENING_ENDPOINT;
+export const SCREENING_DISABLED = isScreeningBypassed({
+  DEV: import.meta.env.DEV,
+  MODE: import.meta.env.MODE,
+  VITE_SCREENING_ENDPOINT: import.meta.env.VITE_SCREENING_ENDPOINT,
+});

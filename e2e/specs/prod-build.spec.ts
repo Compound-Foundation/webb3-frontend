@@ -51,9 +51,9 @@ test.describe('production build without a screening endpoint', { tag: ['@AC7'] }
     expect(Object.keys(build.environment)).not.toContain('VITE_SCREENING_ENDPOINT');
     const javaScript = builtJavaScript(build.outDir);
     expect(javaScript.includes('SCREENING_ENDPOINT_NOT_CONFIGURED'), 'the build has no screening endpoint').toBe(true);
-    // Not a gate: Vite compiles `SCREENING_DISABLED` here to `Boolean(false) && true`, which the minifier
-    // does not fold, so the dead branch and its warning text stay in the bundle without being able to run.
-    // The next test is the gate: a connected wallet must fail closed.
+    // Not a gate: whether the bundle keeps the bypass branch and its warning text depends on how Rollup folds
+    // `SCREENING_DISABLED`, and a branch it keeps cannot run while the flag is false. The next test is the
+    // gate: a connected wallet must fail closed.
     test.info().annotations.push({
       type: 'bypass text in bundle',
       description: String(javaScript.includes(BYPASS_WARNING)),
