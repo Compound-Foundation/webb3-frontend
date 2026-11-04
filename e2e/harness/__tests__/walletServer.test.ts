@@ -376,6 +376,64 @@ describe('checks on each request', () => {
     expect(node.calls.find((call) => call.method === 'evm_setNextBlockTimestamp')?.params).toEqual([
       `0x${(0x6a000000 + 12).toString(16)}`,
     ]);
+    // A send with its own gas limit keeps it, so anvil is asked for no estimate.
+    expect(methods).not.toContain('eth_estimateGas');
+  });
+
+  test("a send without a gas limit carries anvil's estimate at the pending block, made after the next block's time is set", async () => {
+    // anvil 1.9.0 fills in a send's gas limit from an estimate at the latest block's time, not the time set
+    // for the next block. Comet's interest accrual then costs more when the transaction mines than in that
+    // estimate, and a withdrawal runs out of gas inside USDC's transfer.
+    node.handlers.set('eth_estimateGas', () => '0x1b89d');
+    const address = await connectedAccount();
+    const transaction = { from: address, to: address, data: '0x1234', value: '0x0', maxFeePerGas: '0x3b9aca00' };
+    const sending = client.walletRpc(ORIGIN, 'eth_sendTransaction', [transaction]);
+    await client.approve((await client.waitForRequest({ method: 'eth_sendTransaction' })).id);
+    expect(await sending).toEqual({ result: `0x${'ab'.repeat(32)}` });
+    const estimates = node.calls.filter((call) => call.method === 'eth_estimateGas');
+    expect(estimates.map((call) => call.params)).toEqual([[transaction, 'pending']]);
+    const sent = node.calls.filter((call) => call.method === 'eth_sendTransaction');
+    expect(sent.map((call) => call.params[0])).toEqual([{ ...transaction, gas: '0x1b89d' }]);
+    const methods = node.calls.map((call) => call.method);
+    const sendAt = methods.lastIndexOf('eth_sendTransaction');
+    expect(methods.slice(sendAt - 2, sendAt + 1)).toEqual([
+      'evm_setNextBlockTimestamp',
+      'eth_estimateGas',
+      'eth_sendTransaction',
+    ]);
+  });
+
+  test("a set-up send through the control API without a gas limit also carries anvil's pending estimate", async () => {
+    node.handlers.set('eth_estimateGas', () => '0x1b89d');
+    const { address } = await client.newAccount({ usdc: '0' });
+    const data = '0xf3fef3a3';
+    expect(await client.forkSend({ from: address, to: address, data })).toEqual({ hash: `0x${'ab'.repeat(32)}` });
+    const estimates = node.calls.filter((call) => call.method === 'eth_estimateGas');
+    expect(estimates.map((call) => call.params)).toEqual([[{ from: address, to: address, data }, 'pending']]);
+    const sent = node.calls.filter((call) => call.method === 'eth_sendTransaction');
+    expect(sent.map((call) => call.params[0])).toEqual([{ from: address, to: address, data, gas: '0x1b89d' }]);
+  });
+
+  test('an estimate anvil refuses fails the send before anything is sent, and the next send still goes', async () => {
+    node.handlers.set('eth_estimateGas', () => {
+      throw new Error('execution reverted');
+    });
+    const address = await connectedAccount();
+    const failing = client.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: address, to: address }]);
+    const failed = await client.waitForRequest({ method: 'eth_sendTransaction' });
+    await client.approve(failed.id);
+    expect(await failing).toEqual({ error: expect.objectContaining({ message: expect.stringContaining('reverted') }) });
+    expect((await client.getRequest(failed.id)).status).toBe('failed');
+    expect(node.calls.filter((call) => call.method === 'eth_sendTransaction')).toEqual([]);
+
+    // Nothing was sent, so the fork state is known and the next send goes.
+    node.handlers.set('eth_estimateGas', () => '0x5208');
+    const sending = client.walletRpc(ORIGIN, 'eth_sendTransaction', [{ from: address, to: address }]);
+    const next = await client.waitForRequest({ method: 'eth_sendTransaction' }, { after: new Set([failed.id]) });
+    await client.approve(next.id);
+    expect(await sending).toEqual({ result: `0x${'ab'.repeat(32)}` });
+    const sent = node.calls.filter((call) => call.method === 'eth_sendTransaction');
+    expect(sent.map((call) => call.params[0])).toEqual([{ from: address, to: address, gas: '0x5208' }]);
   });
 
   test('answers a send only once anvil has mined it, because anvil 1.9.0 answers before it mines', async () => {
