@@ -27,9 +27,8 @@ import { forkCacheRoot, PINNED_BLOCK, sharedCacheFile } from './fork';
 const GIB = 1024 ** 3;
 
 /**
- * The most workers the estimate chooses. Per-test scheduling was benchmarked at four workers, where warm runs
- * were about 14 % faster than with each spec file in one worker. More workers are unmeasured with per-test
- * scheduling, and each costs about 1.1 GiB of memory and adds to the upstream burst.
+ * The most workers the estimate chooses. Per-test scheduling was benchmarked at four workers. More workers are
+ * unmeasured, and each costs about 1.1 GiB of memory and adds to the upstream burst.
  */
 export const DEFAULT_MAX_WORKERS = 4;
 /**

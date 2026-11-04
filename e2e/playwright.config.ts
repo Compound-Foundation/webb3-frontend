@@ -1,10 +1,13 @@
 // The browser integration suite: `yarn test:browser`. See docs/browser-fork-wallet.md.
 //
-// Each worker has its own fork lane, and Playwright schedules each test on its own (`fullyParallel: true`), so
-// the tests of one spec file can run side by side in different workers. Every test resets its worker's wallet
-// and fork and gets a fresh browser context, so no test depends on another's order or state. The worker count
-// is an estimate for this machine (`harness/concurrency.ts`), unless BROWSER_TEST_WORKERS or `--workers` sets
-// it. There are no retries, so a flaky case shows as a failure.
+// Each worker has its own fork lane. Playwright schedules each test on its own (`fullyParallel: true`), so the
+// tests of one spec file can run at once in different workers. Before each test, the worker's wallet and fork
+// reset and the test gets a new browser context. A test therefore starts with none of another test's
+// accounts, fork changes or browser storage. The proxies' counters and the lane list are shared across the
+// run, so a test that reads them must not depend on which tests ran before it.
+//
+// The worker count is an estimate for this machine (`harness/concurrency.ts`), unless BROWSER_TEST_WORKERS or
+// `--workers` sets it. There are no retries, so a flaky case shows as a failure.
 import path from 'node:path';
 
 import { defineConfig } from '@playwright/test';
