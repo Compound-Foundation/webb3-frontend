@@ -41,6 +41,7 @@ const MANIFEST = {
     isSkipped: false,
     missingEndpoint: { resolved: { DEV: false, PROD: true } },
     allowed: { resolved: { DEV: false, PROD: true } },
+    developmentNodeEnv: { resolved: { DEV: true, PROD: false } },
   },
   app: { devResolved: { DEV: true } },
   tls: { mode: 'node-trusts-harness-certificate' },

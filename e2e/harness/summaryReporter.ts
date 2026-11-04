@@ -369,7 +369,7 @@ export default class SummaryReporter implements Reporter {
     if (manifest !== undefined) {
       const production = manifest.production.isSkipped
         ? `skipped (${manifest.production.reason})`
-        : `no endpoint: DEV=${manifest.production.missingEndpoint.resolved.DEV}, PROD=${manifest.production.missingEndpoint.resolved.PROD}; allowed control: DEV=${manifest.production.allowed.resolved.DEV}, PROD=${manifest.production.allowed.resolved.PROD}`;
+        : `no endpoint: DEV=${manifest.production.missingEndpoint.resolved.DEV}, PROD=${manifest.production.missingEndpoint.resolved.PROD}; allowed control: DEV=${manifest.production.allowed.resolved.DEV}, PROD=${manifest.production.allowed.resolved.PROD}; no endpoint with NODE_ENV=development: DEV=${manifest.production.developmentNodeEnv.resolved.DEV}, PROD=${manifest.production.developmentNodeEnv.resolved.PROD}`;
       lines.push(
         '',
         '## Run',

@@ -1,13 +1,14 @@
-// AC7: a production build cannot use the dev server's screening bypass. Both builds are made by the global
-// setup in mode production with NODE_ENV=production, as `vite build` does when NODE_ENV is unset, and the harness
-// refused to serve either unless Vite resolved DEV=false and PROD=true (`viteApp.ts`). A build run with
-// NODE_ENV=development compiles DEV=true, and so the bypass, whatever its mode. The harness sets NODE_ENV
-// itself, so it does not test that case; see docs/browser-fork-wallet.md.
+// AC7: a production build cannot use the dev server's screening bypass. The global setup makes three builds
+// in mode production, as `vite build` does, and the harness refuses to serve one that did not resolve the
+// configuration it asked for (`viteApp.ts`).
 //
-// - The first build has no VITE_SCREENING_ENDPOINT: exactly the configuration in which the dev server would
-//   skip screening. A connected wallet must fail closed.
+// - The first build has no VITE_SCREENING_ENDPOINT and NODE_ENV=production: exactly the configuration in
+//   which the dev server would skip screening. A connected wallet must fail closed.
 // - The second, the control, has the stub's endpoint and an allowed account. It must connect normally, so
-//   the first case cannot pass merely because a production build fails to connect at all.
+//   the other cases cannot pass merely because a production build fails to connect at all.
+// - The third has no endpoint and NODE_ENV=development, as `NODE_ENV=development vite build` does. Vite derives
+//   DEV from NODE_ENV, so this build compiles DEV=true and PROD=false in mode production. A connected wallet
+//   must fail closed here too.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -118,13 +119,33 @@ test.describe('production build with the screening endpoint (control)', { tag: [
 });
 
 test.describe('production build with NODE_ENV=development', { tag: ['@AC7'] }, () => {
-  // A known case of AC7 that the suite does not execute, so that the summary reports AC7, and the
-  // acceptance, INCOMPLETE until it does. `vite build` with NODE_ENV=development compiles DEV=true, and
-  // `SCREENING_DISABLED` in envVars.ts then turns on the screening bypass when no endpoint is set. Gating the
-  // bypass on the build's mode too is a product change to envVars.ts, which this PR does not make. Once
-  // it is made, this test builds with NODE_ENV=development and no endpoint, connects an allowed account,
-  // and expects the app to fail closed, as the first describe block does.
-  test('cannot use the dev-only screening bypass', () => {
-    test.fixme(true, 'the product fix to SCREENING_DISABLED in envVars.ts is a follow-up to this PR');
+  test.use({ appTarget: 'prod-development-node-env' });
+
+  test('was built in mode production with DEV=true, with no screening endpoint', async ({ manifest, appOrigin }) => {
+    const build = production(manifest).developmentNodeEnv;
+    expect(appOrigin).toBe(build.origin);
+    expect(build.resolved).toEqual({ mode: 'production', isProduction: false, DEV: true, PROD: false });
+    expect(Object.keys(build.environment)).not.toContain('VITE_SCREENING_ENDPOINT');
+    expect(
+      builtJavaScript(build.outDir).includes('SCREENING_ENDPOINT_NOT_CONFIGURED'),
+      'the build has no screening endpoint'
+    ).toBe(true);
+  });
+
+  test('cannot use the dev-only screening bypass', async ({ page, wallet, consoleMessages }) => {
+    const { address } = await wallet.newAccount({ usdc: '1000', screening: 'allowed' });
+    await wallet.select(address);
+    await openApp(page);
+    await connectThroughUi(page, wallet);
+    await expect(screeningOverlay(page)).toBeVisible({ timeout: 30_000 });
+    await expect(headerConnect(page)).toBeVisible();
+    await expect(headerAccount(page, getAddress(address))).toHaveCount(0);
+    expect(await storedConnector(page)).toBeNull();
+    await expect(page.getByRole('button', { name: 'Supply USDC' })).toBeDisabled();
+    expect(await signingRequests(wallet)).toEqual([]);
+    expect(await signingCalls(wallet)).toEqual([]);
+    // The stub would have allowed the account, but the build has no endpoint, so it was never asked.
+    expect(await wallet.screeningLog()).toEqual([]);
+    expect(consoleMessages.filter((message) => message.includes(BYPASS_WARNING))).toEqual([]);
   });
 });
