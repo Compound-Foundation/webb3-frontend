@@ -79,9 +79,13 @@ test.describe('wallet requests and events', { tag: ['@AC6'] }, () => {
     const supply = await wallet.waitForRequest({ method: 'eth_sendTransaction' });
     await expect(pendingBadge(page)).toBeVisible();
     await page.waitForTimeout(2_000);
+    // The app still waits for the wallet: the queue's button asks for confirmation and is disabled.
+    await expect(pendingBadge(page)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Confirm Transaction' }).first()).toBeDisabled();
     // A second submit while the first waits in the wallet: whatever the control shows, no second request.
+    // The state above should stop the click, so a short actionability timeout ends the expected failure early.
     const submit = page.getByRole('button', { name: /Submit/ }).first();
-    const outcome = await submit.click({ timeout: 2_000 }).then(
+    const outcome = await submit.click({ timeout: 250 }).then(
       () => 'clicked',
       () => 'not clickable (gone or disabled)'
     );

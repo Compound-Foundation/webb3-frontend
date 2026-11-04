@@ -25,9 +25,16 @@ import type { ScreeningBehaviour } from '../harness/screeningStub';
 
 const supplyButton = (page: Page) => page.getByRole('button', { name: 'Supply USDC' });
 
-/** Tries an action, and records whether the click landed or the control was gone or disabled. */
+// Each caller first asserts the blocked, disabled or pending state, so the click is expected to fail. A short
+// actionability timeout ends that expected failure early. An enabled control is still clicked at once.
+const PROBE_CLICK_TIMEOUT_MS = 250;
+
+/**
+ * Tries an action after the test has asserted the state that should stop it, and records whether the click
+ * landed or the control was gone or disabled.
+ */
 async function attempt(name: string, locator: Locator) {
-  const outcome = await locator.click({ timeout: 2_000 }).then(
+  const outcome = await locator.click({ timeout: PROBE_CLICK_TIMEOUT_MS }).then(
     () => 'clicked',
     () => 'not clickable (gone or disabled)'
   );
@@ -155,6 +162,9 @@ test.describe('screening', { tag: ['@AC7'] }, () => {
     await expect
       .poll(async () => (await wallet.screeningLog()).filter((entry) => entry.outcome === 'held').length)
       .toBe(1);
+    // The header shows neither account while the new one is pending.
+    await expect(headerAccount(page, first)).toHaveCount(0);
+    await expect(headerAccount(page, second)).toHaveCount(0);
     await attempt('Approve & Add while the new account is pending', approve);
     await page.waitForTimeout(1_000);
     expect(await signingRequests(wallet)).toEqual([]);
@@ -183,6 +193,8 @@ test.describe('screening', { tag: ['@AC7'] }, () => {
     await expect
       .poll(async () => (await wallet.screeningLog()).filter((entry) => entry.outcome === 'held').length)
       .toBe(1);
+    await expect(headerAccount(page, first)).toHaveCount(0);
+    await expect(headerAccount(page, second)).toHaveCount(0);
     // The frame goes when the account is not allowed. A click on a frame that is still there must not
     // produce a signing request for the unscreened account either.
     await attempt(
