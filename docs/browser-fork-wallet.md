@@ -41,7 +41,7 @@ Each run writes `test-results/browser-fork/<run ID>/`, which Git ignores:
 
 ## Iterating and pushing
 
-While iterating, run only the browser specs that cover the change. Before each push that changes code in the browser harness (`e2e/`), wallet connection, transactions or screening, run the full `yarn test:browser` once. Run it on a clean tree, at the head being pushed.
+While iterating, run only the browser specs that cover the change. Before each push that changes code in the browser harness (`e2e/`), wallet connection, transactions, screening, `vite.config.js` or dependencies, run the full `yarn test:browser` once. Run it on a clean tree, at the head being pushed.
 
 ### Scoped runs
 
@@ -87,7 +87,7 @@ For a change to shared harness parts, run the full suite. These parts include fi
 
 ### Pushes and evidence
 
-A push needs the full suite when it changes code in the browser harness (`e2e/`), wallet connection, transactions or screening. Extensions are part of wallet connection, and `envVars.ts` is part of screening. Docs-only pushes and PR-body-only edits do not need the full suite. A merge of the base into the branch needs it when the merge changes code in those areas.
+A push needs the full suite when it changes code in the browser harness (`e2e/`), wallet connection, transactions, screening, `vite.config.js` or dependencies. Extensions are part of wallet connection, and `envVars.ts` is part of screening. A dependency change is any change to `package.json`'s dependencies or to `yarn.lock`. Docs-only pushes and PR-body-only edits do not need the full suite. A merge of the base into the branch needs it when the merge changes code in those areas.
 
 Report these from the full run's `summary.md`:
 
