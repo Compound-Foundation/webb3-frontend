@@ -856,6 +856,48 @@ export function checkCacheRoot(root: string): void {
   }
 }
 
+/**
+ * The cache root's account salt: 32 random bytes as hex, in `<root>/account-salt`. Test keys come from it,
+ * so a test has the same accounts in every run that uses this root. No one who cannot read the root can
+ * derive them. The first run writes the salt to a file of its own and links it into place, so the salt
+ * appears whole or not at all. The function refuses a file that is a symbolic link, is not a regular file,
+ * belongs to another user or is open to anyone else, and a file that holds no salt.
+ */
+export function accountSalt(root: string): string {
+  const file = path.join(root, 'account-salt');
+  const temporaryFile = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    fs.writeFileSync(temporaryFile, randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
+    fs.linkSync(temporaryFile, file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  } finally {
+    fs.rmSync(temporaryFile, { force: true });
+  }
+  const refused = new Error(
+    `The fork cache's ${file} must be a file you own, with mode 0600, and not a symbolic link.`
+  );
+  // The checks read the opened file, so no swap of the path between a check and the read goes unseen.
+  let descriptor: number;
+  try {
+    descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw refused;
+    throw error;
+  }
+  let salt: string;
+  try {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || (uid !== undefined && stat.uid !== uid) || (stat.mode & 0o077) !== 0) throw refused;
+    salt = fs.readFileSync(descriptor, 'utf8');
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  if (!/^[0-9a-f]{64}$/.test(salt)) throw new Error(`The fork cache's ${file} does not hold a salt: delete it.`);
+  return salt;
+}
+
 /** The shared cache file of one trust class for a mainnet fork of `blockNumber`. */
 export const sharedCacheFile = (root: string, trust: CacheTrust, blockNumber: number) =>
   path.join(root, trust, `mainnet-${blockNumber}.json`);
