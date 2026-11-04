@@ -856,6 +856,35 @@ export function checkCacheRoot(root: string): void {
   }
 }
 
+/**
+ * The cache root's account salt: 32 random bytes as hex, in `<root>/account-salt`, made with mode 0600 the
+ * first time. Test keys are derived from it, so a test has the same accounts in every run that uses this
+ * root, and no one who cannot read the root can derive them. It refuses a file that is a symbolic link, that
+ * another user owns or that anyone else can read or write, and a file that holds no salt.
+ */
+export function accountSalt(root: string): string {
+  const file = path.join(root, 'account-salt');
+  try {
+    fs.writeFileSync(file, randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || (uid !== undefined && stat.uid !== uid) || (stat.mode & 0o077) !== 0) {
+    throw new Error(`The fork cache's ${file} must be a file you own, with mode 0600, and not a symbolic link.`);
+  }
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  let salt: string;
+  try {
+    salt = fs.readFileSync(descriptor, 'utf8');
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  if (!/^[0-9a-f]{64}$/.test(salt)) throw new Error(`The fork cache's ${file} does not hold a salt: delete it.`);
+  return salt;
+}
+
 /** The shared cache file of one trust class for a mainnet fork of `blockNumber`. */
 export const sharedCacheFile = (root: string, trust: CacheTrust, blockNumber: number) =>
   path.join(root, trust, `mainnet-${blockNumber}.json`);

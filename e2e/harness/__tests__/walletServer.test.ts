@@ -17,6 +17,7 @@ import { anvilHandlers, FORK_BLOCK, FORK_HASH, startFakeNode, type FakeNode } fr
 import {
   accountKey,
   accountSeedOf,
+  privateKeyFrom,
   startWalletServer,
   tokenMatches,
   type WalletRequest,
@@ -27,6 +28,10 @@ const TOKEN = 'a'.repeat(64);
 const ORIGIN = 'http://127.0.0.1:5999';
 /** The upstream proxy that anvil forks from, which a reset names. */
 const UPSTREAM_URL = 'http://127.0.0.1:18546/';
+/** The account salt of a cache root, which seeded keys are derived with. */
+const SALT = 'b'.repeat(64);
+/** The order of the secp256k1 group. */
+const SECP256K1_ORDER = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 
 const fakeScreening = (): ScreeningLane & { behaviours: Map<string, string>; resets: number } => {
   const behaviours = new Map<string, string>();
@@ -68,6 +73,7 @@ beforeEach(async () => {
     token: TOKEN,
     screening,
     onSecret: (secret) => keys.push(secret),
+    accountSalt: SALT,
     verify: async (fork, target) => {
       verifyCalls += 1;
       if (verifyFails) throw new Error('The local node is not the expected fork: a client that is not anvil.');
@@ -735,7 +741,53 @@ describe('reset', () => {
     const other = await accountsAfter('test-b/0/0');
     expect(other.filter((address) => first.includes(address))).toEqual([]);
     // The first account of a seed is the derived key for index 0.
-    expect(first[0]).toBe(privateKeyToAccount(accountKey('test-a/0/0', 0)).address);
+    expect(first[0]).toBe(privateKeyToAccount(accountKey(SALT, 'test-a/0/0', 0)).address);
+  });
+
+  test('derives a key as keccak256 of the salt, the seed and the index, which changes with each of them', () => {
+    const expected = utils.keccak256(utils.toUtf8Bytes(`cf-browser-harness account key\n${SALT}\ntest-a/0/0\n0`));
+    expect(accountKey(SALT, 'test-a/0/0', 0)).toBe(expected);
+    const keysOf = [
+      accountKey(SALT, 'test-a/0/0', 0),
+      accountKey('c'.repeat(64), 'test-a/0/0', 0),
+      accountKey(SALT, 'test-b/0/0', 0),
+      accountKey(SALT, 'test-a/0/0', 1),
+    ];
+    expect(new Set(keysOf).size).toBe(keysOf.length);
+  });
+
+  test('re-hashes a hash that is not a private key: 0, or the group order and above', () => {
+    const zero = `0x${'0'.repeat(64)}` as const;
+    const order = `0x${SECP256K1_ORDER.toString(16)}` as const;
+    expect(privateKeyFrom(zero)).toBe(utils.keccak256(zero));
+    expect(privateKeyFrom(order)).toBe(utils.keccak256(order));
+    expect(privateKeyFrom(`0x${'f'.repeat(64)}`)).toBe(utils.keccak256(`0x${'f'.repeat(64)}`));
+    const valid = `0x${'1'.repeat(64)}` as const;
+    expect(privateKeyFrom(valid)).toBe(valid);
+  });
+
+  test('without an account salt, a seeded reset still makes random keyed accounts', async () => {
+    const unsalted = await startWalletServer({
+      fork: { localUrl: node.url },
+      target: { number: FORK_BLOCK, hash: FORK_HASH },
+      upstreamUrl: UPSTREAM_URL,
+      token: TOKEN,
+      screening,
+    });
+    const unsaltedClient = new ControlClient(unsalted.url, TOKEN);
+    try {
+      await unsaltedClient.reset('test-a/0/0');
+      const { address: one } = await unsaltedClient.newAccount();
+      await unsaltedClient.reset('test-a/0/0');
+      const { address: two } = await unsaltedClient.newAccount();
+      expect(one).not.toBe(two);
+    } finally {
+      await unsalted.close();
+    }
+  });
+
+  test('accepts a seed of 512 characters', async () => {
+    await expect(client.reset('x'.repeat(512))).resolves.toEqual({ generation: 1 });
   });
 
   test('without a seed, a reset makes new random keyed accounts', async () => {

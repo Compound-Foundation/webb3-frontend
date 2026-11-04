@@ -10,6 +10,7 @@ import path from 'node:path';
 
 import { server as mswServer } from '../../../handlers/server';
 import {
+  accountSalt,
   ALWAYS_LOGGED_METHODS,
   isCacheAnvil,
   startCacheableProxy,
@@ -433,6 +434,36 @@ describe('the shared fork cache', () => {
       const file = path.join(scratch, 'file');
       fs.writeFileSync(file, '');
       expect(() => checkCacheRoot(file)).toThrow(/must be a directory you own, with mode 0700/);
+    });
+  });
+
+  describe('the account salt', () => {
+    const saltFile = () => path.join(root, 'account-salt');
+
+    test('creates a random 32-byte salt with mode 0600 once, and returns the same salt after that', () => {
+      checkCacheRoot(root);
+      const salt = accountSalt(root);
+      expect(salt).toMatch(/^[0-9a-f]{64}$/);
+      expect(fs.statSync(saltFile()).mode & 0o777).toBe(0o600);
+      expect(accountSalt(root)).toBe(salt);
+      const other = path.join(scratch, 'other-root');
+      checkCacheRoot(other);
+      expect(accountSalt(other)).not.toBe(salt);
+    });
+
+    test('refuses a salt file that others can read, a symbolic link, and malformed content', () => {
+      checkCacheRoot(root);
+      fs.writeFileSync(saltFile(), 'a'.repeat(64), { mode: 0o644 });
+      fs.chmodSync(saltFile(), 0o644);
+      expect(() => accountSalt(root)).toThrow(/account-salt must be a file you own, with mode 0600/);
+      fs.rmSync(saltFile());
+      const target = path.join(scratch, 'salt-elsewhere');
+      fs.writeFileSync(target, 'a'.repeat(64), { mode: 0o600 });
+      fs.symlinkSync(target, saltFile());
+      expect(() => accountSalt(root)).toThrow(/account-salt must be a file you own, with mode 0600/);
+      fs.rmSync(saltFile());
+      fs.writeFileSync(saltFile(), 'not a salt', { mode: 0o600 });
+      expect(() => accountSalt(root)).toThrow(/account-salt does not hold a salt/);
     });
   });
 

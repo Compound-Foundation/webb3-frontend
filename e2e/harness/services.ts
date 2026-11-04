@@ -37,6 +37,7 @@ import {
 } from './egress';
 import {
   CACHED_PROXY_PORT,
+  accountSalt,
   checkCacheRoot,
   isCacheAnvil,
   createRedactor,
@@ -345,6 +346,10 @@ export async function startServices({
     const anvilOffReason =
       cacheRoot === undefined || isCacheAnvil(anvil.version) ? undefined : 'the installed anvil cannot read the cache';
     const cachePort = cacheRoot !== undefined && anvilOffReason === undefined ? CACHED_PROXY_PORT : undefined;
+    // With the cache on, each test's keys are derived from its identity and this salt, so its accounts repeat
+    // in every run that uses the root, and the cache holds what anvil read for them.
+    const salt = cachePort === undefined || cacheRoot === undefined ? undefined : accountSalt(cacheRoot);
+    if (salt !== undefined) registerSecret(salt);
     const stats = () => ({
       rpcProxy: {
         forwarded: Object.fromEntries(rpcProxy.stats.forwarded),
@@ -455,6 +460,7 @@ export async function startServices({
           log: (line) =>
             writeLog(walletLog, `${new Date().toISOString()} lane ${index} ${walletRedactor.redact(line)}\n`),
           onSecret: registerSecret,
+          accountSalt: salt,
         });
         const info: LaneInfo = {
           index,

@@ -11,8 +11,9 @@
 // `eth_sendTransaction` from an impersonated sender, after the server checks again that the node is the
 // expected local fork. So no signed chain-1 transaction exists that could be replayed on mainnet. Messages
 // and typed data are signed with the account's key, held only in this process. A reset can carry a seed, the
-// test's identity, from which the keys of that test's accounts are derived. The same test then has the same
-// addresses in every run, so the fork cache holds what anvil read for them. The keys sign only on the fork.
+// test's identity. With the fork cache on, the keys of that test's accounts are derived from the seed and the
+// cache root's random salt, so the test has the same addresses in every run that uses that cache, and the
+// cache holds what anvil read for them. No one without the salt can derive the keys. Otherwise keys are random.
 import type { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
@@ -117,6 +118,8 @@ export type WalletServerOptions = {
   log?: (line: string) => void;
   /** Gets every key the server makes, for the run's secret scan. */
   onSecret?: (secret: string) => void;
+  /** The cache root's account salt. Without it, a reset's seed is ignored and every key is random. */
+  accountSalt?: string;
   /** The most provider calls one generation records. Past it the record reports an overflow. */
   providerCallLimit?: number;
   /** Checks the fork before each send. Tests replace it to see the server refuse. */
@@ -191,12 +194,19 @@ export const accountSeedOf = ({
   retry: number;
 }) => `${testId}/${repeatEachIndex}/${retry}`;
 
-/** The key of the keyed account at `index`, counted from 0, among those made after a reset with `seed`. */
-export function accountKey(seed: string, index: number): Hex {
-  let key = keccak256(stringToBytes(`cf-browser-harness account key\n${seed}\n${index}`));
+/** `hash` when it is a private key, that is at least 1 and below the group order, else it hashed until it is one. */
+export function privateKeyFrom(hash: Hex): Hex {
+  let key = hash;
   while (BigInt(key) === 0n || BigInt(key) >= SECP256K1_ORDER) key = keccak256(key);
   return key;
 }
+
+/**
+ * The key of the keyed account at `index`, counted from 0, among those made after a reset with `seed`, under
+ * the cache root's `salt`.
+ */
+export const accountKey = (salt: string, seed: string, index: number): Hex =>
+  privateKeyFrom(keccak256(stringToBytes(`cf-browser-harness account key\n${salt}\n${seed}\n${index}`)));
 
 /** The seed a reset request carries: none, or a string of 1 to `MAX_ACCOUNT_SEED_LENGTH` characters. */
 function accountSeedParam(seed: unknown): string | undefined {
@@ -223,7 +233,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     rpc<T>(fork.localUrl, method, params, { timeoutMs: 60_000 });
 
   let generation = 0;
-  /** The seed of this generation's keyed accounts, or none for random keys. */
+  /** The seed of this generation's keyed accounts. With no seed, or no salt, keys are random. */
   let accountSeed: string | undefined;
   /** How many keyed accounts this generation has made. */
   let keyedAccounts = 0;
@@ -635,7 +645,11 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       if (!SCREENING_BEHAVIOURS.includes(behaviour)) throw new HttpError(400, 'unknown screening behaviour');
       let account: Account;
       if (hasKey) {
-        const key = accountSeed === undefined ? generatePrivateKey() : accountKey(accountSeed, keyedAccounts++);
+        const { accountSalt } = options;
+        const key =
+          accountSeed === undefined || accountSalt === undefined
+            ? generatePrivateKey()
+            : accountKey(accountSalt, accountSeed, keyedAccounts++);
         options.onSecret?.(key);
         account = { address: privateKeyToAccount(key).address, key };
       } else {
