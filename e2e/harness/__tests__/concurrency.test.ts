@@ -28,7 +28,6 @@ const ROOMY: ConcurrencySignals = {
   idleFraction: 0.9,
   availableMemoryBytes: 100 * GIB,
   memorySource: 'vm_stat',
-  specFiles: 11,
   upstream: 'public',
   cache: 'warm',
 };
@@ -72,9 +71,11 @@ describe('the estimate', () => {
     expect(selection.reasons.join(' ')).toMatch(/at least one worker/);
   });
 
-  test('uses no more workers than there are spec files, since a file runs in one worker', () => {
-    expect(selectWorkers({ ...ROOMY, specFiles: 3 }, {}).workers).toBe(3);
-    expect(selectWorkers({ ...ROOMY, specFiles: 3 }, {}).limits.files).toBe(3);
+  test('takes no limit from the spec files, since each test, not each file, is scheduled on a worker', () => {
+    const selection = selectWorkers(ROOMY, {});
+    expect(selection.limits).not.toHaveProperty('files');
+    expect(selection.reasons.join(' ')).not.toMatch(/spec file/);
+    expect(selection.missing).not.toContain('spec file count');
   });
 
   test('limits a run that reads the public endpoints with no warm cache, whose misses all go upstream', () => {
@@ -95,7 +96,7 @@ describe('the estimate', () => {
       },
       {}
     );
-    expect(selection.missing).toEqual(['CPU count', 'CPU idle share', 'available memory', 'spec file count']);
+    expect(selection.missing).toEqual(['CPU count', 'CPU idle share', 'available memory']);
     expect(selection.workers).toBe(1);
     // An unknown idle share counts half the CPUs as busy.
     const halfIdle = selectWorkers({ ...ROOMY, idleFraction: undefined }, {});

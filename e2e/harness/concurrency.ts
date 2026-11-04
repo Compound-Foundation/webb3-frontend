@@ -7,13 +7,14 @@
 //   a short sample, less the shared services' CPUs, divided by one worker's CPUs.
 // - Memory: the memory the operating system can give without swapping, less the shared services and
 //   headroom, divided by one worker's memory.
-// - Files: Playwright runs a spec file in one worker (`fullyParallel: false`), so more workers than spec
-//   files would sit idle.
 // - Upstream: a run on the public endpoints without a warm cache sends every miss of every worker upstream,
 //   and those endpoints limit their rate. Such a run gets a lower maximum.
 // - The default maximum, which the benchmarks in docs/browser-fork-wallet.md support.
 //
 // The signals are read once, in the runner, and only when the environment does not decide the count.
+//
+// The number of spec files sets no limit: Playwright schedules each test on its own (`fullyParallel: true`),
+// and the suite has many more tests than the default maximum.
 //
 // BROWSER_TEST_WORKERS sets the count outright (1 included), and Playwright's `--workers` overrides both.
 import { execFileSync } from 'node:child_process';
@@ -26,9 +27,9 @@ import { forkCacheRoot, PINNED_BLOCK, sharedCacheFile } from './fork';
 const GIB = 1024 ** 3;
 
 /**
- * The most workers the estimate chooses. A spec file runs in one worker, and the two longest files take about
- * 85 and 75 s of the suite's 290 s, so past four workers they bound the run: six workers were 6 % faster than
- * four in the benchmarks, for 1.1 GiB more memory and half again the upstream burst.
+ * The most workers the estimate chooses. Per-test scheduling was benchmarked at four workers, where warm runs
+ * were about 14 % faster than with each spec file in one worker. More workers are unmeasured with per-test
+ * scheduling, and each costs about 1.1 GiB of memory and adds to the upstream burst.
  */
 export const DEFAULT_MAX_WORKERS = 4;
 /**
@@ -72,8 +73,6 @@ export type ConcurrencySignals = {
   availableMemoryBytes?: number;
   /** Where `availableMemoryBytes` came from. */
   memorySource?: string;
-  /** The spec files the run's projects match. */
-  specFiles?: number;
   /** The upstream's trust class: public endpoints or a private BROWSER_FORK_RPC_URL. */
   upstream: 'public' | 'private';
   /** Whether a shared fork cache file for the pinned block exists. */
@@ -87,8 +86,8 @@ export type WorkerSelection = {
   /** The signals that could not be read, for which a conservative value stood in. */
   missing: string[];
   signals: ConcurrencySignals;
-  /** Each limit the estimate took the smallest of. A missing file count sets no file limit. */
-  limits: { cpu?: number; memory?: number; files?: number; upstream: number; max: number };
+  /** Each limit the estimate took the smallest of. */
+  limits: { cpu?: number; memory?: number; upstream: number; max: number };
 };
 
 const gib = (bytes: number) => `${(bytes / GIB).toFixed(1)} GiB`;
@@ -144,10 +143,6 @@ export function selectWorkers(signals: ConcurrencySignals, env: NodeJS.ProcessEn
     );
   }
 
-  const files = signals.specFiles;
-  if (files === undefined) missing.push('spec file count');
-  else reasons.push(`files: ${files} spec files, and a file runs in one worker`);
-
   const isUpstreamLimited = signals.upstream === 'public' && signals.cache !== 'warm';
   const upstream = isUpstreamLimited ? PUBLIC_COLD_MAX_WORKERS : DEFAULT_MAX_WORKERS;
   reasons.push(
@@ -157,7 +152,7 @@ export function selectWorkers(signals: ConcurrencySignals, env: NodeJS.ProcessEn
   );
   reasons.push(`the default maximum is ${DEFAULT_MAX_WORKERS}`);
 
-  const smallest = Math.min(cpu, memory, files ?? Infinity, upstream, DEFAULT_MAX_WORKERS);
+  const smallest = Math.min(cpu, memory, upstream, DEFAULT_MAX_WORKERS);
   if (smallest < 1) reasons.push('the smallest limit is below one, and a run has at least one worker');
   return {
     workers: Math.max(1, smallest),
@@ -168,7 +163,6 @@ export function selectWorkers(signals: ConcurrencySignals, env: NodeJS.ProcessEn
     limits: {
       cpu,
       memory: signals.availableMemoryBytes === undefined ? undefined : memory,
-      files,
       upstream,
       max: DEFAULT_MAX_WORKERS,
     },
@@ -353,19 +347,11 @@ function cgroupCpuLimit(platform: string): number | undefined {
   return platform === 'linux' ? ownCgroupLimits().cpus : undefined;
 }
 
-function countSpecFiles(testDir: string): number | undefined {
-  try {
-    return fs.readdirSync(testDir).filter((name) => name.endsWith('.spec.ts')).length;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Reads the signals: cheap reads of the operating system and one CPU sample of `IDLE_SAMPLE_MS`. Each signal
  * that cannot be read is left out, and the estimate names it.
  */
-export function readSignals(env: NodeJS.ProcessEnv, testDir: string): ConcurrencySignals {
+export function readSignals(env: NodeJS.ProcessEnv): ConcurrencySignals {
   const platform = process.platform;
   const isPrivate = (env.BROWSER_FORK_RPC_URL ?? '') !== '';
   let cache: ConcurrencySignals['cache'] = 'cold';
@@ -392,7 +378,6 @@ export function readSignals(env: NodeJS.ProcessEnv, testDir: string): Concurrenc
     idleFraction: sampleIdleFraction(IDLE_SAMPLE_MS),
     availableMemoryBytes: memory.bytes,
     memorySource: memory.source,
-    specFiles: countSpecFiles(path.resolve(testDir)),
     upstream: isPrivate ? 'private' : 'public',
     cache,
   };
