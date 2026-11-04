@@ -150,6 +150,11 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(positionCard().transaction?.state).toBe(TransactionState.AwaitingConfirmation);
     await waitFor(() => expect(requestedCalls(wallet)).toEqual(['withdraw']));
     await waitFor(() => expect(positionCard().transaction?.state).toBe(TransactionState.Pending));
+    // The manager is looking for the Comet step's receipt, which is held back. No wrapper step has
+    // started: the lifecycle never left idle, and no other write was handed to the manager.
+    await waitFor(() => expect(wallet.getTransactionReceipt).toHaveBeenCalled());
+    expect(live.action.state.phase).toBe('idle');
+    expect(live.writes.size).toBe(0);
     // The Comet step's receipt is pending: nothing is asked of the wrapper, and the row is held.
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(cometWithdrawals(wallet)).toEqual([

@@ -107,8 +107,9 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await waitForHoldLook(looks);
     // 250 USDC is supplied directly again from elsewhere.
     chain.directSupply = DIRECT;
+    const looksBeforeRise = holdLooks.mock.calls.length;
     show({ state: stateWithDirectSupply(DIRECT) });
-    await waitForHoldLook(looks + 1);
+    await waitForHoldLook(looksBeforeRise);
 
     act(() => live.queue.addOrUpdateAction(entry));
     await expectHeldBack(wallet, chain, entry);
@@ -374,6 +375,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     });
     // The Comet state read again starts a look at the hold, which waits for the provider.
     readProvider.getBlockNumber.mockClear();
+    const looksBefore = holdLooks.mock.calls.length;
     show({ state: stateWithDirectSupply(DIRECT) });
     await waitFor(() => expect(readProvider.getBlockNumber).toHaveBeenCalled());
 
@@ -383,6 +385,9 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await submit();
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Earlier Request Still Pending');
+    // Every look since the provider lagged, the one the Comet state started included, has ended.
+    await waitForHoldLook(looksBefore);
+    expect(readProvider.getLogs).toHaveBeenCalled();
     for (const [filter] of readProvider.getLogs.mock.calls) expect(filter.toBlock).toBeGreaterThanOrEqual(chain.block);
   });
 

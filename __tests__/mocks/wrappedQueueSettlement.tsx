@@ -802,6 +802,7 @@ export async function holdFirstStep(direct = DIRECT) {
 
 /** Submits `entry` again and checks that nothing reaches the wallet and the row says why. */
 export async function expectHeldBack(wallet: Wallet, chain: Chain, entry: Action) {
+  const looks = holdLooks.mock.calls.length;
   await submit();
   expect(requestedCalls(wallet)).toEqual(['withdraw']);
   expect(queued()).toEqual([entry]);
@@ -809,6 +810,10 @@ export async function expectHeldBack(wallet: Wallet, chain: Chain, entry: Action
     action: [ActionType.Withdraw, expect.anything(), entry[2]],
     label: 'Earlier Request Still Pending',
   });
+  // Every look at the hold has ended, and any change it made to the stored holds is done: the hold stays.
+  await waitForHoldLook(looks);
+  await waitForIdle();
+  expect(storedHolds()).toEqual([expect.objectContaining({ kind: 'held', amount: String(entry[2]) })]);
   // Should the held request now execute, Comet takes 200 USDC of the supply and lends nothing.
   executeLate(chain);
   expect(chain.borrowed).toBe(0n);

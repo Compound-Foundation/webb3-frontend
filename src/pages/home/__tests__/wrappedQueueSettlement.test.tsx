@@ -20,6 +20,7 @@ import {
   sentCalls,
   submit,
   switchWriteNetwork,
+  waitForIdle,
 } from '../../../../__tests__/mocks/wrappedQueueSettlement';
 
 // uuid ships ESM only, which Jest does not load here. The transaction manager uses it.
@@ -77,8 +78,8 @@ describe('a queued wrapper action sent before a change of network', () => {
     wallet.releaseReceipts();
     await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
     await waitFor(() => expect(queued()).toEqual([]));
-    // Nothing is left to follow, so nothing more can be sent.
-    await waitFor(() => expect(live.manager.transactions).toEqual([]));
+    // No run, sent action or write is left that could send the supply again.
+    await waitForIdle();
 
     expect(sentCalls(wallet, 'supplyAndWrap')).toHaveLength(1);
     expect(chain.balance).toBe(10_000_000_000n - AMOUNT);
