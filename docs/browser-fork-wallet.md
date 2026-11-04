@@ -27,7 +27,7 @@ Each Playwright worker has its own fork lane. Playwright schedules each test on 
 
 In the [per-test scheduling benchmarks](#per-test-against-per-file-scheduling), warm four-worker runs took 135, 141 and 157 seconds. Cold runs took 154 seconds with four workers and 270 with two. Set-up took 18–20 seconds warm and 29–33 seconds cold across both scheduling modes. These runs retained baseline failures and the skipped AC7 case, as detailed below.
 
-On `main` at `3c19d18` (2026-11-03), on the benchmark machine with 4 workers and a warm cache, `yarn test:browser:dev` took 142 s and `yarn test:browser` took 161 s. Each run failed one test, `mixed-position.spec.ts:416`, which also fails on `main` (COM-369). See [the benchmarks below](#benchmarks) for other worker counts and cold caches.
+On `main` at `3c19d18` (2026-11-03), on the benchmark machine with 4 workers and a warm cache, `yarn test:browser:dev` took 142 s and `yarn test:browser` took 161 s. Each run failed one test, `mixed-position.spec.ts:416`, which failed on `main` until COM-369 set a gas limit on sends that name none (see [How the wallet signs and sends](#how-the-wallet-signs-and-sends)). See [the benchmarks below](#benchmarks) for other worker counts and cold caches.
 
 Each run writes `test-results/browser-fork/<run ID>/`, which Git ignores:
 
@@ -307,7 +307,7 @@ The comparison supports the scheduling decision:
 
 Known failures and skipped coverage remain:
 
-- **Baseline failure at `mixed-position.spec.ts:416`.** The test that keeps the hold when another interface supplies 100 USDC and withdraws 301 USDC failed in all ten counted runs. Both modes reported `transaction … on the fork: status reverted`. This is the known main-branch failure with anvil 1.9.0. Every per-file run on the same commit reproduced it. The fix is outside COM-368's scope.
+- **Baseline failure at `mixed-position.spec.ts:416`.** The test that keeps the hold when another interface supplies 100 USDC and withdraws 301 USDC failed in all ten counted runs. Both modes reported `transaction … on the fork: status reverted`. This was the main-branch failure with anvil 1.9.0 that COM-369 fixed (see [How the wallet signs and sends](#how-the-wallet-signs-and-sends)). Every per-file run on the same commit reproduced it. The fix is outside COM-368's scope.
 - **Intermittent failure at `mixed-position.spec.ts:601`.** The reorg test failed in per-file warm repeat 2 and per-test warm repeat 3. Both failures timed out after 60 seconds on the same `expect.poll` assertion for `isReorged` at line 669. The test passed in about 11–13 seconds in the other eight runs. The failure with `fullyParallel: false` on the same commit shows that per-test scheduling did not cause it. COM-349 had also seen this timeout once under four-worker load. COM-368 leaves this intermittent failure in both modes unfixed and changes no spec behaviour.
 - **Skipped AC7 case.** Every other implemented test passed in every counted run. The AC7 `NODE_ENV=development` case stays skipped, so AC7 and acceptance remain **INCOMPLETE** until the product fix and execution of that case. Each counted run's own acceptance verdict was **FAIL** because of `:416`. Without that failure, the skipped case still prevents clean acceptance.
 
@@ -499,6 +499,7 @@ The provider answers `eth_chainId`, `net_version`, `eth_accounts`, `wallet_getPe
 ## How the wallet signs and sends
 
 - **Transactions are never signed.** An approved `eth_sendTransaction` goes to anvil's `eth_sendTransaction` from the impersonated sender, with only `from`, `to`, `data`, `value`, `gas` and the fee fields, after the wallet verifies the fork again. Each block is mined 12 s after the previous one, so interest accrual, and every Comet assertion, is the same on each run. No signed chain-1 transaction exists that could be replayed on mainnet.
+- **Gas limits.** A send that names no `gas`, from the app or from `POST /v1/fork/send`, gets anvil's `eth_estimateGas` at the `pending` block, asked after the next block's time is set. Otherwise anvil 1.9.0 fills in the limit from an estimate at the latest block's time. When the latest block holds a Comet action, that estimate leaves out the interest accrual the next block does. A Comet withdrawal sent with it runs out of gas inside USDC's transfer and reverts without data. If anvil refuses the estimate, nothing is sent: the page gets code -32603 with anvil's message, and `POST /v1/fork/send` answers HTTP 500. A send that names its own `gas` keeps it.
 - **Messages are signed** with a key derived from the cache root's salt, the test's seed and the keyed account's index when the cache is on. Without a salt or seed, `viem` `generatePrivateKey` makes a random key. Every key stays only in the wallet server's memory and goes to the secret scan. The salt is also a run secret. No key is funded on any public chain, anvil's default keys are never used, and no control answer, log or report holds a key.
 - An impersonated account has no key, so `personal_sign` and `eth_signTypedData_v4` from it answer 4200.
 
