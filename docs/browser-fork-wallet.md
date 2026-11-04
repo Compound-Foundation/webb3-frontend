@@ -23,7 +23,9 @@ The suite lives in `e2e/`: the harness in `e2e/harness/`, the browser specs in `
 | `yarn test:browser:dev`                       | The `dev` project only, without the production builds. Its summary marks AC7's production coverage **INCOMPLETE**.                                                                                                                                                                                                                                                                                       |
 | `yarn test:browser:open`                      | An interactive session: a headed browser on the app, for an agent or a person to drive. With `BROWSER_WALLET_HEADLESS=1`, a headless one. See [Interactive control](#interactive-control).                                                                                                                                                                                                               |
 
-Each Playwright worker has its own fork lane, so spec files run in parallel. Tests within a file run in order, with no retries, so a flaky case shows as a failure. The harness estimates the worker count unless you set it. See [Choosing the worker count](#choosing-the-worker-count).
+Each Playwright worker has its own fork lane. Playwright schedules each test on its own (`fullyParallel: true`), so tests from one file can run in different workers at once. There are no retries, so a flaky case shows as a failure. The harness estimates the worker count unless you set it. See [Choosing the worker count](#choosing-the-worker-count).
+
+In the [per-test scheduling benchmarks](#per-test-against-per-file-scheduling), warm four-worker runs took 135, 141 and 157 seconds. Cold runs took 154 seconds with four workers and 270 with two. Set-up took 18–20 seconds warm and 29–33 seconds cold across both scheduling modes. These runs retained baseline failures and the skipped AC7 case, as detailed below.
 
 On `main` at `3c19d18` (2026-11-03), on the benchmark machine with 4 workers and a warm cache, `yarn test:browser:dev` took 142 s and `yarn test:browser` took 161 s. Each run failed one test, `mixed-position.spec.ts:416`, which also fails on `main` (COM-369). See [the benchmarks below](#benchmarks) for other worker counts and cold caches.
 
@@ -200,14 +202,13 @@ The estimate takes the smallest limit, rounded down, with at least one worker:
 ```text
 cpuLimit = floor((availableCPUs × idleShare - 2) / 2)
 memoryLimit = floor((availableMemory - 4 GiB) / 1.5 GiB)
-workers = max(1, min(cpuLimit, memoryLimit, specFiles, upstreamLimit, 4))
+workers = max(1, min(cpuLimit, memoryLimit, upstreamLimit, 4))
 ```
 
 - **CPU.** `availableCPUs` comes from `os.availableParallelism()`, capped by the CPU quota of the process's own Linux cgroup when present. The harness finds that cgroup from `/proc/self/cgroup` and the mounted hierarchy, and takes the tightest quota from it up to the mount point, so a nested systemd scope or CI slice counts. If that call fails, the harness uses `os.cpus().length`. An unknown count becomes 2. `idleShare` is the idle fraction over a 300 ms sample, or 50% if unavailable. The formula reserves 2 CPUs for shared services and budgets 2 per worker.
 - **Memory.** On Linux, available memory is `MemAvailable`, or, when lower, the tightest memory limit less use on the path from the process's own cgroup (v2 or v1) up to the mount point. On macOS, it is the free, inactive and speculative pages from `vm_stat`. The fallback is `os.freemem()`. Unknown memory sets the memory limit to one worker. The formula reserves 4 GiB for shared services and headroom, then budgets 1.5 GiB per worker.
-- **Files.** The estimator counts the `*.spec.ts` files in `e2e/specs`. A file runs in one worker because `fullyParallel` is false. If the count is unavailable, this limit is omitted.
 - **Upstream.** Public endpoints without a warm shared cache file have a limit of 2, including when the cache is off. A warm cache or a private endpoint uses 4.
-- **Maximum.** The estimate never exceeds 4 workers.
+- **Maximum.** The estimate never exceeds 4 workers. More than four workers is unmeasured with per-test scheduling.
 
 Set a whole number from 1 to 16 to bypass the estimate and its limits. No machine signals are read for that override. `auto`, unset or empty selects the estimate. Any other value stops the run. Playwright's `--workers` overrides the configured count. An interactive session uses one lane and one worker.
 
@@ -219,11 +220,13 @@ yarn test:browser --workers=2
 
 The startup line and `summary.md`'s Run section report the count, selection source, each limit's reasoning and unavailable signals. `manifest.json` records the selection and the count Playwright uses. If `--workers` changes the selected count, the printed report names that override and the earlier count instead of the estimate's reasons. The manifest retains those reasons and missing signals.
 
-The CPU sample is short, and other processes can change the load after selection. The cache signal checks that a shared file exists, not whether anvil can use it. If port 18546 is taken, the run uses an uncached fork even if the estimate assumed a warm cache. The file count includes all spec files, so a filtered run can use fewer workers than the estimate allows.
+The CPU sample is short, and other processes can change the load after selection. The cache signal checks that a shared file exists, not whether anvil can use it. If port 18546 is taken, the run uses an uncached fork even if the estimate assumed a warm cache.
+
+The estimator reads no file count and applies no test-count limit, so its selected lane count can exceed the number of tests in a filtered run. Unused lanes start no anvil. Playwright schedules individual tests, and the full inventory has 59 entries, far above the four-worker maximum. No test-count limit replaces the file limit because the full suite has enough tests to fill the workers, and the old file count ignored filters anyway.
 
 #### Benchmarks
 
-These measurements were taken on 2026-11-03 at commit `559b3e3`. They cover that commit's full suite: 51 cases across the dev and prod-build projects, with 50 implemented and one skipped. The skipped AC7 `NODE_ENV=development` case keeps the acceptance verdict **INCOMPLETE** until the product fix. Commit `37981f6` adds another harness-security browser test, so these results do not measure its full suite.
+COM-349 measured worker counts with per-file scheduling on 2026-11-03 at commit `559b3e3`. These measurements cover that commit's full suite: 51 cases across the dev and prod-build projects, with 50 implemented and one skipped. The skipped AC7 `NODE_ENV=development` case keeps the acceptance verdict **INCOMPLETE** until the product fix. Commit `37981f6` adds another harness-security browser test, so these results do not measure its full suite.
 
 The benchmark machine was an Apple M4 Max with 16 CPUs and 128 GB of memory. The runs used anvil 1.9.0, Node 22.22.0, Playwright 1.64.1 and pinned block 26244888. Each run selected the public drpc endpoint. Runs executed one at a time, alternating cold and warm caches, with worker counts set by `BROWSER_TEST_WORKERS`. A cold run used an empty cache directory. Each warm run used a fresh directory with the same baseline cache, copied from the cold one-worker run's promotion.
 
@@ -244,10 +247,73 @@ Other sessions ran on the machine during most measurements, with one-minute load
 
 Every measured run passed the 50 implemented tests, with no flaky result, upstream failure, cleanup error or lane restart. Every lane's cache merged. These results support the estimator's constants:
 
-- **Four-worker maximum.** Warm wall time fell from 314 seconds with one worker to 197 with two, 129 with four, and 122 with six. Six workers gained about 6% over four, while peak upstream requests per second rose from 60 to 90. Peak RSS rose from 7.7–8.2 GiB at four workers to 9.4 GiB at six. The wallet-events and screening files took about 85 and 75 seconds of roughly 290 seconds of total test time. Since a file runs in one worker, those files limit further gains. Per-test parallelism stays off and needs its own review.
+- **Four-worker maximum.** Warm wall time fell from 314 seconds with one worker to 197 with two, 129 with four, and 122 with six. Six workers gained about 6% over four, while peak upstream requests per second rose from 60 to 90. Peak RSS rose from 7.7–8.2 GiB at four workers to 9.4 GiB at six. The wallet-events and screening files took about 85 and 75 seconds of roughly 290 seconds of total test time. Each file ran in one worker in this benchmark, so those files limited further gains. The [per-test comparison below](#per-test-against-per-file-scheduling) supports per-test scheduling with the same four-worker maximum.
 - **Two-worker cold-public limit.** Cold runs sent 2614, 2951 and 3633 upstream requests at one, two and four workers. The peak rate rose from 38 to 89 requests per second, with up to 11 open requests. Each lane sends its own cache misses upstream. drpc answered every request in these runs, but public endpoint rate limits are not published and can change. Warm runs still sent about 2130 requests because fresh accounts, resets and misses need the upstream.
 - **Memory budget.** The samples showed about 3 GiB shared and about 1.1 GiB per worker. Chromium used about 0.7 GiB per worker, Node about 0.3 GiB, and anvil under 0.1 GiB. No swap was used. The estimator budgets 4 GiB shared and 1.5 GiB per worker to leave headroom.
 - **CPU budget.** A worker averaged about 0.6 CPUs and peaked near 1.6. The estimator budgets 2 CPUs per worker and reserves 2 for shared services.
+
+##### Per-test against per-file scheduling
+
+COM-368 retains per-test scheduling in commit `a60a504`. Warm four-worker runs without the intermittent reorg timeout averaged 138 seconds with per-test scheduling against 161.5 seconds with per-file scheduling, about 14 % faster. The four-worker maximum and two-worker cold-public limit stay unchanged.
+
+The comparison ran on 2026-11-03, in the PST afternoon and evening, on an Apple M4 Max with 16 CPUs and 128 GB. Every counted run used a clean tree at commit `3c19d18`, the main-branch merge of PR #97. Per-file runs used that commit's configuration with `fullyParallel: false`. Per-test runs used the same commit and configuration with Playwright's `--fully-parallel` flag. The runs used anvil 1.9.0, Node 22.22.0, Playwright 1.64.1, pinned block 26244888 and the public drpc endpoint (`https://eth.drpc.org`).
+
+Worker counts came from `BROWSER_TEST_WORKERS`. The estimator sampled on this machine chose two workers for a cold public run and four for a warm run. Cold runs therefore compared the estimated count of two and the maximum of four. Warm runs used four workers, which matched both the estimate and the maximum, with three runs per mode.
+
+Runs executed one at a time, alternating per-file and per-test scheduling. Each cold run used an empty 0700 cache directory. Each warm run used a fresh 0700 directory with the same baseline cache file used by COM-349, copied unchanged (SHA-256 prefix `df7d827a`). Every warm run therefore started from the same cache.
+
+A sampler read the run's process tree every two seconds for resident memory (RSS) and CPU use. It recorded the one-minute load average before each run and its maximum during the run. Upstream counts came from `stats.json`. Set-up covers global setup through services ready, including production builds. Tests + teardown covers services ready through the end of teardown, including cache promotion. Wall time covers the whole command.
+
+Other sessions ran browser suites and other work during most runs. One-minute load averages reached 29–38 during the first eight runs, so timings carry noise. The third warm pair ran on a quiet machine, with maximum load averages of 6.8 and 7.4.
+
+Two attempts are excluded from the table:
+
+- The first attempt at the third warm pair ran while another session held port 18546. Both runs used uncached forks with cache state `off`. They took 441 and 394 seconds, sent about 20,600 and 20,900 upstream requests, and had 291 and 163 upstream failures. The pair was rerun after the port was free.
+- An earlier matrix attempt on commit `f33e64d` stopped during its first run when PR #97 merged. The matrix restarted on `3c19d18`, and the earlier attempt produced no counted result.
+
+| Run           | Scheduling | Workers | Wall (s) | Set-up (s) | Tests + teardown (s) | Passed / failed / skipped | Failed tests                                          | Upstream requests | Upstream errors | Peak open upstream | Peak upstream/s | Peak RSS (GiB) | Mean / peak CPU (%) | Load before / max |
+| ------------- | ---------- | ------- | -------- | ---------- | -------------------- | ------------------------- | ----------------------------------------------------- | ----------------- | --------------- | ------------------ | --------------- | -------------- | ------------------- | ----------------- |
+| cold          | per file   | 2       | 285      | 33         | 244                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 3743              | 0               | 10                 | 45              | 4              | 156 / 449           | 3.7 / 36.2        |
+| cold          | per test   | 2       | 270      | 31         | 231                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 3843              | 0               | 10                 | 59              | 5.3            | 154 / 441           | 33.8 / 33.7       |
+| cold          | per file   | 4       | 188      | 29         | 150                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 4599              | 0               | 12                 | 106             | 7.8            | 256 / 729           | 18.8 / 29.2       |
+| cold          | per test   | 4       | 154      | 30         | 116                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 4601              | 0               | 14                 | 100             | 8.4            | 290 / 707           | 28.8 / 31.1       |
+| warm          | per file   | 4       | 159      | 19         | 132                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 2997              | 0               | 12                 | 75              | 8              | 272 / 859           | 18.8 / 29.2       |
+| warm          | per test   | 4       | 135      | 18         | 109                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 3039              | 0               | 12                 | 71              | 7.6            | 306 / 775           | 23.9 / 29.8       |
+| warm repeat 2 | per file   | 4       | 228      | 19         | 195                  | 56 / 2 / 1                | mixed-position.spec.ts:416 mixed-position.spec.ts:601 | 2986              | 0               | 11                 | 77              | 7.9            | 189 / 762           | 30.6 / 31.2       |
+| warm repeat 2 | per test   | 4       | 141      | 19         | 114                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 3043              | 0               | 13                 | 76              | 8.7            | 296 / 940           | 26.1 / 38.5       |
+| warm repeat 3 | per file   | 4       | 164      | 20         | 136                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 2995              | 0               | 11                 | 76              | 7.7            | 249 / 682           | 2.5 / 6.8         |
+| warm repeat 3 | per test   | 4       | 157      | 19         | 123                  | 56 / 2 / 1                | mixed-position.spec.ts:416 mixed-position.spec.ts:601 | 3041              | 0               | 13                 | 73              | 9              | 267 / 881           | 3 / 7.4           |
+
+Peak RSS values of 4 and 8 mean 4.0 and 8.0 GiB. Upstream errors include transport failures and error answers. Every counted run had zero upstream errors.
+
+The HTML reports' per-test start times give these file spans for the first warm four-worker run of each mode:
+
+| Spec file                | Tests | Per-file span (s) | Per-test span (s) | Summed test time (s) |
+| ------------------------ | ----- | ----------------- | ----------------- | -------------------- |
+| mixed-position.spec.ts   | 7     | 129.5             | 53.1              | ~128–131             |
+| wallet-events.spec.ts    | 10    | 85.0              | 27.0              | ~85–88               |
+| screening.spec.ts        | 11    | 76.6              | 36.3              | ~76                  |
+| harness-security.spec.ts | 12    | 37.3              | 17.1              | ~37                  |
+| signing.spec.ts          | 6     | 30.0              | 11.5              | ~24–30               |
+
+No two tests of one file overlapped in per-file mode. In per-test mode, tests overlapped in every file with more than one test. Under file scheduling, `mixed-position.spec.ts` alone spanned about 130 seconds, nearly the whole test phase.
+
+The comparison supports the scheduling decision:
+
+- **Wall time.** Warm runs without the `:601` timeout took 159 and 164 seconds in per-file mode (mean 161.5), against 135 and 141 in per-test mode (mean 138). That is about 14 % faster. All three warm runs took 159/228/164 seconds in per-file mode (mean 184), against 135/141/157 in per-test mode (mean 144). Tests + teardown took 132/195/136 seconds in per-file mode and 109/114/123 in per-test mode. Cold four-worker wall time fell from 188 to 154 seconds (18 %), and cold two-worker time fell from 285 to 270 seconds (5 %). Set-up time stayed at 18–20 seconds warm and 29–33 seconds cold.
+- **Upstream.** Request counts were about equal: warm runs sent about 2990 in per-file mode and 3040 in per-test mode. Cold four-worker runs sent 4599 and 4601, and cold two-worker runs sent 3743 and 3843. Peak open requests ranged from 10 to 14 across both modes. Warm peak rates ranged from 71 to 77 requests per second across both modes. Cold four-worker peaks were 106 in per-file mode and 100 in per-test mode, and cold two-worker peaks were 45 and 59. There were no upstream errors.
+- **Memory.** Warm peak RSS ranged from 7.7–8.0 GiB in per-file mode and 7.6–9.0 GiB in per-test mode. Cold four-worker peaks were 7.8 and 8.4 GiB. Swap use was zero before and after the runs.
+- **CPU.** Mean process-tree CPU use in warm runs ranged from 189–272 % in per-file mode and 267–306 % in per-test mode, with the work completed sooner. Peaks across both modes were about 680–940 %. More than four workers is unmeasured with per-test scheduling.
+
+Known failures and skipped coverage remain:
+
+- **Baseline failure at `mixed-position.spec.ts:416`.** The test that keeps the hold when another interface supplies 100 USDC and withdraws 301 USDC failed in all ten counted runs. Both modes reported `transaction … on the fork: status reverted`. This is the known main-branch failure with anvil 1.9.0. Every per-file run on the same commit reproduced it. The fix is outside COM-368's scope.
+- **Intermittent failure at `mixed-position.spec.ts:601`.** The reorg test failed in per-file warm repeat 2 and per-test warm repeat 3. Both failures timed out after 60 seconds on the same `expect.poll` assertion for `isReorged` at line 669. The test passed in about 11–13 seconds in the other eight runs. The failure with `fullyParallel: false` on the same commit shows that per-test scheduling did not cause it. COM-349 had also seen this timeout once under four-worker load. COM-368 leaves this intermittent failure in both modes unfixed and changes no spec behaviour.
+- **Skipped AC7 case.** Every other implemented test passed in every counted run. The AC7 `NODE_ENV=development` case stays skipped, so AC7 and acceptance remain **INCOMPLETE** until the product fix and execution of that case. Each counted run's own acceptance verdict was **FAIL** because of `:416`. Without that failure, the skipped case still prevents clean acceptance.
+
+No spec file is marked serial because no spec proved order-dependent. Each test resets its worker's wallet and fork and gets a fresh browser context. The proxies' counters and the lane list stay shared across the run. Two tests read them, and both hold whatever ran before them. AC8's method checks hold because the proxies refuse every method outside their allowlists. The harness-security listener check reads the lane list when it runs. The specs contain no `beforeAll`, `afterAll`, serial mode or module-level mutable state. Each worker leases the lane of its Playwright `parallelIndex`, and its other worker-scoped fixtures (manifest, wallet client, fork client and browser) come from that lane.
+
+Each run promoted the union of every lane except the reorg test's lane, leaving one eligible lane at two workers. The reorg test sent `evm_snapshot` to its fork, which excludes that lane's cache from promotion by design. No lane restarted, and no cleanup error occurred.
 
 ### The fork cache
 
