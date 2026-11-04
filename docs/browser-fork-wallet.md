@@ -45,7 +45,7 @@ While iterating, run only the browser specs that cover the change. Before each p
 
 ### Scoped runs
 
-Pass spec paths, a title filter or a project to select the tests. The project decides whether the production builds run: a run without `--project dev` builds the two production bundles, whatever specs it selects.
+Pass spec paths, a title filter or a project to select the tests. The project decides whether the production builds run: a run whose projects include `prod-build` builds the two production bundles, whatever specs it selects, unless `BROWSER_TEST_SKIP_PROD=1` is set. A run without `--project dev` includes `prod-build`.
 
 ```bash
 # Run one spec file on the dev server, without the production builds.
@@ -91,24 +91,24 @@ A push needs the full suite when it changes code in the browser harness (`e2e/`)
 
 Report these from the full run's `summary.md`:
 
-- The `All implemented tests passed: yes` line.
-- The `Git:` line naming the pushed head, with no `(dirty tree)`.
+- The `All implemented tests passed: yes` line, or the base-failure exception below.
+- The `Git:` line naming the head of the push that needed the run, with no `(dirty tree)`.
 - No `Scoped run, INCOMPLETE` or `Not an acceptance run, INCOMPLETE` line, and a `Production builds:` line that is not `skipped`. A `yarn test:browser:dev` run passes the first two checks, but not this one.
 - The summary's path. The line near the end of the output that starts `Browser harness:` ends with `Summary: <path>`.
 
 While `prod-build.spec.ts` holds its `test.fixme`, a run whose implemented tests all pass has the verdict INCOMPLETE, with that one test incomplete. This is expected. A failure takes precedence, so a run with a failed test has the verdict FAIL. `All implemented tests passed: no`, a FAIL verdict, a dirty tree or a different head is not evidence that the pushed head passed.
 
-When a test also fails at the base, report it with its tracking issue and a full run at the base that fails the same test. Every other implemented test must pass.
+A test that also fails at the base does not block the push, provided every other implemented test passes. The summary then shows `All implemented tests passed: no` and the verdict FAIL. Report that result as it is, with the failing test, its tracking issue, and the summary of a full run at the base that fails the same test. Any other failure blocks the push.
 
 ### Verifiers
 
-A verifier reads the `summary.md` of the full run, at the path the implementer reports, instead of running the full suite again. That run is at the latest head whose push needed one; later docs-only commits do not. The verifier checks the lines above, then runs only the specs its own checks need. If that full run is missing, the implementer still owes it.
+A verifier reads the `summary.md` of a full run, at the path the implementer reports, instead of running the full suite again. If no push in the PR changed code in the areas above, no full run is required. Otherwise the verifier reads the summary for the latest push that did, and matches its `Git:` line to that push's head. Later pushes outside those areas need no other full run. The verifier checks the lines above, or the base-failure exception, then runs only the specs its own checks need. If that full run is missing, the implementer still owes it.
 
 ### Run time and background commands
 
 A full run took 161 s on the benchmark machine with a warm cache. A cold cache, one worker or a loaded machine makes it longer. On the same day, a `yarn test:browser:dev` run took 331 s with a cold cache, 2 workers, a loaded machine and a public endpoint that rate-limited it.
 
-Agent hosts stop long foreground commands. Claude Code's default timeout is 2 minutes and its maximum is 10. Start the full run as a background command and wait for it to finish before ending the turn. A run left behind when the turn ends goes unreported.
+Agent hosts stop long foreground commands. By default, Claude Code stops a foreground command after 2 minutes and allows at most 10. Both limits are configurable. Start the full run as a background command and wait for it to finish before ending the turn. A run left behind when the turn ends goes unreported.
 
 Do not start a second run while one is going. Two runs compete for the machine, and only one holds the [fork cache](#the-fork-cache) port.
 
