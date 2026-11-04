@@ -170,7 +170,7 @@ export function useCometState(
   return state;
 }
 
-const QUERY_WITH_ACCOUNT = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryWithAccountAndStEth' });
+const QUERY_WITH_ACCOUNT_AND_STETH = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryWithAccountAndStEth' });
 export const queryCometDataWithAccount = (
   providerConnection: string | ConnectionInfo,
   market: MarketData | MarketDataLoaded,
@@ -187,7 +187,7 @@ export const queryCometDataWithAccount = (
     Object.entries(market.chainInformation.unwrappedCollateralAssets ?? {}).find(([, token]) =>
       isStETH(token.symbol)
     ) ?? [];
-  return sleuth.fetch<CometWithAccountAndStEthResponse, CometWithAccountAndStEthQuery>(QUERY_WITH_ACCOUNT, [
+  return sleuth.fetch<CometWithAccountAndStEthResponse, CometWithAccountAndStEthQuery>(QUERY_WITH_ACCOUNT_AND_STETH, [
     market.marketAddress,
     nativeTokenToUsdPriceFeed,
     account,

@@ -154,11 +154,18 @@ export type CometStateQuery = [
   boolean // checkDeprecatedwUSDM
 ];
 
+export type CometWithReservesQuery = [
+  string, // comet address
+  string, // nativeTokenToUsd (extra price feed)
+  boolean, // checkDeprecatedwUSDM
+  string[] // collateral assets to read reserves for
+];
+
 export type CometWithReservesResponse = {
   state: CometStateResponse;
   reserves: BigNumber;
   targetReserves: BigNumber;
-  // Same order as state.collateralAssets
+  // Same order as the query's collateral assets
   collateralReserves: BigNumber[];
 };
 

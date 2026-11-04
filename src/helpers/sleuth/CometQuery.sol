@@ -398,15 +398,18 @@ contract CometQuery {
   }
 
   // Kept out of query() so a reverting reserves read breaks only the markets page, not the dashboard.
+  // Reads collateral reserves only for reserveAssets, the collaterals the page shows, so a hidden
+  // legacy collateral whose reserves read reverts cannot break the page.
   function queryWithReserves(
     Comet comet,
     address nativeTokenToUsd,
-    bool checkDeprecatedwUSDM
+    bool checkDeprecatedwUSDM,
+    address[] memory reserveAssets
   ) public view returns (CometState memory state, int reserves, uint targetReserves, uint[] memory collateralReserves) {
     state = query(comet, nativeTokenToUsd, checkDeprecatedwUSDM);
-    collateralReserves = new uint[](state.collateralAssets.length);
-    for (uint i = 0; i < state.collateralAssets.length; i++) {
-      collateralReserves[i] = comet.getCollateralReserves(state.collateralAssets[i].collateralAsset);
+    collateralReserves = new uint[](reserveAssets.length);
+    for (uint i = 0; i < reserveAssets.length; i++) {
+      collateralReserves[i] = comet.getCollateralReserves(reserveAssets[i]);
     }
     return (state, comet.getReserves(), comet.targetReserves(), collateralReserves);
   }

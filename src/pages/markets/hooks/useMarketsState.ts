@@ -14,7 +14,7 @@ import { FACTOR_PRECISION } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
-import { CometStateQuery, CometWithReservesResponse } from '@helpers/sleuth/types';
+import { CometWithReservesQuery, CometWithReservesResponse } from '@helpers/sleuth/types';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
 import { getSleuthOptions } from '@hooks/useSelectedMarket';
 import { getV2State } from '@hooks/useV2MarketState';
@@ -95,10 +95,11 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     reserves,
     targetReserves,
     collateralReserves,
-  } = await sleuth.fetch<CometWithReservesResponse, CometStateQuery>(QUERY_WITH_RESERVES, [
+  } = await sleuth.fetch<CometWithReservesResponse, CometWithReservesQuery>(QUERY_WITH_RESERVES, [
     market.marketAddress,
     getBaseAssetPriceFeed(market),
     getIsDeprecatedwUSDMMarket(market.baseAsset, market.chainInformation),
+    market.collateralAssets.map((asset) => asset.address),
   ]);
 
   const factorScale = Number(cometResponse.factorScale);
@@ -128,10 +129,9 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
   const totalSupply = cometResponse.totalSupply.toBigInt();
   const totalBorrow = cometResponse.totalBorrow.toBigInt();
 
-  const collateralAssets: TokenWithMarketState[] = market.collateralAssets.flatMap((asset) => {
-    const index = cometResponse.collateralAssets.findIndex((info) => info.collateralAsset === asset.address);
-    if (index === -1) return [];
-    const assetInfo = cometResponse.collateralAssets[index];
+  const collateralAssets: TokenWithMarketState[] = market.collateralAssets.flatMap((asset, index) => {
+    const assetInfo = cometResponse.collateralAssets.find((info) => info.collateralAsset === asset.address);
+    if (!assetInfo) return [];
 
     return [
       {
