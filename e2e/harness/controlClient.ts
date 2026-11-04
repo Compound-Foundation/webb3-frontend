@@ -88,7 +88,9 @@ export class ControlClient {
   }
 
   state = () => this.request<WalletState>('GET', '/v1/state');
-  reset = () => this.request<{ generation: number }>('POST', '/v1/reset', {});
+  /** Resets the wallet and the fork. With `seed`, the keyed accounts made until the next reset are derived from it. */
+  reset = (seed?: string) =>
+    this.request<{ generation: number }>('POST', '/v1/reset', seed === undefined ? {} : { seed });
   health = () => this.request<{ ok: boolean; generation: number }>('GET', '/v1/health');
 
   newAccount = (options: AccountOptions = {}) =>
