@@ -1,17 +1,18 @@
 import { StaticJsonRpcProvider } from '@ethersproject/providers';
-import { Contract, Provider } from 'ethers-multicall';
+import { constants } from 'ethers';
 import { useEffect, useState, useRef, useCallback } from 'react';
 
 import { isTestnet, getChainKey, CHAINS } from '@constants/chains';
 import type { Web3 } from '@contexts/Web3Context';
-import COMP from '@helpers/abis/COMP';
-import Governor from '@helpers/abis/Governor';
-import Timelock from '@helpers/abis/Timelock';
 import { getEventLogCoders, proposalEvents, RawLog } from '@helpers/coders';
 import { SECONDS_PER_BLOCK } from '@helpers/constants';
 import { getGovernanceContractAddress, GovernanceNetworksEnum } from '@helpers/contracts';
 import { parseTitleDescriptionFromBody } from '@helpers/functions';
+import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
+import { Sleuth } from '@helpers/sleuth/sleuth';
+import { GovernanceQuery, GovernanceResponse, ProposalsQuery, ProposalsResponse } from '@helpers/sleuth/types';
 import { TIMESTAMP_API } from '@helpers/urls';
+import { getSleuthOptions } from '@hooks/useSelectedMarket';
 import {
   VoteState,
   StateType,
@@ -29,6 +30,11 @@ import {
 
 // TODO(alex) --> confirm desired interval
 const VOTE_REFRESH_INTERVAL = 300_000; // 5 mins
+
+// Removing the vote page also means removing its queries from CometQuery.sol (see GovernorBravo there)
+// and recompiling the artifact
+const QUERY_GOVERNANCE = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryGovernance' });
+const QUERY_PROPOSALS = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryProposals' });
 
 export function useVoteState(
   web3: Web3,
@@ -95,7 +101,7 @@ const getBlockTimestamps = async (blockNumbers: number[], network: string) => {
   return await timestampsResult.json();
 };
 
-const proposalSucceeded = (proposal: Proposal, quorumVotes: bigint) => {
+const proposalSucceeded = (proposal: Pick<Proposal, 'forVotes' | 'againstVotes'>, quorumVotes: bigint) => {
   // we don't need to factor decimal shift here, as we're using values from same contract
   return proposal.forVotes > quorumVotes && proposal.forVotes > proposal.againstVotes;
 };
@@ -106,7 +112,7 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
 
   const chainInfo: ChainInformation = CHAINS[chainId];
   const provider = new StaticJsonRpcProvider(chainInfo.url);
-  const ethcallProvider = new Provider(provider, chainId);
+  const sleuth = new Sleuth(provider, getSleuthOptions(chainId));
 
   // use Sepolia testnet info for any testnet
   // otherwise, use Eth mainnet for any other network, or no wallet connected
@@ -114,19 +120,12 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
     isTestnet(chainId) ? GovernanceNetworksEnum.Testnet : GovernanceNetworksEnum.Mainnet
   );
 
-  const governorContract = new Contract(govAddress, Governor);
-  const timelockContract = new Contract(timelockAddress, Timelock);
   const chainKey = getChainKey(chainId);
 
   // fetch all proposal events within the timelock delay, to capture any queued proposals as well
   const currentBlock = await provider.getBlockNumber();
-  const [votingPeriod, votingDelay, timelockDelay, gracePeriod, quorumVotes] = await ethcallProvider.all([
-    governorContract.votingPeriod(),
-    governorContract.votingDelay(),
-    timelockContract.delay(),
-    timelockContract.GRACE_PERIOD(),
-    governorContract.quorumVotes(),
-  ]);
+  const { votingPeriod, votingDelay, timelockDelay, gracePeriod, quorumVotes, proposalThreshold } =
+    await sleuth.fetch<GovernanceResponse, GovernanceQuery>(QUERY_GOVERNANCE, [govAddress, timelockAddress]);
 
   // we'll use this coder to determine the topic hash, and decode the raw log data
   // created using the event signatures:
@@ -150,7 +149,7 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
   async function getLogs(topic: string) {
     const logs = (await provider.getLogs({
       address: govAddress,
-      fromBlock: currentBlock - votingPeriod - votingDelay - gracePeriod,
+      fromBlock: currentBlock - votingPeriod.toNumber() - votingDelay.toNumber() - gracePeriod.toNumber(),
       toBlock: currentBlock,
       topics: [topic],
     })) as RawLog[];
@@ -257,15 +256,23 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
   const timestamps = uniqueBlockNumbers.length > 0 && (await getBlockTimestamps(uniqueBlockNumbers, chainKey));
   const currentTime = new Date().getTime() / 1000;
 
-  // create combined query to get proposal votes
-  const [...proposalVotes] = await ethcallProvider.all([
-    ...[...rawProposals.values()].map((proposal) => governorContract.proposals(Number(proposal.id))),
-  ]);
+  // one query for the proposal votes and the account's COMP state and vote receipts
+  const proposalIds = [...rawProposals.keys()];
+  const { proposals: proposalVotes, voteAccount } = await sleuth.fetch<ProposalsResponse, ProposalsQuery>(
+    QUERY_PROPOSALS,
+    [govAddress, compAddress, account ?? constants.AddressZero, proposalIds.map(String)]
+  );
 
   const proposals: Proposal[] = [];
-  [...rawProposals.values()].map((item) => {
-    // grab the latest vote count for the raw proposal
-    const votes = proposalVotes.find(({ id }) => id.eq(item.id));
+  [...rawProposals.values()].map((item, index) => {
+    // grab the latest vote count for the raw proposal: the query answers in the order of proposalIds
+    const response = proposalVotes[index];
+    const votes = {
+      forVotes: response.forVotes.toBigInt(),
+      againstVotes: response.againstVotes.toBigInt(),
+      abstainVotes: response.abstainVotes.toBigInt(),
+      eta: response.eta,
+    };
 
     // item is truly in 'pending' state if vote period hasn't started
     if (item.startBlock > currentBlock && item.state.state === ProposalStateEnum.Pending) {
@@ -315,7 +322,7 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
         ...item,
         state: {
           state: ProposalStateEnum.Queued,
-          startTime: eta - timelockDelay,
+          startTime: eta - timelockDelay.toNumber(),
           endTime: eta,
         },
       });
@@ -351,8 +358,6 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
     }
   });
 
-  const [proposalThreshold] = await ethcallProvider.all([governorContract.proposalThreshold()]);
-
   const state: VoteNoAccountState = {
     chainKey,
     chainId,
@@ -365,26 +370,18 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
   };
 
   if (account) {
-    const compContract = new Contract(compAddress, COMP);
+    const { decimals, balance, votes, delegate, receipts } = voteAccount;
 
     // check vote status for active proposals
     const activeProposals = proposals.filter((proposal) => proposal.state.state === ProposalStateEnum.Active);
-    const receiptsCalls = activeProposals.map((proposal) => governorContract.getReceipt(proposal.id, account));
-
-    const [decimals, balance, votes, delegate, ...receipts] = await ethcallProvider.all([
-      compContract.decimals(),
-      compContract.balanceOf(account),
-      compContract.getCurrentVotes(account),
-      compContract.delegates(account),
-      ...receiptsCalls,
-    ]);
 
     // create map of vote status
     const voteReceipts = new Map<bigint, VoteReceipt>();
-    activeProposals.forEach((element, index) => {
+    activeProposals.forEach((element) => {
+      const receipt = receipts[proposalIds.indexOf(element.id)];
       voteReceipts.set(element.id, {
-        voted: receipts[index][0],
-        value: receipts[index][1],
+        voted: receipt.hasVoted,
+        value: receipt.support,
         proposalId: element.id,
       });
     });

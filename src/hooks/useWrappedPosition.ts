@@ -1,10 +1,10 @@
 import { JsonRpcProvider } from '@ethersproject/providers';
-import { Provider } from 'ethers-multicall';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { WrappedMarket } from '@constants/wrappedMarkets';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { REFRESH_INTERVAL } from '@helpers/numbers';
+import { Sleuth } from '@helpers/sleuth/sleuth';
 import {
   BlockWait,
   DEFAULT_BLOCK_WAIT,
@@ -12,6 +12,7 @@ import {
   waitForBlock,
   WrappedPosition,
 } from '@helpers/wrappedPositions';
+import { getSleuthOptions } from '@hooks/useSelectedMarket';
 import { SettledTransaction, Transaction } from '@types';
 
 export type WrappedPositionReader = (
@@ -30,8 +31,8 @@ export type WrappedPositionState =
 export const WRAPPED_POSITION_READ_FAILED =
   'Your wrapped position could not be loaded. Check your connection and try again.';
 
-const readWithMulticall: WrappedPositionReader = (provider, market, account) =>
-  readWrappedPosition(new Provider(provider, market.chainId), market, account);
+const readWithSleuth: WrappedPositionReader = (provider, market, account) =>
+  readWrappedPosition(new Sleuth(provider, getSleuthOptions(market.chainId)), market, account);
 
 /**
  * A `refreshToken` that changes whenever a transaction is added or settles. A settled transaction,
@@ -63,7 +64,7 @@ export function useWrappedPosition({
   refreshToken,
   minBlock,
   blockWait = DEFAULT_BLOCK_WAIT,
-  read = readWithMulticall,
+  read = readWithSleuth,
 }: {
   route: LendingRoute;
   account: string | undefined;

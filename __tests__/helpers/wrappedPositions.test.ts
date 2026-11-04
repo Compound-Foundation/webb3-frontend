@@ -11,6 +11,7 @@ import {
   getRedeemBuffer,
   getWrappedPositionValueInDollars,
   readWrappedPosition,
+  SleuthReader,
   supplyIncentivesForRoute,
   waitForBlock,
   WrappedPositionReadError,
@@ -39,33 +40,20 @@ type ChainValues = {
   isWithdrawPaused: boolean;
 };
 
-type RecordedCall = { address: string; name: string; params: unknown[] };
-
-/** A multicall stand-in that answers each call by contract address and function name. */
-function fakeMulticall(market: WrappedMarket, values: ChainValues, calls: RecordedCall[] = []) {
+/** A Sleuth stand-in that answers the wrapped position query with these values. */
+function fakeSleuth(values: ChainValues) {
   return {
-    all: jest.fn(async (batch: { contract: { address: string }; name: string; params: unknown[] }[]) => {
-      return batch.map(({ contract, name, params }) => {
-        calls.push({ address: contract.address, name, params });
-        const address = contract.address.toLowerCase();
-        if (address === market.wrapperAddress.toLowerCase()) {
-          if (name === 'balanceOf') return BigNumber.from(values.shares);
-          if (name === 'totalSupply') return BigNumber.from(values.totalSupply);
-          if (name === 'asset') return values.asset;
-        }
-        if (address === market.cometAddress.toLowerCase()) {
-          if (name === 'balanceOf') return BigNumber.from(values.totalAssets);
-          if (name === 'totalsBasic') return { baseSupplyIndex: BigNumber.from(values.baseSupplyIndex) };
-          if (name === 'isWithdrawPaused') return values.isWithdrawPaused;
-        }
-        if (address === market.baseTokenAddress.toLowerCase()) {
-          if (name === 'balanceOf') return BigNumber.from(values.walletBalance);
-          if (name === 'allowance') return BigNumber.from(values.allowance);
-        }
-        throw new Error(`unexpected call ${name} on ${contract.address}`);
-      });
-    }),
-  };
+    fetch: jest.fn(async () => ({
+      asset: values.asset,
+      baseSupplyIndex: BigNumber.from(values.baseSupplyIndex),
+      baseWalletBalance: BigNumber.from(values.walletBalance),
+      isWithdrawPaused: values.isWithdrawPaused,
+      shares: BigNumber.from(values.shares),
+      totalAssets: BigNumber.from(values.totalAssets),
+      totalSupply: BigNumber.from(values.totalSupply),
+      wrapperAllowance: BigNumber.from(values.allowance),
+    })),
+  } as unknown as SleuthReader & { fetch: jest.Mock };
 }
 
 // 1,000.5 USDC of wrapper assets. With the 10 ** 12 virtual shares, the supply divides into
@@ -127,14 +115,19 @@ describe('getWrappedPositionValueInDollars', () => {
 });
 
 describe('readWrappedPosition', () => {
-  it('reads every figure in one batch and keeps each in its own units', async () => {
+  it('reads every figure in one query and keeps each in its own units', async () => {
     const market = usdcMarket();
-    const calls: RecordedCall[] = [];
-    const multicall = fakeMulticall(market, BASE_VALUES, calls);
+    const sleuth = fakeSleuth(BASE_VALUES);
 
-    const position = await readWrappedPosition(multicall, market, ACCOUNT);
+    const position = await readWrappedPosition(sleuth, market, ACCOUNT);
 
-    expect(multicall.all).toHaveBeenCalledTimes(1);
+    expect(sleuth.fetch).toHaveBeenCalledTimes(1);
+    expect(sleuth.fetch).toHaveBeenCalledWith(expect.anything(), [
+      market.wrapperAddress,
+      market.cometAddress,
+      market.baseTokenAddress,
+      ACCOUNT,
+    ]);
     expect(position).toEqual({
       shares: 250n * 10n ** 18n,
       shareDecimals: 18,
@@ -151,20 +144,12 @@ describe('readWrappedPosition', () => {
         baseSupplyIndex: 1_050_000_000_000_000n,
       },
     });
-    // The allowance is the base token's, with the wrapper as spender.
-    expect(calls).toContainEqual({
-      address: market.baseTokenAddress,
-      name: 'allowance',
-      params: [ACCOUNT, market.wrapperAddress],
-    });
-    // The wrapper's assets are its Comet balance.
-    expect(calls).toContainEqual({ address: market.cometAddress, name: 'balanceOf', params: [market.wrapperAddress] });
   });
 
   it('reads an empty account as zero shares and zero cash', async () => {
     const market = usdcMarket();
     const position = await readWrappedPosition(
-      fakeMulticall(market, { ...BASE_VALUES, shares: 0n, allowance: 0n }),
+      fakeSleuth({ ...BASE_VALUES, shares: 0n, allowance: 0n }),
       market,
       ACCOUNT
     );
@@ -175,17 +160,17 @@ describe('readWrappedPosition', () => {
 
   it('fails when the wrapper does not hold the configured Comet, instead of reading zero', async () => {
     const market = usdcMarket();
-    const multicall = fakeMulticall(market, {
+    const sleuth = fakeSleuth({
       ...BASE_VALUES,
       asset: '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840',
     });
-    await expect(readWrappedPosition(multicall, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
+    await expect(readWrappedPosition(sleuth, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
   });
 
-  it('fails when the batch fails, instead of reading zero', async () => {
+  it('fails when the query fails, instead of reading zero', async () => {
     const market = usdcMarket();
-    const multicall = { all: jest.fn().mockRejectedValue(new Error('rpc down')) };
-    await expect(readWrappedPosition(multicall, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
+    const sleuth = { fetch: jest.fn().mockRejectedValue(new Error('rpc down')) } as unknown as SleuthReader;
+    await expect(readWrappedPosition(sleuth, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
   });
 });
 

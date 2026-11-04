@@ -1,6 +1,5 @@
 import { StaticJsonRpcProvider } from '@ethersproject/providers';
 import { ConnectionInfo } from 'ethers/lib/utils';
-import { setMulticallAddress } from 'ethers-multicall';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -29,25 +28,6 @@ import {
   SelectedMarketData,
   MarketDataHydrated,
 } from '@types';
-
-// Ethers-multicall doesn't directly support certain chains,
-// so you'll have to tell it the address of a multicall contract
-// it can use for those chains
-// EX: https://goerli.basescan.org/address/0xcA11bde05977b3631167028862bE2a173976CA11#code
-setMulticallAddress(43113, '0x3D015943d2780fE97FE3f69C97edA2CCC094f78c');
-setMulticallAddress(420, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(421613, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(42161, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(8453, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(84531, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(59140, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(534352, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(10, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(11155111, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(5000, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(59144, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(130, '0xcA11bde05977b3631167028862bE2a173976CA11');
-setMulticallAddress(2020, '0xcA11bde05977b3631167028862bE2a173976CA11');
 
 /**
  * Gets the selected market from the query params or local storage and
