@@ -261,8 +261,10 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     await expect(page.getByText('After Transaction')).toHaveCount(0, { timeout: 60_000 });
     await expect(notice(page)).toHaveCount(0, { timeout: 60_000 });
 
-    // A new direct supply beside what is left of the wrapped position, then Max.
+    // A new direct supply beside what is left of the wrapped position, then Max. The app reads a supply made
+    // outside it only on its next periodic refresh, so the page reloads to show it at once.
     await supplyToComet(wallet, fork, account, SECOND_DIRECT);
+    await page.reload();
     await expect(notice(page)).toBeVisible({ timeout: 90_000 });
     const sharesBeforeMax = await wrapperShares(fork, account);
     await page.getByRole('button', { name: 'Withdraw USDC' }).click({ timeout: 60_000 });
