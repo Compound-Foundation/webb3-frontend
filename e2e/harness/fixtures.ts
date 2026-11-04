@@ -12,7 +12,9 @@
 // - `harnessWallet`: the wallet the provider announces, MetaMask unless a spec sets another with
 //   `test.use({ harnessWallet: ANCHORAGE_WALLET })`.
 // - Before each test, the wallet resets: anvil resets the fork to its block from the upstream proxy, and
-//   every account, request, permission, chain setting and screening behaviour is cleared.
+//   every account, request, permission, chain setting and screening behaviour is cleared. With the fork
+//   cache on, the test's keyed accounts come from its identity. They then repeat in every run and differ
+//   from other tests' accounts.
 import fs from 'node:fs';
 
 import { test as base, expect, type Browser, type BrowserContext, type Frame, type Page } from '@playwright/test';
@@ -32,7 +34,7 @@ import {
 import type { Manifest } from './services';
 import { v3ApiReadPrefixes } from './settings';
 import { trustHarnessCertificate } from './tls';
-import type { WalletRequest } from './walletServer';
+import { accountSeedOf, type WalletRequest } from './walletServer';
 
 export { expect };
 
@@ -199,8 +201,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     });
   },
   resetWallet: [
-    async ({ wallet }, use) => {
-      await wallet.reset();
+    async ({ wallet }, use, testInfo) => {
+      // With the fork cache on, the seed gives the test's accounts the same addresses in every run. The cache
+      // then holds what anvil read for them. Other tests get other addresses.
+      await wallet.reset(accountSeedOf(testInfo));
       await use();
     },
     { auto: true },

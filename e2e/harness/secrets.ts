@@ -2,7 +2,8 @@
 //
 // The registry lives on `globalThis` in the Playwright runner, where the global setup, the wallet server and
 // the reporters run, so the summary reporter can scan the outputs after every other reporter has finished.
-// It holds the control token, every key the wallet made and the private upstream URL's patterns.
+// It holds the control token, every key the wallet made, the fork cache's account salt and the private
+// upstream URL's patterns. Each literal is held with its kind, which names it in a report.
 //
 // The scan reads each file whole, each member of a ZIP file (a Playwright trace) after inflating it, and
 // the ZIP that Playwright's HTML report embeds in its index.html, in
@@ -13,15 +14,17 @@ import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 
 const REGISTRY = Symbol.for('cf-browser-harness.secrets');
-type Registry = { literals: Set<string>; patterns: Set<string> };
+type Registry = { literals: Map<string, string>; patterns: Set<string> };
 
 function registry(): Registry {
   const holder = globalThis as unknown as Record<symbol, Registry | undefined>;
-  holder[REGISTRY] ??= { literals: new Set(), patterns: new Set() };
+  holder[REGISTRY] ??= { literals: new Map(), patterns: new Set() };
   return holder[REGISTRY] as Registry;
 }
 
-export const registerSecret = (secret: string) => void registry().literals.add(secret);
+/** Registers `secret`, which a report names as `kind`. */
+export const registerSecret = (secret: string, kind = 'a key the wallet made') =>
+  void registry().literals.set(secret, kind);
 export const registerSecretPattern = (pattern: string) => void registry().patterns.add(pattern);
 export const registeredSecretCount = () => registry().literals.size + registry().patterns.size;
 
@@ -69,9 +72,9 @@ export function findSecrets(texts: { file: string; content: Buffer | string }[])
   const leaks: Leak[] = [];
   for (const { file, content } of texts) {
     const text = typeof content === 'string' ? content : content.toString('latin1');
-    for (const secret of literals) {
+    for (const [secret, kind] of literals) {
       if (forms(secret).some((form) => text.toLowerCase().includes(form.toLowerCase()))) {
-        leaks.push({ file, secret: secret.length === 64 ? 'the control token' : 'a key the wallet made' });
+        leaks.push({ file, secret: kind });
       }
     }
     for (const expression of expressions)
