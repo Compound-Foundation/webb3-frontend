@@ -347,6 +347,11 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
         sent[field] = value;
       }
       await setNextTimestamp();
+      // anvil 1.9.0 fills in a missing gas limit from an estimate at the latest block's time, not the time
+      // set for the next block. Comet's interest accrual costs more in the next block than in that estimate,
+      // so a Comet withdrawal can run out of gas inside USDC's transfer. An estimate at the pending block
+      // uses the next block's time, as anvil 1.2.3's own did. If anvil refuses the estimate, nothing is sent.
+      if (sent.gas === undefined) sent.gas = await call<string>('eth_estimateGas', [{ ...sent }, 'pending']);
       const hash = await call<string>('eth_sendTransaction', [sent]);
       await mined(hash);
       return hash;
