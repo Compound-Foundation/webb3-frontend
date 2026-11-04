@@ -10,7 +10,9 @@
 // Transactions are never signed. An approved `eth_sendTransaction` goes to anvil's own
 // `eth_sendTransaction` from an impersonated sender, after the server checks again that the node is the
 // expected local fork. So no signed chain-1 transaction exists that could be replayed on mainnet. Messages
-// and typed data are signed with a key made for the run, held only in this process.
+// and typed data are signed with the account's key, held only in this process. A reset can carry a seed, the
+// test's identity, from which the keys of that test's accounts are derived. The same test then has the same
+// addresses in every run, so the fork cache holds what anvil read for them. The keys sign only on the fork.
 import type { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
@@ -20,7 +22,9 @@ import {
   encodeFunctionData,
   getAddress,
   isHex,
+  keccak256,
   parseEther,
+  stringToBytes,
   toHex,
   type Address,
   type Hex,
@@ -168,6 +172,41 @@ export function tokenMatches(expected: string, given: string): boolean {
   return timingSafeEqual(sha256(expected), sha256(given));
 }
 
+/** The longest account seed a reset takes. */
+const MAX_ACCOUNT_SEED_LENGTH = 512;
+/** The order of the secp256k1 group. A private key is at least 1 and below it. */
+const SECP256K1_ORDER = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+
+/**
+ * The account seed of one attempt of a Playwright test. It is the same for that test in every run, and differs
+ * for every other test, repeat and retry, so no two tests of a run share an account.
+ */
+export const accountSeedOf = ({
+  testId,
+  repeatEachIndex,
+  retry,
+}: {
+  testId: string;
+  repeatEachIndex: number;
+  retry: number;
+}) => `${testId}/${repeatEachIndex}/${retry}`;
+
+/** The key of the keyed account at `index`, counted from 0, among those made after a reset with `seed`. */
+export function accountKey(seed: string, index: number): Hex {
+  let key = keccak256(stringToBytes(`cf-browser-harness account key\n${seed}\n${index}`));
+  while (BigInt(key) === 0n || BigInt(key) >= SECP256K1_ORDER) key = keccak256(key);
+  return key;
+}
+
+/** The seed a reset request carries: none, or a string of 1 to `MAX_ACCOUNT_SEED_LENGTH` characters. */
+function accountSeedParam(seed: unknown): string | undefined {
+  if (seed === undefined) return undefined;
+  if (typeof seed !== 'string' || seed.length === 0 || seed.length > MAX_ACCOUNT_SEED_LENGTH) {
+    throw new HttpError(400, `seed must be a string of 1 to ${MAX_ACCOUNT_SEED_LENGTH} characters`);
+  }
+  return seed;
+}
+
 /** The chain ID in a `wallet_switchEthereumChain` or `wallet_addEthereumChain` parameter. */
 function chainIdParam(params: unknown): number {
   const [first] = Array.isArray(params) ? params : [];
@@ -184,6 +223,10 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     rpc<T>(fork.localUrl, method, params, { timeoutMs: 60_000 });
 
   let generation = 0;
+  /** The seed of this generation's keyed accounts, or none for random keys. */
+  let accountSeed: string | undefined;
+  /** How many keyed accounts this generation has made. */
+  let keyedAccounts = 0;
   const accounts = new Map<string, Account>();
   const impersonated = new Set<string>();
   let selected: Address[] = [];
@@ -592,7 +635,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       if (!SCREENING_BEHAVIOURS.includes(behaviour)) throw new HttpError(400, 'unknown screening behaviour');
       let account: Account;
       if (hasKey) {
-        const key = generatePrivateKey();
+        const key = accountSeed === undefined ? generatePrivateKey() : accountKey(accountSeed, keyedAccounts++);
         options.onSecret?.(key);
         account = { address: privateKeyToAccount(key).address, key };
       } else {
@@ -634,11 +677,13 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       throw new Error(`USDC funding read back ${after}, not ${amount}: unexpected USDC storage layout`);
   };
 
-  const reset = () =>
+  const reset = (seed: string | undefined) =>
     serially(async () => {
       // Everything in memory is cleared before the first await, so no call in between sees the previous
       // test's accounts, permission or policies.
       generation += 1;
+      accountSeed = seed;
+      keyedAccounts = 0;
       const stale = [...impersonated];
       impersonated.clear();
       accounts.clear();
@@ -843,7 +888,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       case 'GET /v1/stats':
         return options.stats?.() ?? {};
       case 'POST /v1/reset':
-        return reset();
+        return reset(accountSeedParam(body.seed));
       case 'POST /v1/session/end':
         hasSessionEnded = true;
         return { hasEnded: true };

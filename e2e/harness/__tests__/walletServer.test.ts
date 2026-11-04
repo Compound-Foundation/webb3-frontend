@@ -6,13 +6,22 @@
 import http from 'node:http';
 
 import { utils } from 'ethers';
+import type { Hex } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 
 import { server as mswServer } from '../../../handlers/server';
 import { ControlClient } from '../controlClient';
 import { verifyFork } from '../fork';
 import type { ScreeningLane } from '../screeningStub';
 import { anvilHandlers, FORK_BLOCK, FORK_HASH, startFakeNode, type FakeNode } from '../testing/testServers';
-import { startWalletServer, tokenMatches, type WalletRequest, type WalletServer } from '../walletServer';
+import {
+  accountKey,
+  accountSeedOf,
+  startWalletServer,
+  tokenMatches,
+  type WalletRequest,
+  type WalletServer,
+} from '../walletServer';
 
 const TOKEN = 'a'.repeat(64);
 const ORIGIN = 'http://127.0.0.1:5999';
@@ -713,6 +722,49 @@ describe('reset', () => {
     );
     // The old account is no longer a harness account, so nothing can be sent from it.
     await expect(client.forkSend({ from: address, to: address })).rejects.toThrow('400');
+  });
+
+  test('with a seed, the keyed accounts repeat in order for the same seed and differ for another seed', async () => {
+    const accountsAfter = async (seed?: string) => {
+      await client.reset(seed);
+      return [(await client.newAccount()).address, (await client.newAccount()).address];
+    };
+    const first = await accountsAfter('test-a/0/0');
+    expect(new Set(first).size).toBe(2);
+    expect(await accountsAfter('test-a/0/0')).toEqual(first);
+    const other = await accountsAfter('test-b/0/0');
+    expect(other.filter((address) => first.includes(address))).toEqual([]);
+    // The first account of a seed is the derived key for index 0.
+    expect(first[0]).toBe(privateKeyToAccount(accountKey('test-a/0/0', 0)).address);
+  });
+
+  test('without a seed, a reset makes new random keyed accounts', async () => {
+    await client.reset();
+    const { address: one } = await client.newAccount();
+    await client.reset();
+    const { address: two } = await client.newAccount();
+    expect(one).not.toBe(two);
+  });
+
+  test('registers every key it derives for the secret scan', async () => {
+    await client.reset('test-a/0/0');
+    const addresses = [(await client.newAccount()).address, (await client.newAccount()).address];
+    expect(keys.map((key) => privateKeyToAccount(key as Hex).address)).toEqual(addresses);
+  });
+
+  test('a test seed differs for each test, each repeat and each retry, and is the same in every run', () => {
+    const seeds = [
+      accountSeedOf({ testId: 'a1', repeatEachIndex: 0, retry: 0 }),
+      accountSeedOf({ testId: 'b2', repeatEachIndex: 0, retry: 0 }),
+      accountSeedOf({ testId: 'a1', repeatEachIndex: 1, retry: 0 }),
+      accountSeedOf({ testId: 'a1', repeatEachIndex: 0, retry: 1 }),
+    ];
+    expect(new Set(seeds).size).toBe(seeds.length);
+    expect(accountSeedOf({ testId: 'a1', repeatEachIndex: 0, retry: 0 })).toBe(seeds[0]);
+  });
+
+  test.each([[''], ['x'.repeat(513)], [5]])('refuses the seed %p', async (seed) => {
+    await expect(client.request('POST', '/v1/reset', { seed })).rejects.toThrow('400');
   });
 
   test('a long poll for events or an outcome ends at a reset', async () => {
