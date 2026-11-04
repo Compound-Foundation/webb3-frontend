@@ -59,7 +59,7 @@ jest.mock('../components/InstitutionalBanner', () =>
   jest.requireActual('../../../../__tests__/mocks/wrappedQueueSettlementProps').mockRecordProps('InstitutionalBanner')
 );
 
-// The describe below is split across wrappedQueueSettlementDirectSupply1 to 3, in its original order,
+// The describe below is split across wrappedQueueSettlementDirectSupply1 to 3, in order,
 // so that no test file runs much longer than the others. This file holds part 1.
 describe('a withdrawal on the wrapped route from an account with a direct Comet supply', () => {
   let quiet: jest.SpyInstance[] = [];
