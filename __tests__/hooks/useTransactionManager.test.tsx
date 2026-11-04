@@ -826,9 +826,12 @@ describe('useTransactionManager', () => {
     );
     const { result } = renderManager(web3For(ACCOUNT, provider));
 
-    await waitFor(() => expect(hashes(result.current.transactions)).toEqual([tx('unknown')]));
+    // The failed lookup records the provider after the restore, so wait for it rather than for a timer.
+    await waitFor(() => {
+      expect(hashes(result.current.transactions)).toEqual([tx('unknown')]);
+      expect(result.current.walletFailure?.provider).toBe(provider);
+    });
     expect(result.current.settledTransactions).toEqual([]);
-    expect(result.current.walletFailure?.provider).toBe(provider);
   });
 
   it("clears this session's transactions and keeps other accounts' stored records", async () => {

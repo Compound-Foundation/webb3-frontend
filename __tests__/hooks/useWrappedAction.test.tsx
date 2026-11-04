@@ -222,9 +222,16 @@ async function reachReview(result: Result) {
   await waitFor(() => expect(result.current.state.phase).toBe('review'));
 }
 
+/**
+ * Confirms, and waits until the wallet has the request and the page shows the step awaiting its signature. The
+ * fake wallet records the request outside React, so the request alone can arrive before the page renders.
+ */
 async function confirmAndWaitForWallet(result: Result, requests: unknown[], count: number) {
   act(() => result.current.confirm());
-  await waitFor(() => expect(requests).toHaveLength(count));
+  await waitFor(() => {
+    expect(requests).toHaveLength(count);
+    expect(stepStatuses(result)).toContain('awaiting-signature');
+  });
 }
 
 function receipt(hash: string, status = 1): TransactionReceipt {
