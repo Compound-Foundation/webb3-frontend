@@ -635,7 +635,7 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
       });
     const snapshot = await forkRpc('evm_snapshot');
     const late: { hash?: string } = {};
-    // Set when the reload commits. A read that reaches the route after it comes from the reloaded page.
+    // Set when the reload commits. A read that reaches the route after the commit comes from the reloaded page.
     let isReloaded = false;
     let reorg: Promise<object | undefined> | undefined;
     let isReorged = false;
@@ -671,7 +671,7 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
         reorg = (async () => {
           try {
             const mined = (await forkRpc('eth_getTransactionByHash', [late.hash])) as object;
-            // Checked in the test's body: a failed check here would leave the request unanswered.
+            // Checked in the test's body, so that a revert that returns false fails the test with that result.
             isReverted = await forkRpc('evm_revert', [snapshot]);
             await forkRpc('evm_mine');
             isReorged = true;
