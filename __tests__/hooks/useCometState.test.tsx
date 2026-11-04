@@ -61,14 +61,21 @@ const cometResponse = (earnAPR: number) => ({
 const cometResponseWithAccount = (baseBalance: number) => {
   const response = cometResponse(0);
   return {
-    ...response,
-    bulkerAllowance: BigNumber.from(0),
-    baseAsset: {
-      ...response.baseAsset,
-      allowance: BigNumber.from(0),
-      balance: BigNumber.from(baseBalance),
+    state: {
+      ...response,
+      bulkerAllowance: BigNumber.from(0),
+      baseAsset: {
+        ...response.baseAsset,
+        allowance: BigNumber.from(0),
+        balance: BigNumber.from(baseBalance),
+        bulkerAllowance: BigNumber.from(0),
+        walletBalance: BigNumber.from(0),
+      },
+    },
+    stETHState: {
       bulkerAllowance: BigNumber.from(0),
       walletBalance: BigNumber.from(0),
+      wstETHPerStETH: BigNumber.from(0),
     },
   };
 };

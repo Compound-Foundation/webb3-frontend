@@ -1,3 +1,4 @@
+import { BigNumber } from '@ethersproject/bignumber';
 import { renderHook, waitFor } from '@testing-library/react';
 import { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
@@ -5,31 +6,52 @@ import { MemoryRouter } from 'react-router';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { Web3 } from '@contexts/Web3Context';
 import { getMarkets } from '@helpers/markets';
+import { CometStateResponse, CometWithReservesResponse, RateModelResponse } from '@helpers/sleuth/types';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
 import { useMarketsState } from '@pages/markets/hooks/useMarketsState';
 import { MarketDataLoaded, MarketDataState, StateType, V3MarketApiBucket } from '@types';
 
 import { rest, server } from '../../../../handlers/server';
 
-// On-chain reads return the value set in mockReads for that contract function, or 1e18,
-// which is enough for the hook to build its state without a node
-let mockReads: Record<string, bigint> = {};
-
-jest.mock('ethers-multicall', () => {
-  const { BigNumber } = jest.requireActual('@ethersproject/bignumber');
-  return {
-    Contract: jest.fn(() => new Proxy({}, { get: (_target, name) => () => name })),
-    Provider: jest.fn(() => ({
-      all: (calls: string[]) =>
-        Promise.resolve(calls.map((name) => BigNumber.from((mockReads[name] ?? 10n ** 18n).toString()))),
-    })),
-  };
+const mockSleuthFetch = jest.fn();
+jest.mock('@helpers/sleuth/sleuth', () => {
+  const Sleuth = jest.fn().mockImplementation(() => ({ fetch: (...args: unknown[]) => mockSleuthFetch(...args) }));
+  return { Sleuth: Object.assign(Sleuth, { querySol: jest.fn(() => 'query') }) };
 });
 
 jest.mock('@ethersproject/providers', () => ({
   ...jest.requireActual('@ethersproject/providers'),
   StaticJsonRpcProvider: jest.fn(),
 }));
+
+const ONE = BigNumber.from((10n ** 18n).toString());
+
+const rateModel = (base: bigint): RateModelResponse => ({
+  kink: ONE,
+  perSecondInterestRateBase: BigNumber.from(base.toString()),
+  perSecondInterestRateSlopeLow: ONE,
+  perSecondInterestRateSlopeHigh: ONE,
+});
+
+// Every number is 1e18 unless a test overrides it, which is enough for the hook to build its state
+const cometResponse = (overrides: Partial<CometStateResponse> = {}) =>
+  ({
+    state: {
+      baseAsset: { price: ONE, balanceOfComet: ONE },
+      borrowRateModel: rateModel(10n ** 18n),
+      collateralAssets: [],
+      factorScale: ONE,
+      nativeAssetInDollars: ONE,
+      supplyRateModel: rateModel(10n ** 18n),
+      totalBorrow: ONE,
+      totalSupply: ONE,
+      utilization: ONE,
+      ...overrides,
+    },
+    reserves: ONE,
+    targetReserves: ONE,
+    collateralReserves: [],
+  }) as unknown as CometWithReservesResponse;
 
 const marketData = getMarkets(false).find((market) => market.chainInformation.chainId === 1 && !market.rewardsOverwrite);
 
@@ -80,18 +102,20 @@ const renderMarketState = async () => {
 
 const renderMarketHistory = async () => (await renderMarketState()).marketHistory;
 
-afterEach(() => {
-  mockReads = {};
+beforeEach(() => {
+  mockSleuthFetch.mockResolvedValue(cometResponse());
 });
 
 describe('useMarketsState current APRs', () => {
   test('are the base rates when nothing is borrowed', async () => {
     const secondsPerYear = 31_536_000n;
-    mockReads = {
-      getUtilization: 0n,
-      borrowPerSecondInterestRateBase: 475_646_879n,
-      supplyPerSecondInterestRateBase: 317_097_919n,
-    };
+    mockSleuthFetch.mockResolvedValue(
+      cometResponse({
+        utilization: BigNumber.from(0),
+        borrowRateModel: rateModel(475_646_879n),
+        supplyRateModel: rateModel(317_097_919n),
+      })
+    );
 
     const { borrowAPR, earnAPR } = await renderMarketState();
 

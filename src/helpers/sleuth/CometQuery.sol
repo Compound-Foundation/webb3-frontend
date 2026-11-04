@@ -131,6 +131,10 @@ interface ERC20 {
   function symbol() external view returns (string memory);
 }
 
+interface WstETH {
+  function tokensPerStEth() external view returns (uint);
+}
+
 contract CometQuery {
   // Interest rate model parameters, per second at factorScale precision. The app computes the APRs
   // from them because service-patched Comets return a zero rate from getBorrowRate/getSupplyRate
@@ -140,6 +144,13 @@ contract CometQuery {
     uint perSecondInterestRateBase;
     uint perSecondInterestRateSlopeLow;
     uint perSecondInterestRateSlopeHigh;
+  }
+
+  // The account's stETH, which the bulker wraps into the market's wstETH collateral
+  struct StEthState {
+    uint bulkerAllowance;
+    uint walletBalance;
+    uint wstETHPerStETH;
   }
 
   struct BaseAsset {
@@ -284,6 +295,20 @@ contract CometQuery {
       });
   }
 
+  // Kept out of query() so a reverting reserves read breaks only the markets page, not the dashboard.
+  function queryWithReserves(
+    Comet comet,
+    address nativeTokenToUsd,
+    bool checkDeprecatedwUSDM
+  ) public view returns (CometState memory state, int reserves, uint targetReserves, uint[] memory collateralReserves) {
+    state = query(comet, nativeTokenToUsd, checkDeprecatedwUSDM);
+    collateralReserves = new uint[](state.collateralAssets.length);
+    for (uint i = 0; i < state.collateralAssets.length; i++) {
+      collateralReserves[i] = comet.getCollateralReserves(state.collateralAssets[i].collateralAsset);
+    }
+    return (state, comet.getReserves(), comet.targetReserves(), collateralReserves);
+  }
+
   function queryWithAccount(
     Comet comet,
     address nativeTokenToUsd,
@@ -345,6 +370,30 @@ contract CometQuery {
         trackingIndexScale: response.trackingIndexScale,
         utilization: response.utilization
       });
+  }
+
+  // stETHState stays zero unless wstETH is a collateral of this market
+  function queryWithAccountAndStEth(
+    Comet comet,
+    address nativeTokenToUsd,
+    address payable account,
+    address payable bulker,
+    string memory wrappedNativeTokenSymbol,
+    bool checkDeprecatedwUSDM,
+    address stETH,
+    address wstETH
+  ) public view returns (CometStateWithAccountState memory state, StEthState memory stETHState) {
+    state = queryWithAccount(comet, nativeTokenToUsd, account, bulker, wrappedNativeTokenSymbol, checkDeprecatedwUSDM);
+    for (uint i = 0; i < state.collateralAssets.length; i++) {
+      if (state.collateralAssets[i].collateralAsset == wstETH) {
+        stETHState = StEthState({
+          bulkerAllowance: ERC20(stETH).allowance(account, bulker),
+          walletBalance: ERC20(stETH).balanceOf(account),
+          wstETHPerStETH: WstETH(wstETH).tokensPerStEth()
+        });
+        break;
+      }
+    }
   }
 
   function cometStateMinusCollateralInfo(Comet comet, address nativeTokenToUsd) public view returns (CometStateWithoutCollateralAssets memory) {
@@ -494,6 +543,17 @@ contract CometQuery {
         totalSupply: asset.totalSupply,
         walletBalance: walletBalance
       });
+  }
+
+  function queryOperatorAllowances(
+    Comet comet,
+    address account,
+    address[] memory operators
+  ) public view returns (uint[] memory allowances) {
+    allowances = new uint[](operators.length);
+    for (uint i = 0; i < operators.length; i++) {
+      allowances[i] = comet.allowance(account, operators[i]);
+    }
   }
 
   function compare(string memory str1, string memory str2) internal pure returns (bool) {
