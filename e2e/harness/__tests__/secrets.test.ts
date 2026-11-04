@@ -12,6 +12,8 @@ import { findSecrets, outputsUnder, registerSecret, registerSecretPattern, zipMe
 
 const TOKEN = 'c'.repeat(64);
 const KEY = `0x${'d'.repeat(64)}`;
+/** A cache root's account salt, the length of the control token. */
+const SALT = 'e'.repeat(64);
 
 /** A ZIP of `members`, deflated, as Playwright writes a trace. */
 function zip(members: Record<string, string>): Buffer {
@@ -50,8 +52,9 @@ function zip(members: Record<string, string>): Buffer {
 
 let directory: string;
 beforeAll(() => {
-  registerSecret(TOKEN);
+  registerSecret(TOKEN, 'the control token');
   registerSecret(KEY);
+  registerSecret(SALT, 'the account salt');
   registerSecretPattern(secretPatternsOf('https://rpc.example.com/v2/PrivateKey0123456789abcdef')[0]);
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-scan-'));
 });
@@ -104,5 +107,7 @@ test('finds a key with or without 0x, JSON-escaped or base64, and the private UR
     { file: 'c', secret: 'the private upstream URL' },
   ]);
   expect(JSON.stringify(leaks)).not.toContain(KEY.slice(2));
+  // The salt has the token's length, and is named by the kind it was registered with.
+  expect(findSecrets([{ file: 'e', content: `salt ${SALT}` }])).toEqual([{ file: 'e', secret: 'the account salt' }]);
   expect(createRedactor([], [TOKEN]).redact(TOKEN)).toBe('<redacted>');
 });
