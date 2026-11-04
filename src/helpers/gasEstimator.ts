@@ -21,10 +21,6 @@ export enum PreEstimatedAction {
   Approve = 'approve',
   AllowOperator = 'allow-operator',
   Drip = 'drip',
-  Delegate = 'delegate',
-  CastVote = 'cast-vote',
-  QueueProposal = 'queue-proposal',
-  ExecuteProposal = 'execute-proposal',
 }
 
 export function initialEstimatedGasMap(chainInformation: ChainInformation | undefined): Map<string, number> {
@@ -36,10 +32,6 @@ export function initialEstimatedGasMap(chainInformation: ChainInformation | unde
     initialGasMap.set(PreEstimatedAction.Approve, 72770);
     initialGasMap.set(PreEstimatedAction.AllowOperator, 70315);
     initialGasMap.set(PreEstimatedAction.Drip, 60000);
-    initialGasMap.set(PreEstimatedAction.Delegate, 116610);
-    initialGasMap.set(PreEstimatedAction.CastVote, 117824);
-    initialGasMap.set(PreEstimatedAction.QueueProposal, 162020);
-    initialGasMap.set(PreEstimatedAction.ExecuteProposal, 200447);
   } else if (chainId === 137) {
     //Approve Dai was: 55750
     //Approve USDC was: 78950

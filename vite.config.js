@@ -36,7 +36,6 @@ export default defineConfig({
         markets: resolve(__dirname, 'markets/index.html'),
         marketDetail: resolve(__dirname, 'markets/ipfs-404.html'),
         extensions: resolve(__dirname, 'extensions/index.html'),
-        vote: resolve(__dirname, 'vote/index.html'),
         extensionDetail: resolve(__dirname, 'extensions/ipfs-404.html'),
         transactions: resolve(__dirname, 'transactions/index.html'),
         rewards: resolve(__dirname, 'rewards/index.html'),

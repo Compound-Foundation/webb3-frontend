@@ -1,18 +1,14 @@
-import { CHAINS, isTestnet } from '@constants/chains';
+import { CHAINS } from '@constants/chains';
 import { LIMIT } from '@hooks/useTransactionHistory';
 import { ChainInformation, PendingTransaction, MarketData, MarketDataLoaded, TransactionHistoryItem } from '@types';
 
-import { getGovernanceContractAddress, GovernanceNetworksEnum } from './contracts';
-
 export const COMPOUND_URL = 'https://compound.xyz/';
 export const V2_URL = 'https://v2-app.compound.xyz';
-export const GOV_URL = `https://compound.xyz/governance`;
 export const SUPPORT_URL = `https://medium.com/compound-finance/the-compound-guide-to-supplying-borrowing-crypto-assets-94821f2950a0`;
 export const TERMS_URL = 'https://www.compound.xyz/terms-of-service';
 export const PRIVACY_URL = 'https://www.compound.xyz/privacy-policy';
 export const V3_API_URL = import.meta.env.VITE_V3_API_HOST || 'V3_API_HOST_NOT_CONFIGURED';
 export const TIMESTAMP_API = 'https://timestamp.compound.xyz';
-export const TALLY_URL = 'https://www.tally.xyz';
 export const TALLY_GOV_URL = 'https://www.tally.xyz/gov/compound';
 export const REWARDS_PAUSE_FORUM_URL = 'https://www.comp.xyz/t/pausing-comet-rewards-top-ups/7879';
 export const INSTITUTIONAL_MARKET_URL = 'https://www.compound.xyz/institutional-market';
@@ -44,17 +40,6 @@ export function getBlockExplorerUrlForTransactionHistory(transaction: Transactio
 export function getMarketDataUrlForMarket(market: MarketData | MarketDataLoaded): string {
   const v3ApiNetworkKey = market.chainInformation.v3ApiNetworkKeyOverride ?? market.chainInformation.key;
   return `${V3_API_URL}/market/${v3ApiNetworkKey}/${market.marketAddress}`;
-}
-
-export function getGovernanceUrlForChain(chainKey: string): string {
-  return `${V3_API_URL}/governance/${chainKey}`;
-}
-
-export function getTallyProfileForChain(chainId: number, address: string): string {
-  const [governor] = getGovernanceContractAddress(
-    isTestnet(chainId) ? GovernanceNetworksEnum.Testnet : GovernanceNetworksEnum.Mainnet,
-  );
-  return `${TALLY_URL}/profile/${address}?governanceId=eip155:${chainId}:${governor}`;
 }
 
 export function getTransactionHistoryEndpoint(
