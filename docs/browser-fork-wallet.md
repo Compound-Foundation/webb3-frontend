@@ -25,7 +25,7 @@ The suite lives in `e2e/`: the harness in `e2e/harness/`, the browser specs in `
 
 Each Playwright worker has its own fork lane, so spec files run in parallel. Tests within a file run in order, with no retries, so a flaky case shows as a failure. The harness estimates the worker count unless you set it. See [Choosing the worker count](#choosing-the-worker-count).
 
-In the [benchmarks below](#benchmarks), full runs took about 2 to 5½ minutes, depending on workers and cache state. Set-up took 17 to 41 seconds. The screening and wallet-events files accounted for most of the test time.
+On `main` at `3c19d18` (2026-11-03), on the benchmark machine with 4 workers and a warm cache, `yarn test:browser:dev` took 142 s and `yarn test:browser` took 161 s. See [the benchmarks below](#benchmarks) for other worker counts and cold caches.
 
 Each run writes `test-results/browser-fork/<run ID>/`, which Git ignores:
 
@@ -38,6 +38,72 @@ Each run writes `test-results/browser-fork/<run ID>/`, which Git ignores:
 | `html/`, `playwright/`           | Playwright's HTML report, and each failed test's trace, screenshot and attachments.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `startup-failure.txt`            | Why the harness did not start, if it did not.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `warm-up.json`                   | If the first page load did not render, the page's errors, failed requests and blocked requests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+
+## Iterating and pushing
+
+While iterating, run only the browser specs that cover the change. Before each push that changes code in the browser harness (`e2e/`), wallet connection, transactions or screening, run the full `yarn test:browser` once. Run it on a clean tree, at the head being pushed.
+
+### Scoped runs
+
+Pass spec paths, a title filter or a project to select the tests:
+
+```bash
+# Run one spec file.
+yarn test:browser e2e/specs/connect.spec.ts
+
+# Run the disconnect cases in one spec file.
+yarn test:browser e2e/specs/wallet-events.spec.ts -g disconnect
+
+# Run the dev project. No production build is made, since no prod-build spec is selected.
+yarn test:browser --project dev
+
+# The same, as a package script.
+yarn test:browser:dev
+
+# Run screening on the dev server and the production builds.
+yarn test:browser e2e/specs/screening.spec.ts e2e/specs/prod-build.spec.ts
+```
+
+Add `prod-build.spec.ts` to a scoped run when the change touches screening, `envVars.ts` or the build. If you select that spec, the run builds the two production bundles.
+
+Every scoped run's summary says "Scoped run, INCOMPLETE" and names the tests it left out. A scoped run is never acceptance evidence.
+
+The spec files below live in `e2e/specs/`. Choose the specs for the source areas the change touches.
+
+| Area of change                                                                                                                                                                                                                                                                                | Specs to run                                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Wallet connection: `src/components/ConnectWalletModal.tsx`, `src/components/SafeAutoConnect.tsx`, `src/contexts/Web3Context.tsx`, `src/main.tsx`                                                                                                                                              | `connect.spec.ts`, `wallet-events.spec.ts`, `screening.spec.ts`, since every connected address is screened                              |
+| Standard transactions: actions in `src/helpers/`, `useWriteCometState`, `useTransactionManager`, `src/pages/home/components/ActionModal/`, `src/pages/home/index.tsx`                                                                                                                         | `usdc-supply-withdraw.spec.ts`, `existing-position.spec.ts`, `wallet-events.spec.ts`, `mixed-position.spec.ts`                          |
+| Wrapped route: `useWriteWrappedState`, `useWrappedAction`, `useLendingRoute`, `useWrappedPosition`, `src/helpers/wrappedActions.ts`, `src/helpers/queuedExecution.ts`, `src/helpers/lendingRoute.ts`, `src/constants/wrappedMarkets.ts`, `src/pages/home/components/WrappedPositionPanel.tsx` | `wrapped-queue.spec.ts`, `mixed-position.spec.ts`                                                                                       |
+| Screening: `src/helpers/screening.ts`, `src/hooks/useAddressScreening.ts`, `src/hooks/useDisconnectBlockedWallet.ts`, `src/components/ScreeningErrorOverlay.tsx`, `envVars.ts`                                                                                                                | `screening.spec.ts`, `prod-build.spec.ts`                                                                                               |
+| Extensions and signing: `src/pages/extensions/`                                                                                                                                                                                                                                               | `signing.spec.ts`                                                                                                                       |
+| Build: `vite.config.js`, `envVars.ts`, the HTML entry points, dependencies                                                                                                                                                                                                                    | `bundle.spec.ts`, `prod-build.spec.ts`                                                                                                  |
+| Harness: `e2e/harness/`, `e2e/playwright.config.ts`                                                                                                                                                                                                                                           | `harness-security.spec.ts` plus the specs that use the changed part. Run the full suite for shared harness changes, as described below. |
+| Interactive session                                                                                                                                                                                                                                                                           | `interactive.session.ts` is the session behind `yarn test:browser:open`, not a test.                                                    |
+
+For a change to shared harness parts, run the full suite. These parts include fixtures, the wallet server, the fork, proxies, lanes, the summary reporter and the Playwright config.
+
+### Pushes and evidence
+
+A push needs the full suite when it changes code in the browser harness (`e2e/`), wallet connection, transactions or screening. Docs-only pushes and PR-body-only edits do not need the full suite.
+
+Report these from the full run's `summary.md`:
+
+- The `All implemented tests passed: yes` line.
+- The `Git:` line naming the pushed head, with no `(dirty tree)`.
+- The summary's path, which the run's last line prints: `Summary: <checkout>/test-results/browser-fork/<run ID>/summary.md`.
+
+The `Verdict:` line stays INCOMPLETE while `prod-build.spec.ts` holds its `test.fixme`. This is expected even when all implemented tests pass. `All implemented tests passed: no`, a FAIL verdict, a dirty tree or a different head is not evidence that the pushed head passed.
+
+### Verifiers
+
+A verifier reads the `summary.md` of the full run at the PR head, at the path the implementer reports, instead of running the full suite again. The verifier checks the implemented-tests line, the verdict and the clean Git head, then runs only the specs its own checks need. If no clean full run exists at the PR head, the implementer still owes one.
+
+### Run time and background commands
+
+A full run took 161 s on the benchmark machine with a warm cache. It takes longer with a cold cache, one worker or a loaded machine: on the same day, a `yarn test:browser:dev` run with a cold cache, 2 workers, a public endpoint that rate-limited it and a loaded machine took 331 s. A run can approach the 10-minute foreground-command limit on agent hosts. Start the full run as a background command and wait for it to finish before ending the turn. A run left behind when the turn ends goes unreported.
+
+Do not start a second run while one is going. Two runs compete for the machine, and only one holds the [fork cache](#the-fork-cache) port.
 
 ## What runs
 
