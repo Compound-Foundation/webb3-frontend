@@ -320,7 +320,7 @@ export async function startServices({
     const screening = await startScreeningStub({ allowedOrigins: appOrigins, laneCount });
     addStop({ name: 'screening stub', run: () => screening.close() });
     const token = randomBytes(32).toString('hex');
-    registerSecret(token);
+    registerSecret(token, 'the control token');
     const tokenFile = path.join(directory, 'control-token');
     fs.writeFileSync(tokenFile, token, { mode: 0o600 });
 
@@ -346,10 +346,10 @@ export async function startServices({
     const anvilOffReason =
       cacheRoot === undefined || isCacheAnvil(anvil.version) ? undefined : 'the installed anvil cannot read the cache';
     const cachePort = cacheRoot !== undefined && anvilOffReason === undefined ? CACHED_PROXY_PORT : undefined;
-    // With the cache on, each test's keys are derived from its identity and this salt, so its accounts repeat
-    // in every run that uses the root, and the cache holds what anvil read for them.
+    // With the cache on, each test's keys come from its identity and this salt. Its accounts then repeat in
+    // every run that uses the root, and the cache holds what anvil read for them.
     const salt = cachePort === undefined || cacheRoot === undefined ? undefined : accountSalt(cacheRoot);
-    if (salt !== undefined) registerSecret(salt);
+    if (salt !== undefined) registerSecret(salt, 'the account salt');
     const stats = () => ({
       rpcProxy: {
         forwarded: Object.fromEntries(rpcProxy.stats.forwarded),

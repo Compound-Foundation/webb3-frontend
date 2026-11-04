@@ -453,9 +453,11 @@ describe('the shared fork cache', () => {
 
     test('refuses a salt file that others can read, a symbolic link, and malformed content', () => {
       checkCacheRoot(root);
-      fs.writeFileSync(saltFile(), 'a'.repeat(64), { mode: 0o644 });
-      fs.chmodSync(saltFile(), 0o644);
-      expect(() => accountSalt(root)).toThrow(/account-salt must be a file you own, with mode 0600/);
+      fs.writeFileSync(saltFile(), 'a'.repeat(64), { mode: 0o600 });
+      for (const mode of [0o644, 0o640, 0o604]) {
+        fs.chmodSync(saltFile(), mode);
+        expect(() => accountSalt(root)).toThrow(/account-salt must be a file you own, with mode 0600/);
+      }
       fs.rmSync(saltFile());
       const target = path.join(scratch, 'salt-elsewhere');
       fs.writeFileSync(target, 'a'.repeat(64), { mode: 0o600 });
@@ -464,6 +466,16 @@ describe('the shared fork cache', () => {
       fs.rmSync(saltFile());
       fs.writeFileSync(saltFile(), 'not a salt', { mode: 0o600 });
       expect(() => accountSalt(root)).toThrow(/account-salt does not hold a salt/);
+      fs.rmSync(saltFile());
+      fs.mkdirSync(saltFile(), { mode: 0o700 });
+      expect(() => accountSalt(root)).toThrow();
+    });
+
+    test('leaves no file of its own behind beside the salt', () => {
+      checkCacheRoot(root);
+      accountSalt(root);
+      accountSalt(root);
+      expect(fs.readdirSync(root)).toEqual(['account-salt']);
     });
   });
 
