@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import type { FullConfig } from '@playwright/test';
 
+import { workersText, type WorkerSelection } from './concurrency';
 import { REPO_ROOT } from './paths';
 import { startServices } from './services';
 
@@ -24,7 +25,21 @@ export default async function globalSetup(config: FullConfig): Promise<() => Pro
     : !projects.includes('prod-build')
     ? 'the run does not include the prod-build project'
     : undefined;
-  const services = await startServices({ runId, isInteractive, skipProduction });
+  // The selection the configuration made, and the count Playwright runs with, which `--workers` can change.
+  // Each worker can lease one fork lane.
+  const selection = process.env.BROWSER_HARNESS_CONCURRENCY
+    ? (JSON.parse(process.env.BROWSER_HARNESS_CONCURRENCY) as WorkerSelection)
+    : undefined;
+  const workers = isInteractive ? 1 : config.workers;
+  const isCliOverride = selection !== undefined && workers !== selection.workers;
+  process.stdout.write(`Browser harness: workers ${workersText({ workers, selection, isCliOverride })}\n`);
+  const services = await startServices({
+    runId,
+    isInteractive,
+    skipProduction,
+    laneCount: workers,
+    concurrency: { workers, selection, isCliOverride },
+  });
   return async () => {
     const errors = await services.stop();
     if (errors.length > 0) throw new Error(`The harness did not stop cleanly: ${errors.join('; ')}`);

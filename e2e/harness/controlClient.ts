@@ -28,11 +28,22 @@ export class ControlClient {
     this.#token = token;
   }
 
-  /** A client for the run, from BROWSER_WALLET_CONTROL_URL and the token file at BROWSER_WALLET_TOKEN_FILE. */
+  /**
+   * A client for the run, from BROWSER_WALLET_CONTROL_URL, which is lane 0's wallet server, and the token file
+   * at BROWSER_WALLET_TOKEN_FILE.
+   */
   static fromEnvironment(env: NodeJS.ProcessEnv = process.env): ControlClient {
     const url = env.BROWSER_WALLET_CONTROL_URL;
+    if (url === undefined) {
+      throw new Error('BROWSER_WALLET_CONTROL_URL and BROWSER_WALLET_TOKEN_FILE are not set: start the harness first.');
+    }
+    return ControlClient.forUrl(url, env);
+  }
+
+  /** A client for the harness server at `url`, such as a lane's wallet server, with the run's token. */
+  static forUrl(url: string, env: NodeJS.ProcessEnv = process.env): ControlClient {
     const tokenFile = env.BROWSER_WALLET_TOKEN_FILE;
-    if (url === undefined || tokenFile === undefined) {
+    if (tokenFile === undefined) {
       throw new Error('BROWSER_WALLET_CONTROL_URL and BROWSER_WALLET_TOKEN_FILE are not set: start the harness first.');
     }
     return new ControlClient(url, fs.readFileSync(tokenFile, 'utf8').trim());
@@ -77,7 +88,9 @@ export class ControlClient {
   }
 
   state = () => this.request<WalletState>('GET', '/v1/state');
-  reset = () => this.request<{ generation: number }>('POST', '/v1/reset', {});
+  /** Resets the wallet and the fork. With `seed`, the keyed accounts made until the next reset are derived from it. */
+  reset = (seed?: string) =>
+    this.request<{ generation: number }>('POST', '/v1/reset', seed === undefined ? {} : { seed });
   health = () => this.request<{ ok: boolean; generation: number }>('GET', '/v1/health');
 
   newAccount = (options: AccountOptions = {}) =>

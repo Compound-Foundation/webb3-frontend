@@ -13,8 +13,8 @@ export type QueuedWrapperAction =
   | { type: 'withdraw'; action: Action; request: WithdrawalRequest };
 
 /**
- * How a queue is submitted: the wrapper action first, as its own wallet transactions, then the
- * other actions to Comet or the Bulker, as before. Either part can be empty.
+ * How a queue is submitted: a wrapper action as its own wallet transactions, or the direct actions
+ * to Comet or the Bulker. On the wrapped route the queue holds one action, so one part is empty.
  */
 export type QueuedExecutionPlan = { wrapper: QueuedWrapperAction | undefined; direct: Action[] };
 
@@ -27,6 +27,15 @@ export function isWrapperRouted(route: LendingRoute, action: Action): boolean {
   return route.kind === 'wrapped' && (action[0] === ActionType.Supply || action[0] === ActionType.Withdraw);
 }
 
+/**
+ * Whether the queue on `route` holds at most one action. On the wrapped route a base supply or
+ * withdrawal goes to the wrapper, which the Bulker cannot call. Each action there is therefore
+ * submitted on its own, whatever its kind.
+ */
+export function isSingleActionRoute(route: LendingRoute): boolean {
+  return route.kind === 'wrapped';
+}
+
 /** The actions of the queue that go to Comet or the Bulker on `route`, in their queued order. */
 export function directActionsForRoute(route: LendingRoute, actions: Action[]): Action[] {
   return actions.filter((action) => !isWrapperRouted(route, action));
@@ -35,9 +44,9 @@ export function directActionsForRoute(route: LendingRoute, actions: Action[]): A
 /**
  * Splits a queue into the wrapper action and the direct actions, as `QueuedExecutionPlan`
  * describes. On the standard route every action is direct. A maximum supply supplies the wallet
- * balance the earlier queued actions leave, and a maximum withdrawal is a full exit. A queue with
- * more than one wrapper action, or a base action for another token than the wrapper's, is refused
- * whole with a `WrappedExecutionError`, so no part of it is submitted.
+ * balance, and a maximum withdrawal is a full exit. A `WrappedExecutionError` refuses the whole
+ * queue when it holds more than one action on a route limited to one. It does the same for a base
+ * action for another token than the wrapper's. No part of a refused queue is submitted.
  */
 export function planQueuedExecution(
   route: LendingRoute,
@@ -45,16 +54,13 @@ export function planQueuedExecution(
   collateralAssets: TokenWithAccountState[],
   actions: Action[]
 ): QueuedExecutionPlan {
-  const direct = directActionsForRoute(route, actions);
-  if (route.kind !== 'wrapped') return { wrapper: undefined, direct };
-
-  const wrapperIndexes = actions.flatMap((action, index) => (isWrapperRouted(route, action) ? [index] : []));
-  if (wrapperIndexes.length === 0) return { wrapper: undefined, direct };
-  if (wrapperIndexes.length > 1) {
-    throw new WrappedExecutionError('several-wrapped-actions', 'Submit one supply or withdrawal at a time.');
+  if (isSingleActionRoute(route) && actions.length > 1) {
+    throw new WrappedExecutionError('several-actions', 'Submit one action at a time.');
   }
-  const index = wrapperIndexes[0];
-  const action = actions[index];
+  const direct = directActionsForRoute(route, actions);
+  // The wrapped route holds one action, so the queue is either that wrapper action or direct.
+  const action = actions.find((queued) => isWrapperRouted(route, queued));
+  if (action === undefined || route.kind !== 'wrapped') return { wrapper: undefined, direct };
   const [actionType, asset, amount] = action;
   const baseToken = route.market?.baseTokenAddress;
   if (baseToken !== undefined && asset.address.toLowerCase() !== baseToken.toLowerCase()) {
@@ -62,11 +68,73 @@ export function planQueuedExecution(
   }
 
   if (actionType === ActionType.Supply) {
-    const supplied = sanitizedAmountForAction(baseAsset, collateralAssets, actions.slice(0, index), action);
+    const supplied = sanitizedAmountForAction(baseAsset, collateralAssets, [], action);
     return { wrapper: { type: 'supply', action, amount: supplied }, direct };
   }
   const request: WithdrawalRequest = amount === MAX_UINT256 ? { kind: 'full' } : { kind: 'partial', cash: amount };
   return { wrapper: { type: 'withdraw', action, request }, direct };
+}
+
+/**
+ * The Comet base withdrawal that pays the part of a wrapped-route withdrawal the account supplied to
+ * Comet directly, outside the wrapper. It is the call production sends: Comet's
+ * `withdraw(baseToken, amount)`.
+ */
+export type DirectBaseWithdrawal = {
+  /**
+   * `withdraw`'s amount: `MAX_UINT256` for the whole direct supply, or a part strictly below the
+   * supply, in base units.
+   */
+  amount: bigint;
+};
+
+/**
+ * How a queued withdrawal on the wrapped route is carried out: `direct` first, as its own Comet
+ * transaction, then `request` through the wrapper, which starts only once `direct` confirms. At least
+ * one of the two is set. A partial `request` is what the wrapper pays if `direct` takes exactly the
+ * direct supply it was planned from. After `direct` confirms, the rest is worked out again from what
+ * it took.
+ */
+export type WithdrawalSplit = { direct: DirectBaseWithdrawal | undefined; request: WithdrawalRequest | undefined };
+
+/**
+ * Splits a withdrawal of `amount` on the wrapped route between the account's direct Comet supply,
+ * `directBalance`, and its wrapper shares. The direct supply pays first:
+ * - With no direct supply, everything goes to the wrapper, as `planQueuedExecution` plans it.
+ * - An amount below the direct supply is one Comet withdrawal of that amount.
+ * - An amount equal to the direct supply withdraws it with `MAX_UINT256`, with no wrapper step, so
+ *   it never borrows if the supply falls before it executes.
+ * - A larger amount withdraws the whole direct supply with `MAX_UINT256`, then the rest from the
+ *   wrapper.
+ * - A maximum withdraws the whole direct supply with `MAX_UINT256`, then makes a full exit when the
+ *   account holds wrapper shares.
+ *
+ * With `MAX_UINT256`, Comet withdraws the supply it holds for the account and never borrows. A
+ * maximum with a direct supply needs `wrappedShares`, and is refused with a `WrappedExecutionError`
+ * while they are unknown. Home splits a withdrawal when Submit is pressed, again from a fresh read of
+ * `directBalance` before the gas estimate, and once more from a read after it, before the wallet is
+ * asked.
+ */
+export function splitWrappedWithdrawal(
+  amount: bigint,
+  directBalance: bigint,
+  wrappedShares: bigint | undefined
+): WithdrawalSplit {
+  const isMax = amount === MAX_UINT256;
+  if (directBalance <= 0n) {
+    return { direct: undefined, request: isMax ? { kind: 'full' } : { kind: 'partial', cash: amount } };
+  }
+  const wholeDirect: DirectBaseWithdrawal = { amount: MAX_UINT256 };
+  if (isMax) {
+    if (wrappedShares === undefined) {
+      throw new WrappedExecutionError('position-unknown', 'Your wrapped balance is not loaded yet. Try again.');
+    }
+    return { direct: wholeDirect, request: wrappedShares > 0n ? { kind: 'full' } : undefined };
+  }
+  if (amount <= 0n) throw new WrappedExecutionError('unknown-entry', 'Enter an amount greater than 0.');
+  if (amount < directBalance) return { direct: { amount }, request: undefined };
+  if (amount === directBalance) return { direct: wholeDirect, request: undefined };
+  return { direct: wholeDirect, request: { kind: 'partial', cash: amount - directBalance } };
 }
 
 /**

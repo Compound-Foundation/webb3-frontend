@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 
-import type { SentWrapperAction, SubmissionRecord, SubmissionStore } from '@contexts/WrappedLendingContext';
+import type {
+  DirectStepRecord,
+  SentWrapperAction,
+  SubmissionRecord,
+  SubmissionStore,
+} from '@contexts/WrappedLendingContext';
 import type { WrappedActionType } from '@helpers/wrappedActions';
 import { Action, SettledTransaction, Transaction, TransactionState } from '@types';
 
@@ -102,6 +107,7 @@ export function useSubmissionStore({
 }: UseSubmissionStoreOptions): SubmissionStore {
   const [record, setRecord] = useState<SubmissionRecord>();
   const [sentRecord, setSentRecord] = useState<SentWrapperAction>();
+  const [directStepRecord, setDirectStep] = useState<DirectStepRecord>();
   // A return to the same scope never brings back a record from before the change.
   useEffect(() => {
     setRecord((current) => (current !== undefined && current.scope !== scope ? undefined : current));
@@ -139,5 +145,14 @@ export function useSubmissionStore({
     }
   }, [sent, isSubmissionOpen, transactions, settledTransactions]);
 
-  return { record: submission, setRecord, sent, setSent: setSentRecord };
+  const directStep = directStepRecord?.scope === queueScope ? directStepRecord : undefined;
+
+  return {
+    record: submission,
+    setRecord,
+    sent,
+    setSent: setSentRecord,
+    directStep,
+    setDirectStep,
+  };
 }

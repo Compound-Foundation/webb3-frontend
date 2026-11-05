@@ -182,12 +182,16 @@ export function isSameWrappedIdentity(
 }
 
 export type WrappedExecutionProblem =
+  /** A withdrawal needed the account's wrapper shares, and they were not loaded. */
+  | 'position-unknown'
   /** A wrapper action reached the standard queue or the Bulker. */
   | 'wrapped-action'
   /** One request held both direct actions and a wrapper action. */
   | 'mixed-execution'
   /** One request held more than one wrapper action. */
   | 'several-wrapped-actions'
+  /** A queue limited to one action held more than one. */
+  | 'several-actions'
   /** One request held something that is neither. */
   | 'unknown-entry';
 
@@ -211,6 +215,16 @@ const STANDARD_ACTION_TYPES = new Set<unknown>(Object.values(ActionType));
 const WRAPPER_ADDRESSES: ReadonlySet<string> = new Set(
   HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => String(market.wrapperAddress).toLowerCase())
 );
+
+/** Every Comet market the configuration names a wrapper for. */
+const WRAPPED_COMET_ADDRESSES: ReadonlySet<string> = new Set(
+  HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => String(market.cometAddress).toLowerCase())
+);
+
+/** Whether `address` is a Comet market the configuration names a wrapper for. */
+export function isWrappedCometAddress(address: unknown): boolean {
+  return typeof address === 'string' && WRAPPED_COMET_ADDRESSES.has(address.toLowerCase());
+}
 
 /** Whether `address` is a wrapper the configuration names. */
 export function isWrapperAddress(address: unknown): boolean {

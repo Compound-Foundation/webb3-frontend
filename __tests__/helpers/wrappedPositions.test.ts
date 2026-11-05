@@ -1,21 +1,29 @@
+import { Interface } from '@ethersproject/abi';
 import { BigNumber } from 'ethers';
 
 import { WRAPPED_MARKET_REGISTRY, WrappedMarket } from '@constants/wrappedMarkets';
+import CometAbi from '@helpers/abis/Comet';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { ContractCall } from '@helpers/multicall';
+import { MAX_UINT256 } from '@helpers/numbers';
 import {
   CometStateWithMarket,
+  isDirectWithdrawalRefused,
   isSameWalletSession,
   isSubmissionRefused,
   getFullExitCash,
   getGrossAssets,
   getRedeemBuffer,
   getWrappedPositionValueInDollars,
+  getWrappedRouteWithdrawalLimits,
+  readDirectBalance,
   readWrappedPosition,
   supplyIncentivesForRoute,
   waitForBlock,
+  withdrawnFromReceipt,
   WrappedPositionReadError,
 } from '@helpers/wrappedPositions';
+import { WithdrawalLimits } from '@helpers/wrappedWithdrawals';
 import { Action, ActionType, CometState, StateType } from '@types';
 
 import { mockBaseAsset } from '../mocks/mockBaseAsset';
@@ -311,6 +319,7 @@ describe('isSubmissionRefused', () => {
     exit: { isEligible: false, reason: 'exits-disabled' },
   };
   const standard: LendingRoute = { kind: 'standard', writes: { isEligible: true } };
+  const wrappedClosed = wrapped;
   const baseAsset = { ...mockBaseAsset(), walletBalance: 10n ** 12n };
 
   const hydrated = (balance: bigint, market = USDC, account = ACCOUNT): CometStateWithMarket => ({
@@ -372,5 +381,244 @@ describe('isSubmissionRefused', () => {
   it('leaves a dialog for an unrouted market alone', () => {
     const live = { route: standard, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(0n) };
     expect(isSubmissionRefused(live, UNROUTED, [supply])).toBe(false);
+  });
+
+  it('still refuses every base withdrawal to Comet on the wrapped route, with or without a direct supply', () => {
+    for (const balance of [0n, 250_000_000n]) {
+      const live = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(balance) };
+      for (const amount of [1n, 100_000_000n, MAX_UINT256]) {
+        expect(isSubmissionRefused(live, USDC, [[ActionType.Withdraw, { ...baseAsset }, amount] as Action])).toBe(true);
+      }
+    }
+  });
+
+  it('refuses a borrow on the wrapped route while a direct supply remains, since Comet would withdraw it first', () => {
+    const borrow: Action = [ActionType.Borrow, { ...baseAsset }, 100_000_000n] as Action;
+    const withSupply = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(250_000_000n) };
+    const withoutSupply = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(0n) };
+    expect(isSubmissionRefused(withSupply, USDC, [borrow])).toBe(true);
+    expect(isSubmissionRefused(withoutSupply, USDC, [borrow])).toBe(false);
+  });
+
+  describe('isDirectWithdrawalRefused', () => {
+    // The wrapped route with its exits open, as a release opens them.
+    const wrapped = { ...wrappedClosed, exit: { isEligible: true } } as LendingRoute;
+
+    it('allows the planned Comet step while the live Comet state shows a direct supply', () => {
+      const live = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(250_000_000n) };
+      expect(isDirectWithdrawalRefused(live, USDC)).toBe(false);
+      const dust = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(1n) };
+      expect(isDirectWithdrawalRefused(dust, USDC)).toBe(false);
+    });
+
+    it('refuses it once the live Comet state shows no direct supply, or a borrow', () => {
+      const none = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(0n) };
+      expect(isDirectWithdrawalRefused(none, USDC)).toBe(true);
+      const borrower = { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(-1n) };
+      expect(isDirectWithdrawalRefused(borrower, USDC)).toBe(true);
+    });
+
+    it('refuses it off the wrapped route, for another market, or without live balances for the account', () => {
+      const covered = hydrated(250_000_000n);
+      expect(
+        isDirectWithdrawalRefused({ route: standard, account: ACCOUNT, selectedMarket: USDC, comet: covered }, USDC)
+      ).toBe(true);
+      expect(
+        isDirectWithdrawalRefused(
+          { route: wrapped, account: ACCOUNT, selectedMarket: OTHER_ROUTED, comet: covered },
+          USDC
+        )
+      ).toBe(true);
+      const loading = { market: USDC, account: ACCOUNT, state: [StateType.Loading, undefined] as CometState };
+      expect(
+        isDirectWithdrawalRefused({ route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: loading }, USDC)
+      ).toBe(true);
+      const otherAccount = hydrated(250_000_000n, USDC, '0x0000000000000000000000000000000000000bb2');
+      expect(
+        isDirectWithdrawalRefused({ route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: otherAccount }, USDC)
+      ).toBe(true);
+      expect(
+        isDirectWithdrawalRefused(
+          { route: wrapped, account: ACCOUNT, selectedMarket: USDC, comet: hydrated(250_000_000n, OTHER_ROUTED) },
+          USDC
+        )
+      ).toBe(true);
+    });
+
+    it('refuses it while exits are closed or the route cannot withdraw', () => {
+      const covered = hydrated(250_000_000n);
+      expect(
+        isDirectWithdrawalRefused(
+          { route: wrappedClosed, account: ACCOUNT, selectedMarket: USDC, comet: covered },
+          USDC
+        )
+      ).toBe(true);
+      const conflicted = {
+        ...wrappedClosed,
+        exit: { isEligible: false, reason: 'connector-conflict' },
+      } as LendingRoute;
+      expect(
+        isDirectWithdrawalRefused({ route: conflicted, account: ACCOUNT, selectedMarket: USDC, comet: covered }, USDC)
+      ).toBe(true);
+    });
+  });
+});
+
+describe('readDirectBalance', () => {
+  const COMET_ABI = new Interface(CometAbi);
+
+  it("reads Comet's balanceOf for the account at the given block", async () => {
+    const provider = { call: jest.fn(async () => COMET_ABI.encodeFunctionResult('balanceOf', [250_000_000n])) };
+    await expect(readDirectBalance(provider, USDC_COMET, ACCOUNT, 1_234)).resolves.toBe(250_000_000n);
+    expect(provider.call).toHaveBeenCalledWith(
+      { to: USDC_COMET, data: '0x70a08231' + ACCOUNT.slice(2).toLowerCase().padStart(64, '0') },
+      1_234
+    );
+  });
+
+  it('fails, rather than returning zero, when the read fails', async () => {
+    const provider = { call: jest.fn(async () => Promise.reject(new Error('rate limited'))) };
+    await expect(readDirectBalance(provider, USDC_COMET, ACCOUNT, 1_234)).rejects.toThrow('rate limited');
+  });
+});
+
+describe('withdrawnFromReceipt', () => {
+  const COMET_ABI = new Interface(CometAbi);
+  const withdrawLog = (address: string, src: string, amount: bigint) => ({
+    address,
+    ...COMET_ABI.encodeEventLog(COMET_ABI.getEvent('Withdraw'), [src, src, amount]),
+  });
+
+  it("reads the amount from Comet's Withdraw event for the account", () => {
+    const receipt = { logs: [withdrawLog(USDC_COMET, ACCOUNT, 250_000_007n)] } as never;
+    expect(withdrawnFromReceipt(receipt, USDC_COMET, ACCOUNT)).toBe(250_000_007n);
+  });
+
+  it("is undefined without such an event, and ignores another contract's or account's", () => {
+    const other = '0x0000000000000000000000000000000000000bb2';
+    const receipt = {
+      logs: [withdrawLog(other, ACCOUNT, 1n), withdrawLog(USDC_COMET, other, 2n)],
+    } as never;
+    expect(withdrawnFromReceipt(receipt, USDC_COMET, ACCOUNT)).toBeUndefined();
+    expect(withdrawnFromReceipt({ logs: [] } as never, USDC_COMET, ACCOUNT)).toBeUndefined();
+  });
+});
+
+describe('getWrappedRouteWithdrawalLimits', () => {
+  const CASH = 10_000_000_000n;
+  // The wrapper's limits within `cash`: a 500 USDC full exit, of which the cash can pay at most `cash`.
+  const wrapperLimits = (fullExitCash: bigint) =>
+    jest.fn(
+      (cash: bigint): WithdrawalLimits => ({
+        fullExitCash,
+        maxPartialCash: fullExitCash <= cash ? fullExitCash : cash,
+        canExitFully: fullExitCash > 0n && fullExitCash <= cash,
+      })
+    );
+
+  it("gives the wrapper's own limits within the market's cash without a direct supply", () => {
+    const wrapperLimitsAt = wrapperLimits(500_000_000n);
+    expect(
+      getWrappedRouteWithdrawalLimits({
+        directSupply: 0n,
+        cometCash: CASH,
+        hasShares: true,
+        isWithdrawPaused: false,
+        wrapperLimitsAt,
+      })
+    ).toEqual({ maxPartialCash: 500_000_000n, canWithdrawAll: true, fullExitCash: 500_000_000n });
+    expect(wrapperLimitsAt).toHaveBeenCalledWith(CASH);
+  });
+
+  it('adds the direct supply first, and limits the wrapper to the cash the direct part leaves', () => {
+    const wrapperLimitsAt = wrapperLimits(500_000_000n);
+    expect(
+      getWrappedRouteWithdrawalLimits({
+        directSupply: 250_000_000n,
+        cometCash: CASH,
+        hasShares: true,
+        isWithdrawPaused: false,
+        wrapperLimitsAt,
+      })
+    ).toEqual({ maxPartialCash: 750_000_000n, canWithdrawAll: true, fullExitCash: 750_000_000n });
+    expect(wrapperLimitsAt).toHaveBeenCalledWith(CASH - 250_000_000n);
+
+    // The market holds 600 USDC: 250 for the direct part, and 350 of the wrapper's 500.
+    expect(
+      getWrappedRouteWithdrawalLimits({
+        directSupply: 250_000_000n,
+        cometCash: 600_000_000n,
+        hasShares: true,
+        isWithdrawPaused: false,
+        wrapperLimitsAt,
+      })
+    ).toEqual({ maxPartialCash: 600_000_000n, canWithdrawAll: false, fullExitCash: 750_000_000n });
+  });
+
+  it('pays only the cash, from the direct part, when the market holds less than the direct supply', () => {
+    expect(
+      getWrappedRouteWithdrawalLimits({
+        directSupply: 250_000_000n,
+        cometCash: 100_000_000n,
+        hasShares: true,
+        isWithdrawPaused: false,
+        wrapperLimitsAt: wrapperLimits(500_000_000n),
+      })
+    ).toEqual({ maxPartialCash: 100_000_000n, canWithdrawAll: false, fullExitCash: 750_000_000n });
+  });
+
+  it('lets Max withdraw a direct supply alone without wrapper shares, and not beside shares too small to exit', () => {
+    const limits = (hasShares: boolean, fullExitCash: bigint) =>
+      getWrappedRouteWithdrawalLimits({
+        directSupply: 250_000_000n,
+        cometCash: CASH,
+        hasShares,
+        isWithdrawPaused: false,
+        wrapperLimitsAt: wrapperLimits(fullExitCash),
+      });
+    expect(limits(false, 0n)).toEqual({
+      maxPartialCash: 250_000_000n,
+      canWithdrawAll: true,
+      fullExitCash: 250_000_000n,
+    });
+    expect(limits(true, 0n)).toEqual({
+      maxPartialCash: 250_000_000n,
+      canWithdrawAll: false,
+      fullExitCash: 250_000_000n,
+    });
+  });
+
+  it('pays nothing while Comet withdrawals are paused, which stops the direct part too', () => {
+    expect(
+      getWrappedRouteWithdrawalLimits({
+        directSupply: 250_000_000n,
+        cometCash: CASH,
+        hasShares: true,
+        isWithdrawPaused: true,
+        wrapperLimitsAt: wrapperLimits(500_000_000n),
+      })
+    ).toEqual({ maxPartialCash: 0n, canWithdrawAll: false, fullExitCash: 750_000_000n });
+  });
+
+  it("is unknown while the wrapper's limits are", () => {
+    const unknown = () => undefined;
+    expect(
+      getWrappedRouteWithdrawalLimits({
+        directSupply: 0n,
+        cometCash: CASH,
+        hasShares: true,
+        isWithdrawPaused: false,
+        wrapperLimitsAt: unknown,
+      })
+    ).toBeUndefined();
+    expect(
+      getWrappedRouteWithdrawalLimits({
+        directSupply: 1n,
+        cometCash: CASH,
+        hasShares: true,
+        isWithdrawPaused: false,
+        wrapperLimitsAt: unknown,
+      })
+    ).toBeUndefined();
   });
 });

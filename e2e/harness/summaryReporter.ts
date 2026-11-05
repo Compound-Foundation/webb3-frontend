@@ -15,7 +15,8 @@ import path from 'node:path';
 import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 
 import { REQUIRED_ACCEPTANCE_CASES, type RequiredCase } from './acceptance';
-import { REPO_ROOT } from './paths';
+import { workersText } from './concurrency';
+import { homeRelative, REPO_ROOT } from './paths';
 import { findSecrets, outputsUnder, registeredSecretCount } from './secrets';
 
 type Row = { title: string; project: string; tags: string[]; status: string; reason: string; durationMs: number };
@@ -28,6 +29,41 @@ const firstLine = (text: string | undefined) =>
     .find((line) => line.trim() !== '')
     ?.trim()
     .slice(0, 240) ?? '';
+
+/** The fork cache as the manifest records it: its state, with why it is off, or its trust class and root. */
+const forkCacheText = (cache: { state?: string; reason?: string; trust?: string; directory?: string } | undefined) => {
+  if (cache?.state === undefined) return 'not recorded';
+  if (cache.directory !== undefined) return `${cache.state} (${cache.trust}), ${homeRelative(cache.directory)}`;
+  return cache.reason === undefined ? cache.state : `${cache.state} (${cache.reason})`;
+};
+
+type LanePromotion = { lane: number; generation?: number; reason: string };
+
+/** Whether the run promoted the lanes' caches, and what became of each lane's. */
+export function promotionText(promotion: { isPromoted: boolean; reason: string; lanes?: LanePromotion[] }) {
+  const lanes =
+    promotion.lanes === undefined || promotion.lanes.length === 0
+      ? ''
+      : ` (${promotion.lanes
+          .map(
+            (lane) => `lane ${lane.lane}${lane.generation ? ` after restart ${lane.generation}` : ''}: ${lane.reason}`
+          )
+          .join('; ')})`;
+  return promotion.isPromoted
+    ? `${promotion.reason} to the shared cache${lanes}`
+    : `not promoted (${promotion.reason})${lanes}`;
+}
+
+/** The lanes the run started, of the lanes it allowed, and each lane started more than once. */
+export function lanesText(lanes: { count: number; started?: { index: number; generation: number }[] }) {
+  const started = lanes.started ?? [];
+  const indices = new Set(started.map((lane) => lane.index));
+  const restarts = [...indices]
+    .map((index) => [index, started.filter((lane) => lane.index === index).length - 1] as const)
+    .filter(([, count]) => count > 0)
+    .map(([index, count]) => `lane ${index} restarted ${count === 1 ? 'once' : `${count} times`}`);
+  return `${indices.size} of ${lanes.count} started${restarts.length > 0 ? `; ${restarts.join(', ')}` : ''}`;
+}
 
 /** A test's identity across runs: its project and its title path from the spec file down. */
 export const testId = (test: TestCase) => `${test.parent.project()?.name} › ${test.titlePath().slice(2).join(' › ')}`;
@@ -339,6 +375,9 @@ export default class SummaryReporter implements Reporter {
         '## Run',
         '',
         `- Fork: block ${manifest.fork.number} (${manifest.fork.mode}), hash ${manifest.fork.hash}, from ${manifest.fork.endpoint}`,
+        `- Fork cache: ${forkCacheText(manifest.fork.cache)}`,
+        ...(manifest.concurrency === undefined ? [] : [`- Workers: ${workersText(manifest.concurrency)}`]),
+        ...(manifest.lanes === undefined ? [] : [`- Fork lanes: ${lanesText(manifest.lanes)}`]),
         `- Tools: ${Object.entries(manifest.tools)
           .filter(([, value]) => value !== undefined)
           .map(([name, value]) => `${name} ${value}`)
@@ -362,6 +401,17 @@ export default class SummaryReporter implements Reporter {
         `- Upstream proxy forwarded: ${JSON.stringify(stats.upstream.methods)}; refused: ${JSON.stringify(
           stats.upstream.refused
         )}; upstream failures ${stats.upstream.failures}, error answers ${stats.upstream.errorAnswers}`,
+        ...(stats.rpcProxy.lanes === undefined
+          ? []
+          : [`- App RPC proxy reads by lane: ${JSON.stringify(stats.rpcProxy.lanes)}`]),
+        ...(stats.upstream.peakPending === undefined
+          ? []
+          : [
+              `- Upstream bursts: ${stats.upstream.requests} requests in all, at most ${stats.upstream.peakPending} open at once and ${stats.upstream.peakPerSecond} started in one second`,
+            ]),
+        ...(stats.forkCachePromotion === undefined
+          ? []
+          : [`- Fork cache after the run: ${promotionText(stats.forkCachePromotion)}`]),
         `- Cleanup: ${stats.cleanupErrors.length === 0 ? 'every service stopped' : stats.cleanupErrors.join('; ')}`
       );
     }

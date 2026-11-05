@@ -3,6 +3,7 @@
 import http from 'node:http';
 
 export type Call = { method: string; params: unknown[]; headers: http.IncomingHttpHeaders };
+/** Answers one call. A handler can return a promise, to delay its answer or never answer. */
 export type Handler = (params: unknown[]) => unknown;
 
 export type FakeNode = {
@@ -19,21 +20,22 @@ export function startFakeNode(handlers: Record<string, Handler> = {}): Promise<F
   const server = http.createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => {
+    request.on('end', async () => {
       const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null');
-      const answer = (call: { id?: unknown; method: string; params?: unknown[] }) => {
+      const answer = async (call: { id?: unknown; method: string; params?: unknown[] }) => {
         calls.push({ method: call.method, params: call.params ?? [], headers: request.headers });
         const handler = table.get(call.method);
         if (handler === undefined)
           return { jsonrpc: '2.0', id: call.id, error: { code: -32601, message: `no ${call.method}` } };
         try {
-          return { jsonrpc: '2.0', id: call.id, result: handler(call.params ?? []) };
+          return { jsonrpc: '2.0', id: call.id, result: await handler(call.params ?? []) };
         } catch (error) {
           return { jsonrpc: '2.0', id: call.id, error: { code: -32000, message: (error as Error).message } };
         }
       };
+      const body = Array.isArray(parsed) ? await Promise.all(parsed.map(answer)) : await answer(parsed);
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify(Array.isArray(parsed) ? parsed.map(answer) : answer(parsed)));
+      response.end(JSON.stringify(body));
     });
   });
   return new Promise((resolve) =>
@@ -47,8 +49,8 @@ export function startFakeNode(handlers: Record<string, Handler> = {}): Promise<F
             server.closeAllConnections();
             server.close(() => done());
           }),
-      })
-    )
+      }),
+    ),
   );
 }
 
@@ -57,19 +59,20 @@ export const FORK_HASH = '0x440c51a6a6953b880568c1b60e4ad59044f3fa783e340e34d667
 
 /** The handlers of a node that passes `verifyFork` for the pinned block. */
 export function anvilHandlers(overrides: Record<string, Handler> = {}): Record<string, Handler> {
-  let snapshot = 0;
   return {
     eth_chainId: () => '0x1',
-    web3_clientVersion: () => 'anvil/v1.2.3',
+    web3_clientVersion: () => 'anvil/v1.9.0',
     anvil_metadata: () => ({ forkedNetwork: { forkBlockNumber: FORK_BLOCK, forkBlockHash: FORK_HASH } }),
     eth_getBlockByNumber: () => ({ hash: FORK_HASH, timestamp: '0x6a000000', number: '0x1907a18' }),
-    evm_snapshot: () => `0x${(++snapshot).toString(16)}`,
-    evm_revert: () => true,
+    anvil_reset: () => null,
+    anvil_dropTransaction: () => null,
     evm_setNextBlockTimestamp: () => null,
     anvil_impersonateAccount: () => null,
     anvil_stopImpersonatingAccount: () => null,
     anvil_setBalance: () => null,
+    eth_estimateGas: () => '0x5208',
     eth_sendTransaction: () => `0x${'ab'.repeat(32)}`,
+    eth_getTransactionReceipt: () => ({ transactionHash: `0x${'ab'.repeat(32)}`, status: '0x1' }),
     eth_blockNumber: () => '0x1907a18',
     ...overrides,
   };
