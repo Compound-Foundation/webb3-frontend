@@ -1,8 +1,12 @@
+import { Interface } from '@ethersproject/abi';
 import { JsonRpcProvider, StaticJsonRpcProvider } from '@ethersproject/providers';
+import { BigNumber } from 'ethers';
 import { useEffect, useState } from 'react';
 
 import type { Web3 } from '@contexts/Web3Context';
+import Comet from '@helpers/abis/Comet';
 import { isV2Market } from '@helpers/markets';
+import { contractCall, multicall, sleuthWithFallback } from '@helpers/multicall';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
 import { OperatorAllowancesQuery, OperatorAllowancesResponse } from '@helpers/sleuth/types';
@@ -13,23 +17,34 @@ import { Extension } from '../helpers/core';
 import { allExtensions, getOperator } from '../helpers/list';
 
 const QUERY_OPERATOR_ALLOWANCES = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryOperatorAllowances' });
+const COMET = new Interface(Comet);
 
-// Comet allowance of each operator for the account: an extension is enabled when its operator's is above zero
+// Comet allowance of each operator for the account: an extension is enabled when its operator's is above zero.
+// An allowance the multicall fallback could not read is undefined.
 export function queryOperatorAllowances(
   rawProvider: JsonRpcProvider,
   marketData: MarketData | MarketDataLoaded,
   accountAddress: string,
   operators: string[]
-): Promise<OperatorAllowancesResponse> {
-  const sleuth = new Sleuth(
-    new StaticJsonRpcProvider(rawProvider.connection),
-    getSleuthOptions(marketData.chainInformation.chainId)
+): Promise<(BigNumber | undefined)[]> {
+  const provider = new StaticJsonRpcProvider(rawProvider.connection);
+  const sleuth = new Sleuth(provider, getSleuthOptions(marketData.chainInformation.chainId));
+  return sleuthWithFallback<(BigNumber | undefined)[]>(
+    'Extension operator allowances',
+    () =>
+      sleuth.fetch<OperatorAllowancesResponse, OperatorAllowancesQuery>(QUERY_OPERATOR_ALLOWANCES, [
+        marketData.marketAddress,
+        accountAddress,
+        operators,
+      ]),
+    () =>
+      multicall(
+        provider,
+        operators.map((operator) =>
+          contractCall(marketData.marketAddress, COMET, 'allowance', accountAddress, operator)
+        )
+      ).then((results) => results.map((result) => (result.success ? result.value : undefined)))
   );
-  return sleuth.fetch<OperatorAllowancesResponse, OperatorAllowancesQuery>(QUERY_OPERATOR_ALLOWANCES, [
-    marketData.marketAddress,
-    accountAddress,
-    operators,
-  ]);
 }
 
 // Get the extensions supported for this particular market, which can be either be
@@ -93,7 +108,7 @@ async function getState(
   );
 
   const enabledExtensionsIds = extensionsWithOperators
-    .filter((_, idx) => extensionsEnableStatus[idx].gt(0))
+    .filter((_, idx) => extensionsEnableStatus[idx]?.gt(0))
     .map((ext) => ext.id);
   // Any supported extensions that are not enabled are considered disabled.
   const notEnabledExtensionsIds = extensionswithMaybeOperator

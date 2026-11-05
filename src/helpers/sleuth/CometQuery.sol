@@ -117,8 +117,6 @@ interface Comet {
   function totalsCollateral(address token) external view returns (uint);
 
   function allowance(address owner, address spender) external view returns (uint256);
-
-  function isWithdrawPaused() external view returns (bool);
 }
 
 interface ERC20 {
@@ -137,68 +135,6 @@ interface WstETH {
   function tokensPerStEth() external view returns (uint);
 }
 
-// Vote page only (src/pages/vote/hooks/useVoteState.ts). Remove GovernorBravo, Timelock, Comp, the GovernanceParams,
-// ProposalVotes and VoteAccount structs and queryGovernance/queryProposals together with the vote page.
-interface GovernorBravo {
-  struct Receipt {
-    bool hasVoted;
-    uint8 support;
-    uint96 votes;
-  }
-
-  function getReceipt(uint proposalId, address voter) external view returns (Receipt memory);
-
-  function proposalThreshold() external view returns (uint);
-
-  function proposals(
-    uint proposalId
-  )
-    external
-    view
-    returns (
-      uint id,
-      address proposer,
-      uint eta,
-      uint startBlock,
-      uint endBlock,
-      uint forVotes,
-      uint againstVotes,
-      uint abstainVotes,
-      bool canceled,
-      bool executed
-    );
-
-  function quorumVotes() external view returns (uint);
-
-  function votingDelay() external view returns (uint);
-
-  function votingPeriod() external view returns (uint);
-}
-
-interface Timelock {
-  function GRACE_PERIOD() external view returns (uint);
-
-  function delay() external view returns (uint);
-}
-
-interface Comp {
-  function balanceOf(address account) external view returns (uint);
-
-  function decimals() external view returns (uint8);
-
-  function delegates(address account) external view returns (address);
-
-  function getCurrentVotes(address account) external view returns (uint96);
-}
-
-interface WrappedCometERC4626 {
-  function asset() external view returns (address);
-
-  function balanceOf(address owner) external view returns (uint);
-
-  function totalSupply() external view returns (uint);
-}
-
 contract CometQuery {
   // Interest rate model parameters, per second at factorScale precision. The app computes the APRs
   // from them because service-patched Comets return a zero rate from getBorrowRate/getSupplyRate
@@ -208,44 +144,6 @@ contract CometQuery {
     uint perSecondInterestRateBase;
     uint perSecondInterestRateSlopeLow;
     uint perSecondInterestRateSlopeHigh;
-  }
-
-  // Vote page only: remove with the vote page, see GovernorBravo
-  struct GovernanceParams {
-    uint gracePeriod;
-    uint proposalThreshold;
-    uint quorumVotes;
-    uint timelockDelay;
-    uint votingDelay;
-    uint votingPeriod;
-  }
-
-  struct ProposalVotes {
-    uint abstainVotes;
-    uint againstVotes;
-    uint eta;
-    uint forVotes;
-    uint id;
-  }
-
-  struct VoteAccount {
-    uint balance;
-    uint decimals;
-    address delegate;
-    // One per proposal, in the order of the query's proposal ids
-    GovernorBravo.Receipt[] receipts;
-    uint votes;
-  }
-
-  struct WrappedPosition {
-    address asset;
-    uint baseSupplyIndex;
-    uint baseWalletBalance;
-    bool isWithdrawPaused;
-    uint shares;
-    uint totalAssets;
-    uint totalSupply;
-    uint wrapperAllowance;
   }
 
   // The account's stETH, which the bulker wraps into the market's wstETH collateral
@@ -659,72 +557,6 @@ contract CometQuery {
     for (uint i = 0; i < operators.length; i++) {
       allowances[i] = comet.allowance(account, operators[i]);
     }
-  }
-
-  // Vote page only: remove queryGovernance and queryProposals with the vote page, see GovernorBravo
-  function queryGovernance(GovernorBravo governor, Timelock timelock) public view returns (GovernanceParams memory) {
-    return
-      GovernanceParams({
-        gracePeriod: timelock.GRACE_PERIOD(),
-        proposalThreshold: governor.proposalThreshold(),
-        quorumVotes: governor.quorumVotes(),
-        timelockDelay: timelock.delay(),
-        votingDelay: governor.votingDelay(),
-        votingPeriod: governor.votingPeriod()
-      });
-  }
-
-  // account stays empty when the account is the zero address
-  function queryProposals(
-    GovernorBravo governor,
-    Comp comp,
-    address account,
-    uint[] memory proposalIds
-  ) public view returns (ProposalVotes[] memory proposals, VoteAccount memory voteAccount) {
-    proposals = new ProposalVotes[](proposalIds.length);
-    for (uint i = 0; i < proposalIds.length; i++) {
-      (uint id, , uint eta, , , uint forVotes, uint againstVotes, uint abstainVotes, , ) = governor.proposals(
-        proposalIds[i]
-      );
-      proposals[i] = ProposalVotes({
-        abstainVotes: abstainVotes,
-        againstVotes: againstVotes,
-        eta: eta,
-        forVotes: forVotes,
-        id: id
-      });
-    }
-
-    if (account != address(0)) {
-      voteAccount.balance = comp.balanceOf(account);
-      voteAccount.decimals = comp.decimals();
-      voteAccount.delegate = comp.delegates(account);
-      voteAccount.votes = comp.getCurrentVotes(account);
-      voteAccount.receipts = new GovernorBravo.Receipt[](proposalIds.length);
-      for (uint i = 0; i < proposalIds.length; i++) {
-        voteAccount.receipts[i] = governor.getReceipt(proposalIds[i], account);
-      }
-    }
-  }
-
-  // The wrapper's assets are its Comet balance, which is what its totalAssets() returns
-  function queryWrappedPosition(
-    WrappedCometERC4626 wrapper,
-    Comet comet,
-    ERC20 baseToken,
-    address account
-  ) public view returns (WrappedPosition memory) {
-    return
-      WrappedPosition({
-        asset: wrapper.asset(),
-        baseSupplyIndex: comet.totalsBasic().baseSupplyIndex,
-        baseWalletBalance: baseToken.balanceOf(account),
-        isWithdrawPaused: comet.isWithdrawPaused(),
-        shares: wrapper.balanceOf(account),
-        totalAssets: comet.balanceOf(address(wrapper)),
-        totalSupply: wrapper.totalSupply(),
-        wrapperAllowance: baseToken.allowance(account, address(wrapper))
-      });
   }
 
   function compare(string memory str1, string memory str2) internal pure returns (bool) {

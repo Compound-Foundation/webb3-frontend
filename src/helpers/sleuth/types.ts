@@ -20,70 +20,17 @@ export type OperatorAllowancesQuery = [
 // One allowance per operator, in the order of the query
 export type OperatorAllowancesResponse = BigNumber[];
 
-export type GovernanceQuery = [
-  string, // governor address
-  string // timelock address
-];
-
-export type GovernanceResponse = {
-  gracePeriod: BigNumber;
-  proposalThreshold: BigNumber;
-  quorumVotes: BigNumber;
-  timelockDelay: BigNumber;
-  votingDelay: BigNumber;
-  votingPeriod: BigNumber;
-};
-
-export type ProposalsQuery = [
-  string, // governor address
-  string, // COMP address
-  string, // account address, or the zero address
-  string[] // proposal ids
-];
-
-export type ProposalsResponse = {
-  proposals: {
-    abstainVotes: BigNumber;
-    againstVotes: BigNumber;
-    eta: BigNumber;
-    forVotes: BigNumber;
-    id: BigNumber;
-  }[];
-  voteAccount: {
-    balance: BigNumber;
-    decimals: BigNumber;
-    delegate: string;
-    // One per proposal, in the order of the query's proposal ids
-    receipts: { hasVoted: boolean; support: number; votes: BigNumber }[];
-    votes: BigNumber;
-  };
-};
-
-export type WrappedPositionQuery = [
-  string, // wrapper address
-  string, // comet address
-  string, // base token address
-  string // account address
-];
-
-export type WrappedPositionResponse = {
-  asset: string;
-  baseSupplyIndex: BigNumber;
-  baseWalletBalance: BigNumber;
-  isWithdrawPaused: boolean;
-  shares: BigNumber;
-  totalAssets: BigNumber;
-  totalSupply: BigNumber;
-  wrapperAllowance: BigNumber;
-};
-
-export type CometWithAccountAndStEthQuery = [
+export type CometWithAccountStateQuery = [
   string, // comet address
   string, // nativeTokenToUsd (extra price feed)
   string, // account address
   string, // bulker address
   string, // wrapped native token symbol
-  boolean, // checkDeprecatedwUSDM
+  boolean // checkDeprecatedwUSDM
+];
+
+export type CometWithAccountAndStEthQuery = [
+  ...CometWithAccountStateQuery,
   string, // stETH address, or the zero address
   string // wstETH address, or the zero address
 ];

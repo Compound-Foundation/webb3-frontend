@@ -166,6 +166,8 @@ const Extension = ({
         if (selectedMarketData !== undefined && provider !== undefined) {
           (async () => {
             const [allowance] = await queryOperatorAllowances(provider, selectedMarketData, account, [operator]);
+            // without the allowance the page cannot tell whether to offer enabling or disabling the operator
+            if (allowance === undefined) throw new Error(`Could not read the allowance of operator ${operator}`);
 
             const migratorEnabled = allowance.gt(0);
             const shortenedOperatorAddress = getShortAddress(operator);

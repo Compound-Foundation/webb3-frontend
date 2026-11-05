@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { WrappedMarket } from '@constants/wrappedMarkets';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
+import { multicall } from '@helpers/multicall';
 import { REFRESH_INTERVAL } from '@helpers/numbers';
-import { Sleuth } from '@helpers/sleuth/sleuth';
 import {
   BlockWait,
   DEFAULT_BLOCK_WAIT,
@@ -12,7 +12,6 @@ import {
   waitForBlock,
   WrappedPosition,
 } from '@helpers/wrappedPositions';
-import { getSleuthOptions } from '@hooks/useSelectedMarket';
 import { SettledTransaction, Transaction } from '@types';
 
 export type WrappedPositionReader = (
@@ -31,8 +30,8 @@ export type WrappedPositionState =
 export const WRAPPED_POSITION_READ_FAILED =
   'Your wrapped position could not be loaded. Check your connection and try again.';
 
-const readWithSleuth: WrappedPositionReader = (provider, market, account) =>
-  readWrappedPosition(new Sleuth(provider, getSleuthOptions(market.chainId)), market, account);
+const readWithMulticall: WrappedPositionReader = (provider, market, account) =>
+  readWrappedPosition((calls) => multicall(provider, calls), market, account);
 
 /**
  * A `refreshToken` that changes whenever a transaction is added or settles. A settled transaction,
@@ -64,7 +63,7 @@ export function useWrappedPosition({
   refreshToken,
   minBlock,
   blockWait = DEFAULT_BLOCK_WAIT,
-  read = readWithSleuth,
+  read = readWithMulticall,
 }: {
   route: LendingRoute;
   account: string | undefined;

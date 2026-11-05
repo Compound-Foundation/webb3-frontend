@@ -19,6 +19,12 @@ jest.mock('@helpers/sleuth/sleuth', () => {
   return { Sleuth: Object.assign(Sleuth, { querySol: jest.fn(() => 'query') }) };
 });
 
+const mockMulticall = jest.fn();
+jest.mock('@helpers/multicall', () => ({
+  ...jest.requireActual('@helpers/multicall'),
+  multicall: (...args: unknown[]) => mockMulticall(...args),
+}));
+
 jest.mock('@ethersproject/providers', () => ({
   ...jest.requireActual('@ethersproject/providers'),
   StaticJsonRpcProvider: jest.fn(),
@@ -51,9 +57,11 @@ const cometResponse = (overrides: Partial<CometStateResponse> = {}) =>
     reserves: ONE,
     targetReserves: ONE,
     collateralReserves: [],
-  }) as unknown as CometWithReservesResponse;
+  } as unknown as CometWithReservesResponse);
 
-const marketData = getMarkets(false).find((market) => market.chainInformation.chainId === 1 && !market.rewardsOverwrite);
+const marketData = getMarkets(false).find(
+  (market) => market.chainInformation.chainId === 1 && !market.rewardsOverwrite
+);
 
 if (marketData === undefined) {
   throw new Error('Expected a mainnet market without a rewards overwrite');
@@ -90,8 +98,8 @@ const serveHistory = (buckets: V3MarketApiBucket[]) =>
     rest.get(`${getMarketDataUrlForMarket(market)}/historical/summary`, (_req, res, ctx) => res(ctx.json(buckets)))
   );
 
-const renderMarketState = async () => {
-  const { result } = renderHook(() => useMarketsState(web3, marketState), { wrapper: Wrapper });
+const renderMarketState = async (state: MarketDataState = marketState) => {
+  const { result } = renderHook(() => useMarketsState(web3, state), { wrapper: Wrapper });
   await waitFor(() => expect(result.current[0]).toEqual(StateType.Hydrated));
 
   if (result.current[0] !== StateType.Hydrated || result.current[1].type !== 'ProtocolAndMarketState') {
@@ -175,5 +183,44 @@ describe('useMarketsState history APRs', () => {
 
     expect(await renderMarketHistory()).toEqual([]);
     expect(console.error).toHaveBeenCalledWith('Error fetching historical market data: ', expect.any(Error));
+  });
+});
+
+describe('useMarketsState when the Sleuth query fails', () => {
+  const COLLATERAL_A = '0x00000000000000000000000000000000000000a1';
+  const COLLATERAL_B = '0x00000000000000000000000000000000000000b1';
+  const collateral = (address: string) =>
+    ({ address, liquidationFactor: 9n * 10n ** 17n } as unknown as MarketDataLoaded['collateralAssets'][number]);
+  const collateralInfo = (collateralAsset: string) => ({ collateralAsset, price: ONE, totalSupply: ONE });
+
+  test('reads the state with query() and the reserves through a multicall, skipping a collateral whose reserves revert', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const withCollaterals: MarketDataLoaded = {
+      ...market,
+      collateralAssets: [collateral(COLLATERAL_A), collateral(COLLATERAL_B)],
+    };
+    mockSleuthFetch.mockRejectedValueOnce(new Error('queryWithReserves reverted')).mockResolvedValueOnce(
+      cometResponse({
+        collateralAssets: [collateralInfo(COLLATERAL_A), collateralInfo(COLLATERAL_B)],
+      } as unknown as Partial<CometStateResponse>).state
+    );
+    mockMulticall.mockResolvedValue([
+      { success: true, value: BigNumber.from(7) },
+      { success: true, value: BigNumber.from(8) },
+      { success: true, value: BigNumber.from(9) },
+      { success: false, error: new Error('getCollateralReserves reverted') },
+    ]);
+
+    const state = await renderMarketState([StateType.Hydrated, withCollaterals]);
+
+    expect(state.reserves).toEqual(7n);
+    expect(state.targetReserves).toEqual(8n);
+    expect(state.collateralAssets.map(({ address, reserves }) => [address, reserves])).toEqual([[COLLATERAL_A, 9n]]);
+    expect(mockMulticall.mock.calls[0][1].map(({ name }: { name: string }) => name)).toEqual([
+      'getReserves',
+      'targetReserves',
+      'getCollateralReserves',
+      'getCollateralReserves',
+    ]);
   });
 });
