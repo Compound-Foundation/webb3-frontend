@@ -25,13 +25,13 @@ import type { ScreeningBehaviour } from '../harness/screeningStub';
 
 const supplyButton = (page: Page) => page.getByRole('button', { name: 'Supply USDC' });
 
-// Each caller first asserts the blocked, disabled or pending state, so the click is expected to fail. A short
-// actionability timeout ends that expected failure early. An enabled control is still clicked at once.
+// Each caller first asserts the blocked, disabled or pending state. A control that stays in that state fails the
+// click after 250 ms. An actionable control is clicked at once.
 const PROBE_CLICK_TIMEOUT_MS = 250;
 
 /**
- * Tries an action after the test has asserted the state that should stop it, and records whether the click
- * landed or the control was gone or disabled.
+ * Tries an action after the test has asserted the state that stops it. Records whether the click landed or the
+ * control was gone or disabled.
  */
 async function attempt(name: string, locator: Locator) {
   const outcome = await locator.click({ timeout: PROBE_CLICK_TIMEOUT_MS }).then(

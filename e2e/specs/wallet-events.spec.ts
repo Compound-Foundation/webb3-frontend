@@ -26,6 +26,9 @@ import type { WalletRequest } from '../harness/walletServer';
 
 const pendingBadge = (page: Page) => page.getByRole('banner').getByText(/\d+ Pending/);
 
+// The actionability timeout for a click the test expects to fail, after it has asserted the state that stops it.
+const PROBE_CLICK_TIMEOUT_MS = 250;
+
 async function startSupply(page: Page, amount: string) {
   await expect(async () => {
     await page.getByRole('button', { name: 'Supply USDC' }).click();
@@ -83,9 +86,9 @@ test.describe('wallet requests and events', { tag: ['@AC6'] }, () => {
     await expect(pendingBadge(page)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Confirm Transaction' }).first()).toBeDisabled();
     // A second submit while the first waits in the wallet: whatever the control shows, no second request.
-    // The state above should stop the click, so a short actionability timeout ends the expected failure early.
+    // A control that stays in the state above fails the click after the short timeout.
     const submit = page.getByRole('button', { name: /Submit/ }).first();
-    const outcome = await submit.click({ timeout: 250 }).then(
+    const outcome = await submit.click({ timeout: PROBE_CLICK_TIMEOUT_MS }).then(
       () => 'clicked',
       () => 'not clickable (gone or disabled)'
     );
