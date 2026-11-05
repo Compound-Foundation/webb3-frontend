@@ -11,6 +11,7 @@ import {
   BASE_ASSET,
   COMET,
   cometWithdrawals,
+  countHoldChecks,
   DIRECT,
   executeLate,
   expectHeldBack,
@@ -37,6 +38,7 @@ import {
   storedRecords,
   submit,
   USDC_COMET,
+  waitForHoldChecks,
   waitForHoldLook,
   waitForIdle,
 } from '../../../../__tests__/mocks/wrappedQueueSettlement';
@@ -375,7 +377,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     });
     // The Comet state read again starts a look at the hold, which waits for the provider.
     readProvider.getBlockNumber.mockClear();
-    const looksBefore = holdLooks.mock.calls.length;
+    const checksBefore = countHoldChecks();
     show({ state: stateWithDirectSupply(DIRECT) });
     await waitFor(() => expect(readProvider.getBlockNumber).toHaveBeenCalled());
 
@@ -385,8 +387,12 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await submit();
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Earlier Request Still Pending');
-    // Every look since the provider lagged, the one the Comet state started included, has ended.
-    await waitForHoldLook(looksBefore);
+    // Every look since the provider lagged has ended, the one the Comet state started included, which
+    // waited for the provider to ask again.
+    await waitForHoldChecks(checksBefore);
+    await waitForIdle();
+    expect(holdLooks.mock.calls.length).toBeGreaterThan(checksBefore.looks);
+    expect(storedHolds()).toEqual([expect.objectContaining({ kind: 'held' })]);
     expect(readProvider.getLogs).toHaveBeenCalled();
     for (const [filter] of readProvider.getLogs.mock.calls) expect(filter.toBlock).toBeGreaterThanOrEqual(chain.block);
   });

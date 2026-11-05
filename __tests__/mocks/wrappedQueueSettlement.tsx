@@ -630,6 +630,30 @@ export async function waitForHoldLook(since: number) {
   });
 }
 
+/** Every read of the block that a run or a look at the stored holds reads the chain at. */
+export const holdAnchors = jest.spyOn(DirectWithdrawalHold, 'anchorBlock');
+
+/** How many block reads and looks at the stored holds have started so far. */
+export function countHoldChecks() {
+  return { anchors: holdAnchors.mock.calls.length, looks: holdLooks.mock.calls.length };
+}
+
+/**
+ * Waits until every block read and every look at the stored holds started after `since` has ended,
+ * including a look still waiting for the configured chain's provider to reach a block.
+ */
+export async function waitForHoldChecks(since: ReturnType<typeof countHoldChecks>) {
+  for (let ended = -1; ; ) {
+    const started = [...holdAnchors.mock.results.slice(since.anchors), ...holdLooks.mock.results.slice(since.looks)];
+    if (started.length === ended) return;
+    ended = started.length;
+    // A look starts in the step after its block read ends, so the next pass waits for it.
+    await act(async () => {
+      await Promise.allSettled(started.map(({ value }) => value));
+    });
+  }
+}
+
 export function renderDashboard(
   chain: Chain,
   { state = COMET_STATE, position, tab = 'a' }: { state?: CometState; position?: WrappedPosition; tab?: string } = {}
