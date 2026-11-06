@@ -56,6 +56,7 @@ export function zipMembers(buffer: Buffer): { name: string; content: Buffer }[] 
   return members;
 }
 
+/** The forms of `secret` a scan looks for: as written, without `0x`, JSON-escaped and in base64. */
 const forms = (secret: string) => [
   secret,
   secret.replace(/^0x/, ''),
@@ -68,14 +69,18 @@ export type Leak = { file: string; secret: string };
 /** Each place in `texts` that holds a registered secret. A secret is named by kind only, never shown. */
 export function findSecrets(texts: { file: string; content: Buffer | string }[]): Leak[] {
   const { literals, patterns } = registry();
+  // The needles and expressions do not depend on the text, so they are made once per scan, not per text.
+  const needles = [...literals].map(([secret, kind]) => ({
+    kind,
+    forms: [...new Set(forms(secret).map((form) => form.toLowerCase()))],
+  }));
   const expressions = [...patterns].map((pattern) => new RegExp(pattern, 'i'));
   const leaks: Leak[] = [];
   for (const { file, content } of texts) {
     const text = typeof content === 'string' ? content : content.toString('latin1');
-    for (const [secret, kind] of literals) {
-      if (forms(secret).some((form) => text.toLowerCase().includes(form.toLowerCase()))) {
-        leaks.push({ file, secret: kind });
-      }
+    const lowerText = text.toLowerCase();
+    for (const { kind, forms: needleForms } of needles) {
+      if (needleForms.some((form) => lowerText.includes(form))) leaks.push({ file, secret: kind });
     }
     for (const expression of expressions)
       if (expression.test(text)) leaks.push({ file, secret: 'the private upstream URL' });
