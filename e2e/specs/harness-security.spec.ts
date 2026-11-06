@@ -1,7 +1,8 @@
 // AC8 and AC9: the harness's own boundaries.
 //
 // - The browser reaches only the app, the RPC proxy and the screening stub. The raw anvil fork, the upstream
-//   proxy, the wallet server and every other host are blocked, over HTTP and WebSocket.
+//   proxy, the wallet server, the lane server and every other host are blocked, over HTTP and WebSocket.
+// - The app's reads reach the worker's own fork lane, whatever lane header the page sends.
 // - The RPC proxy refuses every write and administrative method on every route.
 // - The wallet binding answers only the app's top frame, and only provider calls and the events poll.
 // - Every harness service listens on 127.0.0.1, read from the processes' real sockets.
@@ -14,14 +15,17 @@ import http from 'node:http';
 import { encodeFunctionData } from 'viem';
 
 import { ERC20_ABI, USDC } from '../harness/contracts';
+import { ControlClient } from '../harness/controlClient';
 import { applyEgress, type BlockedRequest } from '../harness/egress';
 import { connectAccount, expect, openApp, providerRequest, selectedAccount, test } from '../harness/fixtures';
+import type { LaneInfo } from '../harness/forkLanes';
 import { BINDING_NAME } from '../harness/injectedProvider';
+import { LANE_HEADER } from '../harness/laneHeader';
 
 const FAKE_TOKEN = 'not-the-run-token';
 
 type Received = { method: string; url: string };
-type Detailed = Received & { body: string; contentType?: string; authorization?: string };
+type Detailed = Received & { body: string; contentType?: string; authorization?: string; lane?: string | string[] };
 
 /** A loopback server that records each request and answers `answer(url)`, or 200 with the URL. */
 async function recordingServer(
@@ -62,6 +66,7 @@ async function detailedServer(
         body: Buffer.concat(chunks).toString(),
         contentType: request.headers['content-type'],
         authorization: request.headers.authorization,
+        lane: request.headers[LANE_HEADER],
       });
       const redirect = answer(request.url ?? '');
       if (redirect !== undefined) {
@@ -114,7 +119,7 @@ function listeningAddresses(pid: number): string[] {
 }
 
 test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
-  test('the browser cannot reach the fork, the upstream proxy, the wallet server or any other host', async ({
+  test('the browser cannot reach the fork, the upstream proxy, the wallet server, the lane server or any other host', async ({
     page,
     manifest,
     blocked,
@@ -124,6 +129,7 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
       manifest.fork.localUrl,
       manifest.fork.upstreamProxyUrl,
       `${manifest.services.wallet}/v1/health`,
+      `${manifest.services.lanes}/v1/lanes`,
       'https://rpc.scroll.io/',
       'https://example.com/',
     ];
@@ -173,6 +179,7 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
         `http ${manifest.fork.localUrl}/`,
         `http ${manifest.fork.upstreamProxyUrl}`,
         `http ${manifest.services.wallet}/v1/health`,
+        `http ${manifest.services.lanes}/v1/lanes`,
         `websocket ${manifest.fork.localUrl.replace('http:', 'ws:')}/`,
         'websocket wss://example.com/',
       ])
@@ -652,20 +659,119 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
     expect((await wallet.requests()).map((request) => request.method)).toEqual(['wallet_requestPermissions']);
   });
 
+  test('the lane header reaches only lane-routed origins, on every redirect hop, whatever the page sent', async ({
+    browser,
+  }) => {
+    // `routed` stands for the RPC proxy and the screening stub; `other` for every other allowed origin.
+    let otherOrigin = '';
+    const routed = await detailedServer((url) =>
+      url === '/to-other' ? { status: 307, location: `${otherOrigin}/after-routed` } : undefined
+    );
+    const other = await detailedServer((url) =>
+      url === '/to-routed' ? { status: 307, location: `${routed.origin}/after-other` } : undefined
+    );
+    otherOrigin = other.origin;
+    const blocked: BlockedRequest[] = [];
+    const context = await browser.newContext({ serviceWorkers: 'block' });
+    try {
+      await applyEgress(context, { http: new Set([routed.origin, other.origin]), webSocket: new Set() }, blocked, {
+        origins: new Set([routed.origin]),
+        value: '5',
+      });
+      const page = await context.newPage();
+      await page.goto(`${other.origin}/start`);
+      await page.evaluate(
+        async ({ urls, header }) => {
+          for (const url of urls) {
+            await fetch(url, { method: 'POST', headers: { [header]: '9', 'content-type': 'text/plain' }, body: 'x' });
+          }
+        },
+        { urls: [`${other.origin}/to-routed`, `${routed.origin}/to-other`], header: LANE_HEADER }
+      );
+      const seen = (server: { received: Detailed[] }) =>
+        server.received.filter((each) => each.method !== 'OPTIONS').map((each) => [each.url, each.lane ?? null]);
+      expect(seen(other)).toEqual([
+        ['/start', null],
+        ['/to-routed', null],
+        ['/after-routed', null],
+      ]);
+      expect(seen(routed)).toEqual([
+        ['/after-other', '5'],
+        ['/to-other', '5'],
+      ]);
+      expect(blocked).toEqual([]);
+    } finally {
+      await context.close();
+      await routed.close();
+      await other.close();
+    }
+  });
+
   test('every harness service listens on 127.0.0.1 only', async ({ manifest }) => {
     // The workers are children of the Playwright runner, which runs the services in-process.
     const runner = listeningAddresses(process.ppid);
     const anvil = listeningAddresses(manifest.fork.anvilPid);
-    // The upstream proxy, RPC proxy, screening stub, wallet server and dev server, and the two production
-    // servers when the builds ran. Vite's HMR shares the dev server's port.
-    expect(runner.length).toBe(5 + (manifest.production.isSkipped ? 0 : 2));
+    // The lanes started by the time of the listing. Lanes only start, so a listing read after the sockets
+    // holds every wallet server that was listening then.
+    const lanes = await ControlClient.forUrl(manifest.services.lanes).request<LaneInfo[]>('GET', '/v1/lanes');
+    const port = (url: string) => /:(\d+)/.exec(url)?.[1] as string;
+    // The upstream proxy, RPC proxy, screening stub, lane server, a wallet server for each lane, the dev
+    // server, and the two production servers when the builds ran. Vite's HMR shares the dev server's port.
+    const expected = new Set(
+      [
+        manifest.services.bindings.upstreamProxy,
+        manifest.services.bindings.rpcProxy,
+        manifest.services.screening,
+        manifest.services.lanes,
+        manifest.app.devOrigin,
+        ...lanes.map((lane) => lane.walletUrl),
+        ...(manifest.production.isSkipped
+          ? []
+          : [manifest.production.allowed.origin, manifest.production.missingEndpoint.origin]),
+      ].map(port)
+    );
     for (const address of [...runner, ...anvil]) expect(address).toMatch(/^127\.0\.0\.1:\d+$/);
+    for (const address of runner) expect(expected.has(address.split(':')[1]), address).toBe(true);
     const ports = new Set([...runner, ...anvil].map((address) => address.split(':')[1]));
-    for (const url of Object.values(manifest.services.bindings)) {
-      const port = /:(\d+)/.exec(url)?.[1];
-      expect(ports.has(port as string), url).toBe(true);
-    }
+    for (const url of Object.values(manifest.services.bindings)) expect(ports.has(port(url)), url).toBe(true);
     expect(anvil).toEqual([`127.0.0.1:${new URL(manifest.fork.localUrl).port}`]);
+  });
+
+  test("the app's reads reach this worker's fork lane, whatever lane the page names", async ({
+    page,
+    manifest,
+    wallet,
+    lane,
+  }) => {
+    await openApp(page);
+    // A balance that exists only on this lane's fork: a new account, funded there.
+    const { address } = await wallet.newAccount({ eth: '7' });
+    const balances = await page.evaluate(
+      async ({ url, address, header, lanes }) =>
+        Promise.all(
+          lanes.map(async (named) => {
+            try {
+              const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', ...(named === null ? {} : { [header]: named }) },
+                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [address, 'latest'] }),
+              });
+              return (await response.json()).result;
+            } catch {
+              return 'failed';
+            }
+          })
+        ),
+      {
+        url: `${manifest.services.rpcProxy}/ethereum-mainnet`,
+        address,
+        header: LANE_HEADER,
+        lanes: [null, String(lane.index), String(lane.index + 1), '0', 'not a lane'],
+      }
+    );
+    // 7 ETH, from this lane, for every read: Playwright answers a routed request's CORS preflight itself, so
+    // each request reaches the egress route, which replaces whatever lane the page named with the worker's.
+    expect(balances).toEqual(Array(5).fill('0x6124fee993bc0000'));
   });
 
   test('the control API needs the run token, its own Host and no Origin', async ({ manifest }) => {

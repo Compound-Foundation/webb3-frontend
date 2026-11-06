@@ -11,21 +11,18 @@ import type { Action } from '@types';
 /**
  * A wrapper action the dashboard started, and what became of it:
  * - `approve`: Approve & Add's approval for a queued base supply. It never locks the queue.
- * - `execute`: Submit Transaction's supply or withdrawal, before the direct actions queued with it.
- *   Once it confirms, it leaves the queue, the run ends, and the direct actions are submitted as
- *   before.
+ * - `execute`: Submit Transaction's supply or withdrawal, the queue's only action. Once it
+ *   confirms, it leaves the queue and the run ends.
  */
-export type WrappedRun =
-  | { kind: 'approve'; action: Action }
-  | {
-      kind: 'execute';
-      wrapper: QueuedWrapperAction;
-      /** How many queued actions go to Comet or the Bulker after the wrapper action. */
-      directCount: number;
-    };
+export type WrappedRun = { kind: 'approve'; action: Action } | { kind: 'execute'; wrapper: QueuedWrapperAction };
 
 /** Where a wrapped run stands. */
 export type WrappedRunStatus =
+  /**
+   * A withdrawal's Comet step, which takes the account's direct supply before the wrapper step, is
+   * being checked, signed or followed to its receipt. The wrapper step has not started.
+   */
+  | { kind: 'direct' }
   /** Being read, checked, signed or followed to its receipt. */
   | { kind: 'running' }
   /** It stopped with nothing sent. Its queue row shows `label`, and it can be submitted again. */
@@ -63,6 +60,15 @@ export type SentWrapperAction = {
   /** The transaction manager's record of the last step, once the step reaches the manager. */
   transactionId?: string;
 };
+
+/**
+ * The block a confirmed Comet step of a split withdrawal on the wrapped route executed in, or the
+ * block the wallet's node had when another transaction took its nonce. A later Comet step's fresh
+ * read in the same `queueScope` is of that block or a newer one, so a read provider behind the
+ * wallet's node cannot show the supply the step took. It is kept in memory across a change of scope,
+ * and a return to the scope finds it again.
+ */
+export type DirectStepRecord = { scope: string; blockNumber: number };
 
 /**
  * The account, connector, connection status and market the queue belongs to. The wallet's network
@@ -109,6 +115,9 @@ export type SubmissionStore = {
   /** The wrapper action submitted from the queue, until what became of its last step is known. */
   sent: SentWrapperAction | undefined;
   setSent: (sent: SentWrapperAction | undefined) => void;
+  /** Where the last confirmed Comet step of a split withdrawal executed, in the current `queueScope`. */
+  directStep: DirectStepRecord | undefined;
+  setDirectStep: (record: DirectStepRecord | undefined) => void;
 };
 
 /**
@@ -133,7 +142,14 @@ export const STANDARD_LENDING: WrappedLending = Object.freeze({
   retry: () => undefined,
   action: IDLE_WRAPPED_ACTION,
   write: IDLE_WRITE_WRAPPED_STATE,
-  submission: { record: undefined, setRecord: () => undefined, sent: undefined, setSent: () => undefined },
+  submission: {
+    record: undefined,
+    setRecord: () => undefined,
+    sent: undefined,
+    setSent: () => undefined,
+    directStep: undefined,
+    setDirectStep: () => undefined,
+  },
 });
 
 export const WrappedLendingContext = createContext<WrappedLending>(STANDARD_LENDING);
