@@ -11,11 +11,13 @@ import {
   BASE_ASSET,
   COMET,
   cometWithdrawals,
+  countHoldChecks,
   DIRECT,
   executeLate,
   expectHeldBack,
   held,
   holdFirstStep,
+  holdLooks,
   isSame,
   live,
   lives,
@@ -31,12 +33,14 @@ import {
   REPLACED_HASH,
   reportOwnNonceTaken,
   requestedCalls,
-  settle,
   stateWithDirectSupply,
   storedHolds,
   storedRecords,
   submit,
   USDC_COMET,
+  waitForHoldChecks,
+  waitForHoldLook,
+  waitForIdle,
 } from '../../../../__tests__/mocks/wrappedQueueSettlement';
 import { mockTabProps } from '../../../../__tests__/mocks/wrappedQueueSettlementProps';
 
@@ -82,12 +86,12 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     chain.directSupply += 100_000_000n;
     mine(chain, { to: USDC_COMET, data: productionWithdrawData(301_000_000n) });
     expect(chain.directSupply).toBe(249_000_000n);
+    const looks = holdLooks.mock.calls.length;
     show({ state: stateWithDirectSupply(chain.directSupply) });
-    await settle();
+    await waitForHoldLook(looks);
 
     act(() => live.queue.addOrUpdateAction(entry));
     await submit();
-    await settle();
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Earlier Request Still Pending');
     // The held request executes after all: 49 USDC stay, and Comet lends nothing.
@@ -100,12 +104,14 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     const { chain, wallet, show, entry } = await holdFirstStep();
     // Another interface withdraws the whole direct supply, and the dashboard reads none.
     mine(chain, { to: USDC_COMET, data: productionWithdrawData(MAX_UINT256) });
+    const looks = holdLooks.mock.calls.length;
     show({ state: stateWithDirectSupply(0n) });
-    await settle();
+    await waitForHoldLook(looks);
     // 250 USDC is supplied directly again from elsewhere.
     chain.directSupply = DIRECT;
+    const looksBeforeRise = holdLooks.mock.calls.length;
     show({ state: stateWithDirectSupply(DIRECT) });
-    await settle();
+    await waitForHoldLook(looksBeforeRise);
 
     act(() => live.queue.addOrUpdateAction(entry));
     await expectHeldBack(wallet, chain, entry);
@@ -115,8 +121,9 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     const { chain, wallet, show, entry } = await holdFirstStep();
     chain.baseSupplyIndex += 10n ** 12n;
     chain.directSupply += 300_000_000n;
+    const looks = holdLooks.mock.calls.length;
     show({ state: stateWithDirectSupply(chain.directSupply) });
-    await settle();
+    await waitForHoldLook(looks);
     act(() => live.queue.addOrUpdateAction(entry));
     await expectHeldBack(wallet, chain, entry);
   });
@@ -129,11 +136,21 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     // The step is sent, but the node never shows a receipt for it, and its own nonce has passed.
     wallet.sendUncheckedTransaction.mockImplementationOnce(async () => `0x${'ab'.repeat(32)}`);
     wallet.getTransaction.mockImplementation(async () => ({ nonce: 5 } as never));
-    wallet.getTransactionCount.mockImplementationOnce(async () => 5).mockImplementation(async () => 6);
+    // The other transaction takes the nonce only once the hold has stored the step's hash, as a block
+    // later on a real chain.
+    const nonceTaken = held<void>();
+    wallet.getTransactionCount
+      .mockImplementationOnce(async () => 5)
+      .mockImplementation(async () => {
+        await nonceTaken.promise;
+        return 6;
+      });
 
-    await submit();
-    await waitFor(() => expect(queued()).toEqual([]));
-    await settle();
+    act(() => positionCard().onSubmitClicked());
+    await waitFor(() => expect(storedHolds()).toEqual([expect.objectContaining({ hash: REPLACED_HASH })]));
+    nonceTaken.release();
+    await waitForIdle();
+    expect(queued()).toEqual([]);
     expect(live.manager.transactions).toEqual([]);
     expect(live.manager.settledTransactions.map(({ outcome }) => outcome.status)).toEqual(['replaced']);
     await waitFor(() => expect(storedHolds()).toEqual([]));
@@ -153,7 +170,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     wallet.cometSigner.estimateGas.mockRejectedValueOnce(new Error('request timed out'));
 
     await submit();
-    await settle();
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     expect(live.manager.transactions).toEqual([]);
     expect(storedRecords()).toEqual([]);
@@ -211,7 +227,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, amount]));
 
     await submit();
-    await settle();
 
     // The estimate is of the call the wallet is then asked for, byte for byte.
     const estimated = wallet.cometSigner.estimateGas.mock.calls.map(([request]) => request.data);
@@ -243,7 +258,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
     act(() => live.queue.addOrUpdateAction(entry));
     await submit();
-    await settle();
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Earlier Request Still Pending');
 
@@ -278,7 +292,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     act(() => live.queue.addOrUpdateAction(entry));
 
     await submit();
-    await settle();
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Earlier Request Still Pending');
 
@@ -320,10 +333,15 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await waitFor(() => expect(lives.b.action.blockedReason('withdraw')).toBeUndefined());
     act(() => lives.b.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 200_000_000n]));
     act(() => mockTabProps.b.PositionCard.state[1].onSubmitClicked());
-    await settle();
+    // The second tab finds the first tab's reservation and stops before its wallet.
+    await waitFor(() =>
+      expect(mockTabProps.b.PositionCard.state[1].actionRules.wrappedBase.stopped?.label).toBe(
+        'Earlier Request Still Pending'
+      )
+    );
+    expect(lives.b.writes.size).toBe(0);
     read.release();
-    await settle();
-    await settle();
+    await waitForIdle();
 
     // Exactly one withdraw reaches the wallet, and the second tab's row says why it sent nothing.
     expect([...requestedCalls(wallet), ...requestedCalls(second.wallet)]).toEqual(['withdraw']);
@@ -357,16 +375,25 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       }
       return answer(request, ...rest);
     });
+    // The Comet state read again starts a look at the hold, which waits for the provider.
+    readProvider.getBlockNumber.mockClear();
+    const checksBefore = countHoldChecks();
     show({ state: stateWithDirectSupply(DIRECT) });
-    await settle();
+    await waitFor(() => expect(readProvider.getBlockNumber).toHaveBeenCalled());
 
     // The provider catches up. Nothing shows the held request executed, so it still holds.
     readProvider.getBlockNumber.mockImplementation(async () => chain.block);
     act(() => live.queue.addOrUpdateAction(entry));
     await submit();
-    await settle();
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Earlier Request Still Pending');
+    // Every look since the provider lagged has ended, the one the Comet state started included, which
+    // waited for the provider to ask again.
+    await waitForHoldChecks(checksBefore);
+    await waitForIdle();
+    expect(holdLooks.mock.calls.length).toBeGreaterThan(checksBefore.looks);
+    expect(storedHolds()).toEqual([expect.objectContaining({ kind: 'held' })]);
+    expect(readProvider.getLogs).toHaveBeenCalled();
     for (const [filter] of readProvider.getLogs.mock.calls) expect(filter.toBlock).toBeGreaterThanOrEqual(chain.block);
   });
 
@@ -390,7 +417,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     act(() => live.queue.addOrUpdateAction(entry));
 
     await submit();
-    await settle();
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     expect(chain.borrowed).toBe(0n);
     expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
@@ -413,12 +439,17 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       .mockImplementationOnce(async () => chain.block)
       .mockRejectedValue(new Error('block timeout'));
 
-    await submit();
+    act(() => positionCard().onSubmitClicked());
     await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
-    await settle();
+    await waitFor(() =>
+      expect(console.warn).toHaveBeenCalledWith(
+        'The block of a replaced Comet withdrawal is not known:',
+        expect.anything()
+      )
+    );
     expect(queued()).toEqual([entry]);
     expect(positionCard().transaction).toBeDefined();
-    expect(storedHolds()).toEqual([expect.objectContaining({ hash: `0x${'ab'.repeat(32)}` })]);
+    await waitFor(() => expect(storedHolds()).toEqual([expect.objectContaining({ hash: `0x${'ab'.repeat(32)}` })]));
   });
 
   it('keeps the row held until the block of a replaced Comet step is known', async () => {
@@ -440,13 +471,16 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
         return chain.block;
       });
 
-    await submit();
+    act(() => positionCard().onSubmitClicked());
     await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
-    await settle();
+    // The lookup of the wallet node's block after the step was replaced has started.
+    await waitFor(() => expect(wallet.getBlockNumber.mock.calls.length).toBeGreaterThanOrEqual(3));
     // Replaced, but the wallet node's block is not known yet: the row and the run stay as they are.
     expect(queued()).toEqual([entry]);
     expect(positionCard().transaction).toBeDefined();
 
+    // The hold has the step's hash by the time the block is known, as a block later on a real chain.
+    await waitFor(() => expect(storedHolds()).toEqual([expect.objectContaining({ hash: REPLACED_HASH })]));
     block.release();
     await waitFor(() => expect(queued()).toEqual([]));
     await waitFor(() => expect(storedHolds()).toEqual([]));
@@ -459,13 +493,23 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     // Another transaction of the account is pending at nonce 5, so the step is sent at 6. The node
     // does not know the step yet, and nonce 5 mines: the manager reports the step replaced.
     wallet.sendUncheckedTransaction.mockImplementationOnce(async () => REPLACED_HASH);
-    wallet.getTransactionCount.mockImplementationOnce(async () => 5).mockImplementation(async () => 6);
+    // Nonce 5 mines only once the hold has stored the step's hash, as a block later on a real chain.
+    const nonceTaken = held<void>();
+    wallet.getTransactionCount
+      .mockImplementationOnce(async () => 5)
+      .mockImplementation(async () => {
+        await nonceTaken.promise;
+        return 6;
+      });
+    const looks = holdLooks.mock.calls.length;
 
-    await submit();
-    await waitFor(() =>
-      expect(live.manager.settledTransactions.map(({ outcome }) => outcome.status)).toEqual(['replaced'])
-    );
-    await settle();
+    act(() => positionCard().onSubmitClicked());
+    await waitFor(() => expect(storedHolds()).toEqual([expect.objectContaining({ hash: REPLACED_HASH })]));
+    nonceTaken.release();
+    await waitForIdle();
+    expect(live.manager.settledTransactions.map(({ outcome }) => outcome.status)).toEqual(['replaced']);
+    // The run's look at its own hold, once the replaced step's block is known.
+    await waitForHoldLook(looks);
     expect(storedHolds()).toEqual([expect.objectContaining({ hash: REPLACED_HASH })]);
 
     // The same 200 USDC again is held back.
@@ -496,7 +540,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     act(() => live.queue.addOrUpdateAction(entry));
     try {
       await submit();
-      await settle();
       expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
       expect(positionCard().actionRules.wrappedBase.stopped).toEqual({
         action: [ActionType.Withdraw, expect.anything(), entry[2]],
@@ -528,7 +571,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
       act(() => live.queue.addOrUpdateAction(entry));
       await submit();
-      await settle();
       expect(requestedCalls(wallet)).toEqual(['withdraw']);
       expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Earlier Request Still Pending');
     } finally {
