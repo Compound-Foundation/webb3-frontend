@@ -1,8 +1,24 @@
 # Browser testing performance
 
-The half-time goal remains **unproven**. The clean Vite 7 baseline took 177.55 seconds. The target from that observation is `177.55 / 2 = 88.775 seconds`. No measured full run reached that target.
+The half-time goal remains **unmet**. Three matched pairs measured a **28.7% median paired reduction** for the opt-in configuration.
 
-The fastest Node 22 observation took 110.10 seconds. An isolated Node 26 trial took 106.09 seconds after the compiler-readiness fix. The [project pin](../package.json) remains Node 22.22.0. These are individual observations, not a repeated comparison or proof of a general optimum.
+The reference median was 155.78 seconds. The candidate median was 110.66 seconds. Half the reference median is 77.89 seconds. The [project pin](../package.json) remains Node 22.22.0.
+
+## Three matched pairs preserve the implemented inventory
+
+The Linux host has an AMD Ryzen 9 3900X with 12 cores, 24 logical CPUs and about 32 GiB of memory. The reference used four workers at `2ce3b84`. The candidate used twelve workers and four Chromium servers at `a3a7989`. The candidate enabled the four options below. The measurements cover the combined configuration.
+
+| Pair | Reference, seconds | Candidate, seconds | Reduction |
+| ---- | -----------------: | -----------------: | --------: |
+| 1    |             156.12 |             110.66 |     29.1% |
+| 2    |             154.88 |             110.57 |     28.6% |
+| 3    |             155.78 |             111.02 |     28.7% |
+
+Paired reduction is `100 × (1 - candidateSeconds / referenceSeconds)`. The report takes the median of the three paired reductions.
+
+Each reference passed 58 implemented tests. Each candidate passed 59 tests. The extra case is the dev-server security probe. The same unimplemented production-screening case kept acceptance **INCOMPLETE** in every run. The audit found no missing original test IDs, duplicates, cleanup errors or secret leaks. Both production variants resolved `DEV=false`, `PROD=true` and `isProduction=true`.
+
+The six runs used the same tool versions, upstream selection and initial warm-cache contents. The order was reference/candidate, candidate/reference, reference/candidate. Both source trees remained clean. The [machine-readable audit](benchmarks/browser-testing-2026-11-06.json) records commits, timings, inventories and required summary lines.
 
 ## Run the opt-in configuration
 
@@ -47,9 +63,11 @@ yarn test:browser
 
 These switches do not change dependency versions. The experimental branch uses Vite 8.3.6, React plugin 6.2.1 and esbuild 0.28.1, as recorded in `package.json`.
 
-## The observations include the full command
+## Earlier exploratory observations include the full command
 
 The experiments used source base `2ce3b84f0d981a69f67d4e302750031c7c70dbd7`, Anvil 1.9.0, Playwright 1.64.1 and Chromium 156.0.8078.4. The fork used block 26244888 with its hash checked. Each comparison run received a fresh private copy of the same cache seed and account salt. The seed remained unchanged.
+
+The earlier single reference observation took 177.55 seconds. Its half-time target was 88.775 seconds. The repeated references above were faster. Use the paired measurements to assess repeatability.
 
 The seconds below come from the outer command timer. They include startup, production builds, browser tests, teardown and output scans. The shorter duration at the top of `summary.md` is not the full command duration.
 
@@ -66,9 +84,11 @@ The run directories below live under `test-results/browser-fork/` and are Git-ig
 
 Each row retains the same unimplemented production-screening case. The candidate adds one dev-server security probe, which accounts for the change from 58 to 59 implemented tests. No original assertion was removed to obtain these observations.
 
-Only the reference row used a clean tree. Candidate manifests record the same base commit with a dirty tree containing the experiments. These runs do not establish that a final committed or pushed head passed. The implementer still owes a full run on the final clean commit under the [push-evidence rules](browser-fork-wallet.md#pushes-and-evidence).
+Only the reference row in this exploratory table used a clean tree. The candidate rows record a dirty tree containing the experiments. The later paired runs validate clean code commit `a3a7989` under the [push-evidence rules](browser-fork-wallet.md#pushes-and-evidence).
 
 A later clean-tree default-mode run at `85b6cdf` failed in 150.08 seconds: `half-clean-head-default-node22` passed 57 tests and failed one. The known case remained skipped, and the dependent dev-server probe did not run. After a reload, 13 module requests failed with `ECONNRESET`. The app root remained empty. This failed run is not evidence of a speed improvement.
+
+After the connection-lifetime fix, the default configuration passed 59 implemented tests on clean commit `a3a7989` in 146.86 seconds. The run ID is `half-clean-head-default-fixed-node22`. Both production builds ran, and cleanup and secret scans passed. The known fixme kept acceptance **INCOMPLETE**.
 
 ## Readiness, isolation and diagnostics remain part of the workload
 
@@ -113,18 +133,18 @@ Lazy and HMR patch payloads bypass the bundle archive hook, but remain unminifie
 
 Compression needs care even with console calls and debugger statements preserved. The sentinel's deliberately annotated side-effect call disappeared when pure annotations were trusted. `annotations:false` preserved it. The [Oxc documentation](https://oxc.rs/docs/guide/usage/minifier/dead-code-elimination) describes these controls. [Rolldown documents the minification and name-preservation options](https://rolldown.rs/reference/Interface.OutputOptions).
 
-## Repeatability and final-head evidence are still owed
+## Repeat the comparison
 
-Before making a durable speed claim:
+To repeat the completed protocol:
 
 1. Freeze the reference and candidate commits and record both inventories.
 2. Run at least three matched reference/candidate pairs on the same quiet host, one command at a time.
 3. Give each run a fresh private copy of the unchanged cache seed and account salt. Retain their existing permissions.
 4. Keep Node, Anvil, Chromium, fork block/hash, endpoint choice, worker count and selected tests recorded for each pair.
 5. Measure the complete command and report each duration, failure, skip, cleanup result and secret scan.
-6. Report the median paired change and range. Compare candidate times with the 88.775-second target without discarding slower or failed runs.
+6. Report the median paired change and range. Derive the half-time target from the matched reference median and retain slower or failed runs.
 
-This procedure is proposed validation, not completed evidence. The current measurements do not establish the fastest possible implementation or a 50% reduction.
+The six matched runs completed this protocol. Their paired reductions range from 28.6% to 29.1%. The measurements do not establish the fastest possible implementation or a 50% reduction.
 
 Repository validation during the experiments passed type checking, ESLint and the production build. ESLint reported 22 existing warnings. The first concurrent check run had one Jest phase assertion fail (`checking` versus `awaiting-signature`). A complete rerun passed 96 suites and 2,004 tests, with one suite and one test skipped, without a product or test change. The isolated reference cases passed too. The transient failure's cause is unproven.
 

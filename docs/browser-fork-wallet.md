@@ -25,7 +25,7 @@ The suite lives in `e2e/`: the harness in `e2e/harness/`, the browser specs in `
 
 Each Playwright worker has its own fork lane. Playwright schedules each test on its own (`fullyParallel: true`), so tests from one file can run in different workers at once. There are no retries, so a flaky case shows as a failure. The harness estimates the worker count unless you set it. See [Choosing the worker count](#choosing-the-worker-count).
 
-The [performance experiment record](browser-testing-performance.md) describes opt-in bundled dev, parallel builds, browser pooling and minification. The half-time target remains unproven. The performance flags default to off, and the Node 22 pin remains unchanged. Vite itself is upgraded.
+The [performance experiment record](browser-testing-performance.md) describes opt-in bundled dev, parallel builds, browser pooling and minification. Three matched pairs measured a 28.7% median paired reduction. The half-time target remains unmet. The performance flags default to off, and the Node 22 pin remains unchanged. Vite itself is upgraded.
 
 In the [per-test scheduling benchmarks](#per-test-against-per-file-scheduling), warm four-worker runs took 135, 141 and 157 seconds. Cold runs took 154 seconds with four workers and 270 with two. Set-up took 18–20 seconds warm and 29–33 seconds cold across both scheduling modes. These runs retained baseline failures and the skipped AC7 case, as detailed below.
 
