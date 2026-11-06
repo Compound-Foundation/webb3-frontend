@@ -9,8 +9,9 @@
 //     the resolved configuration has DEV=false and PROD=true (`assertProduction`).
 //   - One build sets NODE_ENV=development, as `NODE_ENV=development vite build` does, so that it compiles
 //     DEV=true in mode production. The dev-only screening bypass (`SCREENING_DISABLED` in `envVars.ts`)
-//     must stay off in it. The harness refuses to continue unless that build resolved mode production with
-//     DEV=true and PROD=false (`assertDevelopmentNodeEnv`), because otherwise it would not test that case.
+//     must stay off in it: the bypass also requires `import.meta.hot`, which every build replaces with
+//     undefined. The harness refuses to continue unless that build resolved mode production with DEV=true
+//     and PROD=false (`assertDevelopmentNodeEnv`), because otherwise it would not test that case.
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';

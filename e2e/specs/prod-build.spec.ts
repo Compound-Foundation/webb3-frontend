@@ -7,8 +7,9 @@
 // - The second, the control, has the stub's endpoint and an allowed account. It must connect normally, so
 //   the other cases cannot pass merely because a production build fails to connect at all.
 // - The third has no endpoint and NODE_ENV=development, as `NODE_ENV=development vite build` does. Vite derives
-//   DEV from NODE_ENV, so this build compiles DEV=true and PROD=false in mode production. A connected wallet
-//   must fail closed here too.
+//   DEV from NODE_ENV, so this build compiles DEV=true and PROD=false in mode production. The bypass also
+//   requires the dev server's `import.meta.hot`, which every build replaces with undefined, so a connected
+//   wallet must fail closed here too.
 import fs from 'node:fs';
 import path from 'node:path';
 

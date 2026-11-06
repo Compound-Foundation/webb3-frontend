@@ -21,15 +21,26 @@ const screeningEndpoint = import.meta.env.VITE_SCREENING_ENDPOINT || 'SCREENING_
 
 export const SCREENING_URL = screeningEndpoint;
 
-/** The values of `import.meta.env` that decide whether the dev server skips screening. */
-export type ScreeningBypassEnv = { DEV: boolean; MODE: string; VITE_SCREENING_ENDPOINT?: string };
+/** The values of `import.meta` that decide whether the dev server skips screening. */
+export type ScreeningBypassEnvironment = {
+  /** `import.meta.env.DEV`. */
+  DEV: boolean;
+  /** Whether the Vite dev server served this module: `import.meta.hot` is defined. */
+  isDevServer: boolean;
+  /** `import.meta.env.VITE_SCREENING_ENDPOINT`. */
+  VITE_SCREENING_ENDPOINT?: string;
+};
 
 /**
- * Whether `useAddressScreening` skips the screening endpoint: only on the local dev server with no
- * endpoint configured. See `SCREENING_DISABLED`.
+ * Whether `useAddressScreening` skips the screening endpoint: only on the Vite dev server with DEV true
+ * and no endpoint configured. See `SCREENING_DISABLED`.
  */
-export function isScreeningBypassed({ DEV, MODE, VITE_SCREENING_ENDPOINT }: ScreeningBypassEnv): boolean {
-  return Boolean(DEV) && MODE === 'development' && !VITE_SCREENING_ENDPOINT;
+export function isScreeningBypassed({
+  DEV,
+  isDevServer,
+  VITE_SCREENING_ENDPOINT,
+}: ScreeningBypassEnvironment): boolean {
+  return Boolean(DEV) && isDevServer && !VITE_SCREENING_ENDPOINT;
 }
 
 /**
@@ -41,22 +52,19 @@ export function isScreeningBypassed({ DEV, MODE, VITE_SCREENING_ENDPOINT }: Scre
  * the network call and treats the address as allowed.
  *
  * Three conditions, all required:
- *  - `import.meta.env.MODE` is `development`. Vite sets the mode from `--mode`: the dev
- *    server (`vite`, `yarn dev`) uses `development`, and `vite build` uses `production`
- *    whatever NODE_ENV says.
- *  - `import.meta.env.DEV` is true. Vite derives `DEV` and `PROD` from NODE_ENV, not
- *    from the mode, so `NODE_ENV=development vite build` compiles DEV=true and
- *    PROD=false. Neither flag alone tells the dev server from such a build, so the mode
- *    check above is what keeps the bypass off in every `vite build`.
- *  - no `VITE_SCREENING_ENDPOINT` — set it locally (e.g. in `.env.local`) to point at
+ *  - `import.meta.env.DEV` is true. Vite derives it from NODE_ENV, not from the mode,
+ *    so it is true on the dev server and also in a `vite build` run with
+ *    NODE_ENV=development.
+ *  - The Vite dev server served this module, so `import.meta.hot` is defined. The dev
+ *    server gives every module that reads `import.meta.hot` a hot context. `vite build`
+ *    replaces `import.meta.hot` with `undefined` whatever the mode, NODE_ENV or `.env*`
+ *    files, so this condition is false in every build. The mode does not matter on the
+ *    dev server: `yarn dev` and `yarn dev --mode playground` both meet it.
+ *  - No `VITE_SCREENING_ENDPOINT`. Set it locally (e.g. in `.env.local`) to point at
  *    a reachable worker and screening runs normally, fail-closed behavior included.
- *
- * Do not rely on a build removing the branch that reads this flag. Whether Rollup
- * drops it depends on how the expression is written. The flag is false in every
- * `vite build` either way.
  */
 export const SCREENING_DISABLED = isScreeningBypassed({
   DEV: import.meta.env.DEV,
-  MODE: import.meta.env.MODE,
+  isDevServer: import.meta.hot !== undefined,
   VITE_SCREENING_ENDPOINT: import.meta.env.VITE_SCREENING_ENDPOINT,
 });
