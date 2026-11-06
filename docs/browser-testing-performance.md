@@ -68,6 +68,8 @@ Each row retains the same unimplemented production-screening case. The candidate
 
 Only the reference row used a clean tree. Candidate manifests record the same base commit with a dirty tree containing the experiments. These runs do not establish that a final committed or pushed head passed. The implementer still owes a full run on the final clean commit under the [push-evidence rules](browser-fork-wallet.md#pushes-and-evidence).
 
+A later clean-tree default-mode run at `85b6cdf` failed in 150.08 seconds: `half-clean-head-default-node22` passed 57 tests and failed one. The known case remained skipped, and the dependent dev-server probe did not run. After a reload, 13 module requests failed with `ECONNRESET`. The app root remained empty. This failed run is not evidence of a speed improvement.
+
 ## Readiness, isolation and diagnostics remain part of the workload
 
 The [egress route](../e2e/harness/egress.ts) still checks the destination of each redirect, with a five-hop limit per guarded fetch chain. Lane headers, credential handling, the document Content Security Policy, popup restrictions and worker restrictions remain enforced. The [fixtures](../e2e/harness/fixtures.ts) still create a fresh context and reset the wallet and fork before each test.
@@ -79,6 +81,10 @@ The parallel build workers still produce two production builds. The runner check
 Bundled Vite can return a temporary `Bundling in progress` document while it regenerates output. Four security tests stalled on that document during the first Node 26 trial. A reload broadcast before the fallback page's WebSocket connects is a possible cause. The trace does not prove that ordering or establish Node 26 as the cause.
 
 The readiness gate holds only a successful HTML document response from the bundled dev origin containing Vite's exact fallback markers. It polls through the guarded HTTP path for at most 240 seconds after the first confirmed fallback. Each poll starts a new guarded redirect chain within that deadline. A timeout aborts the request and records `compiler-readiness` in blocked requests. Other responses and errors retain their existing handling. This introduces no test retries, assertion changes or HMR suppression.
+
+The harness dev server now keeps idle HTTP connections open until cleanup. A controlled Node 22 probe reproduced idle-close resets with Playwright's public agent configuration: 14 reused requests reset under the default policy. With `keepAliveTimeout=0`, the 14 requests succeeded and shutdown completed promptly. [Node documents zero as disabling idle expiry](https://github.com/nodejs/node/blob/v22.22.0/doc/api/http.md#serverkeepalivetimeout).
+
+The direct Playwright API-wrapper probe passed both configurations. The failed full trace lacks socket identity, so its connection to the controlled race remains an inference. The [server regression](../e2e/harness/__tests__/viteApp.test.ts) failed before the change because the connection closed during the idle window. It passes with connection reuse and prompt teardown after the change. Application polling and Playwright's retry policy retain their settings.
 
 The [dev-server security project](../e2e/playwright.config.ts) runs after `dev`. Its private-file probes deliberately make Vite broadcast error overlays. The project order prevents those overlays from covering another test's app. A `--project dev` run excludes this probe and remains **INCOMPLETE**.
 
@@ -121,3 +127,5 @@ Before making a durable speed claim:
 This procedure is proposed validation, not completed evidence. The current measurements do not establish the fastest possible implementation or a 50% reduction.
 
 Repository validation during the experiments passed type checking, ESLint and the production build. ESLint reported 22 existing warnings. The first concurrent check run had one Jest phase assertion fail (`checking` versus `awaiting-signature`). A complete rerun passed 96 suites and 2,004 tests, with one suite and one test skipped, without a product or test change. The isolated reference cases passed too. The transient failure's cause is unproven.
+
+After the connection-lifetime change, Jest exposed a transaction-history fixture race. A delayed observer reset can replace the next test's mock. The fixture now unmounts its component before restoring the original observer immediately. The assertions retain their expected values. The full rerun passed 96 suites and 2,005 tests, with one suite and one test skipped.

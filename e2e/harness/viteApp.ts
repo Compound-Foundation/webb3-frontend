@@ -259,6 +259,8 @@ export async function startDevServer({
   process.env.NODE_ENV = 'development';
   Object.assign(process.env, environment);
   const httpServer = http.createServer();
+  // Playwright reuses idle sockets. Keep them open until cleanup to avoid idle-close resets during a page reload.
+  httpServer.keepAliveTimeout = 0;
   const port = await listenOnLoopback(httpServer);
   let DEV = false;
   const server = await createServer({
