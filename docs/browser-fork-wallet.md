@@ -176,7 +176,7 @@ The committed wrapper registry (`src/constants/wrappedMarkets.ts`) keeps every r
 Every production build runs in mode production. Vite derives `DEV` and `PROD` from `NODE_ENV`, not from the mode.
 
 - Two builds run with `NODE_ENV=production`: one with no screening endpoint, and the allowed control with the stub's endpoint. The harness refuses to serve either unless Vite resolved `DEV=false` and `PROD=true`.
-- The third runs with no endpoint and `NODE_ENV=development`, as `NODE_ENV=development vite build` does. It compiles `DEV=true` and `PROD=false`, and the harness refuses to serve it unless Vite resolved exactly that. `SCREENING_DISABLED` in `envVars.ts` also requires mode `development`, so the dev-only screening bypass stays off, and `prod-build.spec.ts` checks that a connected wallet fails closed.
+- The third runs with no endpoint and `NODE_ENV=development`, as `NODE_ENV=development vite build` does. It compiles `DEV=true` and `PROD=false`, and the harness refuses to serve it unless Vite resolved exactly that. `SCREENING_DISABLED` in `envVars.ts` also requires `import.meta.hot`, which only the dev server defines and every build replaces with `undefined`, so the dev-only screening bypass stays off, and `prod-build.spec.ts` checks that a connected wallet fails closed.
 
 Whether a bundle keeps the bypass's branch and warning text depends on how Rollup folds the flag. The tests check the behaviour, not the text. Vite keeps an existing `NODE_ENV`, and the dev server sets `development` for the rest of the run, so the builds run before the dev server.
 
@@ -543,7 +543,7 @@ Limits:
 - The fork runs Prague, as COM-289's runner pinned. Mainnet runs Osaka. Gas figures can differ.
 - Only Ethereum is forked. Other chains answer a JSON-RPC error, and nothing else runs on them.
 - The app calls wagmi's `switchChain`, which does not reject to its caller, so `switchWriteNetwork`'s own `catch` branches for 4902, 4001 and -32002 never run. wagmi's connector handles 4902 by adding the chain. The tests assert that sequence and do not cover the app's catch branches.
-- The production builds run in mode production, two with `NODE_ENV=production`, as `vite build` does when `NODE_ENV` is unset, and one with `NODE_ENV=development`. The harness builds in no other mode. A build run with both `--mode development` and `NODE_ENV=development` resolves the same values as the dev server, so it compiles the dev-only screening bypass when no endpoint is set. No repository script builds that way. `__tests__/envVars.test.ts` covers `DEV=true` in other modes.
+- The production builds run in mode production, two with `NODE_ENV=production`, as `vite build` does when `NODE_ENV` is unset, and one with `NODE_ENV=development`. The harness builds in no other mode. A build run with both `--mode development` and `NODE_ENV=development` resolves the same `import.meta.env` values as the dev server, but every build replaces `import.meta.hot` with `undefined`, so it does not compile the dev-only screening bypass. `__tests__/envVars.test.ts` covers that case, and no browser test builds that way.
 - Playwright routes neither WebRTC nor WebTransport. No harness service speaks either, and the tests do not cover them.
 - The screening tests assert that the app made no signing call, from the wallet's record of every provider call, not only from its queue, so a call the wallet refused before queueing still fails the test.
 - The screening stub follows the worker's request and response contract, not its real origin allowlist or rate limiting.
