@@ -21,6 +21,7 @@ import { test as base, expect, type Browser, type BrowserContext, type Frame, ty
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { mainnet } from 'viem/chains';
 
+import { connectPoolBrowser } from './browserPool';
 import { ControlClient } from './controlClient';
 import { allowLoopbackWebSocket, applyEgress, closePagesItDidNotOpen, type BlockedRequest } from './egress';
 import type { LaneInfo } from './forkLanes';
@@ -138,7 +139,10 @@ export async function harnessContext(
       webSocket: new Set(appOrigin === manifest.app.devOrigin ? [manifest.app.hmrOrigin] : []),
     },
     blocked,
-    { origins: new Set([manifest.services.rpcProxy, manifest.services.screening]), value: String(lane) }
+    { origins: new Set([manifest.services.rpcProxy, manifest.services.screening]), value: String(lane) },
+    appOrigin === manifest.app.devOrigin && manifest.app.devResolved.bundled === true
+      ? { bundledDev: { origin: appOrigin } }
+      : undefined
   );
   await context.exposeBinding(BINDING_NAME, bindingHandler(appOrigin, wallet));
   await context.addInitScript(installHarnessProvider, {
@@ -151,7 +155,13 @@ export async function harnessContext(
   return context;
 }
 
-type WorkerFixtures = { lane: LaneInfo; manifest: Manifest; wallet: ControlClient; fork: PublicClient };
+type WorkerFixtures = {
+  lane: LaneInfo;
+  manifest: Manifest;
+  wallet: ControlClient;
+  fork: PublicClient;
+  preparedPoolConnection: Browser | undefined;
+};
 type TestFixtures = {
   appTarget: AppTarget;
   harnessWallet: HarnessWallet;
@@ -159,6 +169,7 @@ type TestFixtures = {
   blocked: BlockedRequest[];
   consoleMessages: string[];
   resetWallet: void;
+  devDiagnostics: void;
 };
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -172,13 +183,39 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       use(createPublicClient({ chain: mainnet, transport: http(manifest.fork.localUrl) }) as PublicClient),
     { scope: 'worker' },
   ],
+  preparedPoolConnection: [
+    async ({ playwright, headless }, use, workerInfo) => {
+      const endpointsFile = process.env.BROWSER_HARNESS_BROWSER_POOL_FILE;
+      if (endpointsFile === undefined) {
+        await use(undefined);
+        return;
+      }
+      if (!headless) throw new Error('BROWSER_TEST_BROWSER_POOL requires headless browsers.');
+      const browser = await connectPoolBrowser(playwright.chromium, workerInfo.parallelIndex, endpointsFile);
+      try {
+        await use(browser);
+      } finally {
+        // This disconnects the worker. The server still owns Chromium.
+        await browser.close();
+      }
+    },
+    // Automatic worker setup precedes the test's trace recorder. A failed connect cannot record its URL.
+    { scope: 'worker', auto: true },
+  ],
   browser: [
-    async ({ playwright, manifest, headless }, use) => {
+    async ({ playwright, manifest, headless, preparedPoolConnection }, use) => {
       // The egress route fetches each browser request in Node, so this worker trusts the harness certificate.
       trustHarnessCertificate(fs.readFileSync(manifest.tls.certPath, 'utf8'));
+      if (preparedPoolConnection !== undefined) {
+        await use(preparedPoolConnection);
+        return;
+      }
       const browser = await playwright.chromium.launch({ headless });
-      await use(browser);
-      await browser.close();
+      try {
+        await use(browser);
+      } finally {
+        await browser.close();
+      }
     },
     { scope: 'worker' },
   ],
@@ -206,6 +243,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       // then holds what anvil read for them. Other tests get other addresses.
       await wallet.reset(accountSeedOf(testInfo));
       await use();
+    },
+    { auto: true },
+  ],
+  devDiagnostics: [
+    async ({ manifest, appTarget }, use, testInfo) => {
+      await use();
+      const sourceMapsFile = manifest.app.devSourceMapsFile;
+      if (appTarget === 'dev' && sourceMapsFile !== undefined && testInfo.status !== testInfo.expectedStatus) {
+        await testInfo.attach('dev-source-maps.json.gz', { path: sourceMapsFile, contentType: 'application/gzip' });
+      }
     },
     { auto: true },
   ],

@@ -13,6 +13,7 @@ import path from 'node:path';
 
 import { build, createServer, type Plugin, type ResolvedConfig, type ViteDevServer } from 'vite';
 
+import { devMinificationOf, minifyDev } from './devMinification';
 import { REPO_ROOT } from './paths';
 
 export { REPO_ROOT };
@@ -176,6 +177,62 @@ export async function serveProduction({ outDir }: { outDir: string }): Promise<S
 }
 
 /**
+ * Whether BROWSER_TEST_BUNDLED_DEV selects Vite's experimental bundled dev mode (`experimental.bundledDev`):
+ * unset, empty or `0` for the default unbundled dev server, `1` for bundled.
+ * Bundled dev serves Rolldown chunks from memory. A fresh browser context loads those chunks instead of individual modules.
+ */
+export function devBundledOf(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = env.BROWSER_TEST_BUNDLED_DEV;
+  if (value === undefined || value === '' || value === '0') return false;
+  if (value !== '1') throw new Error('BROWSER_TEST_BUNDLED_DEV must be 0 or 1.');
+  return true;
+}
+
+/**
+ * What BROWSER_TEST_BUNDLED_DEV=1 adds to the dev server's configuration.
+ * `strictExecutionOrder` preserves module order across Rolldown chunks.
+ * Shared chunks otherwise precede the entry's React Refresh preamble.
+ * React modules then throw "@vitejs/plugin-react can't detect preamble" (vitejs/vite-plugin-react#1191).
+ * It sits under `rollupOptions`, the key `vite.config.js` uses, so Vite merges it with the configuration's
+ * inputs and plugins instead of replacing them.
+ */
+export const BUNDLED_DEV_CONFIG = {
+  experimental: { bundledDev: true },
+  build: { rollupOptions: { output: { strictExecutionOrder: true } } },
+} as const;
+
+/** Whether `url`, a request's URL, asks for a file by its file system path under Vite's `/@fs/` prefix. */
+export function isRawFsRequest(url: string | undefined): boolean {
+  const pathname = (url ?? '').split(/[?#]/)[0];
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // A malformed escape is checked as sent.
+  }
+  return [pathname, decoded].some((each) => each === '/@fs' || each.startsWith('/@fs/'));
+}
+
+/**
+ * Answers 403 to every `/@fs/` request, before Vite's own middleware sees it. The unbundled dev server
+ * serves `/@fs/` itself and refuses a file outside the repository with 403. Bundled dev serves no `/@fs/`
+ * path and answers it with the app's HTML and status 200 instead, which holds no file but reads as served.
+ * The harness adds this plugin to bundled dev only. A page receives the unbundled server's refusal, with no file outside the repository.
+ */
+export function denyRawFs(): Plugin {
+  return {
+    name: 'cf-harness-deny-raw-fs',
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (!isRawFsRequest(request.url)) return next();
+        response.statusCode = 403;
+        response.end();
+      });
+    },
+  };
+}
+
+/**
  * Starts the dev server on 127.0.0.1 with NODE_ENV=development and exactly `environment`'s `VITE_*`
  * variables. They stay set in the runner for the server's life, because Vite reads NODE_ENV again when it
  * first optimizes dependencies. So the dev server starts after every production build. Vite runs in
@@ -185,12 +242,19 @@ export async function startDevServer({
   envDir,
   environment,
   plugins = [],
+  sourceMapsFile,
 }: {
   envDir: string;
   environment: AppEnvironment;
   /** Plugins for the dev server only, such as `openWrappedReleaseControls`. */
   plugins?: Plugin[];
-}): Promise<Served & { server: ViteDevServer; hmrOrigin: string; DEV: boolean }> {
+  /** A private build-time archive, copied to test artifacts only after a failure. */
+  sourceMapsFile?: string;
+}): Promise<Served & { server: ViteDevServer; hmrOrigin: string; DEV: boolean; bundled: boolean }> {
+  const bundled = devBundledOf();
+  const minified = devMinificationOf();
+  if (minified && sourceMapsFile === undefined) throw new Error('Minified dev requires a private source map archive.');
+  if (bundled) console.log('Browser harness: experimental bundled dev mode, by BROWSER_TEST_BUNDLED_DEV.');
   removeViteVariables();
   process.env.NODE_ENV = 'development';
   Object.assign(process.env, environment);
@@ -204,8 +268,21 @@ export async function startDevServer({
     mode: 'development',
     logLevel: 'warn',
     clearScreen: false,
-    server: { middlewareMode: true, hmr: { server: httpServer }, host: '127.0.0.1' },
-    plugins: [recorder((config) => (DEV = Boolean(config.env.DEV))), ...plugins],
+    server: {
+      middlewareMode: true,
+      hmr: { server: httpServer },
+      host: '127.0.0.1',
+      // Vite 8 turns this on when it detects a coding agent, and then logs the page's console errors and
+      // warnings in the runner as well. Vite 7 never did, and the browser fixtures and traces record them.
+      forwardConsole: false,
+    },
+    ...(bundled ? BUNDLED_DEV_CONFIG : {}),
+    plugins: [
+      recorder((config) => (DEV = Boolean(config.env.DEV))),
+      ...(bundled ? [denyRawFs()] : []),
+      ...(minified ? [minifyDev(sourceMapsFile as string)] : []),
+      ...plugins,
+    ],
   });
   httpServer.on('request', server.middlewares);
   return {
@@ -213,6 +290,7 @@ export async function startDevServer({
     origin: `http://127.0.0.1:${port}`,
     hmrOrigin: `ws://127.0.0.1:${port}`,
     DEV,
+    bundled,
     close: async () => {
       await server.close();
       await closed(httpServer);

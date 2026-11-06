@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { deflateRawSync } from 'node:zlib';
+import { deflateRawSync, gzipSync } from 'node:zlib';
 
 import { createRedactor, secretPatternsOf } from '../fork';
 import { findSecrets, outputsUnder, registerSecret, registerSecretPattern, zipMembers } from '../secrets';
@@ -16,12 +16,12 @@ const KEY = `0x${'d'.repeat(64)}`;
 const SALT = 'e'.repeat(64);
 
 /** A ZIP of `members`, deflated, as Playwright writes a trace. */
-function zip(members: Record<string, string>): Buffer {
+function zip(members: Record<string, string | Buffer>): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
   for (const [name, text] of Object.entries(members)) {
-    const data = deflateRawSync(Buffer.from(text));
+    const data = deflateRawSync(text);
     const nameBytes = Buffer.from(name);
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
@@ -179,5 +179,28 @@ test('attributes each leak to the raw file, trace member or embedded report memb
     ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A gzip attachment has a hashed name inside traces and HTML reports. Detect its bytes, not its suffix.
+test('scans original source maps inside gzip files and ZIP or HTML attachments', () => {
+  registerSecret(TOKEN, 'the control token');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-gzip-scan-'));
+  try {
+    const compressed = gzipSync(JSON.stringify({ sourcesContent: [TOKEN] }));
+    fs.writeFileSync(path.join(directory, 'source-maps.json.gz'), compressed);
+    const attached = zip({ 'resources/hashed-attachment': compressed });
+    fs.writeFileSync(path.join(directory, 'trace.zip'), attached);
+    fs.writeFileSync(
+      path.join(directory, 'index.html'),
+      `<template>data:application/zip;base64,${attached.toString('base64')}</template>`
+    );
+    expect(findSecrets(outputsUnder([directory])).map(({ file }) => path.relative(directory, file))).toEqual([
+      'index.html#embedded/resources/hashed-attachment#gunzip',
+      'source-maps.json.gz#gunzip',
+      'trace.zip#resources/hashed-attachment#gunzip',
+    ]);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 });
