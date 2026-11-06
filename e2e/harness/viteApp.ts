@@ -11,7 +11,7 @@
 //     DEV=true in mode production. The dev-only screening bypass (`SCREENING_DISABLED` in `envVars.ts`)
 //     must stay off in it: the bypass also requires `import.meta.hot`, which every build replaces with
 //     undefined. The harness refuses to continue unless that build resolved mode production with DEV=true
-//     and PROD=false (`assertDevelopmentNodeEnv`), because otherwise it would not test that case.
+//     and PROD=false (`assertDevelopmentNodeEnv`), because no other configuration tests that case.
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';

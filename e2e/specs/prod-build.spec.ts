@@ -2,8 +2,8 @@
 // in mode production, as `vite build` does, and the harness refuses to serve one that did not resolve the
 // configuration it asked for (`viteApp.ts`).
 //
-// - The first build has no VITE_SCREENING_ENDPOINT and NODE_ENV=production: exactly the configuration in
-//   which the dev server would skip screening. A connected wallet must fail closed.
+// - The first build has no VITE_SCREENING_ENDPOINT and NODE_ENV=production: the missing endpoint with which
+//   the dev server, under its default NODE_ENV, skips screening. A connected wallet must fail closed.
 // - The second, the control, has the stub's endpoint and an allowed account. It must connect normally, so
 //   the other cases cannot pass merely because a production build fails to connect at all.
 // - The third has no endpoint and NODE_ENV=development, as `NODE_ENV=development vite build` does. Vite derives

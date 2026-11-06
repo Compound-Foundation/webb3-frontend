@@ -21,7 +21,7 @@ const screeningEndpoint = import.meta.env.VITE_SCREENING_ENDPOINT || 'SCREENING_
 
 export const SCREENING_URL = screeningEndpoint;
 
-/** The values of `import.meta` that decide whether the dev server skips screening. */
+/** The values, read or computed from `import.meta`, that decide whether the dev server skips screening. */
 export type ScreeningBypassEnvironment = {
   /** `import.meta.env.DEV`. */
   DEV: boolean;
@@ -53,13 +53,17 @@ export function isScreeningBypassed({
  *
  * Three conditions, all required:
  *  - `import.meta.env.DEV` is true. Vite derives it from NODE_ENV, not from the mode,
- *    so it is true on the dev server and also in a `vite build` run with
- *    NODE_ENV=development.
+ *    so it is true on the dev server under the default NODE_ENV and also in a
+ *    `vite build` run with NODE_ENV=development. A dev server started with
+ *    NODE_ENV=production has DEV false and screens.
  *  - The Vite dev server served this module, so `import.meta.hot` is defined. The dev
- *    server gives every module that reads `import.meta.hot` a hot context. `vite build`
- *    replaces `import.meta.hot` with `undefined` whatever the mode, NODE_ENV or `.env*`
- *    files, so this condition is false in every build. The mode does not matter on the
- *    dev server: `yarn dev` and `yarn dev --mode playground` both meet it.
+ *    server gives every browser module that reads `import.meta.hot` a hot context (SSR
+ *    modules and classic workers get none). `vite build` replaces `import.meta.hot` with
+ *    `undefined` whatever the mode, NODE_ENV or `.env*` files, so this condition is false
+ *    in every build. A `define` entry for `import.meta.hot` in the Vite configuration
+ *    would override that replacement, so the configuration must not define it. The mode
+ *    does not matter on the dev server: `yarn dev` and `yarn dev --mode playground` both
+ *    meet this condition.
  *  - No `VITE_SCREENING_ENDPOINT`. Set it locally (e.g. in `.env.local`) to point at
  *    a reachable worker and screening runs normally, fail-closed behavior included.
  */
