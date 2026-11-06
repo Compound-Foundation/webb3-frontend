@@ -111,3 +111,73 @@ test('finds a key with or without 0x, JSON-escaped or base64, and the private UR
   expect(findSecrets([{ file: 'e', content: `salt ${SALT}` }])).toEqual([{ file: 'e', secret: 'the account salt' }]);
   expect(createRedactor([], [TOKEN]).redact(TOKEN)).toBe('<redacted>');
 });
+
+/** A secret whose JSON-escaped form differs from the text as written. */
+const ESCAPED = 'quote"back\\slash';
+
+test('finds each form, in either letter case, and reports leaks in text order, then registration order', () => {
+  registerSecret(ESCAPED, 'a secret with escapes');
+  const json = JSON.stringify(ESCAPED).slice(1, -1);
+  const texts = [
+    { file: 'with 0x, upper case', content: `key ${KEY.toUpperCase()}` },
+    { file: 'without 0x', content: Buffer.from(`key ${KEY.slice(2)}`) },
+    { file: 'JSON-escaped only', content: `{"value":"${json}"}` },
+    { file: 'base64', content: `data:text/plain;base64,${Buffer.from(KEY).toString('base64')}` },
+    { file: 'URL, upper case', content: 'HTTPS://RPC.EXAMPLE.COM/V2/PRIVATEKEY0123456789ABCDEF' },
+    { file: 'clean', content: 'nothing here' },
+    {
+      file: 'every kind',
+      content: `${SALT} ${ESCAPED} ${KEY} ${TOKEN} https://rpc.example.com/v2/PrivateKey0123456789abcdef`,
+    },
+  ];
+  // The JSON-escaped text holds no other form of the secret.
+  expect(texts[2].content).not.toContain(ESCAPED);
+  const leaks = findSecrets(texts);
+  expect(leaks).toEqual([
+    { file: 'with 0x, upper case', secret: 'a key the wallet made' },
+    { file: 'without 0x', secret: 'a key the wallet made' },
+    { file: 'JSON-escaped only', secret: 'a secret with escapes' },
+    { file: 'base64', secret: 'a key the wallet made' },
+    { file: 'URL, upper case', secret: 'the private upstream URL' },
+    { file: 'every kind', secret: 'the control token' },
+    { file: 'every kind', secret: 'a key the wallet made' },
+    { file: 'every kind', secret: 'the account salt' },
+    { file: 'every kind', secret: 'a secret with escapes' },
+    { file: 'every kind', secret: 'the private upstream URL' },
+  ]);
+  for (const secret of [TOKEN, KEY.slice(2), SALT, ESCAPED, json]) expect(JSON.stringify(leaks)).not.toContain(secret);
+});
+
+test('attributes each leak to the raw file, trace member or embedded report member that holds it', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-containers-'));
+  try {
+    fs.writeFileSync(path.join(root, 'a-raw.log'), `Bearer ${TOKEN}`);
+    fs.writeFileSync(
+      path.join(root, 'b-trace.zip'),
+      zip({ 'clean.trace': 'nothing here', 'trace.network': `{"key":"${KEY}"}`, 'trace.stacks': `salt ${SALT}` })
+    );
+    const embedded = zip({ 'report.json': `{"stdout":["${Buffer.from(TOKEN).toString('base64')}"]}` });
+    fs.writeFileSync(
+      path.join(root, 'c-index.html'),
+      `<template>data:application/zip;base64,${embedded.toString('base64')}</template>`
+    );
+    const outputs = outputsUnder([root]);
+    expect(outputs.map((output) => path.relative(root, output.file))).toEqual([
+      'a-raw.log',
+      'b-trace.zip',
+      'b-trace.zip#clean.trace',
+      'b-trace.zip#trace.network',
+      'b-trace.zip#trace.stacks',
+      'c-index.html',
+      'c-index.html#embedded/report.json',
+    ]);
+    expect(findSecrets(outputs).map((leak) => [path.relative(root, leak.file), leak.secret])).toEqual([
+      ['a-raw.log', 'the control token'],
+      ['b-trace.zip#trace.network', 'a key the wallet made'],
+      ['b-trace.zip#trace.stacks', 'the account salt'],
+      ['c-index.html#embedded/report.json', 'the control token'],
+    ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
