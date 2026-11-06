@@ -89,7 +89,19 @@ jobs:
         env:
           VITE_V3_API_HOST: ${{ secrets.VITE_V3_API_HOST }}
           VITE_V3_GAS_SUFFIX: ${{ secrets.VITE_V3_GAS_SUFFIX }}
-          VITE_V3_RPC_PROVIDER_HOST: ${{ secrets.VITE_V3_RPC_PROVIDER_HOST }}
+          VITE_SEPOLIA_URL: ${{ secrets.VITE_SEPOLIA_URL }}
+          VITE_MAINNET_URL: ${{ secrets.VITE_MAINNET_URL }}
+          VITE_POLYGON_URL: ${{ secrets.VITE_POLYGON_URL }}
+          VITE_ARBITRUM_URL: ${{ secrets.VITE_ARBITRUM_URL }}
+          VITE_SCROLL_URL: ${{ secrets.VITE_SCROLL_URL }}
+          VITE_OPTIMISM_URL: ${{ secrets.VITE_OPTIMISM_URL }}
+          VITE_AVALANCHE_URL: ${{ secrets.VITE_AVALANCHE_URL }}
+          VITE_FUJI_URL: ${{ secrets.VITE_FUJI_URL }}
+          VITE_BASE_MAINNET_URL: ${{ secrets.VITE_BASE_MAINNET_URL }}
+          VITE_MANTLE_URL: ${{ secrets.VITE_MANTLE_URL }}
+          VITE_LINEA_URL: ${{ secrets.VITE_LINEA_URL }}
+          VITE_UNICHAIN_URL: ${{ secrets.VITE_UNICHAIN_URL }}
+          VITE_RONIN_URL: ${{ secrets.VITE_RONIN_URL }}
           VITE_V3_WALLET_CONNECT_PROJECT_ID: ${{ secrets.VITE_V3_WALLET_CONNECT_PROJECT_ID }}
           VITE_SCREENING_ENDPOINT: ${{ secrets.VITE_SCREENING_ENDPOINT }}
           VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}

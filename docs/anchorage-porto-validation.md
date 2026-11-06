@@ -107,11 +107,29 @@ Build the app locally with the controls open:
    git status --porcelain   # expect no output
    ```
 
-2. Create `.env.local` in the worktree, or copy it from the main checkout. Git ignores it. Reads need `VITE_V3_RPC_PROVIDER_HOST`, and history needs `VITE_V3_API_HOST` (README, "Required Environment Variables"). Without a local backend, use the public hosts that the production bundle uses:
+2. Create `.env.local` in the worktree, or copy it from the main checkout. Git ignores it. Configure RPC endpoints using the complete list in the README's [RPC URL Overrides](../README.md#rpc-url-overrides). Unset or empty overrides use the chain defaults. Use those defaults or your own RPC endpoints that accept requests from your local browser origin; the production Compound node proxy requires a production domain and cannot be used for this local run. This checklist uses real Ethereum mainnet, so do not point mainnet at a local fork. For history, set `VITE_V3_API_HOST=https://v3-api.compound.xyz`; see [Required Environment Variables](../README.md#required-environment-variables).
 
-   ```bash
+   ```dotenv
+   # Example with the active production RPC URLs, for reference. The Compound proxy URLs below require an
+   # allowed production origin. For other domains, leave those RPC values empty to use chain defaults, or
+   # replace them with your own endpoints:
+
    VITE_V3_API_HOST=https://v3-api.compound.xyz
-   VITE_V3_RPC_PROVIDER_HOST=node-provider-v3-app.compound.xyz
+
+   # Compound proxy URLs require an allowed production origin.
+   VITE_MAINNET_URL=https://node-provider-v3-app.compound.xyz/ethereum-mainnet
+   VITE_SEPOLIA_URL=https://node-provider-v3-app.compound.xyz/ethereum-sepolia
+   VITE_POLYGON_URL=https://node-provider-v3-app.compound.xyz/polygon-mainnet
+   VITE_ARBITRUM_URL=https://node-provider-v3-app.compound.xyz/arbitrum-mainnet
+   VITE_SCROLL_URL=https://rpc.scroll.io
+   VITE_OPTIMISM_URL=https://node-provider-v3-app.compound.xyz/optimism-mainnet
+   VITE_AVALANCHE_URL=https://node-provider-v3-app.compound.xyz/avalanche-mainnet
+   VITE_FUJI_URL=https://node-provider-v3-app.compound.xyz/avalanche-fuji
+   VITE_BASE_MAINNET_URL=https://node-provider-v3-app.compound.xyz/base-mainnet
+   VITE_MANTLE_URL=https://node-provider-v3-app.compound.xyz/mantle-mainnet
+   VITE_LINEA_URL=https://node-provider-v3-app.compound.xyz/linea-mainnet
+   VITE_UNICHAIN_URL=https://node-provider-v3-app.compound.xyz/unichain-mainnet
+   VITE_RONIN_URL=https://node-provider-v3-app.compound.xyz/ronin-mainnet
    ```
 
 3. Open the release controls in this working copy only:
@@ -206,7 +224,7 @@ Build the app locally with the controls open:
 
      Open `https://localhost:5174`. The browser console shows `[vite] connected.` once the hot-reload websocket connects through the proxy.
 
-   Open the `localhost` URL, not `https://127.0.0.1:…`. The node proxy at `VITE_V3_RPC_PROVIDER_HOST` answers `401 host not authorized` to an `Origin` of `https://127.0.0.1:5174`, and serves `https://localhost:5174` and `https://localhost:4174` (checked on 2026-10-29). With the self-signed certificate, Chrome shows "Your connection is not private" once. Choose Advanced, then "Proceed to localhost". Before P1, `curl -sk https://localhost:<listen port> | grep -c '<title>Compound Dashboard'` prints `1`.
+   Open the `https://localhost` URL used in the commands above so the browser origin matches your screening and RPC configuration. With the self-signed certificate, Chrome shows "Your connection is not private" once. Choose Advanced, then "Proceed to localhost". Before P1, `curl -sk https://localhost:<listen port> | grep -c '<title>Compound Dashboard'` prints `1`.
 
 6. After the run, stop the proxy and the server, restore the file and check the working copy:
 
