@@ -33,11 +33,11 @@ import {
   renderMixedWithProvider,
   requestedCalls,
   sentCalls,
-  settle,
   stateWithDirectSupply,
   storedHolds,
   submit,
   USDC_COMET,
+  waitForIdle,
   WRAPPED_SHARES,
 } from '../../../../__tests__/mocks/wrappedQueueSettlement';
 import { mockLastProps } from '../../../../__tests__/mocks/wrappedQueueSettlementProps';
@@ -80,15 +80,16 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
 
   /** A wallet connector on the standard route, which the wrapped route never uses. */
   const STANDARD_CONNECTOR = 'io.metamask';
+  /** Waits until the dashboard's session is on the standard route. */
+  const waitForStandardRoute = () => waitFor(() => expect(live.action.blockedReason('withdraw')).toBe('not-wrapped'));
 
   it('refuses a base withdrawal for the held account through another connector, on the standard route', async () => {
     const { chain, wallet, show, entry } = await holdFirstStep();
     // The same account connects through a standard-route wallet.
     show({ connectorId: STANDARD_CONNECTOR });
-    await settle();
+    await waitForStandardRoute();
     act(() => live.queue.addOrUpdateAction(entry));
     await submit();
-    await settle();
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(queued()).toEqual([entry]);
     // Should the held request now execute, Comet takes 200 USDC of the 250 and lends nothing.
@@ -110,7 +111,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
     const { wallet, show } = renderDashboard(chain, { state: stateWithDirectSupply(DIRECT) });
     show({ connectorId: STANDARD_CONNECTOR, state: stateWithDirectSupply(DIRECT) });
-    await settle();
+    await waitForStandardRoute();
     act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 200_000_000n]));
 
     await submit();
@@ -126,7 +127,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
     const { wallet, show } = renderDashboard(chain, { state: stateWithDirectSupply(DIRECT) });
     show({ connectorId: STANDARD_CONNECTOR, state: stateWithDirectSupply(DIRECT) });
-    await settle();
+    await waitForStandardRoute();
     // An Anchorage tab of the same account stores its hold while this request's gas is estimated.
     wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
       window.localStorage.setItem(
@@ -149,7 +150,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 200_000_000n]));
 
     await submit();
-    await settle();
+    expect(wallet.cometSigner.estimateGas).toHaveBeenCalledTimes(1);
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     expect(chain.directSupply).toBe(DIRECT);
   });
@@ -181,14 +182,12 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     async (_name, makeUnreadable) => {
       const { chain, wallet, show, entry } = await holdFirstStep();
       show({ connectorId: STANDARD_CONNECTOR });
-      await settle();
+      await waitForStandardRoute();
       const restore = makeUnreadable();
       try {
         act(() => live.queue.addOrUpdateAction(entry));
-        await settle();
         const estimates = wallet.cometSigner.estimateGas.mock.calls.length;
         await submit();
-        await settle();
         expect(requestedCalls(wallet)).toEqual(['withdraw']);
         expect(queued()).toEqual([entry]);
         // Refused at Submit, before the manager estimates gas, not only just before the wallet.
@@ -208,7 +207,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       const chain = chainFor({ shares: WRAPPED_SHARES, directSupply: DIRECT });
       const { wallet, show } = renderDashboard(chain, { state: stateWithDirectSupply(DIRECT) });
       show({ connectorId: STANDARD_CONNECTOR, state: stateWithDirectSupply(DIRECT) });
-      await settle();
+      await waitForStandardRoute();
       let restore = () => undefined as void;
       wallet.cometSigner.estimateGas.mockImplementationOnce(async () => {
         restore = makeUnreadable();
@@ -217,7 +216,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       act(() => live.queue.addOrUpdateAction([ActionType.Withdraw, BASE_ASSET, 200_000_000n]));
       try {
         await submit();
-        await settle();
+        expect(wallet.cometSigner.estimateGas).toHaveBeenCalledTimes(1);
         expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
         expect(chain.directSupply).toBe(DIRECT);
       } finally {
@@ -247,7 +246,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     await waitFor(() => expect(isReadStarted).toBe(true));
     show({ walletChainId: 8453 });
     read.release();
-    await settle();
+    await waitForIdle();
 
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     expect(chain.directSupply).toBe(DIRECT);
@@ -271,10 +270,10 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     // The Comet state is read again and shows no direct supply, in the same visit and session.
     show({ state: stateWithDirectSupply(0n) });
     estimate.release();
-    await settle();
+    await waitForIdle();
 
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
-    expect(storedHolds()).toEqual([]);
+    await waitFor(() => expect(storedHolds()).toEqual([]));
     expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Not Sent, Try Again');
     expect(chain.directSupply).toBe(DIRECT);
   });
@@ -308,10 +307,10 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     // The Comet state is read again and shows no direct supply, in the same visit and session.
     show({ state: stateWithDirectSupply(0n) });
     read.release();
-    await settle();
+    await waitForIdle();
 
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
-    expect(storedHolds()).toEqual([]);
+    await waitFor(() => expect(storedHolds()).toEqual([]));
     expect(positionCard().actionRules.wrappedBase.stopped?.label).toBe('Not Sent, Try Again');
     expect(chain.directSupply).toBe(DIRECT);
   });
@@ -344,8 +343,9 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       .mockImplementationOnce(send)
       .mockRejectedValueOnce({ code: 4001, message: 'User rejected.' });
     await submit();
-    await waitFor(() => expect(live.action.state.phase).toBe('stopped'));
-    await settle();
+    expect(live.action.state.phase).toBe('stopped');
+    // The confirmed Comet step's hold is released.
+    await waitFor(() => expect(storedHolds()).toEqual([]));
     // The Comet step took the 250 USDC. The dashboard still shows it, so the 50 USDC rest plans a
     // partial Comet step. The configured chain's provider is one block behind the wallet's node.
     const cometReceiptBlock = live.manager.settledTransactions[0].outcome;
@@ -359,10 +359,10 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
           isSame(request.to, MARKET.cometAddress) && request.data === COMET.encodeFunctionData('balanceOf', [ACCOUNT])
       );
 
-    await submit();
+    act(() => positionCard().onSubmitClicked());
     // The read waits for the provider to reach the Comet step's block, polling every 1.5 seconds.
     await waitFor(() => expect(directReads()).toHaveLength(1), { timeout: 5_000 });
-    await settle();
+    await waitForIdle();
 
     expect(directReads()[0][1]).toBeGreaterThanOrEqual(cometReceiptBlock.receipt.blockNumber);
     expect(requestedCalls(wallet)).toEqual(['withdraw', 'unwrapAndWithdraw']);
@@ -383,8 +383,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       .mockRejectedValueOnce({ code: 4001, message: 'User rejected.' });
 
     await submit();
-    await waitFor(() => expect(live.action.state.phase).toBe('stopped'));
-    await settle();
+    expect(live.action.state.phase).toBe('stopped');
 
     expect(requestedCalls(wallet)).toEqual(['withdraw', 'unwrapAndWithdraw']);
     expect(chain.directSupply).toBe(0n);
@@ -403,8 +402,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     chain.directSupply = 400_000_000n;
 
     await submit();
-    await waitFor(() => expect(queued()).toEqual([]));
-    await settle();
+    expect(queued()).toEqual([]);
 
     // One Comet withdraw(base, 300 USDC), production's encoding, and nothing from the wrapper.
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
@@ -443,7 +441,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       return send2(request);
     });
 
-    await submit();
+    act(() => positionCard().onSubmitClicked());
     await waitFor(() => expect(requestedCalls(wallet)).toEqual(['withdraw', 'unwrapAndWithdraw']));
     // Comet withdrew the 100.000007 USDC it held. The row shows the queued amount less that.
     expect(cometWithdrawals(wallet).map(({ args }) => args[1])).toEqual([MAX_UINT256]);
@@ -476,8 +474,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     });
 
     await submit();
-    await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
-    await settle();
+    expect(live.manager.settledTransactions).toHaveLength(1);
 
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(chain.directSupply).toBe(0n);
@@ -501,7 +498,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     });
 
     await submit();
-    await settle();
 
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     expect(chain.borrowed).toBe(0n);
@@ -527,7 +523,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     });
 
     await submit();
-    await settle();
 
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     expect(chain.borrowed).toBe(0n);
@@ -554,7 +549,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     });
 
     await submit();
-    await settle();
 
     expect(wallet.sendUncheckedTransaction).not.toHaveBeenCalled();
     expect(queued()).toEqual([entry]);

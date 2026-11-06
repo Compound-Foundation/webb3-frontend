@@ -29,11 +29,11 @@ import {
   renderMixed,
   requestedCalls,
   sentCalls,
-  settle,
   stateWithDirectSupply,
   storedHolds,
   submit,
   USDC_COMET,
+  waitForIdle,
   Wallet,
   WRAPPED_SHARES,
 } from '../../../../__tests__/mocks/wrappedQueueSettlement';
@@ -116,8 +116,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     });
 
     await submit();
-    await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
-    await settle();
+    expect(live.manager.settledTransactions).toHaveLength(1);
 
     expect(cometWithdrawals(wallet).map(({ args }) => args[1])).toEqual([MAX_UINT256]);
     expect(chain.borrowed).toBe(0n);
@@ -150,7 +149,12 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     // From the press, the dashboard is held as for a transaction to Comet.
     expect(positionCard().transaction?.state).toBe(TransactionState.AwaitingConfirmation);
     await waitFor(() => expect(requestedCalls(wallet)).toEqual(['withdraw']));
-    await settle();
+    await waitFor(() => expect(positionCard().transaction?.state).toBe(TransactionState.Pending));
+    // The manager is looking for the Comet step's receipt, which is held back. No wrapper step has
+    // started: the lifecycle never left idle, and no other write was handed to the manager.
+    await waitFor(() => expect(wallet.getTransactionReceipt).toHaveBeenCalled());
+    expect(live.action.state.phase).toBe('idle');
+    expect(live.writes.size).toBe(0);
     // The Comet step's receipt is pending: nothing is asked of the wrapper, and the row is held.
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(cometWithdrawals(wallet)).toEqual([
@@ -221,7 +225,6 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     fail(wallet, chain);
 
     await submit();
-    await settle();
 
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(sentCalls(wallet, 'unwrapAndWithdraw')).toHaveLength(0);
@@ -249,7 +252,8 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     show({ isHomeShown: false });
     wallet.releaseReceipts();
     await waitFor(() => expect(live.manager.settledTransactions).toHaveLength(1));
-    await settle();
+    // The run ends with the Comet step.
+    await waitForIdle();
 
     // No wallet request opens on another page. The row holds what the wrapper still pays.
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
@@ -257,7 +261,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
     expect(queued()).toEqual([[ActionType.Withdraw, expect.anything(), 50_000_000n]]);
 
     show({ isHomeShown: true });
-    await settle();
+    await waitForIdle();
     expect(requestedCalls(wallet)).toEqual(['withdraw']);
     expect(positionCard().transaction).toBeUndefined();
   });
@@ -325,9 +329,9 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
       isHomeShown: false,
       storeMarket: { chainId: 1, cometAddress: '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840' },
     });
-    await settle();
+    await waitFor(() => expect(live.submission.record).toBeUndefined());
     show({ isHomeShown: true });
-    await settle();
+    await waitFor(() => expect(live.action.blockedReason('withdraw')).toBeUndefined());
     act(() => live.queue.addOrUpdateAction(entry));
     await expectHeldBack(wallet, chain, entry);
   });
@@ -353,7 +357,7 @@ describe('a withdrawal on the wrapped route from an account with a direct Comet 
   it('keeps the hold when the transaction list is cleared', async () => {
     const { chain, wallet, entry } = await holdFirstStep();
     act(() => live.manager.clearTransactions());
-    await settle();
+    await waitFor(() => expect(live.manager.transactions).toEqual([]));
     act(() => live.queue.addOrUpdateAction(entry));
     await expectHeldBack(wallet, chain, entry);
   });
