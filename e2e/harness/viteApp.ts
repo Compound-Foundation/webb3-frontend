@@ -3,10 +3,15 @@
 // - `envDir` is an empty directory, so no `.env*` file in the repository changes a run.
 // - Every `VITE_*` variable in the runner's environment is removed first, and only the harness's are set.
 // - NODE_ENV is set for each lifecycle. Vite keeps an existing NODE_ENV and derives `import.meta.env.DEV`
-//   from it, so a production build in a process where the dev server set NODE_ENV=development compiles
-//   DEV=true, which turns on the dev-only screening bypass (`SCREENING_DISABLED` in `envVars.ts`). Each
-//   production build sets NODE_ENV=production and refuses to continue unless the resolved configuration has
-//   DEV=false and PROD=true.
+//   and `PROD` from it, whatever the mode. The mode, `import.meta.env.MODE`, comes from `mode` (`--mode` on
+//   the command line), which is `production` for every build here.
+//   - The two ordinary production builds set NODE_ENV=production, and the harness refuses to continue unless
+//     the resolved configuration has DEV=false and PROD=true (`assertProduction`).
+//   - One build sets NODE_ENV=development, as `NODE_ENV=development vite build` does, so that it compiles
+//     DEV=true in mode production. The dev-only screening bypass (`SCREENING_DISABLED` in `envVars.ts`)
+//     must stay off in it: the bypass also requires `import.meta.hot`, which every build replaces with
+//     undefined. The harness refuses to continue unless that build resolved mode production with DEV=true
+//     and PROD=false (`assertDevelopmentNodeEnv`), because no other configuration tests that case.
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -20,6 +25,9 @@ export { REPO_ROOT };
 const CONFIG_FILE = path.join(REPO_ROOT, 'vite.config.js');
 
 export type AppEnvironment = Record<`VITE_${string}`, string>;
+
+/** The NODE_ENV a production build runs with. */
+export type NodeEnv = 'production' | 'development';
 
 /** What a production build resolved to: its mode, and the booleans that decide the screening bypass. */
 export type ResolvedBuild = { mode: string; isProduction: boolean; DEV: boolean; PROD: boolean };
@@ -35,7 +43,7 @@ export function removeViteVariables(): string[] {
  * Runs `run` with NODE_ENV and exactly the `VITE_*` variables in `environment`, then restores NODE_ENV and
  * removes the variables again.
  */
-async function withEnvironment<T>(nodeEnv: 'production', environment: AppEnvironment, run: () => Promise<T>) {
+async function withEnvironment<T>(nodeEnv: NodeEnv, environment: AppEnvironment, run: () => Promise<T>) {
   const savedNodeEnv = process.env.NODE_ENV;
   removeViteVariables();
   process.env.NODE_ENV = nodeEnv;
@@ -59,27 +67,47 @@ export function assertProduction(resolved: ResolvedBuild | undefined): ResolvedB
   if (resolved.DEV !== false || resolved.PROD !== true || !resolved.isProduction) {
     throw new Error(
       `The production build resolved DEV=${resolved.DEV}, PROD=${resolved.PROD}, isProduction=${resolved.isProduction}. ` +
-        'It would compile the dev-only screening bypass, so the harness refuses to serve it.'
+        'It must be DEV=false and PROD=true, so the harness refuses to serve it.'
     );
   }
   return resolved;
 }
 
 /**
- * Builds the app for production into `outDir`, with only `environment`'s `VITE_*` variables, and returns
- * what the build resolved. It refuses a build that resolved DEV=true.
+ * Throws unless `resolved` is a build in mode production that NODE_ENV=development gave DEV=true and
+ * PROD=false. Any other configuration would not test whether such a build can use the screening bypass.
+ */
+export function assertDevelopmentNodeEnv(resolved: ResolvedBuild | undefined): ResolvedBuild {
+  if (resolved === undefined) throw new Error('The NODE_ENV=development build resolved no configuration.');
+  if (resolved.mode !== 'production' || resolved.DEV !== true || resolved.PROD !== false || resolved.isProduction) {
+    throw new Error(
+      `The NODE_ENV=development build resolved mode=${resolved.mode}, DEV=${resolved.DEV}, PROD=${resolved.PROD}, ` +
+        `isProduction=${resolved.isProduction}. It must be mode production with DEV=true and PROD=false to test ` +
+        'the screening bypass, so the harness refuses to serve it.'
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Builds the app in mode production into `outDir`, with only `environment`'s `VITE_*` variables and
+ * `nodeEnv` as NODE_ENV, and returns what the build resolved. With NODE_ENV=production it refuses a build
+ * that resolved DEV=true. With NODE_ENV=development it refuses one that did not resolve DEV=true.
  */
 export async function buildProduction({
   outDir,
   envDir,
   environment,
+  nodeEnv = 'production',
 }: {
   outDir: string;
   envDir: string;
   environment: AppEnvironment;
+  nodeEnv?: NodeEnv;
 }): Promise<ResolvedBuild> {
+  const assertResolved = nodeEnv === 'production' ? assertProduction : assertDevelopmentNodeEnv;
   let resolved: ResolvedBuild | undefined;
-  await withEnvironment('production', environment, () =>
+  await withEnvironment(nodeEnv, environment, () =>
     build({
       configFile: CONFIG_FILE,
       root: REPO_ROOT,
@@ -96,13 +124,13 @@ export async function buildProduction({
             DEV: Boolean(config.env.DEV),
             PROD: Boolean(config.env.PROD),
           };
-          // Stop before any output is written if the configuration is not a production one.
-          assertProduction(resolved);
+          // Stop before any output is written if the configuration is not the one asked for.
+          assertResolved(resolved);
         }),
       ],
     })
   );
-  return assertProduction(resolved);
+  return assertResolved(resolved);
 }
 
 export type Served = { origin: string; close: () => Promise<void> };

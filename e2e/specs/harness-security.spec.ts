@@ -718,7 +718,7 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
     const lanes = await ControlClient.forUrl(manifest.services.lanes).request<LaneInfo[]>('GET', '/v1/lanes');
     const port = (url: string) => /:(\d+)/.exec(url)?.[1] as string;
     // The upstream proxy, RPC proxy, screening stub, lane server, a wallet server for each lane, the dev
-    // server, and the two production servers when the builds ran. Vite's HMR shares the dev server's port.
+    // server, and the three production servers when the builds ran. Vite's HMR shares the dev server's port.
     const expected = new Set(
       [
         manifest.services.bindings.upstreamProxy,
@@ -729,7 +729,11 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
         ...lanes.map((lane) => lane.walletUrl),
         ...(manifest.production.isSkipped
           ? []
-          : [manifest.production.allowed.origin, manifest.production.missingEndpoint.origin]),
+          : [
+              manifest.production.allowed.origin,
+              manifest.production.missingEndpoint.origin,
+              manifest.production.developmentNodeEnv.origin,
+            ]),
       ].map(port)
     );
     for (const address of [...runner, ...anvil, ...poolAddresses]) expect(address).toMatch(/^127\.0\.0\.1:\d+$/);

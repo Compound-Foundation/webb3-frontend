@@ -142,6 +142,7 @@ describe('the worker settings', () => {
 
   it('refuse the configurations assertProduction refuses, with the same message', async () => {
     const refused: ResolvedBuild[] = [
+      { mode: 'production', isProduction: false, DEV: true, PROD: false },
       { mode: 'production', isProduction: true, DEV: true, PROD: true },
       { mode: 'production', isProduction: true, DEV: false, PROD: false },
       { mode: 'development', isProduction: false, DEV: false, PROD: true },

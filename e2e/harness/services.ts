@@ -7,8 +7,8 @@
 //     pinned block starts from the fork cache, and a clean stop promotes what the lanes read back to it.
 //  4. the lane pool and its lease server: each Playwright worker leases the lane of its parallel index, whose
 //     anvil and wallet server start then (`forkLanes.ts`)
-//  5. unless skipped, the two production builds (no screening endpoint, and an allowed control) and their
-//     static servers
+//  5. unless skipped, the three production builds (no screening endpoint, an allowed control, and no endpoint
+//     with NODE_ENV=development) and their static servers
 //  6. the dev server, then one warm-up page load on lane 0, which also checks the browser's trust in the
 //     certificate
 //
@@ -78,6 +78,7 @@ import { findSecrets, outputsUnder, registerSecret, registerSecretPattern } from
 import { v3ApiReadPrefixes, v3ApiUrl } from './settings';
 import { makeCertificate, trustHarnessCertificate } from './tls';
 import {
+  buildProduction,
   emptyEnvDir,
   REPO_ROOT,
   removeViteVariables,
@@ -143,6 +144,13 @@ export type Manifest = {
           environment: Record<string, string>;
         };
         allowed: { origin: string; outDir: string; resolved: ResolvedBuild; environment: Record<string, string> };
+        /** No screening endpoint, built in mode production with NODE_ENV=development, so it compiles DEV=true. */
+        developmentNodeEnv: {
+          origin: string;
+          outDir: string;
+          resolved: ResolvedBuild;
+          environment: Record<string, string>;
+        };
       };
   services: {
     rpcProxy: string;
@@ -620,7 +628,8 @@ export async function startServices({
       const allowedEnvironment = { ...baseEnvironment, VITE_SCREENING_ENDPOINT: screening.endpoint };
       const missingOut = path.join(directory, 'dist-prod-missing-endpoint');
       const allowedOut = path.join(directory, 'dist-prod-allowed');
-      bundleRoots = [missingOut, allowedOut];
+      const developmentNodeEnvOut = path.join(directory, 'dist-prod-development-node-env');
+      bundleRoots = [missingOut, allowedOut, developmentNodeEnvOut];
       const [missingResolved, allowedResolved] = await buildProductions({
         envDir,
         builds: [
@@ -628,11 +637,20 @@ export async function startServices({
           { outDir: allowedOut, environment: allowedEnvironment },
         ],
       });
+      // This regression build needs DEV=true, so it runs separately from the production-only workers.
+      const developmentNodeEnvResolved = await buildProduction({
+        outDir: developmentNodeEnvOut,
+        envDir,
+        environment: missingEnvironment,
+        nodeEnv: 'development',
+      });
       const missingServer = await serveProduction({ outDir: missingOut });
       addStop({ name: 'production server (no endpoint)', run: () => missingServer.close() });
       const allowedServer = await serveProduction({ outDir: allowedOut });
       addStop({ name: 'production server (allowed)', run: () => allowedServer.close() });
-      appOrigins.add(missingServer.origin).add(allowedServer.origin);
+      const developmentNodeEnvServer = await serveProduction({ outDir: developmentNodeEnvOut });
+      addStop({ name: 'production server (NODE_ENV=development)', run: () => developmentNodeEnvServer.close() });
+      appOrigins.add(missingServer.origin).add(allowedServer.origin).add(developmentNodeEnvServer.origin);
       production = {
         isSkipped: false,
         missingEndpoint: {
@@ -646,6 +664,12 @@ export async function startServices({
           outDir: allowedOut,
           resolved: allowedResolved,
           environment: allowedEnvironment,
+        },
+        developmentNodeEnv: {
+          origin: developmentNodeEnvServer.origin,
+          outDir: developmentNodeEnvOut,
+          resolved: developmentNodeEnvResolved,
+          environment: missingEnvironment,
         },
       };
     }

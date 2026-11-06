@@ -20,7 +20,7 @@ export function assertProductionBuild(resolved) {
   if (resolved.DEV !== false || resolved.PROD !== true || !resolved.isProduction) {
     throw new Error(
       `The production build resolved DEV=${resolved.DEV}, PROD=${resolved.PROD}, isProduction=${resolved.isProduction}. ` +
-        'It would compile the dev-only screening bypass, so the harness refuses to serve it.'
+        'It must be DEV=false and PROD=true, so the harness refuses to serve it.'
     );
   }
   return resolved;

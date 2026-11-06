@@ -39,7 +39,7 @@ import { accountSeedOf, type WalletRequest } from './walletServer';
 
 export { expect };
 
-export type AppTarget = 'dev' | 'prod-missing-endpoint' | 'prod-allowed';
+export type AppTarget = 'dev' | 'prod-missing-endpoint' | 'prod-allowed' | 'prod-development-node-env';
 
 export function readManifest(): Manifest {
   const file = process.env.BROWSER_HARNESS_MANIFEST;
@@ -70,7 +70,9 @@ export function withLane(manifest: Manifest, lane: LaneInfo): Manifest {
 export function originOf(manifest: Manifest, target: AppTarget): string {
   if (target === 'dev') return manifest.app.devOrigin;
   if (manifest.production.isSkipped) throw new Error(`production builds were skipped: ${manifest.production.reason}`);
-  return target === 'prod-allowed' ? manifest.production.allowed.origin : manifest.production.missingEndpoint.origin;
+  if (target === 'prod-allowed') return manifest.production.allowed.origin;
+  if (target === 'prod-development-node-env') return manifest.production.developmentNodeEnv.origin;
+  return manifest.production.missingEndpoint.origin;
 }
 
 type BindingSource = { page: Page | null; frame: Frame };

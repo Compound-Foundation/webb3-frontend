@@ -11,7 +11,8 @@ export type ScreeningStatus = 'idle' | 'checking' | 'allowed' | 'blocked';
  * Screens `address` fail-closed. Caller exposes the account only on 'allowed'.
  * `address` MUST be the raw (pre-gate) address to avoid a gating feedback loop.
  *
- * The one exception is the local dev server — see `SCREENING_DISABLED` in envVars.ts.
+ * The one exception is the Vite dev server (DEV true, `import.meta.hot` defined), in any
+ * mode, with no `VITE_SCREENING_ENDPOINT`. See `SCREENING_DISABLED` in envVars.ts.
  */
 export function useAddressScreening(address: string | undefined): ScreeningStatus {
   const [status, setStatus] = useState<ScreeningStatus>('idle');
@@ -33,8 +34,10 @@ export function useAddressScreening(address: string | undefined): ScreeningStatu
       return;
     }
 
-    // Dev server only, and only when no endpoint is configured. See
-    // `SCREENING_DISABLED` in envVars.ts — this branch is compiled out of any build.
+    // Vite dev server only (DEV true, `import.meta.hot` defined), and only when no
+    // endpoint is configured. See `SCREENING_DISABLED` in envVars.ts. A build can keep or
+    // drop this branch, but the flag is false in every build, because Vite replaces
+    // `import.meta.hot` with undefined there.
     if (SCREENING_DISABLED) {
       console.warn('Address screening is disabled on the local dev server (no VITE_SCREENING_ENDPOINT set).');
       setStatus('allowed');
