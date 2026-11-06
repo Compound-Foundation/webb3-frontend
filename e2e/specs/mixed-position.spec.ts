@@ -618,9 +618,15 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     await expect(notice(page)).toBeVisible({ timeout: 60_000 });
     const { first, transaction: firstTransaction } = await holdFirstRequest(page, wallet, { account, appOrigin });
 
-    // The held request is mined, and the app finds its Withdraw log. When the app reads the transaction, a
-    // reorg removes its block, and the node answers with the transaction pending again. The route is in
-    // place before the request is mined, so that no earlier look of the open page finds it.
+    // The held request is mined, and the reloaded page finds its Withdraw log. When that page reads the
+    // transaction, a reorg removes its block, and the route answers with the transaction pending again.
+    // Later reads of the transaction reach the node, which no longer has it.
+    //
+    // The open page can read the transaction too, after it is mined and before the test knows its hash.
+    // The route holds each `eth_getTransactionByHash` read until the test has seen the request mined. A
+    // read of the request from the open page is then answered as pending, and the chain stays as it is.
+    // The reorg therefore waits for the reloaded page, whatever the open page reads.
+    //
     // anvil's own methods, which the public client does not type.
     const forkRpc = (method: string, params: unknown[] = []) =>
       (fork.request as unknown as (call: { method: string; params: unknown[] }) => Promise<unknown>)({
@@ -629,12 +635,16 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
       });
     const snapshot = await forkRpc('evm_snapshot');
     const late: { hash?: string } = {};
-    let isClaimed = false;
+    // Set when the reload commits. A read that reaches the route after the commit comes from the reloaded page.
+    let isReloaded = false;
+    let reorg: Promise<object | undefined> | undefined;
     let isReorged = false;
     let isReverted: unknown;
-    // The reorg waits until the test has seen the request mined.
+    // A failed read or reorg in the route. The route aborts the page's request, and the test fails on it.
+    let routeError: unknown;
     let seenMined: () => void = () => undefined;
     const isSeenMined = new Promise<void>((resolve) => (seenMined = resolve));
+    const pendingAgain = (mined: object) => ({ ...mined, blockHash: null, blockNumber: null, transactionIndex: null });
     await page.route('**/*', async (route) => {
       let body: { id?: number; method?: string; params?: [string] } | undefined;
       try {
@@ -642,24 +652,49 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
       } catch {
         body = undefined;
       }
-      if (
-        !isClaimed &&
-        late.hash !== undefined &&
-        body?.method === 'eth_getTransactionByHash' &&
-        body.params?.[0]?.toLowerCase() === late.hash.toLowerCase()
-      ) {
-        isClaimed = true;
-        await isSeenMined;
-        const mined = (await forkRpc('eth_getTransactionByHash', [late.hash])) as object;
-        // Checked in the test's body: a failed check here would leave the request unanswered.
-        isReverted = await forkRpc('evm_revert', [snapshot]);
-        await forkRpc('evm_mine');
-        isReorged = true;
-        const pending = { ...mined, blockHash: null, blockNumber: null, transactionIndex: null };
-        await route.fulfill({ json: { jsonrpc: '2.0', id: body.id, result: pending } });
+      if (body?.method !== 'eth_getTransactionByHash') {
+        await route.fallback();
         return;
       }
-      await route.fallback();
+      const isFromReloadedPage = isReloaded;
+      await isSeenMined;
+      if (body.params?.[0]?.toLowerCase() !== late.hash?.toLowerCase()) {
+        await route.fallback();
+        return;
+      }
+      if (reorg !== undefined) {
+        await reorg;
+        await route.fallback();
+        return;
+      }
+      if (isFromReloadedPage) {
+        reorg = (async () => {
+          try {
+            const mined = (await forkRpc('eth_getTransactionByHash', [late.hash])) as object;
+            // Checked in the test's body, so that a revert that returns false fails the test with that result.
+            isReverted = await forkRpc('evm_revert', [snapshot]);
+            await forkRpc('evm_mine');
+            isReorged = true;
+            return mined;
+          } catch (error) {
+            routeError = error;
+            return undefined;
+          }
+        })();
+        const mined = await reorg;
+        if (mined === undefined) await route.abort();
+        else await route.fulfill({ json: { jsonrpc: '2.0', id: body.id, result: pendingAgain(mined) } });
+        return;
+      }
+      let mined: object;
+      try {
+        mined = (await forkRpc('eth_getTransactionByHash', [late.hash])) as object;
+      } catch (error) {
+        routeError = error;
+        await route.abort();
+        return;
+      }
+      await route.fulfill({ json: { jsonrpc: '2.0', id: body.id, result: pendingAgain(mined) } });
     });
     const mined = await wallet.forkSend({ from: account, to: COMET_USDC, data: firstTransaction.data });
     late.hash = mined.hash;
@@ -667,9 +702,13 @@ test.describe('a direct Comet supply beside a wrapped position, on Anchorage', {
     seenMined();
 
     // A reload looks at the hold, and meets the reorg.
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) isReloaded = true;
+    });
     await page.reload();
     await expect(notice(page)).toBeVisible({ timeout: 60_000 });
-    await expect.poll(() => isReorged, { timeout: 60_000 }).toBe(true);
+    await expect.poll(() => isReorged || routeError !== undefined, { timeout: 60_000 }).toBe(true);
+    expect(routeError).toBeUndefined();
     expect(isReverted).toBe(true);
 
     // The same 200 USDC again: the hold stays, and nothing reaches the wallet.
