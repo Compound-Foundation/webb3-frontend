@@ -27,8 +27,9 @@ import { forkCacheRoot, PINNED_BLOCK, sharedCacheFile } from './fork';
 const GIB = 1024 ** 3;
 
 /**
- * The most workers the estimate chooses. Per-test scheduling was benchmarked at four workers. More workers are
- * unmeasured, and each costs about 1.1 GiB of memory and adds to the upstream burst.
+ * The estimate's maximum follows the four-worker per-test benchmarks.
+ * Higher-count bundled-dev trials are recorded in docs/browser-testing-performance.md.
+ * Each worker cost about 1.1 GiB in the original benchmarks and adds upstream traffic.
  */
 export const DEFAULT_MAX_WORKERS = 4;
 /**
