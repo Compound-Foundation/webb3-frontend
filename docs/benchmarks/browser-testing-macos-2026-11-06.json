@@ -292,10 +292,7 @@
       "artifacts": {
         "trace_zips": 1,
         "screenshot_pngs": 1,
-        "screenshot_dimensions": [
-          1440,
-          1000
-        ],
+        "screenshot_dimensions": [1440, 1000],
         "assertion_steps": 1,
         "test_sources": 3,
         "exact_temporary_test_source": true,
