@@ -25,13 +25,7 @@ The suite lives in `e2e/`: the harness in `e2e/harness/`, the browser specs in `
 
 Each Playwright worker has its own fork lane. Playwright schedules each test on its own (`fullyParallel: true`), so tests from one file can run in different workers at once. There are no retries, so a flaky case shows as a failure. The harness estimates the worker count unless you set it. See [Choosing the worker count](#choosing-the-worker-count).
 
-The [performance experiment record](browser-testing-performance.md) describes opt-in bundled dev, parallel builds, browser pooling and minification. Three matched Linux pairs measured a 28.7% median paired reduction. The Linux half-time target remains unmet.
-
-A separate [native Mac option](browser-testing-performance.md#native-mac-execution-is-a-separate-option) repeated at a 69.81-second median. This changes the host and cache seed. The performance flags default to off, and the Node 22 pin remains unchanged. Vite itself is upgraded.
-
-In the [per-test scheduling benchmarks](#per-test-against-per-file-scheduling), warm four-worker runs took 135, 141 and 157 seconds. Cold runs took 154 seconds with four workers and 270 with two. Set-up took 18–20 seconds warm and 29–33 seconds cold across both scheduling modes. These runs retained baseline failures and the skipped AC7 case, as detailed below.
-
-On `main` at `3c19d18` (2026-11-03), on the benchmark machine with 4 workers and a warm cache, `yarn test:browser:dev` took 142 s and `yarn test:browser` took 161 s. Each run failed one test, `mixed-position.spec.ts:416`, which failed on `main` until COM-369 set a gas limit on sends that name none (see [How the wallet signs and sends](#how-the-wallet-signs-and-sends)). See [the benchmarks below](#benchmarks) for other worker counts and cold caches.
+The harness supports opt-in bundled development, parallel production builds, shared Chromium servers and development minification. See [Performance options](#performance-options) for configuration. Experiment records and measurements live in [COM-423](https://linear.app/compoundfoundation/issue/COM-423/reduce-browser-harness-runtime-while-preserving-isolation-and).
 
 Each run writes `test-results/browser-fork/<run ID>/`, which Git ignores:
 
@@ -112,7 +106,7 @@ A verifier reads the `summary.md` of a full run, at the path the implementer rep
 
 ### Run time and background commands
 
-A full run took 161 s on the benchmark machine with a warm cache. A cold cache, one worker or a loaded machine makes it longer. On the same day, a `yarn test:browser:dev` run took 331 s with a cold cache, 2 workers, a loaded machine and a public endpoint that rate-limited it.
+Run duration depends on cache state, worker count, machine load and upstream availability.
 
 Agent hosts stop long foreground commands. By default, Claude Code stops a foreground command after 2 minutes and allows at most 10. Both limits are configurable. Start the full run as a background command and wait for it to finish before ending the turn. A run left behind when the turn ends goes unreported.
 
@@ -136,7 +130,7 @@ The harness makes a self-signed certificate for 127.0.0.1 with `openssl`, one da
 
 ### Fork lanes
 
-A [fork lane](../e2e/harness/forkLanes.ts) has its own anvil, wallet server and screening partition. When caching is enabled, each anvil has a private cache home. By default, each worker also has its own Chromium and Node process. The opt-in [browser pool](browser-testing-performance.md#run-the-opt-in-configuration) shares Chromium servers while retaining separate contexts and worker connections. The lanes share the read-only upstream proxy, the HTTPS RPC proxy, the screening stub, the dev server and both production builds.
+A [fork lane](../e2e/harness/forkLanes.ts) has its own anvil, wallet server and screening partition. When caching is enabled, each anvil has a private cache home. By default, each worker also has its own Chromium and Node process. The opt-in [browser pool](#performance-options) shares Chromium servers while retaining separate contexts and worker connections. The lanes share the read-only upstream proxy, the HTTPS RPC proxy, the screening stub, the dev server and both production builds.
 
 A worker leases the lane for its Playwright `parallelIndex` when its first test needs the fixtures. Lane 0 starts during set-up to choose the upstream endpoint. Other lanes start on their first lease, so unused lanes start no anvil. A replacement worker gets the same parallel index and leases the same lane. The wallet reset before each test clears the previous worker's fork changes, accounts, requests and screening state.
 
@@ -212,7 +206,7 @@ workers = max(1, min(cpuLimit, memoryLimit, upstreamLimit, 4))
 - **CPU.** `availableCPUs` comes from `os.availableParallelism()`, capped by the CPU quota of the process's own Linux cgroup when present. The harness finds that cgroup from `/proc/self/cgroup` and the mounted hierarchy, and takes the tightest quota from it up to the mount point, so a nested systemd scope or CI slice counts. If that call fails, the harness uses `os.cpus().length`. An unknown count becomes 2. `idleShare` is the idle fraction over a 300 ms sample, or 50% if unavailable. The formula reserves 2 CPUs for shared services and budgets 2 per worker.
 - **Memory.** On Linux, available memory is `MemAvailable`, or, when lower, the tightest memory limit less use on the path from the process's own cgroup (v2 or v1) up to the mount point. On macOS, it is the free, inactive and speculative pages from `vm_stat`. The fallback is `os.freemem()`. Unknown memory sets the memory limit to one worker. The formula reserves 4 GiB for shared services and headroom, then budgets 1.5 GiB per worker.
 - **Upstream.** Public endpoints without a warm shared cache file have a limit of 2, including when the cache is off. A warm cache or a private endpoint uses 4.
-- **Maximum.** The estimate never exceeds 4 workers. The [performance trials](browser-testing-performance.md) include higher counts with opt-in settings. Those observations do not establish a higher automatic limit.
+- **Maximum.** The estimate never exceeds 4 workers. An explicit worker override does not raise the automatic limit.
 
 Set a whole number from 1 to 16 to bypass the estimate and its limits. No machine signals are read for that override. `auto`, unset or empty selects the estimate. Any other value stops the run. Playwright's `--workers` overrides the configured count. An interactive session uses one lane and one worker.
 
@@ -228,96 +222,34 @@ The CPU sample is short, and other processes can change the load after selection
 
 The estimator reads no file count and applies no test-count limit, so its selected lane count can exceed the number of tests in a filtered run. Unused lanes start no anvil. Playwright schedules individual tests, and the full inventory has 59 entries, far above the four-worker maximum. No test-count limit replaces the file limit because the full suite has enough tests to fill the workers, and the old file count ignored filters anyway.
 
-#### Benchmarks
+### Performance options
 
-COM-349 measured worker counts with per-file scheduling on 2026-11-03 at commit `559b3e3`. These measurements cover that commit's full suite: 51 cases across the dev and prod-build projects, with 50 implemented and one skipped. The skipped AC7 `NODE_ENV=development` case keeps the acceptance verdict **INCOMPLETE** until the product fix. Commit `37981f6` adds another harness-security browser test, so these results do not measure its full suite.
+These options default to off. Node remains pinned to 22.22.0. Dependency versions come from `package.json` and `yarn.lock`.
 
-The benchmark machine was an Apple M4 Max with 16 CPUs and 128 GB of memory. The runs used anvil 1.9.0, Node 22.22.0, Playwright 1.64.1 and pinned block 26244888. Each run selected the public drpc endpoint. Runs executed one at a time, alternating cold and warm caches, with worker counts set by `BROWSER_TEST_WORKERS`. A cold run used an empty cache directory. Each warm run used a fresh directory with the same baseline cache, copied from the cold one-worker run's promotion.
+| Setting                          | Behavior                                                                                                                     |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `BROWSER_TEST_BUNDLED_DEV=1`     | Serve Vite bundled development output with React development checks and Refresh.                                             |
+| `BROWSER_TEST_PARALLEL_BUILDS=1` | Build both production variants in isolated worker environments.                                                              |
+| `BROWSER_TEST_BROWSER_POOL=N`    | Share N Chromium servers across worker connections. Each test retains a fresh context and fork/wallet reset.                 |
+| `BROWSER_TEST_MINIFY_DEV=1`      | Minify bundled development output while retaining names and original source maps for failures. Requires bundled development. |
 
-A sampler read the run's process tree every two seconds. Peak RSS is the sampled resident memory of that process tree. Set-up covers global setup through services ready, including production builds. Tests + teardown covers services ready through the end of teardown, including promotion. Wall time covers the whole command.
+The pool requires headless, noninteractive operation. It refuses `DEBUG` and active `PWDEBUG`. Its count cannot exceed the worker count or 16. Set each option to `0` to disable it. The automatic worker maximum remains four.
 
-Other sessions ran on the machine during most measurements, with one-minute load averages up to 38, so timings carry noise. The repeated warm four-worker run finished within two seconds of the first.
+From the repository root, enable the options with:
 
-| Run         | Workers | Wall (s) | Set-up (s) | Tests + teardown (s) | Passed / failed / skipped | Upstream requests | Upstream errors | Peak open upstream | Peak upstream/s | Peak RSS (GiB) |
-| ----------- | ------- | -------- | ---------- | -------------------- | ------------------------- | ----------------- | --------------- | ------------------ | --------------- | -------------- |
-| Cold        | 1       | 329      | 29         | 298                  | 50 / 0 / 1                | 2614              | 0               | 4                  | 38              | 4.1            |
-| Cold        | 2       | 235      | 41         | 192                  | 50 / 0 / 1                | 2951              | 0               | 6                  | 44              | 4.0            |
-| Cold        | 4       | 165      | 37         | 126                  | 50 / 0 / 1                | 3633              | 0               | 11                 | 89              | 5.7            |
-| Warm        | 1       | 314      | 17         | 294                  | 50 / 0 / 1                | 2154              | 0               | 3                  | 42              | 4.1            |
-| Warm        | 2       | 197      | 22         | 173                  | 50 / 0 / 1                | 2121              | 0               | 4                  | 53              | 5.8            |
-| Warm        | 4       | 129      | 20         | 107                  | 50 / 0 / 1                | 2131              | 0               | 5                  | 60              | 7.7            |
-| Warm repeat | 4       | 131      | 20         | 109                  | 50 / 0 / 1                | 2129              | 0               | 7                  | 61              | 8.2            |
-| Warm        | 6       | 122      | 21         | 99                   | 50 / 0 / 1                | 2140              | 0               | 7                  | 90              | 9.4            |
+```bash
+env -u DEBUG -u PWDEBUG -u NODE_OPTIONS -u BROWSER_HARNESS_CONCURRENCY \
+  BROWSER_FORK_BLOCK=pinned \
+  BROWSER_FORK_CACHE=on \
+  BROWSER_TEST_SKIP_PROD=0 \
+  BROWSER_TEST_BUNDLED_DEV=1 \
+  BROWSER_TEST_PARALLEL_BUILDS=1 \
+  BROWSER_TEST_BROWSER_POOL=1 \
+  BROWSER_TEST_MINIFY_DEV=1 \
+  yarn test:browser
+```
 
-Every measured run passed the 50 implemented tests, with no flaky result, upstream failure, cleanup error or lane restart. Every lane's cache merged. These results support the estimator's constants:
-
-- **Four-worker maximum.** Warm wall time fell from 314 seconds with one worker to 197 with two, 129 with four, and 122 with six. Six workers gained about 6% over four, while peak upstream requests per second rose from 60 to 90. Peak RSS rose from 7.7–8.2 GiB at four workers to 9.4 GiB at six. The wallet-events and screening files took about 85 and 75 seconds of roughly 290 seconds of total test time. Each file ran in one worker in this benchmark, so those files limited further gains. The [per-test comparison below](#per-test-against-per-file-scheduling) supports per-test scheduling with the same four-worker maximum.
-- **Two-worker cold-public limit.** Cold runs sent 2614, 2951 and 3633 upstream requests at one, two and four workers. The peak rate rose from 38 to 89 requests per second, with up to 11 open requests. Each lane sends its own cache misses upstream. drpc answered every request in these runs, but public endpoint rate limits are not published and can change. Warm runs still sent about 2130 requests because fresh accounts, resets and misses need the upstream.
-- **Memory budget.** The samples showed about 3 GiB shared and about 1.1 GiB per worker. Chromium used about 0.7 GiB per worker, Node about 0.3 GiB, and anvil under 0.1 GiB. No swap was used. The estimator budgets 4 GiB shared and 1.5 GiB per worker to leave headroom.
-- **CPU budget.** A worker averaged about 0.6 CPUs and peaked near 1.6. The estimator budgets 2 CPUs per worker and reserves 2 for shared services.
-
-##### Per-test against per-file scheduling
-
-COM-368 retains per-test scheduling in commit `a60a504`. Warm four-worker runs without the intermittent reorg timeout averaged 138 seconds with per-test scheduling against 161.5 seconds with per-file scheduling, about 14 % faster. The four-worker maximum and two-worker cold-public limit stay unchanged.
-
-The comparison ran on 2026-11-03, in the PST afternoon and evening, on an Apple M4 Max with 16 CPUs and 128 GB. Every counted run used a clean tree at commit `3c19d18`, the main-branch merge of PR #97. Per-file runs used that commit's configuration with `fullyParallel: false`. Per-test runs used the same commit and configuration with Playwright's `--fully-parallel` flag. The runs used anvil 1.9.0, Node 22.22.0, Playwright 1.64.1, pinned block 26244888 and the public drpc endpoint (`https://eth.drpc.org`).
-
-Worker counts came from `BROWSER_TEST_WORKERS`. The estimator sampled on this machine chose two workers for a cold public run and four for a warm run. Cold runs therefore compared the estimated count of two and the maximum of four. Warm runs used four workers, which matched both the estimate and the maximum, with three runs per mode.
-
-Runs executed one at a time, alternating per-file and per-test scheduling. Each cold run used an empty 0700 cache directory. Each warm run used a fresh 0700 directory with the same baseline cache file used by COM-349, copied unchanged (SHA-256 prefix `df7d827a`). Every warm run therefore started from the same cache.
-
-A sampler read the run's process tree every two seconds for resident memory (RSS) and CPU use. It recorded the one-minute load average before each run and its maximum during the run. Upstream counts came from `stats.json`. Set-up covers global setup through services ready, including production builds. Tests + teardown covers services ready through the end of teardown, including cache promotion. Wall time covers the whole command.
-
-Other sessions ran browser suites and other work during most runs. One-minute load averages reached 29–38 during the first eight runs, so timings carry noise. The third warm pair ran on a quiet machine, with maximum load averages of 6.8 and 7.4.
-
-Two attempts are excluded from the table:
-
-- The first attempt at the third warm pair ran while another session held port 18546. Both runs used uncached forks with cache state `off`. They took 441 and 394 seconds, sent about 20,600 and 20,900 upstream requests, and had 291 and 163 upstream failures. The pair was rerun after the port was free.
-- An earlier matrix attempt on commit `f33e64d` stopped during its first run when PR #97 merged. The matrix restarted on `3c19d18`, and the earlier attempt produced no counted result.
-
-| Run           | Scheduling | Workers | Wall (s) | Set-up (s) | Tests + teardown (s) | Passed / failed / skipped | Failed tests                                          | Upstream requests | Upstream errors | Peak open upstream | Peak upstream/s | Peak RSS (GiB) | Mean / peak CPU (%) | Load before / max |
-| ------------- | ---------- | ------- | -------- | ---------- | -------------------- | ------------------------- | ----------------------------------------------------- | ----------------- | --------------- | ------------------ | --------------- | -------------- | ------------------- | ----------------- |
-| cold          | per file   | 2       | 285      | 33         | 244                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 3743              | 0               | 10                 | 45              | 4              | 156 / 449           | 3.7 / 36.2        |
-| cold          | per test   | 2       | 270      | 31         | 231                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 3843              | 0               | 10                 | 59              | 5.3            | 154 / 441           | 33.8 / 33.7       |
-| cold          | per file   | 4       | 188      | 29         | 150                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 4599              | 0               | 12                 | 106             | 7.8            | 256 / 729           | 18.8 / 29.2       |
-| cold          | per test   | 4       | 154      | 30         | 116                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 4601              | 0               | 14                 | 100             | 8.4            | 290 / 707           | 28.8 / 31.1       |
-| warm          | per file   | 4       | 159      | 19         | 132                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 2997              | 0               | 12                 | 75              | 8              | 272 / 859           | 18.8 / 29.2       |
-| warm          | per test   | 4       | 135      | 18         | 109                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 3039              | 0               | 12                 | 71              | 7.6            | 306 / 775           | 23.9 / 29.8       |
-| warm repeat 2 | per file   | 4       | 228      | 19         | 195                  | 56 / 2 / 1                | mixed-position.spec.ts:416 mixed-position.spec.ts:601 | 2986              | 0               | 11                 | 77              | 7.9            | 189 / 762           | 30.6 / 31.2       |
-| warm repeat 2 | per test   | 4       | 141      | 19         | 114                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 3043              | 0               | 13                 | 76              | 8.7            | 296 / 940           | 26.1 / 38.5       |
-| warm repeat 3 | per file   | 4       | 164      | 20         | 136                  | 57 / 1 / 1                | mixed-position.spec.ts:416                            | 2995              | 0               | 11                 | 76              | 7.7            | 249 / 682           | 2.5 / 6.8         |
-| warm repeat 3 | per test   | 4       | 157      | 19         | 123                  | 56 / 2 / 1                | mixed-position.spec.ts:416 mixed-position.spec.ts:601 | 3041              | 0               | 13                 | 73              | 9              | 267 / 881           | 3 / 7.4           |
-
-Peak RSS values of 4 and 8 mean 4.0 and 8.0 GiB. Upstream errors include transport failures and error answers. Every counted run had zero upstream errors.
-
-The HTML reports' per-test start times give these file spans for the first warm four-worker run of each mode:
-
-| Spec file                | Tests | Per-file span (s) | Per-test span (s) | Summed test time (s) |
-| ------------------------ | ----- | ----------------- | ----------------- | -------------------- |
-| mixed-position.spec.ts   | 7     | 129.5             | 53.1              | ~128–131             |
-| wallet-events.spec.ts    | 10    | 85.0              | 27.0              | ~85–88               |
-| screening.spec.ts        | 11    | 76.6              | 36.3              | ~76                  |
-| harness-security.spec.ts | 12    | 37.3              | 17.1              | ~37                  |
-| signing.spec.ts          | 6     | 30.0              | 11.5              | ~24–30               |
-
-No two tests of one file overlapped in per-file mode. In per-test mode, tests overlapped in every file with more than one test. Under file scheduling, `mixed-position.spec.ts` alone spanned about 130 seconds, nearly the whole test phase.
-
-The comparison supports the scheduling decision:
-
-- **Wall time.** Warm runs without the `:601` timeout took 159 and 164 seconds in per-file mode (mean 161.5), against 135 and 141 in per-test mode (mean 138). That is about 14 % faster. All three warm runs took 159/228/164 seconds in per-file mode (mean 184), against 135/141/157 in per-test mode (mean 144). Tests + teardown took 132/195/136 seconds in per-file mode and 109/114/123 in per-test mode. Cold four-worker wall time fell from 188 to 154 seconds (18 %), and cold two-worker time fell from 285 to 270 seconds (5 %). Set-up time stayed at 18–20 seconds warm and 29–33 seconds cold.
-- **Upstream.** Request counts were about equal: warm runs sent about 2990 in per-file mode and 3040 in per-test mode. Cold four-worker runs sent 4599 and 4601, and cold two-worker runs sent 3743 and 3843. Peak open requests ranged from 10 to 14 across both modes. Warm peak rates ranged from 71 to 77 requests per second across both modes. Cold four-worker peaks were 106 in per-file mode and 100 in per-test mode, and cold two-worker peaks were 45 and 59. There were no upstream errors.
-- **Memory.** Warm peak RSS ranged from 7.7–8.0 GiB in per-file mode and 7.6–9.0 GiB in per-test mode. Cold four-worker peaks were 7.8 and 8.4 GiB. Swap use was zero before and after the runs.
-- **CPU.** Mean process-tree CPU use in warm runs ranged from 189–272 % in per-file mode and 267–306 % in per-test mode, with the work completed sooner. Peaks across both modes were about 680–940 %. More than four workers is unmeasured with per-test scheduling.
-
-Known failures and skipped coverage remain:
-
-- **Baseline failure at `mixed-position.spec.ts:416`.** The test that keeps the hold when another interface supplies 100 USDC and withdraws 301 USDC failed in all ten counted runs. Both modes reported `transaction … on the fork: status reverted`. This was the main-branch failure with anvil 1.9.0 that COM-369 fixed (see [How the wallet signs and sends](#how-the-wallet-signs-and-sends)). Every per-file run on the same commit reproduced it. The fix is outside COM-368's scope.
-- **Intermittent failure at `mixed-position.spec.ts:601`.** The reorg test failed in per-file warm repeat 2 and per-test warm repeat 3. Both failures timed out after 60 seconds on the same `expect.poll` assertion for `isReorged` at line 669. The test passed in about 11–13 seconds in the other eight runs. The failure with `fullyParallel: false` on the same commit shows that per-test scheduling did not cause it. COM-349 had also seen this timeout once under four-worker load. COM-368 leaves this intermittent failure in both modes unfixed and changes no spec behaviour.
-- **Skipped AC7 case.** Every other implemented test passed in every counted run. The AC7 `NODE_ENV=development` case stays skipped, so AC7 and acceptance remain **INCOMPLETE** until the product fix and execution of that case. Each counted run's own acceptance verdict was **FAIL** because of `:416`. Without that failure, the skipped case still prevents clean acceptance.
-
-No spec file is marked serial because no spec proved order-dependent. Each test resets its worker's wallet and fork and gets a fresh browser context. The proxies' counters and the lane list stay shared across the run. Two tests read them, and both hold whatever ran before them. AC8's method checks hold because the proxies refuse every method outside their allowlists. The harness-security listener check reads the lane list when it runs. The specs contain no `beforeAll`, `afterAll`, serial mode or module-level mutable state. Each worker leases the lane of its Playwright `parallelIndex`, and its other worker-scoped fixtures (manifest, wallet client, fork client and browser) come from that lane.
-
-Each run promoted the union of every lane except the reorg test's lane, leaving one eligible lane at two workers. The reorg test sent `evm_snapshot` to its fork, which excludes that lane's cache from promotion by design. No lane restarted, and no cleanup error occurred.
+This command runs the full inventory and both production builds. The existing production-screening fixme still keeps acceptance INCOMPLETE. The fixture attaches `dev-source-maps.json.gz` to failed minified development tests. The secret scanner also checks the archive.
 
 ### The fork cache
 
@@ -343,27 +275,6 @@ The cache keeps a wrong answer. If an upstream once answered a read with wrong s
 ```bash
 rm ~/.cache/cf-browser-fork/public/mainnet-26244888.json   # or private/; under $XDG_CACHE_HOME/cf-browser-fork, or BROWSER_FORK_CACHE_DIR, when set
 ```
-
-#### Repeated test accounts
-
-COM-372 compared random and derived keys on 2026-11-03, in the PST evening. The machine was an Apple M4 Max with 16 CPUs and 128 GB. The runs used Node 22.22.0, anvil 1.9.0, Playwright 1.64.1, pinned block 26244888 and the public drpc endpoint. `BROWSER_TEST_WORKERS` set four workers, and port 18546 was free.
-
-Each mode started from a copy of the same cache file (SHA-256 prefix `ec7ebbdb`) in its own `BROWSER_FORK_CACHE_DIR`. Each ran twice in a row, so the second run read what the first promoted. Random keys ran on `main` at `27dd643`. Derived keys ran at `5df93ad`, which derived keys from the test identity without a salt. The salt added in `185e403` changes which addresses are derived, not how often they repeat. The earlier COM-349 and COM-368 benchmark tables used random accounts, so their timings are not directly comparable to runs that reuse derived accounts.
-
-The `startSupply` wait measures the `expect(...).toPass` around the "Supply USDC" click in `wallet-events.spec.ts`, across nine calls in eight tests per run. The chain-change test calls it twice.
-
-| Run         | Wall (s) | Set-up (s) | Tests (s) | Upstream requests | `eth_getStorageAt` | `eth_getBalance` | Entries promoted | Mean `startSupply` (ms) | Passed / failed |
-| ----------- | -------- | ---------- | --------- | ----------------- | ------------------ | ---------------- | ---------------- | ----------------------- | --------------- |
-| Random 1st  | 167      | 23         | 152       | 2738              | 2237               | 47               | 1978             | 3949                    | 56 / 2          |
-| Random 2nd  | 175      | 19         | 161       | 2741              | 2239               | 47               | 1980             | 5555                    | 56 / 2          |
-| Derived 1st | 163      | 20         | 149       | 2736              | 2237               | 48               | 1979             | 3532                    | 56 / 2          |
-| Derived 2nd | 108      | 18         | 101       | 780               | 389                | 7                | 256              | 668                     | 57 / 1          |
-
-The second derived run sent 72 % fewer upstream requests than the second random run (780 against 2741). It made 83 % fewer `eth_getStorageAt` requests (389 against 2239) and promoted 87 % fewer new entries (256 against 1980). The mean `startSupply` wait fell from 5.6 s to 0.67 s. Test time fell from 161 s to 101 s, and wall time fell from 175 s to 108 s (38 %). The first derived run matched the random runs because its accounts were not in the cache. The remaining upstream requests include each start's and reset's own reads. They also include other reads the cache does not hold.
-
-`mixed-position.spec.ts:416` failed in all four runs. It failed on `main` until COM-369 (#101) fixed it. These benchmark runs predate that fix. The intermittent reorg timeout at `mixed-position.spec.ts:601` failed in the first three runs and passed in the fourth. It also failed with random keys, so it is a known intermittent failure, not caused by key derivation. Every run skipped one AC7 test and had zero upstream errors. These runs are not clean acceptance results.
-
-The lane that ran the reorg test is excluded from promotion by design. The random runs promoted 599/591/788 and 652/486/842 entries per eligible lane. The derived runs promoted 653/540/786 and 126/66/64. The first random run promoted lanes 0, 1 and 3. The second derived run promoted lanes 1, 2 and 3.
 
 ## Startup, reset and cleanup
 

@@ -9,7 +9,7 @@
 //   headroom, divided by one worker's memory.
 // - Upstream: a run on the public endpoints without a warm cache sends every miss of every worker upstream,
 //   and those endpoints limit their rate. Such a run gets a lower maximum.
-// - The default maximum, which the benchmarks in docs/browser-fork-wallet.md support.
+// - The configured default maximum.
 //
 // The signals are read once, in the runner, and only when the environment does not decide the count.
 //
@@ -27,32 +27,24 @@ import { forkCacheRoot, PINNED_BLOCK, sharedCacheFile } from './fork';
 const GIB = 1024 ** 3;
 
 /**
- * The estimate's maximum follows the four-worker per-test benchmarks.
- * Higher-count bundled-dev trials are recorded in docs/browser-testing-performance.md.
- * Each worker cost about 1.1 GiB in the original benchmarks and adds upstream traffic.
+ * The automatic estimate caps workers to limit shared resource and upstream pressure.
+ * Performance experiment records are tracked in Linear COM-423.
  */
 export const DEFAULT_MAX_WORKERS = 4;
 /**
- * The most workers the estimate chooses for a run on the public endpoints without a warm cache. Every lane's
- * misses go upstream: four cold lanes sent 39 % more requests than one, at more than twice the peak rate, to
- * endpoints whose rate limits are not published and change.
+ * Public endpoints limit request rates. Cold lanes send their cache misses upstream independently.
+ * Limit their concurrency while the shared cache fills.
  */
 export const PUBLIC_COLD_MAX_WORKERS = 2;
 /** The largest count BROWSER_TEST_WORKERS accepts. */
 export const MAX_OVERRIDE_WORKERS = 16;
 /** The CPUs that the runner, the dev server and the proxies use, which no worker can have. */
 export const SHARED_CPUS = 2;
-/**
- * One worker's CPUs: its Chromium, its Node process and its anvil. A worker averaged 0.6 CPUs in the benchmarks
- * and peaked at 1.6.
- */
+/** The CPU budget for a worker's Chromium, Node process and anvil. */
 export const CPUS_PER_WORKER = 2;
-/**
- * The memory of the runner, the dev server and the production builds, about 3 GiB in the benchmarks, with
- * 1 GiB of headroom for the system.
- */
+/** The shared memory budget covers the runner, dev server, production builds and system headroom. */
 export const SHARED_MEMORY = 4 * GIB;
-/** One worker's memory: its Chromium, its Node process and its anvil, about 1.1 GiB in the benchmarks. */
+/** The memory budget for a worker's Chromium, Node process and anvil. */
 export const MEMORY_PER_WORKER = 1.5 * GIB;
 /** The share of the CPUs counted as idle when the sample cannot be taken. */
 const UNKNOWN_IDLE_FRACTION = 0.5;
