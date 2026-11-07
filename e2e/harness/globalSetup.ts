@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import type { FullConfig } from '@playwright/test';
 
+import { browserPoolCountOf } from './browserPool';
 import { workersText, type WorkerSelection } from './concurrency';
 import { REPO_ROOT } from './paths';
 import { startServices } from './services';
@@ -31,6 +32,12 @@ export default async function globalSetup(config: FullConfig): Promise<() => Pro
     ? (JSON.parse(process.env.BROWSER_HARNESS_CONCURRENCY) as WorkerSelection)
     : undefined;
   const workers = isInteractive ? 1 : config.workers;
+  if (
+    browserPoolCountOf(process.env, workers, isInteractive) > 0 &&
+    config.projects.some((project) => project.use.headless === false)
+  ) {
+    throw new Error('BROWSER_TEST_BROWSER_POOL requires headless browsers; remove --headed or disable the pool.');
+  }
   const isCliOverride = selection !== undefined && workers !== selection.workers;
   process.stdout.write(`Browser harness: workers ${workersText({ workers, selection, isCliOverride })}\n`);
   const services = await startServices({
