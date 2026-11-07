@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
 import '@testing-library/jest-dom';
@@ -18,7 +18,9 @@ const renderTransactionsPage = (transactions: Transaction[], web3: Web3) => {
 };
 
 describe('Transaction History Page', () => {
+  let originalObserver: typeof IntersectionObserver;
   beforeEach(() => {
+    originalObserver = window.IntersectionObserver;
     // IntersectionObserver isn't available in test environment
     const mockIntersectionObserver = jest.fn();
     mockIntersectionObserver.mockReturnValue({
@@ -30,11 +32,12 @@ describe('Transaction History Page', () => {
   });
 
   afterEach(() => {
-    setTimeout(() => {
-      const mockIntersectionObserver = jest.fn();
-      mockIntersectionObserver.mockReturnValue(null);
-      window.IntersectionObserver = mockIntersectionObserver;
-    }, 500);
+    try {
+      cleanup();
+    } finally {
+      // The observer must remain installed through React's unmount callbacks.
+      window.IntersectionObserver = originalObserver;
+    }
   });
 
   test('renders Transaction History loading state', async () => {
