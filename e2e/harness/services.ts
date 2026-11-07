@@ -26,8 +26,10 @@ import path from 'node:path';
 
 import { chromium } from '@playwright/test';
 
+import { browserPoolCountOf, startBrowserPool, type BrowserPoolInfo } from './browserPool';
 import type { WorkerSelection } from './concurrency';
 import { COMET_USDC, USDC } from './contracts';
+import { devMinificationOf } from './devMinification';
 import {
   allowLoopbackWebSocket,
   applyEgress,
@@ -67,6 +69,7 @@ import {
 import { createLanePool, startLaneServer, type LaneInfo, type StartedLane } from './forkLanes';
 import { BINDING_NAME, installHarnessProvider, PROVIDER_ICON, PROVIDER_NAME, PROVIDER_RDNS } from './injectedProvider';
 import { homeRelative, RUNS_DIR } from './paths';
+import { buildProductions } from './productionBuilds';
 import { openWrappedReleaseControls } from './releaseControls';
 import { startRpcProxy } from './rpcProxy';
 import { cleanUpSynchronously, recoverKilledRuns, type ProcessRecord, type RecordedAnvil } from './runRecords';
@@ -112,12 +115,16 @@ export type Manifest = {
   lanes: { count: number; started?: LaneInfo[] };
   /** How the worker count was chosen. `workers` is what Playwright ran with, `--workers` included. */
   concurrency: { workers: number; selection?: WorkerSelection; isCliOverride: boolean };
+  /** Pool servers share Chromium, while workers retain separate connections and tests retain fresh contexts. */
+  browserPool?: BrowserPoolInfo;
   tools: Record<string, string | undefined>;
   git: { head: string | undefined; isDirty: boolean | undefined };
   app: {
     devOrigin: string;
     hmrOrigin: string;
-    devResolved: { DEV: boolean };
+    devResolved: { DEV: boolean; bundled?: boolean };
+    /** Immutable source-map versions for failed tests of minified development code. */
+    devSourceMapsFile?: string;
     environment: Record<string, string>;
     removedViteVariables: string[];
     /**
@@ -205,6 +212,9 @@ export async function startServices({
   laneCount: number;
   concurrency: Manifest['concurrency'];
 }): Promise<Services> {
+  // Refuse invalid pool settings before recovery, a fork or a network listener starts.
+  const browserPoolCount = browserPoolCountOf(process.env, laneCount, isInteractive);
+  delete process.env.BROWSER_HARNESS_BROWSER_POOL_FILE;
   const startedAt = new Date().toISOString();
   const runDir = path.join(RUNS_DIR, runId);
   fs.mkdirSync(runDir, { recursive: true });
@@ -620,9 +630,14 @@ export async function startServices({
       const allowedOut = path.join(directory, 'dist-prod-allowed');
       const developmentNodeEnvOut = path.join(directory, 'dist-prod-development-node-env');
       bundleRoots = [missingOut, allowedOut, developmentNodeEnvOut];
-      const missingResolved = await buildProduction({ outDir: missingOut, envDir, environment: missingEnvironment });
-      const allowedResolved = await buildProduction({ outDir: allowedOut, envDir, environment: allowedEnvironment });
-      // No endpoint, as the first build, but with NODE_ENV=development, which compiles DEV=true.
+      const [missingResolved, allowedResolved] = await buildProductions({
+        envDir,
+        builds: [
+          { outDir: missingOut, environment: missingEnvironment },
+          { outDir: allowedOut, environment: allowedEnvironment },
+        ],
+      });
+      // This regression build needs DEV=true, so it runs separately from the production-only workers.
       const developmentNodeEnvResolved = await buildProduction({
         outDir: developmentNodeEnvOut,
         envDir,
@@ -666,10 +681,12 @@ export async function startServices({
       VITE_EXTRA_EXTENSIONS: EXTENSION_ID,
       [`VITE_${EXTENSION_ID.toUpperCase()}_SOURCE`]: screening.extensionUrl,
     };
+    const devSourceMapsFile = devMinificationOf() ? path.join(directory, 'dev-source-maps.json.gz') : undefined;
     const dev = await startDevServer({
       envDir,
       environment: devEnvironment,
       plugins: [openWrappedReleaseControls()],
+      sourceMapsFile: devSourceMapsFile,
     });
     addStop({ name: 'dev server', run: () => dev.close() });
     ensureRunning();
@@ -678,6 +695,7 @@ export async function startServices({
     trustHarnessCertificate(certificate.cert.toString());
     const tlsMode = await warmUp({
       devOrigin: dev.origin,
+      bundled: dev.bundled,
       hmrOrigin: dev.hmrOrigin,
       rpcProxyOrigin: rpcProxy.url,
       screeningOrigin: screening.origin,
@@ -685,6 +703,20 @@ export async function startServices({
       forwarded: () => rpcProxy.stats.lanes.get('0') ?? 0,
       runDir,
     });
+    ensureRunning();
+    const browserPool =
+      browserPoolCount === 0
+        ? undefined
+        : await startBrowserPool({
+            count: browserPoolCount,
+            certificatePath: certificate.certPath,
+            privateDir: directory,
+          });
+    if (browserPool !== undefined) {
+      addStop({ name: 'browser pool', run: browserPool.stop });
+      ensureRunning();
+      process.env.BROWSER_HARNESS_BROWSER_POOL_FILE = browserPool.endpointsFile;
+    }
 
     const manifest: Manifest = {
       runId,
@@ -701,6 +733,7 @@ export async function startServices({
       },
       lanes: { count: laneCount },
       concurrency,
+      ...(browserPool === undefined ? {} : { browserPool: browserPool.info }),
       tools: {
         anvil: anvil.version,
         anvilClient: clientVersion,
@@ -717,7 +750,8 @@ export async function startServices({
       app: {
         devOrigin: dev.origin,
         hmrOrigin: dev.hmrOrigin,
-        devResolved: { DEV: dev.DEV },
+        devResolved: { DEV: dev.DEV, bundled: dev.bundled },
+        ...(devSourceMapsFile === undefined ? {} : { devSourceMapsFile }),
         environment: devEnvironment,
         removedViteVariables,
         wrappedReleaseControls: 'open',
@@ -730,6 +764,9 @@ export async function startServices({
         wallet: firstInfo.walletUrl,
         lanes: laneServer.url,
         bindings: {
+          ...Object.fromEntries(
+            browserPool?.info.servers.map((server, index) => [`browserPool${index}`, server.origin]) ?? []
+          ),
           anvil: firstInfo.forkUrl,
           upstreamProxy: forkContext.proxy.url,
           rpcProxy: `127.0.0.1:${rpcProxy.port}`,
@@ -825,6 +862,7 @@ async function readUsdcImplementation(forkUrl: string): Promise<string> {
  */
 async function warmUp({
   devOrigin,
+  bundled,
   hmrOrigin,
   rpcProxyOrigin,
   screeningOrigin,
@@ -833,6 +871,7 @@ async function warmUp({
   runDir,
 }: {
   devOrigin: string;
+  bundled: boolean;
   hmrOrigin: string;
   rpcProxyOrigin: string;
   screeningOrigin: string;
@@ -855,7 +894,8 @@ async function warmUp({
           webSocket: new Set([hmrOrigin]),
         },
         blocked,
-        { origins: new Set([rpcProxyOrigin, screeningOrigin]), value: '0' }
+        { origins: new Set([rpcProxyOrigin, screeningOrigin]), value: '0' },
+        bundled ? { bundledDev: { origin: devOrigin } } : undefined
       );
       await context.addInitScript(installHarnessProvider, {
         appOrigin: devOrigin,
