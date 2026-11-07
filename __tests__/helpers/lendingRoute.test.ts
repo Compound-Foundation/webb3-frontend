@@ -114,10 +114,10 @@ describe('lendingRoute', () => {
       expect(route.exit).toEqual(ELIGIBLE);
       expect(route.reads).toEqual(ELIGIBLE);
 
-      // The hardcoded registry keeps the route wrapped but enables no write.
+      // The hardcoded registry keeps the route wrapped and opens deposits and exits.
       const shipped = expectWrapped(resolve(cometAddress, anchorage(), { registry: WRAPPED_MARKET_REGISTRY }));
-      expect(shipped.deposit).toEqual(blocked('deposits-disabled'));
-      expect(shipped.exit).toEqual(blocked('exits-disabled'));
+      expect(shipped.deposit).toEqual(ELIGIBLE);
+      expect(shipped.exit).toEqual(ELIGIBLE);
       expect(shipped.reads).toEqual(ELIGIBLE);
     });
 
