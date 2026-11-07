@@ -6,6 +6,10 @@ const releaseFile = '.release';
 const ethereumNode = process.env['ETHEREUM_NODE'] || 'http://localhost:8585';
 const workerHost = process.env['WORKER_HOST'] || 'https://v3-app.compound.xyz';
 const url = `${workerHost}/release`;
+// The worker accepts only a release signed for its own app host. If WORKER_HOST
+// is an alias host such as app.compound.xyz, set APP_HOST to the primary host
+// (v3-app.compound.xyz).
+const appHost = process.env['APP_HOST'] || new URL(workerHost).host;
 
 async function release(payload, url, signature) {
   const body = JSON.stringify(payload);
@@ -35,10 +39,10 @@ async function release(payload, url, signature) {
 }
 
 // The signed message is the JSON-stringified payload. The worker recovers the
-// signer from this exact body and checks it matches `deployer` and `timestamp`,
-// so the object signed here must be byte-identical to the one sent in `release`.
+// signer from these exact bytes and compares it with `deployer`. The object
+// signed here must therefore be byte-identical to the one sent in `release`.
 function buildPayload(cid, timestamp, deployer) {
-  return { cid, timestamp, deployer };
+  return { cid, timestamp, deployer, app_host: appHost };
 }
 
 async function run(cid, signature, timestamp, deployer) {
@@ -46,8 +50,10 @@ async function run(cid, signature, timestamp, deployer) {
     cid = (await fs.readFile(releaseFile, 'utf-8')).trim();
   }
 
-  // Release timestamp (epoch ms) provides replay protection: the worker
-  // requires it to strictly increase between releases.
+  // Release timestamp (epoch ms) provides replay protection. The worker requires
+  // it to increase with every release. It must also fall within the window set
+  // by RELEASE_MAX_AGE_MS and RELEASE_MAX_FUTURE_MS in frontend-devops
+  // (cloudflare/pinata-ipfs-worker/src/ipfs/release.ts).
   if (timestamp === undefined) {
     timestamp = Date.now();
   }
