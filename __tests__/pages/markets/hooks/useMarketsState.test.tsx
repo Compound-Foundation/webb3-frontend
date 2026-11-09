@@ -22,7 +22,7 @@ jest.mock('@helpers/sleuth/sleuth', () => {
 const mockMulticall = jest.fn();
 jest.mock('@helpers/multicall', () => ({
   ...jest.requireActual('@helpers/multicall'),
-  multicall: (...args: unknown[]) => mockMulticall(...args),
+  readClient: () => ({ multicall: (...args: unknown[]) => mockMulticall(...args) }),
 }));
 
 jest.mock('@ethersproject/providers', () => ({
@@ -204,11 +204,9 @@ describe('useMarketsState when the Sleuth query fails', () => {
         collateralAssets: [collateralInfo(COLLATERAL_A), collateralInfo(COLLATERAL_B)],
       } as unknown as Partial<CometStateResponse>).state
     );
-    mockMulticall.mockResolvedValue([
-      { success: true, value: BigNumber.from(7) },
-      { success: true, value: BigNumber.from(8) },
-      { success: true, value: BigNumber.from(9) },
-      { success: false, error: new Error('getCollateralReserves reverted') },
+    mockMulticall.mockResolvedValueOnce([7n, 8n]).mockResolvedValueOnce([
+      { status: 'success', result: 9n },
+      { status: 'failure', error: new Error('getCollateralReserves reverted') },
     ]);
 
     const state = await renderMarketState([StateType.Hydrated, withCollaterals]);
@@ -216,11 +214,10 @@ describe('useMarketsState when the Sleuth query fails', () => {
     expect(state.reserves).toEqual(7n);
     expect(state.targetReserves).toEqual(8n);
     expect(state.collateralAssets.map(({ address, reserves }) => [address, reserves])).toEqual([[COLLATERAL_A, 9n]]);
-    expect(mockMulticall.mock.calls[0][1].map(({ name }: { name: string }) => name)).toEqual([
-      'getReserves',
-      'targetReserves',
-      'getCollateralReserves',
-      'getCollateralReserves',
-    ]);
+    expect(
+      mockMulticall.mock.calls.flatMap(([{ contracts }]) =>
+        contracts.map(({ functionName }: { functionName: string }) => functionName)
+      )
+    ).toEqual(['getReserves', 'targetReserves', 'getCollateralReserves', 'getCollateralReserves']);
   });
 });

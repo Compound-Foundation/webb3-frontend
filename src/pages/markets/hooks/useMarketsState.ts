@@ -1,9 +1,9 @@
-import { Interface } from '@ethersproject/abi';
 import { BigNumber } from '@ethersproject/bignumber';
 import { JsonRpcProvider, StaticJsonRpcProvider } from '@ethersproject/providers';
 import { parseUnits } from '@ethersproject/units';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
+import type { Address } from 'viem';
 
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import type { Web3 } from '@contexts/Web3Context';
@@ -13,7 +13,7 @@ import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import { aprAt, toRateModel } from '@helpers/interestRates';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
-import { contractCall, multicall, requireValues, sleuthWithFallback } from '@helpers/multicall';
+import { MULTICALL3_ADDRESS, readClient, sleuthWithFallback } from '@helpers/multicall';
 import { FACTOR_PRECISION } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
@@ -44,7 +44,6 @@ const MARKETS_REFRESH_INTERVAL = 300_000; // 5 mins
 
 const QUERY_WITH_RESERVES = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryWithReserves' });
 const QUERY = Sleuth.querySol(CometQuery, { queryFunctionName: 'query' });
-const COMET = new Interface(Comet);
 
 // A collateral whose reserves the fallback could not read has undefined reserves
 type MarketReserves = Omit<CometWithReservesResponse, 'collateralReserves'> & {
@@ -68,20 +67,32 @@ const readMarket = (provider: JsonRpcProvider, market: MarketDataLoaded): Promis
         collaterals,
       ]),
     async () => {
-      const [state, [reserves, targetReserves, ...collateralReserves]] = await Promise.all([
+      const client = readClient(provider);
+      const comet = { address: market.marketAddress as Address, abi: Comet } as const;
+      const [state, [reserves, targetReserves], collateralReserves] = await Promise.all([
         sleuth.fetch<CometStateResponse, CometStateQuery>(QUERY, stateQuery),
-        multicall(provider, [
-          contractCall(market.marketAddress, COMET, 'getReserves'),
-          contractCall(market.marketAddress, COMET, 'targetReserves'),
-          ...collaterals.map((asset) => contractCall(market.marketAddress, COMET, 'getCollateralReserves', asset)),
-        ]),
+        client.multicall({
+          multicallAddress: MULTICALL3_ADDRESS,
+          allowFailure: false,
+          contracts: [
+            { ...comet, functionName: 'getReserves' },
+            { ...comet, functionName: 'targetReserves' },
+          ],
+        }),
+        client.multicall({
+          multicallAddress: MULTICALL3_ADDRESS,
+          contracts: collaterals.map(
+            (asset) => ({ ...comet, functionName: 'getCollateralReserves', args: [asset as Address] } as const)
+          ),
+        }),
       ]);
-      const [reservesValue, targetReservesValue] = requireValues([reserves, targetReserves], 'market reserves');
       return {
         state,
-        reserves: reservesValue,
-        targetReserves: targetReservesValue,
-        collateralReserves: collateralReserves.map((result) => (result.success ? result.value : undefined)),
+        reserves: BigNumber.from(reserves),
+        targetReserves: BigNumber.from(targetReserves),
+        collateralReserves: collateralReserves.map((result) =>
+          result.status === 'success' ? BigNumber.from(result.result) : undefined
+        ),
       };
     }
   );

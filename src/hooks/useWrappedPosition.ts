@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { WrappedMarket } from '@constants/wrappedMarkets';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
-import { multicall } from '@helpers/multicall';
+import { readClient } from '@helpers/multicall';
 import { REFRESH_INTERVAL } from '@helpers/numbers';
 import {
   BlockWait,
@@ -31,7 +31,7 @@ export const WRAPPED_POSITION_READ_FAILED =
   'Your wrapped position could not be loaded. Check your connection and try again.';
 
 const readWithMulticall: WrappedPositionReader = (provider, market, account) =>
-  readWrappedPosition((calls) => multicall(provider, calls), market, account);
+  readWrappedPosition(readClient(provider), market, account);
 
 /**
  * A `refreshToken` that changes whenever a transaction is added or settles. A settled transaction,

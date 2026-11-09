@@ -1,8 +1,8 @@
-import { Interface } from '@ethersproject/abi';
 import { StaticJsonRpcProvider } from '@ethersproject/providers';
 import { BigNumber, constants } from 'ethers';
 import { ConnectionInfo } from 'ethers/lib/utils';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { parseAbi, type Address } from 'viem';
 
 import type { Web3 } from '@contexts/Web3Context';
 import ERC20 from '@helpers/abis/ERC20';
@@ -12,7 +12,7 @@ import { recordCometStateSource } from '@helpers/cometStateSource';
 import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import { aprAt, toRateModel } from '@helpers/interestRates';
 import { shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
-import { contractCall, multicall, requireValues, sleuthWithFallback } from '@helpers/multicall';
+import { MULTICALL3_ADDRESS, readClient, sleuthWithFallback } from '@helpers/multicall';
 import { getCapacity, getCollateralValue, MAX_UINT256, REFRESH_INTERVAL } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
@@ -25,7 +25,7 @@ import {
   CometWithAccountStateResponse,
   StEthStateResponse,
 } from '@helpers/sleuth/types';
-import { getStETHAccountState, isStETH, isWrappedStETH } from '@helpers/steth';
+import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { delaysCometRefresh } from '@hooks/useTransactionManager';
 import { useWaiter } from '@hooks/useWaiter';
 import {
@@ -175,8 +175,7 @@ export function useCometState(
 
 const QUERY_WITH_ACCOUNT_AND_STETH = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryWithAccountAndStEth' });
 const QUERY_WITH_ACCOUNT = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryWithAccount' });
-const ERC20_ABI = new Interface(ERC20);
-const WSTETH_ABI = new Interface(['function tokensPerStEth() view returns (uint256)']);
+const WSTETH_ABI = parseAbi(['function tokensPerStEth() view returns (uint256)']);
 
 export const queryCometDataWithAccount = (
   providerConnection: string | ConnectionInfo,
@@ -212,24 +211,34 @@ export const queryCometDataWithAccount = (
         wstETHAddress,
       ]),
     async () => {
-      const [state, stETHResults] = await Promise.all([
-        sleuth.fetch<CometWithAccountStateResponse, CometWithAccountStateQuery>(QUERY_WITH_ACCOUNT, accountQuery),
-        stETH
-          ? multicall(provider, [
-              contractCall(stETH.address, ERC20_ABI, 'allowance', account, market.bulkerAddress),
-              contractCall(stETH.address, ERC20_ABI, 'balanceOf', account),
-              contractCall(wstETHAddress, WSTETH_ABI, 'tokensPerStEth'),
-            ])
-          : [],
-      ]);
+      const state = await sleuth.fetch<CometWithAccountStateResponse, CometWithAccountStateQuery>(
+        QUERY_WITH_ACCOUNT,
+        accountQuery
+      );
       // As in the Sleuth query: stETH is read only for a market with wstETH collateral, and when it
       // cannot be read the account state fails
-      if (!state.collateralAssets.some((asset) => asset.collateralAsset === wstETHAddress)) {
+      if (!stETH || !state.collateralAssets.some((asset) => asset.collateralAsset === wstETHAddress)) {
         const zero = BigNumber.from(0);
         return { state, stETHState: { bulkerAllowance: zero, walletBalance: zero, wstETHPerStETH: zero } };
       }
-      const [bulkerAllowance, walletBalance, wstETHPerStETH] = requireValues(stETHResults, 'account stETH state');
-      return { state, stETHState: { bulkerAllowance, walletBalance, wstETHPerStETH } };
+      const stETHToken = { address: stETH.address as Address, abi: ERC20 } as const;
+      const [bulkerAllowance, walletBalance, wstETHPerStETH] = await readClient(provider).multicall({
+        multicallAddress: MULTICALL3_ADDRESS,
+        allowFailure: false,
+        contracts: [
+          { ...stETHToken, functionName: 'allowance', args: [account as Address, market.bulkerAddress as Address] },
+          { ...stETHToken, functionName: 'balanceOf', args: [account as Address] },
+          { address: wstETHAddress as Address, abi: WSTETH_ABI, functionName: 'tokensPerStEth' },
+        ],
+      });
+      return {
+        state,
+        stETHState: {
+          bulkerAllowance: BigNumber.from(bulkerAllowance),
+          walletBalance: BigNumber.from(walletBalance),
+          wstETHPerStETH: BigNumber.from(wstETHPerStETH),
+        },
+      };
     }
   );
 };
@@ -368,7 +377,16 @@ const maybeHydrateStEthCollateral = (
           .map((asset) => {
             const unwrappedAsset = market.chainInformation.unwrappedCollateralAssets[asset.address];
             if (isWrappedStETH(asset.symbol) && isStETH(unwrappedAsset.symbol)) {
-              return getStETHAccountState(asset, unwrappedAsset, stETHState);
+              return {
+                ...asset,
+                balance: 0n,
+                bulkerAllowance: stETHState.bulkerAllowance.toBigInt(),
+                price: (asset.price * stETHState.wstETHPerStETH.toBigInt()) / BigInt(10 ** asset.decimals),
+                walletBalance: stETHState.walletBalance.toBigInt(),
+                address: unwrappedAsset.address,
+                symbol: unwrappedAsset.symbol,
+                name: unwrappedAsset.name,
+              };
             } else {
               console.error('Unknown handling for extra collateral asset: ', unwrappedAsset);
               throw new Error(`Unknown handling for extra collateral asset ${unwrappedAsset.symbol}`);

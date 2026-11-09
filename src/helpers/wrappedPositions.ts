@@ -1,6 +1,7 @@
 import { Interface } from '@ethersproject/abi';
 import type { JsonRpcProvider, TransactionReceipt } from '@ethersproject/providers';
 import { BigNumber } from 'ethers';
+import type { Address } from 'viem';
 
 import { WRAPPED_MARKET_REGISTRY, WrappedMarket, WrappedMarketRegistry } from '@constants/wrappedMarkets';
 import CometAbi from '@helpers/abis/Comet';
@@ -8,17 +9,10 @@ import ERC20Abi from '@helpers/abis/ERC20';
 import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
 import { lendsBaseDirectly } from '@helpers/actions';
 import { LendingRoute } from '@helpers/lendingRoute';
-import { CallResult, contractCall, MulticallReader } from '@helpers/multicall';
+import { MULTICALL3_ADDRESS, readClient } from '@helpers/multicall';
 import { getTokenValue } from '@helpers/numbers';
 import type { WithdrawalLimits } from '@helpers/wrappedWithdrawals';
-import {
-  Action,
-  BaseAssetWithAccountState,
-  CometState,
-  Currency,
-  ProtocolAndAccountState,
-  StateType,
-} from '@types';
+import { Action, BaseAssetWithAccountState, CometState, Currency, ProtocolAndAccountState, StateType } from '@types';
 
 /** The wrapper's divisor for Comet's supply index in its redeem buffer. */
 const BASE_INDEX_SCALE = 10n ** 15n;
@@ -117,10 +111,6 @@ export async function waitForBlock(
   return blockNumber;
 }
 
-const WRAPPER = new Interface(WrappedCometAbi);
-const COMET = new Interface(CometAbi);
-const ERC20 = new Interface(ERC20Abi);
-
 /**
  * What `shares` are worth in base units. This is OpenZeppelin's ERC-4626 conversion with the
  * wrapper's decimals offset, rounded down, as the wrapper's public `convertToAssets` returns it.
@@ -160,54 +150,50 @@ function toBigInt(value: unknown, name: string): bigint {
   throw new WrappedPositionReadError(`The wrapper read returned no number for ${name}.`);
 }
 
-function valueOf(result: CallResult, name: string): unknown {
-  if (!result.success)
-    throw new WrappedPositionReadError(`The wrapper read of ${name} failed.`, { cause: result.error });
-  return result.value;
-}
-
 /**
  * Reads `account`'s position in `market`'s wrapper. Every figure comes from one multicall, so
  * one block. The read fails, rather than returning zero, when the batch or any of its calls fails
  * or the wrapper does not hold the configured Comet.
  */
 export async function readWrappedPosition(
-  multicall: MulticallReader,
+  client: Pick<ReturnType<typeof readClient>, 'multicall'>,
   market: WrappedMarket,
   account: string
 ): Promise<WrappedPosition> {
-  const reads = {
-    shares: contractCall(market.wrapperAddress, WRAPPER, 'balanceOf', account),
-    totalSupply: contractCall(market.wrapperAddress, WRAPPER, 'totalSupply'),
-    asset: contractCall(market.wrapperAddress, WRAPPER, 'asset'),
-    totalAssets: contractCall(market.cometAddress, COMET, 'balanceOf', market.wrapperAddress),
-    totalsBasic: contractCall(market.cometAddress, COMET, 'totalsBasic'),
-    isWithdrawPaused: contractCall(market.cometAddress, COMET, 'isWithdrawPaused'),
-    baseWalletBalance: contractCall(market.baseTokenAddress, ERC20, 'balanceOf', account),
-    wrapperAllowance: contractCall(market.baseTokenAddress, ERC20, 'allowance', account, market.wrapperAddress),
-  };
-  let results: CallResult[];
-  try {
-    results = await multicall(Object.values(reads));
-  } catch (error) {
+  const wrapper = { address: market.wrapperAddress as Address, abi: WrappedCometAbi } as const;
+  const comet = { address: market.cometAddress as Address, abi: CometAbi } as const;
+  const baseToken = { address: market.baseTokenAddress as Address, abi: ERC20Abi } as const;
+  const reading = client.multicall({
+    multicallAddress: MULTICALL3_ADDRESS,
+    allowFailure: false,
+    contracts: [
+      { ...wrapper, functionName: 'balanceOf', args: [account as Address] },
+      { ...wrapper, functionName: 'totalSupply' },
+      { ...wrapper, functionName: 'asset' },
+      { ...comet, functionName: 'balanceOf', args: [market.wrapperAddress as Address] },
+      { ...comet, functionName: 'totalsBasic' },
+      { ...comet, functionName: 'isWithdrawPaused' },
+      { ...baseToken, functionName: 'balanceOf', args: [account as Address] },
+      { ...baseToken, functionName: 'allowance', args: [account as Address, market.wrapperAddress as Address] },
+    ],
+  });
+  const [
+    shares,
+    totalSupply,
+    asset,
+    totalAssets,
+    { baseSupplyIndex },
+    isWithdrawPaused,
+    baseWalletBalance,
+    wrapperAllowance,
+  ] = await reading.catch((error) => {
     throw new WrappedPositionReadError('The wrapper position could not be read.', { cause: error });
-  }
-  const values = Object.fromEntries(
-    Object.keys(reads).map((name, index) => [name, valueOf(results[index], name)])
-  ) as Record<keyof typeof reads, unknown>;
-  const { asset, isWithdrawPaused, totalsBasic } = values;
+  });
 
-  if (typeof asset !== 'string' || asset.toLowerCase() !== market.cometAddress.toLowerCase()) {
+  if (asset.toLowerCase() !== market.cometAddress.toLowerCase()) {
     throw new WrappedPositionReadError('The wrapper does not hold the configured market.');
   }
-  if (typeof isWithdrawPaused !== 'boolean') {
-    throw new WrappedPositionReadError('The wrapper read returned no withdrawal pause state.');
-  }
 
-  const shares = toBigInt(values.shares, 'shares');
-  const totalSupply = toBigInt(values.totalSupply, 'totalSupply');
-  const totalAssets = toBigInt(values.totalAssets, 'totalAssets');
-  const baseSupplyIndex = toBigInt((totalsBasic as { baseSupplyIndex?: unknown })?.baseSupplyIndex, 'baseSupplyIndex');
   const grossAssets = getGrossAssets(shares, totalSupply, totalAssets, market.baseDecimals);
   const redeemBuffer = getRedeemBuffer(baseSupplyIndex);
 
@@ -216,8 +202,8 @@ export async function readWrappedPosition(
     shareDecimals: market.shareDecimals,
     grossAssets,
     baseDecimals: market.baseDecimals,
-    baseWalletBalance: toBigInt(values.baseWalletBalance, 'baseWalletBalance'),
-    wrapperAllowance: toBigInt(values.wrapperAllowance, 'wrapperAllowance'),
+    baseWalletBalance,
+    wrapperAllowance,
     redeemBuffer,
     fullExitCash: getFullExitCash(grossAssets, redeemBuffer),
     isWithdrawPaused,

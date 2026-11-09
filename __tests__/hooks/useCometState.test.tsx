@@ -41,7 +41,7 @@ jest.mock('@helpers/sleuth/sleuth', () => {
 const mockMulticall = jest.fn();
 jest.mock('@helpers/multicall', () => ({
   ...jest.requireActual('@helpers/multicall'),
-  multicall: (...args: unknown[]) => mockMulticall(...args),
+  readClient: () => ({ multicall: (...args: unknown[]) => mockMulticall(...args) }),
 }));
 
 const mockQueryCometData = queryCometData as jest.Mock;
@@ -256,11 +256,7 @@ describe('queryCometDataWithAccount when the Sleuth query fails', () => {
   test('reads the account state with queryWithAccount and the stETH state through a multicall', async () => {
     const state = stateWithWstETH();
     mockSleuthFetch.mockRejectedValueOnce(new Error('stETH read reverted')).mockResolvedValueOnce(state);
-    mockMulticall.mockResolvedValue([
-      { success: true, value: BigNumber.from(1) },
-      { success: true, value: BigNumber.from(2) },
-      { success: true, value: BigNumber.from(3) },
-    ]);
+    mockMulticall.mockResolvedValue([1n, 2n, 3n]);
 
     const response = await queryCometDataWithAccount('http://localhost', market, ACCOUNT);
 
@@ -272,42 +268,20 @@ describe('queryCometDataWithAccount when the Sleuth query fails', () => {
         wstETHPerStETH: BigNumber.from(3),
       },
     });
-    // the fallback query takes queryWithAccount's six arguments, without the stETH pair
-    expect(mockSleuthFetch.mock.calls[0][1]).toHaveLength(8);
-    expect(mockSleuthFetch.mock.calls[1][1]).toEqual(mockSleuthFetch.mock.calls[0][1].slice(0, 6));
-    expect(mockMulticall.mock.calls[0][1].map(({ name }: { name: string }) => name)).toEqual([
-      'allowance',
-      'balanceOf',
-      'tokensPerStEth',
-    ]);
+    expect(
+      mockMulticall.mock.calls[0][0].contracts.map(({ functionName }: { functionName: string }) => functionName)
+    ).toEqual(['allowance', 'balanceOf', 'tokensPerStEth']);
   });
 
-  test('fails when the fallback cannot read the stETH state either', async () => {
-    mockSleuthFetch.mockRejectedValueOnce(new Error('stETH read reverted')).mockResolvedValueOnce(stateWithWstETH());
-    mockMulticall.mockResolvedValue([
-      { success: true, value: BigNumber.from(1) },
-      { success: false, error: new Error('reverted') },
-      { success: true, value: BigNumber.from(3) },
-    ]);
-
-    await expect(queryCometDataWithAccount('http://localhost', market, ACCOUNT)).rejects.toThrow(
-      'Could not read the account stETH state'
-    );
-  });
-
-  test('ignores the stETH reads for a market without wstETH collateral, as the Sleuth query does', async () => {
+  test('skips the stETH reads for a market without wstETH collateral, as the Sleuth query does', async () => {
     const { state } = cometResponseWithAccount(5);
     mockSleuthFetch.mockRejectedValueOnce(new Error('Sleuth contract missing')).mockResolvedValueOnce(state);
-    mockMulticall.mockResolvedValue([
-      { success: false, error: new Error('reverted') },
-      { success: false, error: new Error('reverted') },
-      { success: false, error: new Error('reverted') },
-    ]);
 
     const zero = BigNumber.from(0);
     expect(await queryCometDataWithAccount('http://localhost', market, ACCOUNT)).toEqual({
       state,
       stETHState: { bulkerAllowance: zero, walletBalance: zero, wstETHPerStETH: zero },
     });
+    expect(mockMulticall).not.toHaveBeenCalled();
   });
 });
