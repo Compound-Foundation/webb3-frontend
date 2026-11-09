@@ -12,16 +12,25 @@
 // not allowed fails the request before anything is sent there.
 import type { BrowserContext } from '@playwright/test';
 
+import { LANE_HEADER } from './laneHeader';
+
 /**
  * `http`: origins, or origins with a path prefix, that any method may reach. `readOnly`: prefixes that only
  * GET and HEAD may reach. `webSocket`: WebSocket origins.
  */
 export type Egress = { http: ReadonlySet<string>; readOnly?: ReadonlySet<string>; webSocket: ReadonlySet<string> };
 export type BlockedRequest = {
-  kind: 'http' | 'redirect' | 'websocket' | 'popup';
+  kind: 'http' | 'redirect' | 'websocket' | 'popup' | 'compiler-readiness';
   url: string;
   method?: string;
   from?: string;
+  reason?: string;
+  timeoutMs?: number;
+};
+
+/** An explicit bundled-dev origin enables the compiler fallback gate. Other documents pass through. */
+export type EgressOptions = {
+  bundledDev?: { origin: string; readinessTimeoutMs?: number };
 };
 
 /**
@@ -175,14 +184,66 @@ export function hopHeaders(
   );
 }
 
+/** The worker's fork lane, and the origins of the services that route by it: the RPC proxy and the screening stub. */
+export type LaneRoute = { origins: ReadonlySet<string>; value: string };
+
+/**
+ * `headers` with the lane header set to the worker's lane when `url` is at one of `lane.origins`, and removed
+ * otherwise. Any value the page sent, in any letter case, is dropped, so the page cannot choose another
+ * worker's fork or screening.
+ */
+export function withLaneHeader(headers: Record<string, string>, url: string, lane: LaneRoute): Record<string, string> {
+  const rest = Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== LANE_HEADER));
+  return lane.origins.has(originOf(url) ?? '') ? { ...rest, [LANE_HEADER]: lane.value } : rest;
+}
+
 /** Whether `egress` lets a request of `method` reach `url`. */
 export function allows(egress: Egress, url: string, method: string): boolean {
   if (isAllowed(url, egress.http)) return true;
   return READ_METHODS.includes(method.toUpperCase()) && isAllowed(url, egress.readOnly ?? new Set());
 }
 
-/** Applies `egress` to `context`, and records each blocked request and redirect in `blocked`. */
-export async function applyEgress(context: BrowserContext, egress: Egress, blocked: BlockedRequest[]): Promise<void> {
+/** No service routes by lane: every request goes without the lane header. */
+const NO_LANE: LaneRoute = { origins: new Set(), value: '' };
+const COMPILER_READINESS_TIMEOUT_MS = 240_000;
+const COMPILER_POLL_INTERVAL_MS = 100;
+
+/** Vite reserves this standalone script and heading for its bundled-dev compilation placeholder. */
+function isCompilerFallback(html: string): boolean {
+  const documentHtml = html.replace(/<!--[\s\S]*?(?:-->|$)/g, '');
+  return (
+    /<script>\s*globalThis\.__vite_is_fallback_page__\s*=\s*true\s*;?\s*<\/script>/.test(documentHtml) &&
+    /<h1>\s*Bundling in progress\s*<\/h1>/.test(documentHtml)
+  );
+}
+
+/**
+ * Applies `egress` to `context`, and records each blocked request and redirect in `blocked`. Every request,
+ * each redirect hop included, carries the lane header as `withLaneHeader` sets it for `lane`, or none.
+ */
+export async function applyEgress(
+  context: BrowserContext,
+  egress: Egress,
+  blocked: BlockedRequest[],
+  lane: LaneRoute = NO_LANE,
+  options: EgressOptions = {}
+): Promise<void> {
+  const bundledDev = options.bundledDev;
+  const readinessTimeoutMs = bundledDev?.readinessTimeoutMs ?? COMPILER_READINESS_TIMEOUT_MS;
+  if (bundledDev !== undefined) {
+    const origin = new URL(bundledDev.origin);
+    if (
+      origin.origin !== bundledDev.origin ||
+      origin.protocol !== 'http:' ||
+      !['127.0.0.1', 'localhost', '[::1]'].includes(origin.hostname) ||
+      !egress.http.has(bundledDev.origin)
+    ) {
+      throw new Error('Bundled dev readiness requires an exact allowed HTTP loopback origin.');
+    }
+    if (!Number.isFinite(readinessTimeoutMs) || readinessTimeoutMs <= 0) {
+      throw new Error('Bundled dev readiness requires a positive finite timeout in milliseconds.');
+    }
+  }
   await context.route('**', async (route) => {
     const request = route.request();
     let url = request.url();
@@ -192,26 +253,73 @@ export async function applyEgress(context: BrowserContext, egress: Egress, block
       blocked.push({ kind: 'http', url: withoutQuery(url), method });
       return route.abort('blockedbyclient');
     }
-    // The first request goes as the browser made it. Each redirect hop is a request of its own, built here
-    // in full and sent through the context's request API with a URL, not the routed request: `route.fetch`
-    // reuses the routed request's body whenever none is given, which a hop that drops the body must not.
-    let headers = request.headers();
+    // The first request goes as the browser made it, except for the lane header. Headers given to
+    // `route.fetch` replace the request's, so they are given only when the lane header changes them, and then
+    // in full, cookies included. Each redirect hop is a request of its own, built here in full and sent through
+    // the context's request API with a URL, not the routed request: `route.fetch` reuses the routed request's
+    // body whenever none is given, which a hop that drops the body must not.
+    const isLaneChanged =
+      lane.origins.has(originOf(url) ?? '') ||
+      Object.keys(request.headers()).some((name) => name.toLowerCase() === LANE_HEADER);
+    let headers = withLaneHeader(isLaneChanged ? await request.allHeaders() : request.headers(), url, lane);
     let body: Buffer | undefined = request.postDataBuffer() ?? undefined;
-    for (let redirects = 0; ; redirects++) {
+    let isFirstFetch = true;
+    let readinessDeadline: number | undefined;
+    const abortReadiness = () => {
+      blocked.push({
+        kind: 'compiler-readiness',
+        url: withoutQuery(url),
+        method,
+        timeoutMs: readinessTimeoutMs,
+        reason: 'Vite bundled dev compilation did not become ready before the compiler readiness deadline.',
+      });
+      return route.abort('timedout').catch(() => undefined);
+    };
+    for (let redirects = 0; ; ) {
+      const remainingMs = readinessDeadline === undefined ? undefined : readinessDeadline - performance.now();
+      if (remainingMs !== undefined && remainingMs <= 0) return abortReadiness();
       let response;
       try {
-        // No timeout: a screening request the stub holds stays open until the page gives up on it.
-        response =
-          redirects === 0
-            ? await route.fetch({ maxRedirects: 0, timeout: 0 })
-            : await context.request.fetch(url, { method, headers, data: body, maxRedirects: 0, timeout: 0 });
+        // Only confirmed compiler fallbacks have a deadline. A held screening request keeps its existing lifetime.
+        const timeout = remainingMs === undefined ? 0 : Math.max(1, Math.ceil(remainingMs));
+        response = isFirstFetch
+          ? await route.fetch(isLaneChanged ? { headers, maxRedirects: 0, timeout } : { maxRedirects: 0, timeout })
+          : await context.request.fetch(url, { method, headers, data: body, maxRedirects: 0, timeout });
+        isFirstFetch = false;
       } catch {
+        if (readinessDeadline !== undefined && performance.now() >= readinessDeadline) return abortReadiness();
         // The page went away, or the server closed the connection.
         return route.abort('failed').catch(() => undefined);
       }
       const location = response.headers()['location'];
       if (response.status() < 300 || response.status() > 399 || location === undefined) {
         const isDocument = request.resourceType() === 'document';
+        if (
+          bundledDev !== undefined &&
+          isDocument &&
+          method === 'GET' &&
+          originOf(url) === bundledDev.origin &&
+          response.status() === 200 &&
+          /^text\/html(?:\s*;|\s*$)/i.test(response.headers()['content-type'] ?? '')
+        ) {
+          try {
+            if (isCompilerFallback(await response.text())) {
+              readinessDeadline ??= performance.now() + readinessTimeoutMs;
+              // Playwright records the response body before disposal and retains the placeholder in its network trace.
+              await response.dispose();
+              if (request.frame().page().isClosed()) return route.abort('failed').catch(() => undefined);
+              const delayMs = Math.min(COMPILER_POLL_INTERVAL_MS, Math.max(0, readinessDeadline - performance.now()));
+              await new Promise((resolve) => setTimeout(resolve, delayMs));
+              if (request.frame().page().isClosed()) return route.abort('failed').catch(() => undefined);
+              // A poll starts a fresh redirect chain and uses the cookie jar updated by the preceding response.
+              redirects = 0;
+              headers = withLaneHeader(hopHeaders(headers, { isBodyDropped: false, isCrossOrigin: false }), url, lane);
+              continue;
+            }
+          } catch {
+            return route.abort('failed').catch(() => undefined);
+          }
+        }
         return route
           .fulfill({ response, headers: isDocument ? withDocumentPolicy(response.headers()) : undefined })
           .catch(() => undefined);
@@ -222,13 +330,15 @@ export async function applyEgress(context: BrowserContext, egress: Egress, block
         blocked.push({ kind: 'redirect', url: withoutQuery(next), from: withoutQuery(url), method: hop.method });
         return route.abort('blockedbyclient').catch(() => undefined);
       }
-      headers = hopHeaders(headers, {
-        isBodyDropped: hop.isBodyDropped,
-        isCrossOrigin: originOf(next) !== originOf(url),
-      });
+      headers = withLaneHeader(
+        hopHeaders(headers, { isBodyDropped: hop.isBodyDropped, isCrossOrigin: originOf(next) !== originOf(url) }),
+        next,
+        lane
+      );
       if (hop.isBodyDropped) body = undefined;
       method = hop.method;
       url = next;
+      redirects += 1;
     }
   });
   await context.routeWebSocket(/.*/, (webSocket) => {

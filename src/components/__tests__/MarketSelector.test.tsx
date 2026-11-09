@@ -1,12 +1,19 @@
-import { render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 
 import '@testing-library/jest-dom';
 import { getSelectedMarketContext, initializeContext } from '@contexts/SelectedMarketContext';
+import { LATEST_MARKET_SUMMARY_QUERY_KEY } from '@hooks/useMarkets';
 import { LatestMarketSummaryResponse, MarketData, MarketStatus, SelectedMarketData, StateType } from '@types';
 
-import { MOCK_DEFAULT_MARKET, MOCK_MARKETS, MockMarketsProvider } from '../../../__tests__/mocks/mockMarkets';
+import {
+  MOCK_DEFAULT_MARKET,
+  MOCK_MARKET_LIST,
+  MOCK_MARKETS,
+  MockMarketsProvider,
+} from '../../../__tests__/mocks/mockMarkets';
 import MarketSelector from '../MarketSelector';
 
 // Mainnet WETH comet; its base asset is displayed as ETH, so look it up by address
@@ -62,5 +69,42 @@ describe('MarketSelector — market statuses', () => {
     const { selectMarket } = renderSelector('partially');
     await openAndClickWeth();
     expect(selectMarket).toHaveBeenCalledWith({ ...weth, status: 'partially' });
+  });
+});
+
+describe('MarketSelector — market list refresh', () => {
+  test('keeps working when the hovered network leaves the market list', async () => {
+    const BASE_CHAIN_ID = 8453;
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryDefaults(LATEST_MARKET_SUMMARY_QUERY_KEY, { enabled: false });
+    queryClient.setQueryData(LATEST_MARKET_SUMMARY_QUERY_KEY, MOCK_MARKET_LIST);
+    const selected: SelectedMarketData = {
+      selectedMarket: [StateType.Hydrated, MOCK_DEFAULT_MARKET],
+      selectMarket: jest.fn(),
+      selectMarketByAddress: jest.fn(),
+    };
+    initializeContext(selected);
+    const SelectedMarketContext = getSelectedMarketContext();
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <SelectedMarketContext.Provider value={selected}>
+            <MarketSelector />
+          </SelectedMarketContext.Provider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByText(MOCK_DEFAULT_MARKET.baseAsset.symbol));
+    await userEvent.hover(screen.getByText('Base'));
+    act(() => {
+      queryClient.setQueryData(
+        LATEST_MARKET_SUMMARY_QUERY_KEY,
+        MOCK_MARKET_LIST.filter((entry) => entry.chainId !== BASE_CHAIN_ID),
+      );
+    });
+
+    await waitFor(() => expect(screen.queryByText('Base')).not.toBeInTheDocument());
+    expect(screen.getAllByText(weth.baseAsset.symbol).length).toBeGreaterThan(0);
   });
 });

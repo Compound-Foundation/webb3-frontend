@@ -9,7 +9,14 @@ export function useLocalStorage<T>(storageKey: string, defaultValue: T): [T, (va
     }
   };
 
-  const [value, setValue] = useState<T>(() => parse(window.localStorage.getItem(storageKey)));
+  // A browser that blocks storage throws on any access
+  const [value, setValue] = useState<T>(() => {
+    try {
+      return parse(window.localStorage.getItem(storageKey));
+    } catch {
+      return defaultValue;
+    }
+  });
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
@@ -23,7 +30,11 @@ export function useLocalStorage<T>(storageKey: string, defaultValue: T): [T, (va
   return [
     value,
     (newValue) => {
-      window.localStorage.setItem(storageKey, JSON.stringify(newValue));
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(newValue));
+      } catch {
+        // The value still applies until the page reloads
+      }
       setValue(newValue);
     },
   ];

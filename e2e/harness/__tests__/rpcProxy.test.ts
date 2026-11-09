@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { server as mswServer } from '../../../handlers/server';
+import { LANE_HEADER } from '../laneHeader';
 import { APP_READ_METHODS, startRpcProxy, type RpcProxy } from '../rpcProxy';
 import { startFakeNode, type FakeNode } from '../testing/testServers';
 import { makeCertificate, type Certificate } from '../tls';
@@ -25,6 +26,8 @@ const WRITES = [
   'anvil_impersonateAccount',
   'evm_snapshot',
   'evm_revert',
+  'anvil_reset',
+  'anvil_setRpcUrl',
   'hardhat_setBalance',
   'debug_traceTransaction',
   'txpool_content',
@@ -35,6 +38,9 @@ const WRITES = [
 let directory: string;
 let certificate: Certificate;
 let node: FakeNode;
+/** The fork of lane 1, which the proxy has not started at first. */
+let otherNode: FakeNode;
+let lanes: (string | undefined)[];
 let proxy: RpcProxy;
 const origins = new Set([APP]);
 
@@ -47,11 +53,19 @@ afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
 
 beforeEach(async () => {
   node = await startFakeNode({ eth_chainId: () => '0x1', eth_call: () => '0x01' });
-  proxy = await startRpcProxy({ tls: certificate, forkUrl: () => node.url, allowedOrigins: origins });
+  otherNode = await startFakeNode({ eth_chainId: () => '0x1', eth_call: () => '0x02' });
+  lanes = [node.url, undefined, undefined];
+  proxy = await startRpcProxy({
+    tls: certificate,
+    forkUrl: (lane) => lanes[lane],
+    laneCount: 3,
+    allowedOrigins: origins,
+  });
 });
 afterEach(async () => {
   await proxy.close();
   await node.close();
+  await otherNode.close();
 });
 
 /** A request to the proxy that trusts only the harness certificate, with the headers given. */
@@ -70,7 +84,15 @@ function send(
         path: route,
         method,
         ca: certificate.cert,
-        headers: { 'content-type': 'application/json', host: proxy.host, ...headers },
+        // Lane 0 unless the test names another; a value of '' leaves the header out.
+        headers: Object.fromEntries(
+          Object.entries({
+            'content-type': 'application/json',
+            host: proxy.host,
+            [LANE_HEADER]: '0',
+            ...headers,
+          }).filter(([, value]) => value !== '')
+        ),
       },
       (response) => {
         const chunks: Buffer[] = [];
@@ -153,4 +175,32 @@ test('refuses another Host, an Origin outside the app, a method other than POST,
   expect(preflight.status).toBe(204);
   expect(preflight.headers['access-control-allow-origin']).toBe(APP);
   expect(node.calls).toEqual([]);
+});
+
+describe('fork lanes', () => {
+  const call = { jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{}, 'latest'] };
+
+  test('forwards each read to the fork of the lane its header names, and counts the reads by lane', async () => {
+    lanes[1] = otherNode.url;
+    expect(JSON.parse((await send('/ethereum-mainnet', call, { [LANE_HEADER]: '0' })).body).result).toBe('0x01');
+    expect(JSON.parse((await send('/ethereum-mainnet', call, { [LANE_HEADER]: '1' })).body).result).toBe('0x02');
+    expect(JSON.parse((await send('/ethereum-mainnet', call, { [LANE_HEADER]: '1' })).body).result).toBe('0x02');
+    expect(node.calls).toHaveLength(1);
+    expect(otherNode.calls).toHaveLength(2);
+    expect(Object.fromEntries(proxy.stats.lanes)).toEqual({ '0': 1, '1': 2 });
+  });
+
+  test('refuses a read with no lane, a lane out of range or malformed, or a lane whose fork has not started', async () => {
+    for (const lane of ['', '3', '-1', '01', '1.0', '0,1', 'x', '1']) {
+      const answer = JSON.parse((await send('/ethereum-mainnet', call, { [LANE_HEADER]: lane })).body);
+      expect(answer).toEqual({
+        jsonrpc: '2.0',
+        id: 1,
+        error: { code: -32603, message: 'harness: the request names no started fork lane' },
+      });
+    }
+    expect(node.calls).toEqual([]);
+    expect(otherNode.calls).toEqual([]);
+    expect(proxy.stats.refused.get('<no started fork lane>')).toBe(8);
+  });
 });

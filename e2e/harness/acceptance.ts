@@ -18,6 +18,6 @@ export const REQUIRED_ACCEPTANCE_CASES: readonly RequiredCase[] = [
     id: 'prod-build › prod-build.spec.ts › production build with NODE_ENV=development › cannot use the dev-only screening bypass',
     why:
       'AC7 requires that a production build cannot use the dev screening bypass, and a build run with ' +
-      'NODE_ENV=development compiles DEV=true. It stays a test.fixme until the product fix to envVars.ts lands.',
+      'NODE_ENV=development compiles DEV=true. The test builds that way with no endpoint and expects the app to fail closed.',
   },
 ];

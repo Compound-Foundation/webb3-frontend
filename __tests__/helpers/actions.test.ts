@@ -324,6 +324,20 @@ describe('validateAddingAction with base lending through the wrapper', () => {
   const supply = (amount: bigint) => mockBaseAction({ actionType: ActionType.Supply, amount });
   const withdraw = (amount: bigint) => mockBaseAction({ actionType: ActionType.Withdraw, amount });
 
+  it('takes a withdrawal of up to the direct supply and what the wrapper pays, with the limit Home works out', () => {
+    // 250 USDC supplied to Comet directly, beside a wrapped position that pays 2,000 USDC.
+    const mixed: ActionRules = {
+      wrappedBase: { ...OPEN_BASE, maxPartialWithdrawal: 2_250_000_000n, directSupply: 250_000_000n },
+    };
+    const base = noAllowance({ balance: 250_000_000n });
+    expect(validateAddingAction(base, collateralAssetsPre(), [], withdraw(2_250_000_000n), mixed)).toBe('ok');
+    expect(validateAddingAction(base, collateralAssetsPre(), [], withdraw(100_000_000n), mixed)).toBe('ok');
+    expect(validateAddingAction(base, collateralAssetsPre(), [], withdraw(2_250_000_001n), mixed)).toEqual([
+      false,
+      'Amount Exceeds Withdrawable Balance',
+    ]);
+  });
+
   it("checks a base supply against the allowance to the wrapper, not Comet's", () => {
     const action = supply(1_000_000_000n);
     const withWrapperAllowance = (supplyAllowance: bigint | undefined): ActionRules => ({
@@ -525,6 +539,74 @@ describe('validateAddingAction with base lending through the wrapper', () => {
   });
 });
 
+describe('validateAddingAction on a single-action queue', () => {
+  const SINGLE: ActionRules = {
+    isSingleAction: true,
+    wrappedBase: {
+      supplyBlockedReason: undefined,
+      withdrawBlockedReason: undefined,
+      maxPartialWithdrawal: 2_000_000_000n,
+      canWithdrawAll: true,
+      supplyAllowance: MAX_UINT256,
+    },
+  };
+  const baseAssetPre = () => mockBaseAsset({ balance: 1_000_000_000n, walletBalance: 5_000_000_000n });
+  const collateralAssetsPre = () => [mockEthCollateralAsset({ walletBalance: 10n ** 18n })];
+  const QUEUED_FIRST = 'Submit Or Remove The Queued Action First';
+  const actionsOfEachKind = (): [string, Action][] => [
+    ['supply', mockBaseAction({ actionType: ActionType.Supply, amount: 1_000_000n })],
+    ['withdrawal', mockBaseAction({ actionType: ActionType.Withdraw, amount: 1_000_000n })],
+    ['borrow', mockBaseAction({ actionType: ActionType.Borrow, amount: 1_000_000_000n })],
+    ['collateral supply', mockCollateralAction({ actionType: ActionType.SupplyCollateral, amount: 10n ** 16n })],
+    ['collateral withdrawal', mockCollateralAction({ actionType: ActionType.WithdrawCollateral, amount: 10n ** 16n })],
+  ];
+  const distinctPairs = actionsOfEachKind().flatMap(([queuedName, queued]) =>
+    actionsOfEachKind()
+      .filter(([addedName]) => addedName !== queuedName)
+      .map(([addedName, added]): [string, string, Action, Action] => [queuedName, addedName, queued, added])
+  );
+
+  it.each(distinctPairs)('refuses, after a queued %s, a %s', (_queuedName, _addedName, queued, added) => {
+    expect(validateAddingAction(baseAssetPre(), collateralAssetsPre(), [queued], added, SINGLE)).toEqual([
+      false,
+      QUEUED_FIRST,
+    ]);
+  });
+
+  it('refuses a repay after a queued collateral supply, and the reverse', () => {
+    const borrower = mockBaseAsset({ balance: -1_000_000_000n, walletBalance: 5_000_000_000n });
+    const repay = mockBaseAction({ actionType: ActionType.Repay, amount: 1_000_000n });
+    const supplyCollateral = mockCollateralAction({ actionType: ActionType.SupplyCollateral, amount: 10n ** 16n });
+
+    expect(validateAddingAction(borrower, collateralAssetsPre(), [supplyCollateral], repay, SINGLE)).toEqual([
+      false,
+      QUEUED_FIRST,
+    ]);
+    expect(validateAddingAction(borrower, collateralAssetsPre(), [repay], supplyCollateral, SINGLE)).toEqual([
+      false,
+      QUEUED_FIRST,
+    ]);
+  });
+
+  // A withdrawal and a borrow have amount rules of their own, which other tests cover.
+  const withoutAmountRules = actionsOfEachKind().filter(([name]) => name !== 'withdrawal' && name !== 'borrow');
+
+  it.each(withoutAmountRules)('accepts a %s into an empty queue', (_name, action) => {
+    expect(validateAddingAction(baseAssetPre(), collateralAssetsPre(), [], action, SINGLE)).toBe('ok');
+  });
+
+  it('allows several actions when the queue is not limited to one', () => {
+    const batching: ActionRules = { ...SINGLE, isSingleAction: false };
+    const supply = mockBaseAction({ actionType: ActionType.Supply, amount: 1_000_000n });
+    const supplyCollateral = mockCollateralAction({ actionType: ActionType.SupplyCollateral, amount: 10n ** 16n });
+
+    expect(validateAddingAction(baseAssetPre(), collateralAssetsPre(), [supplyCollateral], supply, batching)).toBe(
+      'ok'
+    );
+    expect(validateAddingAction(baseAssetPre(), collateralAssetsPre(), [supplyCollateral], supply)).toBe('ok');
+  });
+});
+
 describe('lendsBaseDirectly', () => {
   const collateralAssetsPre = () => [mockEthCollateralAsset()];
 
@@ -560,6 +642,15 @@ describe('lendsBaseDirectly', () => {
       mockBaseAction({ actionType: ActionType.Repay, amount: MAX_UINT256 }),
     ];
     expect(lendsBaseDirectly(mockBaseAsset({ balance: -10000000000n }), collateralAssetsPre(), actions)).toBe(false);
+  });
+
+  it('finds a borrow while a direct supply remains, which Comet withdraws before it borrows', () => {
+    const borrow = [mockBaseAction({ actionType: ActionType.Borrow, amount: 1_000_000_000n })];
+    expect(lendsBaseDirectly(mockBaseAsset({ balance: 250_000_000n }), collateralAssetsPre(), borrow)).toBe(true);
+    expect(lendsBaseDirectly(mockBaseAsset({ balance: 1n }), collateralAssetsPre(), borrow)).toBe(true);
+    // No direct supply, or a borrow already, leaves nothing for the borrow to withdraw first.
+    expect(lendsBaseDirectly(mockBaseAsset({ balance: 0n }), collateralAssetsPre(), borrow)).toBe(false);
+    expect(lendsBaseDirectly(mockBaseAsset({ balance: -10n }), collateralAssetsPre(), borrow)).toBe(false);
   });
 });
 

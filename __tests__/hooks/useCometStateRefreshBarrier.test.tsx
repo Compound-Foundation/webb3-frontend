@@ -4,6 +4,7 @@ import { BigNumber } from 'ethers';
 
 import { Web3 } from '@contexts/Web3Context';
 import { REFRESH_INTERVAL } from '@helpers/numbers';
+import { CometStateResponse } from '@helpers/sleuth/types';
 import { useCometState } from '@hooks/useCometState';
 import { queryCometData } from '@hooks/useSelectedMarket';
 import { MarketData, MarketDataState, RewardsState, StateType, Transaction, TransactionState } from '@types';
@@ -21,24 +22,40 @@ jest.mock('@hooks/useSelectedMarket', () => ({
 
 const mockQueryCometData = queryCometData as jest.Mock;
 
-const cometResponse = (earnAPR: number) => ({
-  totalSupply: BigNumber.from(0),
-  totalBorrow: BigNumber.from(0),
-  nativeAssetInDollars: BigNumber.from(0),
-  borrowAPR: BigNumber.from(0),
-  earnAPR: BigNumber.from(earnAPR),
-  collateralAssets: [],
-  baseAsset: {
-    baseAsset: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    symbol: 'USDC',
-    name: 'USD Coin',
-    decimals: BigNumber.from(6),
-    minBorrow: BigNumber.from(0),
-    priceFeed: '0x0000000000000000000000000000000000000001',
-    balanceOfComet: BigNumber.from(0),
-    price: BigNumber.from(100_000_000),
-  },
+// A rate model whose per-second rate is `perSecondRate` at any utilization.
+const rateModel = (perSecondRate: number) => ({
+  kink: BigNumber.from(0),
+  perSecondInterestRateBase: BigNumber.from(perSecondRate),
+  perSecondInterestRateSlopeLow: BigNumber.from(0),
+  perSecondInterestRateSlopeHigh: BigNumber.from(0),
 });
+
+// The seconds in a 365-day year, written out so that expected values do not depend on the
+// constant in the code under test.
+const SECONDS_PER_YEAR = 31_536_000n;
+
+// The hook's `earnAPR` equals `supplyRatePerSecond * SECONDS_PER_YEAR`.
+const cometResponse = (supplyRatePerSecond: number) =>
+  ({
+    totalSupply: BigNumber.from(0),
+    totalBorrow: BigNumber.from(0),
+    nativeAssetInDollars: BigNumber.from(0),
+    utilization: BigNumber.from(0),
+    factorScale: BigNumber.from(10).pow(18),
+    borrowRateModel: rateModel(0),
+    supplyRateModel: rateModel(supplyRatePerSecond),
+    collateralAssets: [],
+    baseAsset: {
+      baseAsset: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      decimals: BigNumber.from(6),
+      minBorrow: BigNumber.from(0),
+      priceFeed: '0x0000000000000000000000000000000000000001',
+      balanceOfComet: BigNumber.from(0),
+      price: BigNumber.from(100_000_000),
+    },
+  } satisfies Partial<CometStateResponse>);
 
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 const WRAPPER = '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73';
@@ -109,7 +126,7 @@ describe('useCometState refresh barrier', () => {
     await runFirstRead();
 
     expect(result.current[0]).toBe(StateType.NoWallet);
-    expect(result.current[1]?.earnAPR).toBe(222n);
+    expect(result.current[1]?.earnAPR).toBe(222n * SECONDS_PER_YEAR);
   });
 
   it('keeps refreshing the selected market while an interrupted wrapper request is tracked', async () => {
@@ -119,7 +136,7 @@ describe('useCometState refresh barrier', () => {
       transactions: [INTERRUPTED_WRAPPER_REQUEST],
     });
     await runFirstRead();
-    expect(result.current[1]?.earnAPR).toBe(111n);
+    expect(result.current[1]?.earnAPR).toBe(111n * SECONDS_PER_YEAR);
 
     mockQueryCometData.mockResolvedValue(cometResponse(333));
     await act(async () => {
@@ -127,7 +144,7 @@ describe('useCometState refresh barrier', () => {
     });
 
     expect(result.current[0]).toBe(StateType.NoWallet);
-    expect(result.current[1]?.earnAPR).toBe(333n);
+    expect(result.current[1]?.earnAPR).toBe(333n * SECONDS_PER_YEAR);
   });
 
   it.each<[string, Transaction]>([
@@ -174,7 +191,7 @@ describe('useCometState refresh barrier', () => {
     });
 
     expect(result.current[0]).toBe(StateType.NoWallet);
-    expect(result.current[1]?.earnAPR).toBe(111n);
+    expect(result.current[1]?.earnAPR).toBe(111n * SECONDS_PER_YEAR);
   });
 
   it('applies a delayed refresh once a live wrapper request is marked interrupted', async () => {
@@ -196,7 +213,7 @@ describe('useCometState refresh barrier', () => {
     });
 
     expect(result.current[0]).toBe(StateType.NoWallet);
-    expect(result.current[1]?.earnAPR).toBe(111n);
+    expect(result.current[1]?.earnAPR).toBe(111n * SECONDS_PER_YEAR);
   });
 
   it('delays the refresh for a broadcast transaction tracked beside an interrupted wrapper request', async () => {
@@ -222,6 +239,6 @@ describe('useCometState refresh barrier', () => {
     });
 
     expect(result.current[0]).toBe(StateType.NoWallet);
-    expect(result.current[1]?.earnAPR).toBe(111n);
+    expect(result.current[1]?.earnAPR).toBe(111n * SECONDS_PER_YEAR);
   });
 });

@@ -1,10 +1,12 @@
 // The HTTPS JSON-RPC proxy that the app's RPC URLs point at. `envVars.ts` builds every RPC URL as
 // `https://${VITE_V3_RPC_PROVIDER_HOST}/<network>`, so the harness sets that host to this proxy's address.
-// `/ethereum-mainnet` goes to the local anvil fork, for reads only. Every other network answers a JSON-RPC
-// error: the harness forks Ethereum alone and has no other-chain passthrough.
+// `/ethereum-mainnet` goes to the anvil fork of the lane the request's lane header names, for reads only.
+// Every other network answers a JSON-RPC error: the harness forks Ethereum alone and has no other-chain
+// passthrough.
 import https from 'node:https';
 
 import { countIn, methodName } from './fork';
+import { LANE_HEADER, laneOf } from './laneHeader';
 
 /** The reads the app makes. Every other method is refused on every route, so the page can neither write nor administer the fork. */
 export const APP_READ_METHODS: ReadonlySet<string> = new Set([
@@ -37,6 +39,8 @@ export type RpcProxyStats = {
   refused: Map<string, number>;
   /** Calls to a network the harness does not serve, by route. */
   unserved: Map<string, number>;
+  /** Calls forwarded, by fork lane. */
+  lanes: Map<string, number>;
 };
 
 export type RpcProxy = {
@@ -57,18 +61,21 @@ const jsonRpcError = (id: unknown, code: number, message: string) => ({
  * Starts the proxy on 127.0.0.1 with `tls`. `allowedOrigins` is read on every request, so origins added after
  * start-up, such as a preview server's, take effect at once. A request is refused when its Host is not the
  * proxy's own address (DNS rebinding), when it carries an Origin outside `allowedOrigins`, when it is not a
- * JSON POST, or when its body is over 10 MB.
+ * JSON POST, or when its body is over 10 MB. A read goes to `forkUrl` of the lane its lane header names, and
+ * is refused when the header names no lane below `laneCount` whose fork has started.
  */
 export function startRpcProxy({
   tls,
-  forkUrl,
+  forkUrl: forkUrlOfLane,
+  laneCount,
   allowedOrigins,
 }: {
   tls: { key: Buffer; cert: Buffer };
-  forkUrl: () => string;
+  forkUrl: (lane: number) => string | undefined;
+  laneCount: number;
   allowedOrigins: ReadonlySet<string>;
 }): Promise<RpcProxy> {
-  const stats: RpcProxyStats = { forwarded: new Map(), refused: new Map(), unserved: new Map() };
+  const stats: RpcProxyStats = { forwarded: new Map(), refused: new Map(), unserved: new Map(), lanes: new Map() };
   const server = https.createServer({ key: tls.key, cert: tls.cert }, (request, response) => {
     const origin = request.headers.origin;
     const corsHeaders: Record<string, string> =
@@ -138,11 +145,21 @@ export function startRpcProxy({
         const errors = calls.map((call) => jsonRpcError(call?.id, -32000, 'harness: chain not served by the harness'));
         return answer(isBatch ? errors : errors[0]);
       }
+      const lane = laneOf(request.headers[LANE_HEADER], laneCount);
+      const forkUrl = lane === undefined ? undefined : forkUrlOfLane(lane);
+      if (forkUrl === undefined) {
+        countIn(stats.refused, '<no started fork lane>');
+        const errors = calls.map((call) =>
+          jsonRpcError(call?.id, -32603, 'harness: the request names no started fork lane')
+        );
+        return answer(isBatch ? errors : errors[0]);
+      }
       // Rebuilt from the four members that were checked.
       const checked = calls.map(({ jsonrpc, id, method, params }) => ({ jsonrpc, id, method, params }));
       for (const method of methods) countIn(stats.forwarded, method);
+      for (let each = 0; each < calls.length; each++) countIn(stats.lanes, String(lane));
       try {
-        const upstream = await fetch(forkUrl(), {
+        const upstream = await fetch(forkUrl, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(isBatch ? checked : checked[0]),

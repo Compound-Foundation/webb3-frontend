@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import type { FullConfig, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 
+import * as secrets from '../secrets';
 import SummaryReporter, { testId } from '../summaryReporter';
 
 /** A test case as the reporter reads one. */
@@ -41,6 +42,7 @@ const MANIFEST = {
     isSkipped: false,
     missingEndpoint: { resolved: { DEV: false, PROD: true } },
     allowed: { resolved: { DEV: false, PROD: true } },
+    developmentNodeEnv: { resolved: { DEV: true, PROD: false } },
   },
   app: { devResolved: { DEV: true } },
   tls: { mode: 'node-trusts-harness-certificate' },
@@ -48,18 +50,34 @@ const MANIFEST = {
   contracts: { usdcImplementation: '0x00' },
 };
 
-async function summaryOf(selected: readonly (readonly string[])[], inventory: () => string[]) {
+/** What the reporter's last `onEnd` in `summaryOf` returned to Playwright and printed to the console. */
+let lastEnd: { result: unknown; console: string } = { result: undefined, console: '' };
+
+async function summaryOf(
+  selected: readonly (readonly string[])[],
+  inventory: () => string[],
+  manifest: object = MANIFEST,
+  stats?: object,
+  outputs: Record<string, string> = {}
+) {
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-summary-'));
-  fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(MANIFEST));
+  fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(manifest));
+  if (stats !== undefined) fs.writeFileSync(path.join(runDir, 'stats.json'), JSON.stringify(stats));
+  for (const [name, content] of Object.entries(outputs)) fs.writeFileSync(path.join(runDir, name), content);
   // The synthetic inventory holds none of the real required cases, which the last tests below cover.
   const reporter = new SummaryReporter({ runDir, inventory, requiredCases: [] });
   const tests = selected.map(([project, file, title]) => testCase(project, file, title));
   reporter.onBegin({ projects: [] } as unknown as FullConfig, { allTests: () => tests } as unknown as Suite);
   for (const each of tests) reporter.onTestEnd(each, passed);
   const write = process.stdout.write;
-  process.stdout.write = (() => true) as typeof process.stdout.write;
+  const printed: string[] = [];
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    printed.push(chunk.toString());
+    return true;
+  }) as typeof process.stdout.write;
   try {
-    await reporter.onEnd({ status: 'passed' } as never);
+    const result = await reporter.onEnd({ status: 'passed' } as never);
+    lastEnd = { result, console: printed.join('') };
   } finally {
     process.stdout.write = write;
   }
@@ -148,4 +166,138 @@ test('a run whose full inventory cannot be listed is INCOMPLETE', async () => {
   });
   expect(summary).toContain('Verdict: **INCOMPLETE**');
   expect(summary).toContain('could not list the full suite');
+});
+
+test("the run section gives the fork cache's state, trust class and directory, with the home directory as ~", async () => {
+  const withCache = (cache: object) => ({ ...MANIFEST, fork: { ...MANIFEST.fork, cache } });
+  expect(
+    await summaryOf(
+      FULL,
+      () => FULL.map(id),
+      withCache({ state: 'warm', trust: 'public', directory: '/data/fork-cache' })
+    )
+  ).toContain('- Fork cache: warm (public), /data/fork-cache');
+  expect(
+    await summaryOf(
+      FULL,
+      () => FULL.map(id),
+      withCache({ state: 'cold', trust: 'private', directory: path.join(os.homedir(), '.cache/cf-browser-fork') })
+    )
+  ).toContain('- Fork cache: cold (private), ~/.cache/cf-browser-fork');
+  expect(await summaryOf(FULL, () => FULL.map(id), withCache({ state: 'off' }))).toContain('- Fork cache: off');
+  expect(
+    await summaryOf(FULL, () => FULL.map(id), withCache({ state: 'off', reason: 'port 18546 is in use' }))
+  ).toContain('- Fork cache: off (port 18546 is in use)');
+  // A manifest written before the cache existed.
+  expect(await summaryOf(FULL, () => FULL.map(id))).toContain('- Fork cache: not recorded');
+});
+
+test('the proxies section says whether the run promoted its fork cache, and why not', async () => {
+  const STATS = {
+    rpcProxy: { forwarded: {}, refused: {}, unserved: {} },
+    upstream: { methods: {}, refused: {}, failures: 0, errorAnswers: 0 },
+    cleanupErrors: [],
+  };
+  const promoted = {
+    ...STATS,
+    forkCachePromotion: {
+      isPromoted: true,
+      reason: 'promoted the union of 1 lane',
+      lanes: [
+        { lane: 0, generation: 0, isMerged: true, reason: 'merged 3 new entries' },
+        { lane: 1, generation: 0, isMerged: false, reason: 'anvil did not exit cleanly' },
+        { lane: 1, generation: 1, isMerged: true, reason: 'merged 1 new entry' },
+      ],
+    },
+  };
+  expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, promoted)).toContain(
+    '- Fork cache after the run: promoted the union of 1 lane to the shared cache (lane 0: merged 3 new entries; lane 1: anvil did not exit cleanly; lane 1 after restart 1: merged 1 new entry)'
+  );
+  const refused = { ...STATS, forkCachePromotion: { isPromoted: false, reason: 'the fork was sent anvil_setRpcUrl' } };
+  expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, refused)).toContain(
+    '- Fork cache after the run: not promoted (the fork was sent anvil_setRpcUrl)'
+  );
+  expect(await summaryOf(FULL, () => FULL.map(id), MANIFEST, STATS)).not.toContain('Fork cache after the run');
+});
+
+test('the run section gives the worker count, how it was chosen, the signals it could not read, and the lanes started', async () => {
+  const selection = {
+    workers: 2,
+    source: 'estimate',
+    reasons: ['CPU: 16 CPUs at 50 % idle leave 8.0; 2 for shared services and 2 per worker allow 3', 'memory: allow 2'],
+    missing: ['CPU idle share'],
+  };
+  const manifest = {
+    ...MANIFEST,
+    concurrency: { workers: 2, selection, isCliOverride: false },
+    lanes: {
+      count: 2,
+      started: [
+        { index: 0, generation: 0, cache: 'warm' },
+        { index: 1, generation: 0, cache: 'warm' },
+        { index: 1, generation: 1, cache: 'warm' },
+      ],
+    },
+  };
+  const summary = await summaryOf(FULL, () => FULL.map(id), manifest);
+  expect(summary).toContain(
+    '- Workers: 2, by estimate: CPU: 16 CPUs at 50 % idle leave 8.0; 2 for shared services and 2 per worker allow 3; memory: allow 2. Signals not read: CPU idle share.'
+  );
+  expect(summary).toContain('- Fork lanes: 2 of 2 started; lane 1 restarted once');
+  const overridden = { ...manifest, concurrency: { workers: 1, selection, isCliOverride: true } };
+  expect(await summaryOf(FULL, () => FULL.map(id), overridden)).toContain(
+    '- Workers: 1, set by --workers (the estimate was 2)'
+  );
+  // A manifest from before fork lanes has no worker line.
+  expect(await summaryOf(FULL, () => FULL.map(id))).not.toContain('- Workers:');
+});
+
+test('the proxies section gives the upstream bursts and the reads by lane', async () => {
+  const stats = {
+    rpcProxy: { forwarded: {}, refused: {}, unserved: {}, lanes: { '0': 10, '1': 4 } },
+    upstream: {
+      requests: 40,
+      methods: {},
+      refused: {},
+      failures: 0,
+      errorAnswers: 1,
+      peakPending: 6,
+      peakPerSecond: 9,
+    },
+    cleanupErrors: [],
+  };
+  const summary = await summaryOf(FULL, () => FULL.map(id), MANIFEST, stats);
+  expect(summary).toContain('- App RPC proxy reads by lane: {"0":10,"1":4}');
+  expect(summary).toContain(
+    '- Upstream bursts: 40 requests in all, at most 6 open at once and 9 started in one second'
+  );
+});
+
+describe('the secret scan', () => {
+  const TOKEN = 'f'.repeat(64);
+  beforeAll(() => secrets.registerSecret(TOKEN, 'the control token'));
+  afterEach(() => jest.restoreAllMocks());
+
+  test('a secret in an output fails the run, and the summary names its kind and file, never its value', async () => {
+    const summary = await summaryOf(FULL, () => FULL.map(id), MANIFEST, undefined, { 'trace.log': `Bearer ${TOKEN}` });
+    expect(summary).toContain('Verdict: **FAIL**');
+    expect(summary).toContain('**1 secret(s) found:** the control token in trace.log');
+    expect(summary).not.toContain(TOKEN);
+    // The reporter's result is what fails the Playwright run.
+    expect(lastEnd.result).toEqual({ status: 'failed' });
+    expect(lastEnd.console).toContain('FAIL');
+    expect(lastEnd.console).not.toContain(TOKEN);
+  });
+
+  test('the summary counts the outputs it scanned, which it lists once', async () => {
+    const outputsUnder = jest.spyOn(secrets, 'outputsUnder');
+    const summary = await summaryOf(FULL, () => FULL.map(id), MANIFEST, undefined, { 'a.log': 'one', 'b.log': 'two' });
+    expect(summary).toContain('Verdict: **PASS**');
+    // manifest.json, test-output.log, a.log and b.log.
+    expect(summary).toMatch(
+      /No secret found\. \d+ secrets were registered, and 4 files and trace members were scanned/
+    );
+    expect(outputsUnder).toHaveBeenCalledTimes(1);
+    expect(lastEnd.result).toBeUndefined();
+  });
 });

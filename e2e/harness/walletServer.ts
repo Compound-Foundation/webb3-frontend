@@ -10,7 +10,10 @@
 // Transactions are never signed. An approved `eth_sendTransaction` goes to anvil's own
 // `eth_sendTransaction` from an impersonated sender, after the server checks again that the node is the
 // expected local fork. So no signed chain-1 transaction exists that could be replayed on mainnet. Messages
-// and typed data are signed with a key made for the run, held only in this process.
+// and typed data are signed with the account's key, held only in this process. A reset can carry a seed, the
+// test's identity. With the fork cache on, the keys of that test's accounts are derived from the seed and the
+// cache root's random salt, so the test has the same addresses in every run that uses that cache, and the
+// cache holds what anvil read for them. No one without the salt can derive the keys. Otherwise keys are random.
 import type { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
@@ -20,7 +23,9 @@ import {
   encodeFunctionData,
   getAddress,
   isHex,
+  keccak256,
   parseEther,
+  stringToBytes,
   toHex,
   type Address,
   type Hex,
@@ -30,7 +35,7 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { BLOCK_SECONDS } from './blockTime';
 import { ERC20_ABI, USDC, usdcBalanceKey } from './contracts';
 import { hex, rpc, verifyFork } from './fork';
-import { SCREENING_BEHAVIOURS, isAddress, type ScreeningBehaviour, type ScreeningStub } from './screeningStub';
+import { SCREENING_BEHAVIOURS, isAddress, type ScreeningBehaviour, type ScreeningLane } from './screeningStub';
 
 /** The provider methods that queue for a decision. */
 export const QUEUED_METHODS = [
@@ -65,6 +70,10 @@ export const WALLET_READ_METHODS: ReadonlySet<string> = new Set([
 /** How long one `/v1/rpc`, outcome or events call waits before it answers "still pending". */
 export const LONG_POLL_MS = 20_000;
 export const MAX_CONTROL_BODY_BYTES = 1024 * 1024;
+/** How often the wallet reads a sent transaction's receipt while it waits for anvil to mine it. */
+const RECEIPT_POLL_MS = 50;
+/** How long the wallet's request to drop an unconfirmed transaction may take. Nothing waits for it. */
+const DROP_TIMEOUT_MS = 5_000;
 
 export type RpcErrorBody = { code: number; message: string; data?: unknown };
 export type Outcome = { result: unknown } | { error: RpcErrorBody };
@@ -100,16 +109,23 @@ type Account = { address: Address; key?: Hex };
 export type WalletServerOptions = {
   fork: { localUrl: string; child?: ChildProcess };
   target: { number: number; hash: string };
+  /** The upstream proxy that anvil forks from, which each reset names again. */
+  upstreamUrl: string;
   token: string;
-  screening: ScreeningStub;
+  /** This lane's screening partition. */
+  screening: ScreeningLane;
   stats?: () => Record<string, unknown>;
   log?: (line: string) => void;
   /** Gets every key the server makes, for the run's secret scan. */
   onSecret?: (secret: string) => void;
+  /** The cache root's account salt. Without it, a reset's seed is ignored and every key is random. */
+  accountSalt?: string;
   /** The most provider calls one generation records. Past it the record reports an overflow. */
   providerCallLimit?: number;
   /** Checks the fork before each send. Tests replace it to see the server refuse. */
   verify?: typeof verifyFork;
+  /** How long a send waits for anvil to mine it, 30 s unless a test sets it. */
+  mineTimeoutMs?: number;
 };
 
 export type WalletServer = {
@@ -121,13 +137,19 @@ export type WalletServer = {
 };
 
 class HttpError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
     super(message);
   }
 }
 
 class WalletError extends Error {
-  constructor(readonly code: number, message: string) {
+  constructor(
+    readonly code: number,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -153,6 +175,48 @@ export function tokenMatches(expected: string, given: string): boolean {
   return timingSafeEqual(sha256(expected), sha256(given));
 }
 
+/** The longest account seed a reset takes. */
+const MAX_ACCOUNT_SEED_LENGTH = 512;
+/** The order of the secp256k1 group. A private key is at least 1 and below it. */
+const SECP256K1_ORDER = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+
+/**
+ * The account seed of one attempt of a Playwright test. It is the same for that test in every run, and differs
+ * for every other test, repeat and retry, so no two tests of a run share an account.
+ */
+export const accountSeedOf = ({
+  testId,
+  repeatEachIndex,
+  retry,
+}: {
+  testId: string;
+  repeatEachIndex: number;
+  retry: number;
+}) => `${testId}/${repeatEachIndex}/${retry}`;
+
+/** `hash` when it is a private key, that is at least 1 and below the group order, else it hashed until it is one. */
+export function privateKeyFrom(hash: Hex): Hex {
+  let key = hash;
+  while (BigInt(key) === 0n || BigInt(key) >= SECP256K1_ORDER) key = keccak256(key);
+  return key;
+}
+
+/**
+ * The key of the keyed account at `index`, counted from 0, among those made after a reset with `seed`, under
+ * the cache root's `salt`.
+ */
+export const accountKey = (salt: string, seed: string, index: number): Hex =>
+  privateKeyFrom(keccak256(stringToBytes(`cf-browser-harness account key\n${salt}\n${seed}\n${index}`)));
+
+/** The seed a reset request carries: none, or a string of 1 to `MAX_ACCOUNT_SEED_LENGTH` characters. */
+function accountSeedParam(seed: unknown): string | undefined {
+  if (seed === undefined) return undefined;
+  if (typeof seed !== 'string' || seed.length === 0 || seed.length > MAX_ACCOUNT_SEED_LENGTH) {
+    throw new HttpError(400, `seed must be a string of 1 to ${MAX_ACCOUNT_SEED_LENGTH} characters`);
+  }
+  return seed;
+}
+
 /** The chain ID in a `wallet_switchEthereumChain` or `wallet_addEthereumChain` parameter. */
 function chainIdParam(params: unknown): number {
   const [first] = Array.isArray(params) ? params : [];
@@ -169,7 +233,10 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     rpc<T>(fork.localUrl, method, params, { timeoutMs: 60_000 });
 
   let generation = 0;
-  let baseline = await call<string>('evm_snapshot');
+  /** The seed of this generation's keyed accounts. With no seed, or no salt, keys are random. */
+  let accountSeed: string | undefined;
+  /** How many keyed accounts this generation has made. */
+  let keyedAccounts = 0;
   const accounts = new Map<string, Account>();
   const impersonated = new Set<string>();
   let selected: Address[] = [];
@@ -259,7 +326,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
         if (transaction.chainId !== undefined && Number(transaction.chainId) !== chainId) {
           throw new WalletError(
             -32602,
-            `harness: transaction chainId ${String(transaction.chainId)} is not the wallet's chain`
+            `harness: transaction chainId ${String(transaction.chainId)} is not the wallet's chain`,
           );
         }
         if (!isAddress(transaction.to)) throw new WalletError(-32602, 'harness: a transaction needs a `to` address');
@@ -278,7 +345,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
         if (domainChainId !== undefined && Number(domainChainId) !== chainId) {
           throw new WalletError(
             -32602,
-            `harness: typed data domain chainId ${String(domainChainId)} is not the wallet's chain`
+            `harness: typed data domain chainId ${String(domainChainId)} is not the wallet's chain`,
           );
         }
         if (account.key === undefined) throw new WalletError(4200, 'harness: impersonated account cannot sign');
@@ -303,9 +370,19 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     await call('evm_setNextBlockTimestamp', [hex(Number(latest.timestamp) + BLOCK_SECONDS)]);
   };
 
+  /**
+   * Whether a send was not confirmed, because its receipt was not read in time or a receipt read failed.
+   * anvil can still mine such a transaction, even after it was dropped, so the fork state is unknown, and
+   * every later send is refused until a reset succeeds.
+   */
+  let isForkStateUnknown = false;
+
   /** Sends a transaction from an impersonated harness account on the verified fork. */
   const sendOnFork = (transaction: Record<string, unknown>) =>
     serially(async () => {
+      if (isForkStateUnknown) {
+        throw new WalletError(-32603, 'harness: a send was not confirmed, so the fork state is unknown until a reset');
+      }
       await verifiedFork();
       const from = transaction.from as string;
       if (!impersonated.has(from.toLowerCase()))
@@ -323,8 +400,53 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
         sent[field] = value;
       }
       await setNextTimestamp();
-      return call<string>('eth_sendTransaction', [sent]);
+      // anvil 1.9.0 fills in a missing gas limit from an estimate at the latest block's time, not the time
+      // set for the next block. Comet's interest accrual costs more in the next block than in that estimate,
+      // so a Comet withdrawal can run out of gas inside USDC's transfer. An estimate at the pending block
+      // uses the next block's time, as anvil 1.2.3's own did. If anvil refuses the estimate, nothing is sent.
+      if (sent.gas === undefined) sent.gas = await call<string>('eth_estimateGas', [{ ...sent }, 'pending']);
+      const hash = await call<string>('eth_sendTransaction', [sent]);
+      await mined(hash);
+      return hash;
     });
+
+  /**
+   * Waits until anvil has mined `hash`. anvil 1.9.0 answers `eth_sendTransaction` before it mines the
+   * transaction, and anvil 1.2.3 after. The wallet answers only once the receipt exists, so that the page's
+   * receipt wait finds the block it watches for, and the next send's timestamp follows this block.
+   *
+   * The whole wait, receipt reads included, takes at most `mineTimeoutMs`. When it fails, the fork state is
+   * unknown, and the wallet asks anvil to drop the transaction without waiting for the answer. A dropped
+   * transaction leaves the pool if anvil has not begun to execute it; one it has begun can still be mined.
+   */
+  const mined = async (hash: string) => {
+    const timeoutMs = options.mineTimeoutMs ?? 30_000;
+    const deadline = Date.now() + timeoutMs;
+    const notMined = () => new Error(`transaction ${hash} was not mined within ${timeoutMs / 1000} s`);
+    try {
+      for (;;) {
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) throw notMined();
+        let receipt: unknown;
+        try {
+          receipt = await rpc<unknown>(fork.localUrl, 'eth_getTransactionReceipt', [hash], { timeoutMs: remainingMs });
+        } catch (error) {
+          throw Date.now() >= deadline ? notMined() : error;
+        }
+        if (receipt !== null) {
+          if (Date.now() > deadline) throw notMined();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, Math.min(RECEIPT_POLL_MS, deadline - Date.now())));
+      }
+    } catch (error) {
+      isForkStateUnknown = true;
+      void rpc(fork.localUrl, 'anvil_dropTransaction', [hash], { timeoutMs: DROP_TIMEOUT_MS }).catch((dropError) =>
+        log(`dropping ${hash} failed: ${(dropError as Error)?.message ?? dropError}`),
+      );
+      throw error;
+    }
+  };
 
   const execute = async (request: WalletRequest): Promise<unknown> => {
     if (request.generation !== generation) throw new WalletError(4900, 'harness: the wallet was reset');
@@ -409,7 +531,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
             message: decision.message ?? DEFAULT_MESSAGES[decision.reject] ?? 'harness: rejected',
           },
         },
-        'rejected'
+        'rejected',
       );
     }
   };
@@ -439,7 +561,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
         slot.waiters.delete(wake);
         resolve(
           slot.outcome ??
-            (outcomes.has(id) ? { pending: id } : { error: { code: 4900, message: 'harness: the wallet was reset' } })
+            (outcomes.has(id) ? { pending: id } : { error: { code: 4900, message: 'harness: the wallet was reset' } }),
         );
       };
       const timer = setTimeout(wake, waitMs);
@@ -522,13 +644,17 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
 
   const createAccount = async (
     { eth = '10', usdc = '0', screening: behaviour = 'allowed', hasKey }: AccountOptions & { hasKey: boolean },
-    given?: Address
+    given?: Address,
   ) =>
     serially(async () => {
       if (!SCREENING_BEHAVIOURS.includes(behaviour)) throw new HttpError(400, 'unknown screening behaviour');
       let account: Account;
       if (hasKey) {
-        const key = generatePrivateKey();
+        const { accountSalt } = options;
+        const key =
+          accountSeed === undefined || accountSalt === undefined
+            ? generatePrivateKey()
+            : accountKey(accountSalt, accountSeed, keyedAccounts++);
         options.onSecret?.(key);
         account = { address: privateKeyToAccount(key).address, key };
       } else {
@@ -570,11 +696,13 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       throw new Error(`USDC funding read back ${after}, not ${amount}: unexpected USDC storage layout`);
   };
 
-  const reset = () =>
+  const reset = (seed: string | undefined) =>
     serially(async () => {
       // Everything in memory is cleared before the first await, so no call in between sees the previous
       // test's accounts, permission or policies.
       generation += 1;
+      accountSeed = seed;
+      keyedAccounts = 0;
       const stale = [...impersonated];
       impersonated.clear();
       accounts.clear();
@@ -601,9 +729,12 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       for (const wake of [...eventWaiters]) wake();
       screening.reset();
       for (const address of stale) await call('anvil_stopImpersonatingAccount', [address]);
-      if ((await call<boolean>('evm_revert', [baseline])) !== true) throw new Error('evm_revert failed');
-      baseline = await call<string>('evm_snapshot');
+      // The reset forks the block again from the harness's upstream proxy and drops every change made on the
+      // fork. anvil 1.8 and later keep what they read from the upstream across a reset. The reset names the
+      // proxy, so it also ends a reset by another process to another upstream.
+      await call('anvil_reset', [{ forking: { jsonRpcUrl: options.upstreamUrl, blockNumber: target.number } }]);
       await verifiedFork();
+      isForkStateUnknown = false;
       log(`reset to generation ${generation}`);
       return { generation };
     });
@@ -612,7 +743,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
     [...requests.values()].filter(
       (request) =>
         (!query.has('status') || request.status === query.get('status')) &&
-        (!query.has('method') || request.method === query.get('method'))
+        (!query.has('method') || request.method === query.get('method')),
     );
 
   const route = async (method: string, path: string, query: URLSearchParams, body: Record<string, unknown>) => {
@@ -776,7 +907,7 @@ export async function startWalletServer(options: WalletServerOptions): Promise<W
       case 'GET /v1/stats':
         return options.stats?.() ?? {};
       case 'POST /v1/reset':
-        return reset();
+        return reset(accountSeedParam(body.seed));
       case 'POST /v1/session/end':
         hasSessionEnded = true;
         return { hasEnded: true };

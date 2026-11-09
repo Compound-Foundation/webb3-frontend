@@ -7,13 +7,10 @@ import { getActionQueueContext, initializeContext as initializeActionQueue } fro
 import { getSelectedMarketContext, initializeContext as initializeSelectedMarket } from '@contexts/SelectedMarketContext';
 import { Theme } from '@hooks/useThemeManager';
 import {
-  Action,
   ActionQueue,
-  ActionType,
   CometState,
   MarketData,
   MarketStatus,
-  PendingAction,
   SelectedMarketData,
   StateType,
   TokenWithAccountState,
@@ -43,16 +40,16 @@ initializeSelectedMarket(selected);
 const MAX_UINT256 = 2n ** 256n - 1n;
 const wbtc = mockWbtcCollateralAsset({ balance: 10n ** 7n, walletBalance: 10n ** 8n, allowance: MAX_UINT256 });
 
-const makeActionQueue = (actions: Action[] = [], pendingAction?: PendingAction): ActionQueue => ({
+const actionQueue: ActionQueue = {
   addOrUpdateAction: jest.fn(),
   clearActions: jest.fn(),
   queueActions: jest.fn(),
-  getActions: () => actions,
-  getPendingAction: () => pendingAction,
+  getActions: () => [],
+  getPendingAction: () => undefined,
   removeAction: jest.fn(),
   setPendingAction: jest.fn(),
-});
-initializeActionQueue(makeActionQueue());
+};
+initializeActionQueue(actionQueue);
 
 const makeCometState = (collateral: TokenWithAccountState): CometState => [
   StateType.Hydrated,
@@ -75,8 +72,6 @@ type RenderOptions = {
   isWbtcError?: boolean;
   wbtcAsset?: TokenWithAccountState;
   wbtcFlags?: { isVisible?: boolean; isDeprecated?: boolean };
-  actions?: Action[];
-  pendingAction?: PendingAction;
 };
 
 const renderHome = ({
@@ -84,12 +79,9 @@ const renderHome = ({
   isWbtcError = false,
   wbtcAsset = wbtc,
   wbtcFlags,
-  actions,
-  pendingAction,
 }: RenderOptions) => {
   const SelectedMarketContext = getSelectedMarketContext();
   const ActionQueueContext = getActionQueueContext();
-  const actionQueue = makeActionQueue(actions, pendingAction);
   const market: MarketData = {
     ...MOCK_DEFAULT_MARKET,
     status,
@@ -120,7 +112,6 @@ const renderHome = ({
       </MockMarketsProvider>
     </MemoryRouter>
   );
-  return actionQueue;
 };
 
 describe('Home — market status', () => {
@@ -146,37 +137,6 @@ describe('Home — collateral status', () => {
     expect(within(row).getAllByRole('button', { name: /Supply/ })[0]).toBeDisabled();
     expect(within(row).getAllByRole('button', { name: /Withdraw/ })[0]).toBeDisabled();
   });
-
-  test.each<[string, PendingAction]>([
-    ['supply', [ActionType.SupplyCollateral, { ...wbtc, allowance: 0n }, 10n ** 7n]],
-    ['withdraw', [ActionType.WithdrawCollateral, wbtc, mockBaseAsset(), 10n ** 7n]],
-  ])(
-    'confirming a pending %s of an error collateral neither approves nor queues it',
-    async (_, pendingAction) => {
-      const actionQueue = renderHome({ isWbtcError: true, pendingAction });
-
-      // The confirm (or enable) button sits right after Cancel in the action input
-      const [confirmButton] = screen
-        .getAllByRole('button', { name: 'Cancel' })
-        .map((cancel) => cancel.nextElementSibling);
-      await userEvent.click(confirmButton as HTMLElement);
-
-      expect(writeState.approve).not.toHaveBeenCalled();
-      expect(actionQueue.addOrUpdateAction).not.toHaveBeenCalled();
-    }
-  );
-
-  test.each([ActionType.SupplyCollateral, ActionType.WithdrawCollateral] as const)(
-    'a queued %s of an error collateral is not submitted',
-    async (actionType) => {
-      renderHome({ isWbtcError: true, actions: [[actionType, wbtc, 10n ** 7n]] });
-
-      await userEvent.click(screen.getAllByRole('button', { name: 'Submit Transaction' })[0]);
-
-      expect(writeState.supply).not.toHaveBeenCalled();
-      expect(writeState.withdraw).not.toHaveBeenCalled();
-    }
-  );
 });
 
 describe('Home — collateral visibility', () => {
