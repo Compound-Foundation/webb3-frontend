@@ -11,13 +11,19 @@
 //   historical log query upstream. A private upstream's answer to it must be a bounded array of logs
 //   (`isLogArray`). The proxy reads at most 64 MB of any answer.
 // - anvil starts with `--accounts 0`, so it holds no unlocked account and can sign nothing.
+// - The harness runs anvil 1.9.0, and a fork of the pinned block reuses the state earlier runs read
+//   (`loadForkCache`, `promoteLaneCaches`).
 // - The matrix, verdict and retry rules of the wrapped lending suite are left out.
 import { ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import zlib from 'node:zlib';
+
+import { keccak256, stringToBytes } from 'viem';
 
 /** COM-289's pinned block, and its hash. */
 export const PINNED_BLOCK = 26244888;
@@ -32,7 +38,10 @@ export const PUBLIC_ENDPOINTS = [
 ];
 /** A recent fork stays this many blocks behind the endpoint's latest. */
 export const RECENT_BLOCK_LAG = 8;
-/** The EVM rules the fork runs: Prague, the latest that anvil 1.2.3 knows. Mainnet runs Osaka. */
+/**
+ * The EVM rules the fork runs: Prague, against which the harness's assertions were written. anvil 1.9.0 gives
+ * the same gas under it as anvil 1.2.3 did. Mainnet runs Osaka.
+ */
 export const HARDFORK = 'prague';
 /** The largest JSON-RPC body the proxy forwards. */
 export const MAX_PROXY_BODY_BYTES = 10 * 1024 * 1024;
@@ -366,8 +375,9 @@ export async function rpc<T = unknown>(
   return body?.result as T;
 }
 
-/** The phrases anvil's retry rule reads in an error's message (alloy 0.12.6, in anvil 1.2.3). */
+/** The phrases anvil's retry rule reads in an error's message (alloy-json-rpc 2.5.0, in anvil 1.9.0). */
 const RETRY_PHRASES = [
+  'maximum number of concurrent requests',
   'rate limit',
   'rate exceeded',
   'too many requests',
@@ -391,7 +401,7 @@ export function withheldMessage(message: unknown): string {
 export const methodName = (method: unknown) =>
   typeof method === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(method) ? method : '<invalid>';
 
-export const countIn = (counts: Map<string, number>, key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
+export const countIn = <Key>(counts: Map<Key, number>, key: Key) => counts.set(key, (counts.get(key) ?? 0) + 1);
 
 type Entry = { id?: unknown; result?: unknown; error?: RpcError | null };
 
@@ -548,6 +558,10 @@ export type UpstreamStats = {
   errorAnswers: number;
   firstError: string | undefined;
   pending: number;
+  /** The most requests open to the upstream at once. */
+  peakPending: number;
+  /** The requests started in each second, by the second since the epoch. */
+  perSecond: Map<number, number>;
   lastFailureAt: number | undefined;
   methods: Map<string, number>;
   refused: Map<string, number>;
@@ -561,7 +575,11 @@ export type UpstreamStats = {
  */
 export function startUpstreamProxy(
   endpoint: Endpoint,
-  { printable, timeoutMs = 40_000 }: { printable: (text: unknown) => string; timeoutMs?: number }
+  {
+    printable,
+    timeoutMs = 40_000,
+    port = 0,
+  }: { printable: (text: unknown) => string; timeoutMs?: number; port?: number }
 ): Promise<{ server: http.Server; stats: UpstreamStats; url: string }> {
   const stats: UpstreamStats = {
     requests: 0,
@@ -569,6 +587,8 @@ export function startUpstreamProxy(
     errorAnswers: 0,
     firstError: undefined,
     pending: 0,
+    peakPending: 0,
+    perSecond: new Map(),
     lastFailureAt: undefined,
     methods: new Map(),
     refused: new Map(),
@@ -622,6 +642,8 @@ export function startUpstreamProxy(
       for (const method of methods) countIn(stats.methods, method);
       stats.requests += 1;
       stats.pending += 1;
+      stats.peakPending = Math.max(stats.peakPending, stats.pending);
+      countIn(stats.perSecond, Math.floor(Date.now() / 1000));
       try {
         const upstream = await fetch(endpoint.url, {
           method: 'POST',
@@ -663,7 +685,7 @@ export function startUpstreamProxy(
   server.keepAliveTimeout = 0;
   return new Promise((resolve, reject) => {
     server.on('error', reject);
-    server.listen(0, '127.0.0.1', () =>
+    server.listen(port, '127.0.0.1', () =>
       resolve({ server, stats, url: `http://127.0.0.1:${(server.address() as { port: number }).port}/` })
     );
   });
@@ -743,7 +765,568 @@ export function findAnvil(env: NodeJS.ProcessEnv = process.env): { command: stri
     const version = toolVersion(candidate, ['--version']);
     if (version !== undefined) return { command: candidate, version };
   }
-  throw new Error('anvil was not found. Install Foundry 1.2.3 (https://getfoundry.sh) or set ANVIL to its path.');
+  throw new Error('anvil was not found. Install Foundry 1.9.0 (https://getfoundry.sh) or set ANVIL to its path.');
+}
+
+/**
+ * The upstream proxy's port when the fork is cached. anvil 1.9.0 binds its cache file to the exact fork URL,
+ * the proxy's, so the URL must be the same in every run for a run to find what an earlier one read.
+ */
+export const CACHED_PROXY_PORT = 18_546;
+
+/**
+ * Node's zstd functions, which anvil 1.9.0's cache files need. Node 22.15 and later have them; the
+ * repository's `@types/node` predates them.
+ */
+export const zstd = zlib as unknown as {
+  zstdCompressSync: (data: Buffer | string) => Buffer;
+  zstdDecompressSync: (data: Buffer) => Buffer;
+};
+
+/** The trust class of the upstream a cache file was read from. Each class has its own file. */
+export type CacheTrust = 'public' | 'private';
+
+/**
+ * The root of the fork cache for a fork of `block`, or undefined when the fork is not cached. Only the pinned
+ * block is cached: its state never changes, so a slot read once holds for every later run. The root is
+ * BROWSER_FORK_CACHE_DIR, else `cf-browser-fork` under an absolute XDG_CACHE_HOME, else under `~/.cache`.
+ * BROWSER_FORK_CACHE=off turns the cache off. Both variables are checked whatever the block.
+ */
+export function forkCacheRoot(
+  env: NodeJS.ProcessEnv,
+  block: 'pinned' | 'latest',
+  homeDirectory: string = os.homedir()
+): string | undefined {
+  const cacheSetting = env.BROWSER_FORK_CACHE ?? '';
+  if (!['on', 'off', ''].includes(cacheSetting)) {
+    throw new Error("BROWSER_FORK_CACHE must be 'on' (the default) or 'off'.");
+  }
+  const cacheDirectoryOverride = env.BROWSER_FORK_CACHE_DIR ?? '';
+  if (cacheDirectoryOverride !== '' && !path.isAbsolute(cacheDirectoryOverride)) {
+    throw new Error('BROWSER_FORK_CACHE_DIR must be an absolute path.');
+  }
+  if (cacheSetting === 'off' || block !== 'pinned') return undefined;
+  if (cacheDirectoryOverride !== '') return cacheDirectoryOverride;
+  const xdgCacheHome = env.XDG_CACHE_HOME ?? '';
+  const cacheParent = path.isAbsolute(xdgCacheHome) ? xdgCacheHome : path.join(homeDirectory, '.cache');
+  return path.join(cacheParent, 'cf-browser-fork');
+}
+
+/**
+ * Creates the cache root, with mode 0700, when it is missing, and refuses it unless it is a directory, not a
+ * symbolic link, that this user owns and no one else can read or write. A local user who can write in it
+ * decides the fork state of every later run. A user who can rename an entry in a parent directory, or change
+ * a symbolic link on the way to the root, can swap the root for a directory of their own. So each directory
+ * and link on the path as given, and each parent the path resolves to, must belong to this user or to root.
+ * A directory that others can write must also have the sticky bit, which stops them renaming this user's
+ * entries. The harness checks again before it loads the cache and before it promotes a run's copy.
+ */
+export function checkCacheRoot(root: string): void {
+  try {
+    fs.lstatSync(root);
+  } catch {
+    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  }
+  const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+  const stat = fs.lstatSync(root);
+  if (!stat.isDirectory() || (uid !== undefined && stat.uid !== uid) || (stat.mode & 0o077) !== 0) {
+    throw new Error(
+      `The fork cache directory ${root} must be a directory you own, with mode 0700, and not a symbolic link.`
+    );
+  }
+  const isTrusted = (entry: string) => {
+    const entryStat = fs.lstatSync(entry);
+    const isTrustedOwner = uid === undefined || entryStat.uid === uid || entryStat.uid === 0;
+    const isOpenWithoutSticky =
+      entryStat.isDirectory() && (entryStat.mode & 0o022) !== 0 && (entryStat.mode & 0o1000) === 0;
+    return isTrustedOwner && !isOpenWithoutSticky;
+  };
+  const withAncestors = (start: string) => {
+    const entries: string[] = [];
+    for (let entry = start; ; entry = path.dirname(entry)) {
+      entries.push(entry);
+      if (entry === path.dirname(entry)) return entries;
+    }
+  };
+  const parent = path.dirname(path.resolve(root));
+  for (const entry of new Set([...withAncestors(parent), ...withAncestors(fs.realpathSync(parent))])) {
+    if (!isTrusted(entry)) {
+      throw new Error(`The fork cache directory ${root} is inside ${entry}, which another user can change.`);
+    }
+  }
+}
+
+/**
+ * The cache root's account salt: 32 random bytes as hex, in `<root>/account-salt`. Test keys come from it,
+ * so a test has the same accounts in every run that uses this root. No one who cannot read the root can
+ * derive them. The first run writes the salt to a file of its own and links it into place, so the salt
+ * appears whole or not at all. The function refuses a file that is a symbolic link, is not a regular file,
+ * belongs to another user or is open to anyone else, and a file that holds no salt.
+ */
+export function accountSalt(root: string): string {
+  const file = path.join(root, 'account-salt');
+  const temporaryFile = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    fs.writeFileSync(temporaryFile, randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
+    fs.linkSync(temporaryFile, file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  } finally {
+    fs.rmSync(temporaryFile, { force: true });
+  }
+  const refused = new Error(
+    `The fork cache's ${file} must be a file you own, with mode 0600, and not a symbolic link.`
+  );
+  // The checks read the opened file, so no swap of the path between a check and the read goes unseen.
+  let descriptor: number;
+  try {
+    descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw refused;
+    throw error;
+  }
+  let salt: string;
+  try {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || (uid !== undefined && stat.uid !== uid) || (stat.mode & 0o077) !== 0) throw refused;
+    salt = fs.readFileSync(descriptor, 'utf8');
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  if (!/^[0-9a-f]{64}$/.test(salt)) throw new Error(`The fork cache's ${file} does not hold a salt: delete it.`);
+  return salt;
+}
+
+/** The shared cache file of one trust class for a mainnet fork of `blockNumber`. */
+export const sharedCacheFile = (root: string, trust: CacheTrust, blockNumber: number) =>
+  path.join(root, trust, `mainnet-${blockNumber}.json`);
+
+/**
+ * The file in which anvil 1.9.0 keeps the state it read from the upstream at `forkUrl` for a mainnet fork of
+ * `blockNumber`, under the home it runs with.
+ */
+export const anvilCacheFile = (anvilHome: string, blockNumber: number, forkUrl: string) =>
+  path.join(
+    anvilHome,
+    '.foundry',
+    'cache',
+    'rpc',
+    'mainnet',
+    String(blockNumber),
+    `storage-${keccak256(stringToBytes(forkUrl)).slice(2)}.json`
+  );
+
+/**
+ * The block of a cache file that anvil 1.9.0 can read: a regular file, not a link, of zstd-compressed JSON
+ * that names its block. anvil also checks the file's fork URL and block header, which the harness does not.
+ */
+function cachedBlock(file: string): number | undefined {
+  try {
+    if (!fs.lstatSync(file).isFile()) return undefined;
+    const content = JSON.parse(zstd.zstdDecompressSync(fs.readFileSync(file)).toString('utf8'));
+    const number = content?.meta?.block_env?.number;
+    return typeof number === 'string' && /^0x[0-9a-fA-F]{1,16}$/.test(number) ? Number(number) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `warm` when `file` is a cache of `blockNumber` that anvil can read, else `cold`. */
+export const forkCacheState = (file: string, blockNumber: number): 'cold' | 'warm' =>
+  cachedBlock(file) === blockNumber ? 'warm' : 'cold';
+
+/**
+ * Prepares anvil's home for the run in the run's private directory: emptied, and holding a copy of the shared
+ * cache file, under the name anvil gives it for `forkUrl`, when the shared file is warm. anvil writes only to
+ * this copy, never to the shared file.
+ */
+export function loadForkCache({
+  sharedFile,
+  runHome,
+  blockNumber,
+  forkUrl,
+}: {
+  sharedFile: string;
+  runHome: string;
+  blockNumber: number;
+  forkUrl: string;
+}): 'cold' | 'warm' {
+  fs.rmSync(runHome, { recursive: true, force: true });
+  fs.mkdirSync(runHome, { recursive: true, mode: 0o700 });
+  const state = forkCacheState(sharedFile, blockNumber);
+  if (state === 'warm') {
+    const file = anvilCacheFile(runHome, blockNumber, forkUrl);
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.copyFileSync(sharedFile, file);
+  }
+  return state;
+}
+
+/** The anvil methods the harness calls. None of them changes the upstream the fork's cache file is named for. */
+const HARNESS_ANVIL_METHODS: ReadonlySet<string> = new Set([
+  'anvil_dropTransaction',
+  'anvil_impersonateAccount',
+  'anvil_metadata',
+  'anvil_reset',
+  'anvil_setBalance',
+  'anvil_setStorageAt',
+  'anvil_stopImpersonatingAccount',
+  'evm_setNextBlockTimestamp',
+]);
+
+/**
+ * The methods in `methods` that stop the run's cache from being promoted: every method except the `eth_`,
+ * `net_` and `web3_` methods and the harness's own. anvil's RPC port has no credential, so any local process
+ * can call it. `anvil_reset` is the harness's own: anvil writes what it read to the file of the upstream it
+ * read from, so a reset to another upstream fills another file, and the harness's next reset names its own
+ * upstream again. `anvil_setRpcUrl` changes the upstream without a new file, and `anvil_setLoggingEnabled`
+ * hides every later call from the log. The list allows known methods, so a method added to anvil later also
+ * stops the promotion.
+ */
+export const methodsBlockingPromotion = (methods: Iterable<string>) =>
+  [...new Set(methods)].filter((method) => !/^(?:eth|net|web3)_/.test(method) && !HARNESS_ANVIL_METHODS.has(method));
+
+/** Adds to `methods` each line of anvil's output that is only a method name. anvil logs most calls this way. */
+export function recordLoggedMethods(text: string, methods: Set<string>): void {
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (/^[a-z][a-z0-9]*_[A-Za-z0-9]+$/.test(trimmed)) methods.add(trimmed);
+  }
+}
+
+/**
+ * Whether `version`, anvil's `--version` line, is anvil 1.9.0, whose cache format, reset and method log the
+ * cache relies on. An earlier anvil cannot read the cache file.
+ */
+export const isCacheAnvil = (version: string) => /^anvil Version: 1\.9\.0(?:\D|$)/.test(version);
+
+/**
+ * Methods that `verifyFork` sends to every fork the harness uses, and that anvil logs. Their absence from the
+ * log means the log was not read as expected, so nothing can be promoted.
+ */
+export const ALWAYS_LOGGED_METHODS = ['eth_chainId', 'anvil_metadata'];
+
+/** The most method names a promotion's reason lists. */
+const MAX_LISTED_METHODS = 5;
+
+/** What one lane's anvil left for the promotion: its home, its log's methods, and how it stopped. */
+export type LaneCache = {
+  lane: number;
+  /** Which start of the lane this was: 0, unless its anvil exited during the run and was started again. */
+  generation: number;
+  runHome: string;
+  methods: Iterable<string>;
+  hasExitedCleanly: boolean;
+  anvilVersion: string;
+  /** Whether the upstream proxy still held its port when this lane's anvil stopped. */
+  isProxyListening: boolean;
+};
+
+export type LaneGate = { isEligible: true; file: string } | { isEligible: false; reason: string };
+
+/**
+ * Whether one lane's cache file may be merged into the shared file: the upstream proxy still held its port
+ * when the lane's anvil stopped, so nothing else answered its last reads; the anvil was 1.9.0 and exited
+ * cleanly; its log shows every method in `ALWAYS_LOGGED_METHODS` and none that `methodsBlockingPromotion`
+ * names; and it wrote a cache of the block.
+ */
+export function laneCacheGate({
+  runHome,
+  blockNumber,
+  forkUrl,
+  methods,
+  hasExitedCleanly,
+  anvilVersion,
+  isProxyListening,
+}: Omit<LaneCache, 'lane' | 'generation'> & { blockNumber: number; forkUrl: string }): LaneGate {
+  const refuse = (reason: string): LaneGate => ({ isEligible: false, reason });
+  if (!isProxyListening) return refuse('the upstream proxy stopped before anvil');
+  if (!isCacheAnvil(anvilVersion)) return refuse('the cache is promoted only from anvil 1.9.0');
+  if (!hasExitedCleanly) return refuse('anvil did not exit cleanly');
+  const logged = new Set(methods);
+  if (!ALWAYS_LOGGED_METHODS.every((method) => logged.has(method))) {
+    return refuse("anvil's log does not show the calls the harness makes");
+  }
+  const blocking = methodsBlockingPromotion(logged);
+  if (blocking.length > 0) {
+    const listed = blocking.slice(0, MAX_LISTED_METHODS).join(', ');
+    const more = blocking.length > MAX_LISTED_METHODS ? ` and ${blocking.length - MAX_LISTED_METHODS} more` : '';
+    return refuse(`the fork was sent ${listed}${more}`);
+  }
+  const file = anvilCacheFile(runHome, blockNumber, forkUrl);
+  if (cachedBlock(file) !== blockNumber) return refuse('anvil wrote no cache of the block');
+  return { isEligible: true, file };
+}
+
+/** The sections of anvil 1.9.0's cache file. A file with any other top-level member is not merged. */
+const CACHE_SECTIONS = ['meta', 'accounts', 'storage', 'block_hashes', 'block_hash_cache_version'];
+/** The `block_hash_cache_version` of anvil 1.9.0's cache file, the only one the harness merges. */
+const MERGED_CACHE_VERSION = 1;
+
+type CacheContent = {
+  meta: { block_env?: { number?: unknown }; fork_hash?: unknown } & Record<string, unknown>;
+  accounts: Record<string, unknown>;
+  storage: Record<string, Record<string, unknown>>;
+  block_hashes: Record<string, unknown>;
+  block_hash_cache_version: number;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** `value` as JSON with every object's keys sorted, so that two equal values give the same text. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_, each) =>
+    isRecord(each) ? Object.fromEntries(Object.entries(each).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : each
+  );
+
+/** The decoded cache file, or undefined when it is not a regular file of zstd-compressed JSON. */
+function readCacheFile(file: string): unknown {
+  try {
+    if (!fs.lstatSync(file).isFile()) return undefined;
+    return JSON.parse(zstd.zstdDecompressSync(fs.readFileSync(file)).toString('utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Why `content` cannot be merged as a cache of `blockNumber` forked at `forkHash`, or undefined. */
+function cacheProblem(content: unknown, blockNumber: number, forkHash: string): string | undefined {
+  if (!isRecord(content) || !isRecord(content.meta) || !isRecord(content.meta.block_env)) {
+    return 'anvil wrote no cache of the block';
+  }
+  if (content.meta.block_env.number !== hex(blockNumber)) return 'anvil wrote no cache of the block';
+  const isKnownFormat =
+    Object.keys(content).every((key) => CACHE_SECTIONS.includes(key)) &&
+    content.block_hash_cache_version === MERGED_CACHE_VERSION &&
+    isRecord(content.accounts) &&
+    isRecord(content.block_hashes) &&
+    isRecord(content.storage) &&
+    Object.values(content.storage).every(isRecord);
+  if (!isKnownFormat) return 'its cache is in a format the harness does not merge';
+  if (content.meta.fork_hash !== forkHash) return 'its cache is of another fork';
+  return undefined;
+}
+
+export type LanePromotion = { lane: number; generation: number; isMerged: boolean; reason: string };
+export type Promotion = { isPromoted: boolean; reason: string; lanes?: LanePromotion[] };
+
+/** Each entry of a cache file under one key, its section and the names that locate it, with its value. */
+function entriesOf(content: CacheContent): Map<string, unknown> {
+  const entries = new Map<string, unknown>();
+  for (const [address, value] of Object.entries(content.accounts)) entries.set(`accounts\0${address}`, value);
+  for (const [number, value] of Object.entries(content.block_hashes)) entries.set(`block_hashes\0${number}`, value);
+  for (const [address, slots] of Object.entries(content.storage)) {
+    for (const [slot, value] of Object.entries(slots)) entries.set(`storage\0${address}\0${slot}`, value);
+  }
+  return entries;
+}
+
+/** Adds the entry under `key` to `content`. */
+function addEntry(content: CacheContent, key: string, value: unknown): void {
+  const [section, name, slot] = key.split('\0');
+  if (section === 'storage') (content.storage[name] ??= {})[slot] = value;
+  else content[section as 'accounts' | 'block_hashes'][name] = value;
+}
+
+const entryCount = (count: number) => `${count} ${count === 1 ? 'entry' : 'entries'}`;
+
+/**
+ * Replaces the shared cache file with the union of what it holds and what each eligible lane's anvil read.
+ *
+ * The root passes `checkCacheRoot` again first. Each start of each lane passes `laneCacheGate` on its own and
+ * holds a cache of the block, forked at `forkHash`, in the format of anvil 1.9.0; the first lane merged sets
+ * the fork that every other file must match in full. The shared file is read again now, so that a promotion by
+ * another run since this one started is kept, and is left out if it is of another fork.
+ *
+ * The pinned block's state never changes, so two plain reads of one entry from the upstream agree. anvil's
+ * cache holds only such reads, never a change made on the fork. An entry that two files disagree on is
+ * therefore not a plain read in one of them, and nothing shows which: the union leaves it out, the shared
+ * file's copy included, so that the next run reads it from the upstream again. Every other entry is merged.
+ *
+ * The union goes to a new file beside the shared one, which is then renamed over it, so a reader never sees
+ * half a file and a symbolic link at the shared path is replaced, not written through. Nothing is written when
+ * no lane is eligible or the union equals the shared file. It never throws: a file system error is named by its
+ * code alone, because its message names paths, and with them the user name.
+ */
+export function promoteLaneCaches({
+  cacheRoot,
+  sharedFile,
+  blockNumber,
+  forkHash,
+  forkUrl,
+  lanes,
+}: {
+  cacheRoot: string;
+  sharedFile: string;
+  blockNumber: number;
+  forkHash: string;
+  forkUrl: string;
+  lanes: LaneCache[];
+}): Promotion & { lanes: LanePromotion[] } {
+  try {
+    checkCacheRoot(cacheRoot);
+  } catch {
+    return { isPromoted: false, reason: 'the cache root failed its check', lanes: [] };
+  }
+  const results: LanePromotion[] = [];
+  const candidates: { result: LanePromotion; content: CacheContent }[] = [];
+  let reference: string | undefined;
+  for (const each of lanes) {
+    const result: LanePromotion = { lane: each.lane, generation: each.generation, isMerged: false, reason: '' };
+    results.push(result);
+    const gate = laneCacheGate({ ...each, blockNumber, forkUrl });
+    if (!gate.isEligible) {
+      result.reason = gate.reason;
+      continue;
+    }
+    const content = readCacheFile(gate.file);
+    const problem = cacheProblem(content, blockNumber, forkHash);
+    const meta = problem === undefined ? canonical((content as CacheContent).meta) : undefined;
+    if (problem !== undefined || (reference !== undefined && meta !== reference)) {
+      result.reason = problem ?? 'its cache is of another fork';
+      continue;
+    }
+    reference ??= meta;
+    result.isMerged = true;
+    candidates.push({ result, content: content as CacheContent });
+  }
+  if (candidates.length === 0) return { isPromoted: false, reason: 'no lane passed the gates', lanes: results };
+
+  const shared = readCacheFile(sharedFile);
+  let sharedEntries = new Map<string, unknown>();
+  let isSharedKept = false;
+  let replacedNote = '';
+  if (shared !== undefined) {
+    if (
+      cacheProblem(shared, blockNumber, forkHash) === undefined &&
+      canonical((shared as CacheContent).meta) === reference
+    ) {
+      sharedEntries = entriesOf(shared as CacheContent);
+      isSharedKept = true;
+    } else {
+      replacedNote = '; the shared file was of another fork and was replaced';
+    }
+  }
+  const laneEntries = candidates.map(({ content }) => entriesOf(content));
+  // The canonical values each entry has across the shared file and the lanes, to find those in dispute.
+  const values = new Map<string, Set<string>>();
+  for (const entries of [sharedEntries, ...laneEntries]) {
+    for (const [key, value] of entries) {
+      let seen = values.get(key);
+      if (seen === undefined) values.set(key, (seen = new Set()));
+      seen.add(canonical(value));
+    }
+  }
+  const disputed = new Set([...values].filter(([, seen]) => seen.size > 1).map(([key]) => key));
+
+  const merged: CacheContent = {
+    meta: candidates[0].content.meta,
+    accounts: {},
+    storage: {},
+    block_hashes: {},
+    block_hash_cache_version: MERGED_CACHE_VERSION,
+  };
+  const held = new Set<string>();
+  for (const [key, value] of sharedEntries) {
+    if (disputed.has(key)) continue;
+    addEntry(merged, key, value);
+    held.add(key);
+  }
+  let added = 0;
+  candidates.forEach(({ result }, index) => {
+    let laneAdded = 0;
+    let laneDisputed = 0;
+    for (const [key, value] of laneEntries[index]) {
+      if (disputed.has(key)) laneDisputed += 1;
+      else if (!held.has(key)) {
+        addEntry(merged, key, value);
+        held.add(key);
+        laneAdded += 1;
+      }
+    }
+    added += laneAdded;
+    result.reason = `merged ${laneAdded} new ${laneAdded === 1 ? 'entry' : 'entries'}${
+      laneDisputed === 0 ? '' : `; left out ${entryCount(laneDisputed)} another file disagrees on`
+    }`;
+  });
+  const isSharedChanged = [...sharedEntries.keys()].some((key) => disputed.has(key));
+  if (isSharedKept && added === 0 && !isSharedChanged) {
+    return { isPromoted: false, reason: 'the shared file already held everything the lanes read', lanes: results };
+  }
+  const disputedNote = disputed.size === 0 ? '' : `; left out ${entryCount(disputed.size)} the files disagree on`;
+  const temporaryFile = `${sharedFile}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(sharedFile), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(temporaryFile, zstd.zstdCompressSync(JSON.stringify(merged)), { flag: 'wx', mode: 0o600 });
+    fs.renameSync(temporaryFile, sharedFile);
+  } catch (error) {
+    fs.rmSync(temporaryFile, { force: true });
+    const code = (error as NodeJS.ErrnoException)?.code;
+    return {
+      isPromoted: false,
+      reason: typeof code === 'string' ? `the promotion failed (${code})` : 'the promotion failed',
+      lanes: results,
+    };
+  }
+  return {
+    isPromoted: true,
+    reason: `promoted the union of ${candidates.length} lane${
+      candidates.length === 1 ? '' : 's'
+    }${disputedNote}${replacedNote}`,
+    lanes: results,
+  };
+}
+
+/**
+ * `startCacheableProxy`, with the proxy's stop registered through `addStop` as soon as it listens. Stops run
+ * in the reverse order of registration, so anvil, whose stop is registered after this one, stops while the
+ * proxy still holds the fixed port: no other process can take the port and answer anvil's last reads. The
+ * stop is idempotent, so the failure path can call it too.
+ */
+export async function startHeldProxy(
+  endpoint: Endpoint,
+  {
+    printable,
+    cachePort,
+    addStop,
+  }: {
+    printable: (text: unknown) => string;
+    cachePort?: number;
+    addStop: (stop: { name: string; run: () => Promise<void> }) => void;
+  }
+) {
+  const { proxy, offReason } = await startCacheableProxy(endpoint, { printable, cachePort });
+  let isStopped = false;
+  const stopProxy = async () => {
+    if (isStopped) return;
+    isStopped = true;
+    proxy.server.closeAllConnections();
+    await new Promise<void>((resolve) => proxy.server.close(() => resolve()));
+  };
+  addStop({ name: 'upstream proxy', run: stopProxy });
+  return { proxy, offReason, stopProxy };
+}
+
+/**
+ * Starts the upstream proxy at `cachePort` when one is given, and on a free port otherwise. When `cachePort`
+ * is taken, as by a second run, the proxy listens on a free port, and `offReason` says why the run is not
+ * cached. Any other error to listen is thrown.
+ */
+export async function startCacheableProxy(
+  endpoint: Endpoint,
+  { printable, cachePort }: { printable: (text: unknown) => string; cachePort?: number }
+): Promise<{ proxy: Awaited<ReturnType<typeof startUpstreamProxy>>; offReason?: string }> {
+  if (cachePort !== undefined) {
+    try {
+      return { proxy: await startUpstreamProxy(endpoint, { printable, port: cachePort }) };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'EADDRINUSE') throw error;
+      return { proxy: await startUpstreamProxy(endpoint, { printable }), offReason: `port ${cachePort} is in use` };
+    }
+  }
+  return { proxy: await startUpstreamProxy(endpoint, { printable }) };
 }
 
 export const hasExited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
@@ -780,6 +1363,11 @@ export type Fork = { child: ChildProcess; localUrl: string; port: number; pid: n
  * account. anvil binds a free port itself, and the port is read from its output. `onChild` gets the child and
  * its working directory as soon as it is spawned, so that cleanup can stop it and remove the directory
  * whatever happens next.
+ *
+ * With `cacheHome`, the run's anvil home that `loadForkCache` prepared, anvil keeps its storage cache there.
+ * It reads cached state in place of the upstream. Each `anvil_reset` and its stop on SIGTERM or SIGINT write
+ * back what it read from the upstream, never a change made on the fork. Without `cacheHome`, anvil caches
+ * nothing.
  */
 export async function startFork({
   anvil,
@@ -788,6 +1376,7 @@ export async function startFork({
   log,
   redactor,
   onChild,
+  cacheHome,
   readyTimeoutMs = 120_000,
 }: {
   anvil: string;
@@ -796,6 +1385,7 @@ export async function startFork({
   log: (text: string) => void;
   redactor: Redactor;
   onChild: (child: ChildProcess, directory: string) => void;
+  cacheHome?: string;
   readyTimeoutMs?: number;
 }): Promise<Fork> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-browser-anvil-'));
@@ -823,12 +1413,12 @@ export async function startFork({
     '1000',
     '--compute-units-per-second',
     '330',
-    '--no-storage-caching',
+    ...(cacheHome === undefined ? ['--no-storage-caching'] : []),
   ];
   // An empty working directory, so no foundry.toml changes anvil's settings.
   const child = spawn(anvil, args, {
     cwd: directory,
-    env: { PATH: process.env.PATH, HOME: process.env.HOME },
+    env: { PATH: process.env.PATH, HOME: cacheHome ?? process.env.HOME },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   onChild(child, directory);

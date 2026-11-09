@@ -1,16 +1,23 @@
 // Starts and stops the harness's services for one run, in this order:
 //
 //  1. a private 0700 directory outside the repository, for the TLS key and the control token
-//  2. the fork: the read-only upstream proxy and anvil, verified, moving to the next public endpoint when
-//     the upstream fails anvil's start-up
-//  3. the HTTPS RPC proxy, the screening stub and the wallet server, with a new per-run token
-//  4. unless skipped, the two production builds (no screening endpoint, and an allowed control) and their
-//     static servers
-//  5. the dev server, then one warm-up page load, which also checks the browser's trust in the certificate
+//  2. the screening stub and the HTTPS RPC proxy, with one partition and one route for each fork lane
+//  3. the fork: the read-only upstream proxy, shared by every lane, and lane 0's anvil and wallet server,
+//     verified, moving to the next public endpoint when the upstream fails anvil's start-up. A fork of the
+//     pinned block starts from the fork cache, and a clean stop promotes what the lanes read back to it.
+//  4. the lane pool and its lease server: each Playwright worker leases the lane of its parallel index, whose
+//     anvil and wallet server start then (`forkLanes.ts`)
+//  5. unless skipped, the three production builds (no screening endpoint, an allowed control, and no endpoint
+//     with NODE_ENV=development) and their static servers
+//  6. the dev server, then one warm-up page load on lane 0, which also checks the browser's trust in the
+//     certificate
+//
+// Every lane shares the builds, the dev server and the proxies. The app's RPC and screening URLs are compiled
+// in, so the worker's egress route names its lane in a header (`laneHeader.ts`) on each request to them.
 //
 // Each service registers its own stop as soon as it starts, so a failure at any step stops what started
 // before it. `stopServices` is awaited on teardown and on start-up failure, and is idempotent. On SIGINT
-// and SIGTERM it runs too. A synchronous kill of anvil runs on process exit as the last resort.
+// and SIGTERM it runs too. A synchronous kill of every anvil runs on process exit as the last resort.
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
@@ -19,7 +26,10 @@ import path from 'node:path';
 
 import { chromium } from '@playwright/test';
 
+import { browserPoolCountOf, startBrowserPool, type BrowserPoolInfo } from './browserPool';
+import type { WorkerSelection } from './concurrency';
 import { COMET_USDC, USDC } from './contracts';
+import { devMinificationOf } from './devMinification';
 import {
   allowLoopbackWebSocket,
   applyEgress,
@@ -28,25 +38,41 @@ import {
   type BlockedRequest,
 } from './egress';
 import {
+  CACHED_PROXY_PORT,
+  accountSalt,
+  checkCacheRoot,
+  isCacheAnvil,
   createRedactor,
   failedToStartOnUpstream,
   findAnvil,
+  forkCacheRoot,
   ForkStartError,
   hasExited,
   forkTarget,
+  loadForkCache,
+  promoteLaneCaches,
+  recordLoggedMethods,
+  sharedCacheFile,
   startFork,
-  startUpstreamProxy,
+  startHeldProxy,
   stopChild,
   toolVersion,
   upstreamEndpoints,
   verifyFork,
+  type CacheTrust,
+  type Endpoint,
   type ForkTarget,
+  type LaneCache,
+  type Promotion,
+  type UpstreamStats,
 } from './fork';
+import { createLanePool, startLaneServer, type LaneInfo, type StartedLane } from './forkLanes';
 import { BINDING_NAME, installHarnessProvider, PROVIDER_ICON, PROVIDER_NAME, PROVIDER_RDNS } from './injectedProvider';
-import { RUNS_DIR } from './paths';
+import { homeRelative, RUNS_DIR } from './paths';
+import { buildProductions } from './productionBuilds';
 import { openWrappedReleaseControls } from './releaseControls';
 import { startRpcProxy } from './rpcProxy';
-import { cleanUpSynchronously, recoverKilledRuns, type ProcessRecord } from './runRecords';
+import { cleanUpSynchronously, recoverKilledRuns, type ProcessRecord, type RecordedAnvil } from './runRecords';
 import { startScreeningStub } from './screeningStub';
 import { findSecrets, outputsUnder, registerSecret, registerSecretPattern } from './secrets';
 import { v3ApiReadPrefixes, v3ApiUrl } from './settings';
@@ -60,7 +86,7 @@ import {
   startDevServer,
   type ResolvedBuild,
 } from './viteApp';
-import { startWalletServer } from './walletServer';
+import { startWalletServer, type WalletServer } from './walletServer';
 
 export const EXTENSION_ID = 'cfharness';
 
@@ -68,15 +94,37 @@ export const EXTENSION_ID = 'cfharness';
 export type Manifest = {
   runId: string;
   startedAt: string;
+  /** When the services were ready and the tests could start. */
+  readyAt?: string;
   finishedAt?: string;
   isInteractive: boolean;
-  fork: ForkTarget & { endpoint: string; localUrl: string; anvilPid: number; upstreamProxyUrl: string };
+  /**
+   * The fork. `localUrl` and `anvilPid` are lane 0's in the file; a worker's `manifest` fixture gives its own
+   * lane's.
+   */
+  fork: ForkTarget & {
+    endpoint: string;
+    localUrl: string;
+    anvilPid: number;
+    upstreamProxyUrl: string;
+    cache: ForkCache;
+    /** Whether the teardown promoted the lanes' caches, written when the run finishes. */
+    cachePromotion?: Promotion;
+  };
+  /** The fork lanes: how many workers may lease one, and, when the run finishes, each lane started. */
+  lanes: { count: number; started?: LaneInfo[] };
+  /** How the worker count was chosen. `workers` is what Playwright ran with, `--workers` included. */
+  concurrency: { workers: number; selection?: WorkerSelection; isCliOverride: boolean };
+  /** Pool servers share Chromium, while workers retain separate connections and tests retain fresh contexts. */
+  browserPool?: BrowserPoolInfo;
   tools: Record<string, string | undefined>;
   git: { head: string | undefined; isDirty: boolean | undefined };
   app: {
     devOrigin: string;
     hmrOrigin: string;
-    devResolved: { DEV: boolean };
+    devResolved: { DEV: boolean; bundled?: boolean };
+    /** Immutable source-map versions for failed tests of minified development code. */
+    devSourceMapsFile?: string;
     environment: Record<string, string>;
     removedViteVariables: string[];
     /**
@@ -96,12 +144,22 @@ export type Manifest = {
           environment: Record<string, string>;
         };
         allowed: { origin: string; outDir: string; resolved: ResolvedBuild; environment: Record<string, string> };
+        /** No screening endpoint, built in mode production with NODE_ENV=development, so it compiles DEV=true. */
+        developmentNodeEnv: {
+          origin: string;
+          outDir: string;
+          resolved: ResolvedBuild;
+          environment: Record<string, string>;
+        };
       };
   services: {
     rpcProxy: string;
     screening: string;
     extensionUrl: string;
+    /** Lane 0's wallet server in the file; a worker's `manifest` fixture gives its own lane's. */
     wallet: string;
+    /** The lane server, where a worker leases its lane. */
+    lanes: string;
     bindings: Record<string, string>;
   };
   /** The browser makes no TLS connection: the egress route fetches its requests in Node, which trusts `certPath`. */
@@ -111,6 +169,14 @@ export type Manifest = {
   privateDir: string;
   tokenFile: string;
 };
+
+/**
+ * The fork cache for the run: off, with why when the cache is on but the run could not use it, or its root
+ * and the trust class of the run's upstream, with whether that class's cache held state of the block.
+ */
+export type ForkCache =
+  | { state: 'off'; reason?: string }
+  | { state: 'cold' | 'warm'; trust: CacheTrust; directory: string };
 
 type Stop = { name: string; run: () => Promise<void> | void };
 
@@ -136,19 +202,31 @@ export async function startServices({
   runId,
   isInteractive,
   skipProduction,
+  laneCount,
+  concurrency,
 }: {
   runId: string;
   isInteractive: boolean;
   skipProduction: string | undefined;
+  /** How many fork lanes workers may lease: Playwright's worker count. */
+  laneCount: number;
+  concurrency: Manifest['concurrency'];
 }): Promise<Services> {
+  // Refuse invalid pool settings before recovery, a fork or a network listener starts.
+  const browserPoolCount = browserPoolCountOf(process.env, laneCount, isInteractive);
+  delete process.env.BROWSER_HARNESS_BROWSER_POOL_FILE;
   const startedAt = new Date().toISOString();
   const runDir = path.join(RUNS_DIR, runId);
   fs.mkdirSync(runDir, { recursive: true });
   const recovered = recoverKilledRuns();
   const stops: Stop[] = [];
-  let anvilChild: ChildProcess | undefined;
-  let anvilCwd: string | undefined;
+  /** Every anvil the run started, with its working directory, for the synchronous last resort. */
+  const anvils: { child: ChildProcess; cwd: string }[] = [];
   let privateDir: string | undefined;
+  let cachePromotion: Promotion | undefined;
+  /** Each lane as it started, restarts included, for the finished manifest. */
+  const lanesStarted: LaneInfo[] = [];
+  let upstreamStats: UpstreamStats | undefined;
   let stopped: Promise<string[]> | undefined;
   /** The production builds and `dist/`, scanned for the run's secrets before the private directory goes. */
   let bundleRoots: string[] = [];
@@ -191,14 +269,14 @@ export async function startServices({
           errors.push(`${name}: ${(error as Error)?.message ?? error}`);
         }
       }
-      if (anvilChild !== undefined && !hasExited(anvilChild)) errors.push(`anvil ${anvilChild.pid} is still running`);
+      for (const { child } of anvils) if (!hasExited(child)) errors.push(`anvil ${child.pid} is still running`);
       const processFile = path.join(runDir, 'processes.json');
       if (errors.length === 0 && fs.existsSync(processFile)) fs.rmSync(processFile);
       return errors;
     })();
     return stopped;
   };
-  const exitHandler = () => cleanUpSynchronously({ anvil: anvilChild, anvilCwd, privateDir });
+  const exitHandler = () => cleanUpSynchronously({ anvils, privateDir });
   // Playwright handles SIGINT itself and runs the teardown; the exit handler covers a SIGINT during
   // start-up. Playwright's runner does not handle SIGTERM, so this stops the services and then exits, as
   // Node would have without a listener.
@@ -207,18 +285,27 @@ export async function startServices({
   process.once('SIGTERM', terminate);
   stops.push({ name: 'signal handler', run: () => void process.off('SIGTERM', terminate) });
 
-  const anvilLog = fs.openSync(path.join(runDir, 'anvil.log'), 'a', 0o600);
   const walletLog = fs.openSync(path.join(runDir, 'wallet.log'), 'a', 0o600);
+  /** Each lane's anvil log, by lane, open until the logs close. */
+  const anvilLogs = new Map<number, number>();
   let areLogsOpen = true;
   /** Writes to a log until the logs close. anvil's last output and a late control error can come after. */
   const writeLog = (fd: number, text: string) => {
     if (areLogsOpen) fs.writeSync(fd, text);
   };
+  const anvilLogOf = (lane: number) => {
+    let fd = anvilLogs.get(lane);
+    if (fd === undefined) {
+      fd = fs.openSync(path.join(runDir, `anvil-${lane}.log`), 'a', 0o600);
+      anvilLogs.set(lane, fd);
+    }
+    return fd;
+  };
   stops.push({
     name: 'logs',
     run: () => {
       areLogsOpen = false;
-      [anvilLog, walletLog].forEach((fd) => fs.closeSync(fd));
+      [walletLog, ...anvilLogs.values()].forEach((fd) => fs.closeSync(fd));
     },
   });
 
@@ -227,14 +314,34 @@ export async function startServices({
     fs.chmodSync(privateDir, 0o700);
     const directory = privateDir;
     addStop({ name: 'private directory', run: () => fs.rmSync(directory, { recursive: true, force: true }) });
-    const writeRecord = (record: Omit<ProcessRecord, 'runnerPid' | 'privateDir'>) =>
+    const record: Omit<ProcessRecord, 'runnerPid' | 'privateDir'> & { anvils: RecordedAnvil[] } = { anvils: [] };
+    const writeRecord = () =>
       fs.writeFileSync(
         path.join(runDir, 'processes.json'),
         JSON.stringify({ runnerPid: process.pid, privateDir: directory, ...record }, null, 2)
       );
-    writeRecord({});
+    writeRecord();
 
-    // 2. The fork.
+    // 2. The screening stub and the RPC proxy, which route each request by its lane. The proxy reads a lane's
+    // fork URL from the pool on every request, so a lane that starts later is reached at once.
+    const appOrigins = new Set<string>();
+    const certificate = makeCertificate(directory);
+    let forkUrlOf: (lane: number) => string | undefined = () => undefined;
+    const rpcProxy = await startRpcProxy({
+      tls: certificate,
+      forkUrl: (lane) => forkUrlOf(lane),
+      laneCount,
+      allowedOrigins: appOrigins,
+    });
+    addStop({ name: 'RPC proxy', run: () => rpcProxy.close() });
+    const screening = await startScreeningStub({ allowedOrigins: appOrigins, laneCount });
+    addStop({ name: 'screening stub', run: () => screening.close() });
+    const token = randomBytes(32).toString('hex');
+    registerSecret(token, 'the control token');
+    const tokenFile = path.join(directory, 'control-token');
+    fs.writeFileSync(tokenFile, token, { mode: 0o600 });
+
+    // 3. The fork.
     const endpoints = upstreamEndpoints();
     // Only the runner holds the private URL: the workers, which inherit the environment, never see it.
     delete process.env.BROWSER_FORK_RPC_URL;
@@ -248,12 +355,171 @@ export async function startServices({
     ) {
       throw new Error("BROWSER_FORK_BLOCK must be 'pinned' (the default) or 'latest'.");
     }
+    // Before any endpoint is contacted, so that a wrong setting or an unsafe directory stops the run first.
+    const configuredCacheRoot = forkCacheRoot(process.env, blockOption);
+    if (configuredCacheRoot !== undefined) checkCacheRoot(configuredCacheRoot);
+    // The checked root, resolved once, so that no link on its path can change between the checks and the reads.
+    const cacheRoot = configuredCacheRoot === undefined ? undefined : fs.realpathSync(configuredCacheRoot);
+    const anvilOffReason =
+      cacheRoot === undefined || isCacheAnvil(anvil.version) ? undefined : 'the installed anvil cannot read the cache';
+    const cachePort = cacheRoot !== undefined && anvilOffReason === undefined ? CACHED_PROXY_PORT : undefined;
+    // With the cache on, each test's keys come from its identity and this salt. Its accounts then repeat in
+    // every run that uses the root, and the cache holds what anvil read for them.
+    const salt = cachePort === undefined || cacheRoot === undefined ? undefined : accountSalt(cacheRoot);
+    if (salt !== undefined) registerSecret(salt, 'the account salt');
+    const stats = () => ({
+      rpcProxy: {
+        forwarded: Object.fromEntries(rpcProxy.stats.forwarded),
+        refused: Object.fromEntries(rpcProxy.stats.refused),
+        unserved: Object.fromEntries(rpcProxy.stats.unserved),
+        lanes: Object.fromEntries(rpcProxy.stats.lanes),
+      },
+      upstream:
+        upstreamStats === undefined
+          ? undefined
+          : {
+              requests: upstreamStats.requests,
+              failures: upstreamStats.failures,
+              errorAnswers: upstreamStats.errorAnswers,
+              methods: Object.fromEntries(upstreamStats.methods),
+              refused: Object.fromEntries(upstreamStats.refused),
+              peakPending: upstreamStats.peakPending,
+              peakPerSecond: Math.max(0, ...upstreamStats.perSecond.values()),
+            },
+    });
+
+    /** What every lane of the run shares: the upstream, its proxy, the block, and the shared cache file. */
+    type ForkContext = {
+      endpoint: Endpoint;
+      proxy: Awaited<ReturnType<typeof startHeldProxy>>['proxy'];
+      target: ForkTarget;
+      sharedFile: string | undefined;
+    };
+
+    /**
+     * Starts lane `index`: its own anvil home, holding a copy of the shared cache file, its own anvil forked
+     * through the shared proxy, verified, and its own wallet server on its screening partition. A failure stops
+     * what the lane started before it throws. The lane's stop closes the wallet server, then stops anvil,
+     * which writes its cache on SIGTERM, while the proxy still holds its port.
+     */
+    const startLane = async (context: ForkContext, index: number, generation: number): Promise<StartedLane> => {
+      ensureRunning();
+      const { proxy, target, sharedFile } = context;
+      const runHome = path.join(directory, `anvil-home-${index}-${generation}`);
+      let cache: LaneInfo['cache'] = 'off';
+      if (cacheRoot !== undefined && sharedFile !== undefined) {
+        checkCacheRoot(cacheRoot);
+        cache = loadForkCache({ sharedFile, runHome, blockNumber: target.number, forkUrl: proxy.url });
+      }
+      const methods = new Set<string>();
+      const log = anvilLogOf(index);
+      writeLog(log, `--- lane ${index}, start ${generation}, ${new Date().toISOString()}\n`);
+      let child: ChildProcess | undefined;
+      let cwd: string | undefined;
+      let wallet: WalletServer | undefined;
+      /** Whether the lane started and its stop belongs to the pool. Until then, its anvil has a stop of its own. */
+      let isStarted = false;
+      const stopParts = async () => {
+        await wallet?.close();
+        if (child !== undefined) await stopChild(child);
+        if (cwd !== undefined) fs.rmSync(cwd, { recursive: true, force: true });
+      };
+      try {
+        const fork = await startFork({
+          anvil: anvil.command,
+          upstreamUrl: proxy.url,
+          target,
+          log: (text) => {
+            recordLoggedMethods(text, methods);
+            writeLog(log, text);
+          },
+          redactor,
+          cacheHome: sharedFile === undefined ? undefined : runHome,
+          onChild: (spawned, spawnedCwd) => {
+            child = spawned;
+            cwd = spawnedCwd;
+            anvils.push({ child: spawned, cwd: spawnedCwd });
+            // A signal while the lane starts stops this anvil while the proxy still holds its port: the stop is
+            // registered after the proxy's, so it runs first.
+            addStop({
+              name: `lane ${index} anvil while it starts`,
+              run: async () => {
+                if (isStarted) return;
+                await stopChild(spawned);
+                fs.rmSync(spawnedCwd, { recursive: true, force: true });
+              },
+            });
+            record.upstreamProxyPort = Number(new URL(proxy.url).port);
+            record.anvils.push({ pid: spawned.pid, cwd: spawnedCwd });
+            writeRecord();
+          },
+        });
+        ensureRunning();
+        await verifyFork(fork, target);
+        // anvil holds no unlocked account, so it can sign nothing (`--accounts 0`).
+        const unlocked = await (
+          await fetch(fork.localUrl, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_accounts', params: [] }),
+          })
+        ).json();
+        if (!Array.isArray(unlocked.result) || unlocked.result.length !== 0)
+          throw new Error('anvil started with unlocked accounts');
+        const walletRedactor = createRedactor(context.endpoint.secretPatterns, [token]);
+        wallet = await startWalletServer({
+          fork,
+          target,
+          upstreamUrl: proxy.url,
+          token,
+          screening: screening.lanes[index],
+          stats,
+          log: (line) =>
+            writeLog(walletLog, `${new Date().toISOString()} lane ${index} ${walletRedactor.redact(line)}\n`),
+          onSecret: registerSecret,
+          accountSalt: salt,
+        });
+        const info: LaneInfo = {
+          index,
+          generation,
+          forkUrl: fork.localUrl,
+          anvilPid: fork.pid,
+          walletUrl: wallet.url,
+          cache,
+        };
+        lanesStarted.push(info);
+        const spawned = fork.child;
+        isStarted = true;
+        return {
+          info,
+          isAlive: () => !hasExited(spawned),
+          stop: async (): Promise<LaneCache | undefined> => {
+            await stopParts();
+            // Only while this run's proxy still held the fixed port, so that nothing else answered anvil.
+            if (sharedFile === undefined) return undefined;
+            return {
+              lane: index,
+              generation,
+              runHome,
+              methods,
+              hasExitedCleanly: spawned.exitCode === 0,
+              anvilVersion: anvil.version,
+              isProxyListening: proxy.server.listening,
+            };
+          },
+        };
+      } catch (error) {
+        await stopParts();
+        throw error;
+      }
+    };
+
+    let firstLane: StartedLane | undefined;
+    let context: ForkContext | undefined;
+    let cache: ForkCache = { state: 'off' };
     const problems: string[] = [];
-    let fork: Awaited<ReturnType<typeof startFork>> | undefined;
-    let target: ForkTarget | undefined;
-    let upstream: Awaited<ReturnType<typeof startUpstreamProxy>> | undefined;
-    let chosen: (typeof endpoints)[number] | undefined;
     for (const endpoint of endpoints) {
+      let target: ForkTarget | undefined;
       try {
         target = await forkTarget(endpoint, blockOption);
       } catch (error) {
@@ -264,41 +530,25 @@ export async function startServices({
         problems.push(`${endpoint.label}: does not serve block ${blockOption}`);
         continue;
       }
-      const proxy = await startUpstreamProxy(endpoint, { printable: redactor.printable });
-      const stopProxy = () => new Promise<void>((resolve) => proxy.server.close(() => resolve()));
+      // A cached fork needs the proxy at its fixed port, so that the fork URL, and with it anvil's cache
+      // file, is the same in every run and every lane. The proxy's stop is registered before the lanes', so
+      // the teardown stops every lane's anvil first.
+      const { proxy, offReason, stopProxy } = await startHeldProxy(endpoint, {
+        printable: redactor.printable,
+        cachePort,
+        addStop,
+      });
+      ensureRunning();
+      const trust: CacheTrust = endpoint.isPrivate ? 'private' : 'public';
+      const sharedFile =
+        cacheRoot !== undefined && cachePort !== undefined && offReason === undefined
+          ? sharedCacheFile(cacheRoot, trust, target.number)
+          : undefined;
+      const candidate: ForkContext = { endpoint, proxy, target, sharedFile };
+      upstreamStats = proxy.stats;
       try {
-        let child: Parameters<typeof stopChild>[0] | undefined;
-        fork = await startFork({
-          anvil: anvil.command,
-          upstreamUrl: proxy.url,
-          target,
-          log: (text) => writeLog(anvilLog, text),
-          redactor,
-          onChild: (spawned, directory) => {
-            child = spawned;
-            anvilChild = spawned;
-            anvilCwd = directory;
-            addStop({
-              name: 'anvil',
-              run: async () => {
-                await stopChild(spawned);
-                fs.rmSync(directory, { recursive: true, force: true });
-              },
-            });
-            writeRecord({
-              anvilPid: spawned.pid,
-              upstreamProxyPort: Number(new URL(proxy.url).port),
-              anvilCwd: directory,
-            });
-          },
-        });
-        void child;
-        upstream = proxy;
-        chosen = endpoint;
-        addStop({ name: 'upstream proxy', run: () => (proxy.server.closeAllConnections(), stopProxy()) });
-        break;
+        firstLane = await startLane(candidate, 0, 0);
       } catch (error) {
-        proxy.server.closeAllConnections();
         await stopProxy();
         if (
           error instanceof ForkStartError &&
@@ -313,69 +563,56 @@ export async function startServices({
         }
         throw error;
       }
+      context = candidate;
+      if (cacheRoot !== undefined && sharedFile !== undefined) {
+        cache = { state: firstLane.info.cache === 'warm' ? 'warm' : 'cold', trust, directory: homeRelative(cacheRoot) };
+      } else {
+        const reason = offReason ?? anvilOffReason;
+        cache = reason === undefined ? { state: 'off' } : { state: 'off', reason };
+      }
+      break;
     }
-    if (fork === undefined || target === undefined || upstream === undefined || chosen === undefined) {
+    if (firstLane === undefined || context === undefined) {
       throw new Error(`No upstream endpoint can serve the fork:\n  ${problems.join('\n  ')}`);
     }
-    ensureRunning();
-    const forkInfo = fork;
-    const { clientVersion } = await verifyFork(forkInfo, target);
-    // anvil holds no unlocked account, so it can sign nothing (`--accounts 0`).
-    const unlocked = await (
-      await fetch(forkInfo.localUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_accounts', params: [] }),
-      })
-    ).json();
-    if (!Array.isArray(unlocked.result) || unlocked.result.length !== 0)
-      throw new Error('anvil started with unlocked accounts');
-    const usdcImplementation = await readUsdcImplementation(forkInfo.localUrl);
-
-    // 3. Proxy, stub and wallet.
-    const appOrigins = new Set<string>();
-    const certificate = makeCertificate(directory);
-    const rpcProxy = await startRpcProxy({
-      tls: certificate,
-      forkUrl: () => forkInfo.localUrl,
-      allowedOrigins: appOrigins,
+    const forkContext = context;
+    // 4. The lane pool. Its stop is registered after the proxy's, so it runs first: every lane's anvil stops
+    // and writes its cache while the proxy still holds its port, and then the union of the eligible lanes'
+    // caches is promoted.
+    const pool = createLanePool({
+      count: laneCount,
+      startLane: (index, generation) => startLane(forkContext, index, generation),
+      initial: firstLane,
     });
-    addStop({ name: 'RPC proxy', run: () => rpcProxy.close() });
-    const screening = await startScreeningStub({ allowedOrigins: appOrigins });
-    addStop({ name: 'screening stub', run: () => screening.close() });
-    const token = randomBytes(32).toString('hex');
-    registerSecret(token);
-    const tokenFile = path.join(directory, 'control-token');
-    fs.writeFileSync(tokenFile, token, { mode: 0o600 });
-    const walletRedactor = createRedactor(chosen.secretPatterns, [token]);
-    const upstreamStats = upstream.stats;
-    const stats = () => ({
-      rpcProxy: {
-        forwarded: Object.fromEntries(rpcProxy.stats.forwarded),
-        refused: Object.fromEntries(rpcProxy.stats.refused),
-        unserved: Object.fromEntries(rpcProxy.stats.unserved),
-      },
-      upstream: {
-        requests: upstreamStats.requests,
-        failures: upstreamStats.failures,
-        errorAnswers: upstreamStats.errorAnswers,
-        methods: Object.fromEntries(upstreamStats.methods),
-        refused: Object.fromEntries(upstreamStats.refused),
+    forkUrlOf = pool.forkUrlOf;
+    addStop({
+      name: 'fork lanes',
+      run: async () => {
+        const { caches, errors } = await pool.stop();
+        const { sharedFile, target } = forkContext;
+        if (cacheRoot !== undefined && sharedFile !== undefined) {
+          cachePromotion = promoteLaneCaches({
+            cacheRoot,
+            sharedFile,
+            blockNumber: target.number,
+            forkHash: target.hash,
+            forkUrl: forkContext.proxy.url,
+            lanes: caches,
+          });
+        }
+        if (errors.length > 0) throw new Error(errors.join('; '));
       },
     });
-    const wallet = await startWalletServer({
-      fork: forkInfo,
-      target,
-      token,
-      screening,
-      stats,
-      log: (line) => writeLog(walletLog, `${new Date().toISOString()} ${walletRedactor.redact(line)}\n`),
-      onSecret: registerSecret,
-    });
-    addStop({ name: 'wallet server', run: () => wallet.close() });
+    ensureRunning();
+    const laneServer = await startLaneServer({ pool, token });
+    addStop({ name: 'lane server', run: () => laneServer.close() });
+    const firstInfo = firstLane.info;
+    const target = forkContext.target;
+    const clientVersion = (await verifyFork({ localUrl: firstInfo.forkUrl }, target)).clientVersion;
+    const usdcImplementation = await readUsdcImplementation(firstInfo.forkUrl);
     ensureRunning();
 
-    // 4. Production builds, before the dev server sets NODE_ENV=development for the rest of the run.
+    // 5. Production builds, before the dev server sets NODE_ENV=development for the rest of the run.
     const removedViteVariables = removeViteVariables();
     const envDir = emptyEnvDir(directory);
     const apiUrl = v3ApiUrl();
@@ -391,14 +628,29 @@ export async function startServices({
       const allowedEnvironment = { ...baseEnvironment, VITE_SCREENING_ENDPOINT: screening.endpoint };
       const missingOut = path.join(directory, 'dist-prod-missing-endpoint');
       const allowedOut = path.join(directory, 'dist-prod-allowed');
-      bundleRoots = [missingOut, allowedOut];
-      const missingResolved = await buildProduction({ outDir: missingOut, envDir, environment: missingEnvironment });
-      const allowedResolved = await buildProduction({ outDir: allowedOut, envDir, environment: allowedEnvironment });
+      const developmentNodeEnvOut = path.join(directory, 'dist-prod-development-node-env');
+      bundleRoots = [missingOut, allowedOut, developmentNodeEnvOut];
+      const [missingResolved, allowedResolved] = await buildProductions({
+        envDir,
+        builds: [
+          { outDir: missingOut, environment: missingEnvironment },
+          { outDir: allowedOut, environment: allowedEnvironment },
+        ],
+      });
+      // This regression build needs DEV=true, so it runs separately from the production-only workers.
+      const developmentNodeEnvResolved = await buildProduction({
+        outDir: developmentNodeEnvOut,
+        envDir,
+        environment: missingEnvironment,
+        nodeEnv: 'development',
+      });
       const missingServer = await serveProduction({ outDir: missingOut });
       addStop({ name: 'production server (no endpoint)', run: () => missingServer.close() });
       const allowedServer = await serveProduction({ outDir: allowedOut });
       addStop({ name: 'production server (allowed)', run: () => allowedServer.close() });
-      appOrigins.add(missingServer.origin).add(allowedServer.origin);
+      const developmentNodeEnvServer = await serveProduction({ outDir: developmentNodeEnvOut });
+      addStop({ name: 'production server (NODE_ENV=development)', run: () => developmentNodeEnvServer.close() });
+      appOrigins.add(missingServer.origin).add(allowedServer.origin).add(developmentNodeEnvServer.origin);
       production = {
         isSkipped: false,
         missingEndpoint: {
@@ -413,20 +665,28 @@ export async function startServices({
           resolved: allowedResolved,
           environment: allowedEnvironment,
         },
+        developmentNodeEnv: {
+          origin: developmentNodeEnvServer.origin,
+          outDir: developmentNodeEnvOut,
+          resolved: developmentNodeEnvResolved,
+          environment: missingEnvironment,
+        },
       };
     }
 
-    // 5. The dev server.
+    // 6. The dev server.
     const devEnvironment = {
       ...baseEnvironment,
       VITE_SCREENING_ENDPOINT: screening.endpoint,
       VITE_EXTRA_EXTENSIONS: EXTENSION_ID,
       [`VITE_${EXTENSION_ID.toUpperCase()}_SOURCE`]: screening.extensionUrl,
     };
+    const devSourceMapsFile = devMinificationOf() ? path.join(directory, 'dev-source-maps.json.gz') : undefined;
     const dev = await startDevServer({
       envDir,
       environment: devEnvironment,
       plugins: [openWrappedReleaseControls()],
+      sourceMapsFile: devSourceMapsFile,
     });
     addStop({ name: 'dev server', run: () => dev.close() });
     ensureRunning();
@@ -435,25 +695,45 @@ export async function startServices({
     trustHarnessCertificate(certificate.cert.toString());
     const tlsMode = await warmUp({
       devOrigin: dev.origin,
+      bundled: dev.bundled,
       hmrOrigin: dev.hmrOrigin,
       rpcProxyOrigin: rpcProxy.url,
       screeningOrigin: screening.origin,
       readOnly: v3ApiReadPrefixes(apiUrl ?? null),
-      forwarded: () => rpcProxy.stats.forwarded.get('eth_call') ?? 0,
+      forwarded: () => rpcProxy.stats.lanes.get('0') ?? 0,
       runDir,
     });
+    ensureRunning();
+    const browserPool =
+      browserPoolCount === 0
+        ? undefined
+        : await startBrowserPool({
+            count: browserPoolCount,
+            certificatePath: certificate.certPath,
+            privateDir: directory,
+          });
+    if (browserPool !== undefined) {
+      addStop({ name: 'browser pool', run: browserPool.stop });
+      ensureRunning();
+      process.env.BROWSER_HARNESS_BROWSER_POOL_FILE = browserPool.endpointsFile;
+    }
 
     const manifest: Manifest = {
       runId,
       startedAt,
+      readyAt: new Date().toISOString(),
       isInteractive,
       fork: {
         ...target,
-        endpoint: chosen.label,
-        localUrl: forkInfo.localUrl,
-        anvilPid: forkInfo.pid,
-        upstreamProxyUrl: upstream.url,
+        endpoint: forkContext.endpoint.label,
+        localUrl: firstInfo.forkUrl,
+        anvilPid: firstInfo.anvilPid,
+        upstreamProxyUrl: forkContext.proxy.url,
+        cache,
       },
+      lanes: { count: laneCount },
+      concurrency,
+      ...(browserPool === undefined ? {} : { browserPool: browserPool.info }),
       tools: {
         anvil: anvil.version,
         anvilClient: clientVersion,
@@ -470,7 +750,8 @@ export async function startServices({
       app: {
         devOrigin: dev.origin,
         hmrOrigin: dev.hmrOrigin,
-        devResolved: { DEV: dev.DEV },
+        devResolved: { DEV: dev.DEV, bundled: dev.bundled },
+        ...(devSourceMapsFile === undefined ? {} : { devSourceMapsFile }),
         environment: devEnvironment,
         removedViteVariables,
         wrappedReleaseControls: 'open',
@@ -480,13 +761,18 @@ export async function startServices({
         rpcProxy: rpcProxy.url,
         screening: screening.origin,
         extensionUrl: screening.extensionUrl,
-        wallet: wallet.url,
+        wallet: firstInfo.walletUrl,
+        lanes: laneServer.url,
         bindings: {
-          anvil: forkInfo.localUrl,
-          upstreamProxy: upstream.url,
+          ...Object.fromEntries(
+            browserPool?.info.servers.map((server, index) => [`browserPool${index}`, server.origin]) ?? []
+          ),
+          anvil: firstInfo.forkUrl,
+          upstreamProxy: forkContext.proxy.url,
           rpcProxy: `127.0.0.1:${rpcProxy.port}`,
           screening: screening.origin,
-          wallet: wallet.url,
+          wallet: firstInfo.walletUrl,
+          lanes: laneServer.url,
           dev: dev.origin,
         },
       },
@@ -502,7 +788,9 @@ export async function startServices({
     const manifestPath = path.join(runDir, 'manifest.json');
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
     process.env.BROWSER_HARNESS_MANIFEST = manifestPath;
-    process.env.BROWSER_WALLET_CONTROL_URL = wallet.url;
+    process.env.BROWSER_HARNESS_LANES_URL = laneServer.url;
+    // Lane 0's wallet, for an interactive session and an agent's own control calls. A worker uses its lane's.
+    process.env.BROWSER_WALLET_CONTROL_URL = firstInfo.walletUrl;
     process.env.BROWSER_WALLET_TOKEN_FILE = tokenFile;
     return {
       manifest,
@@ -514,11 +802,26 @@ export async function startServices({
         // directory: the keys and the private URL are known only to this process.
         const errors = await stop();
         process.off('exit', exitHandler);
-        const finished = { ...manifest, finishedAt: new Date().toISOString() };
+        const finished = {
+          ...manifest,
+          finishedAt: new Date().toISOString(),
+          fork: { ...manifest.fork, cachePromotion },
+          lanes: { ...manifest.lanes, started: lanesStarted },
+        };
         fs.writeFileSync(manifestPath, JSON.stringify(finished, null, 2));
         fs.writeFileSync(
           path.join(runDir, 'stats.json'),
-          JSON.stringify({ ...stats(), bundleSecretScan, cleanupErrors: errors }, null, 2)
+          JSON.stringify(
+            {
+              ...stats(),
+              upstreamPerSecond: Object.fromEntries(upstreamStats?.perSecond ?? []),
+              forkCachePromotion: cachePromotion,
+              bundleSecretScan,
+              cleanupErrors: errors,
+            },
+            null,
+            2
+          )
         );
         return errors;
       },
@@ -553,12 +856,13 @@ async function readUsdcImplementation(forkUrl: string): Promise<string> {
 }
 
 /**
- * Loads the app once, so that Vite's first dependency optimization is not charged to a test. It also checks
- * that the app's `eth_call` reads reach the RPC proxy through the egress route, which trusts the harness
- * certificate in Node.
+ * Loads the app once, on lane 0, so that Vite's first dependency optimization is not charged to a test. It
+ * also checks that the app's reads reach lane 0's fork through the RPC proxy and the egress route, which
+ * trusts the harness certificate in Node.
  */
 async function warmUp({
   devOrigin,
+  bundled,
   hmrOrigin,
   rpcProxyOrigin,
   screeningOrigin,
@@ -567,6 +871,7 @@ async function warmUp({
   runDir,
 }: {
   devOrigin: string;
+  bundled: boolean;
   hmrOrigin: string;
   rpcProxyOrigin: string;
   screeningOrigin: string;
@@ -588,7 +893,9 @@ async function warmUp({
           readOnly: new Set(readOnly),
           webSocket: new Set([hmrOrigin]),
         },
-        blocked
+        blocked,
+        { origins: new Set([rpcProxyOrigin, screeningOrigin]), value: '0' },
+        bundled ? { bundledDev: { origin: devOrigin } } : undefined
       );
       await context.addInitScript(installHarnessProvider, {
         appOrigin: devOrigin,

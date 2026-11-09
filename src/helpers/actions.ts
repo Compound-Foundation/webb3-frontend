@@ -15,6 +15,17 @@ export function isSameAction(action1: Action | PendingAction, action2: Action | 
   return action1[0] === action2[0] && isSameToken(action1[1], action2[1]);
 }
 
+/**
+ * Whether adding `action` to `queued` gives the queue a second, distinct action. The queued action
+ * itself, edited or added again, is not a second action.
+ */
+export function addsSecondAction(queued: readonly Action[], action: Action | PendingAction): boolean {
+  return queued.some((queuedAction) => !isSameAction(queuedAction, action));
+}
+
+/** Why a queue limited to one action refuses another, as the amount form and the queue show it. */
+export const QUEUED_ACTION_FIRST = 'Submit Or Remove The Queued Action First';
+
 export function isSameClaimAction(action1: Action | PendingAction, action2: Action | PendingAction): boolean {
   return (
     action1[0] === ActionType.ClaimRewards &&
@@ -170,12 +181,17 @@ type Validity = 'ok' | [false, string];
 /**
  * Why `action` would lend or withdraw the base token as a direct Comet supplier, given the base
  * balance the earlier actions leave: a base supply or a base withdrawal always would, and so would a
- * repay larger than the debt. A full repay (`MAX_UINT256`) repays the debt exactly.
+ * repay larger than the debt. A full repay (`MAX_UINT256`) repays the debt exactly. A borrow while a
+ * direct supply remains would first withdraw that supply, since Comet's `withdraw` takes the supply
+ * before it borrows.
  */
 function directBaseLendingProblem(baseAsset: BaseAssetWithAccountState, action: Action): string | undefined {
   const [actionType, , amount] = action;
   if (actionType === ActionType.Supply || actionType === ActionType.Withdraw) {
     return 'Base Lending Goes Through The Wrapper';
+  }
+  if (actionType === ActionType.Borrow && baseAsset.balance > 0n) {
+    return `Must Withdraw Full ${baseAsset.symbol} Balance`;
   }
   return actionType === ActionType.Repay ? excessRepayProblem(baseAsset, amount) : undefined;
 }
@@ -197,17 +213,26 @@ export type WrappedBaseRules = {
   /** Why a base withdrawal cannot be queued now, as the amount form shows it, or undefined. */
   withdrawBlockedReason: string | undefined;
   /**
-   * The most a partial withdrawal through the wrapper pays now, in base units: the position less
-   * the wrapper's rounding buffer, within the market's cash. Undefined until the position is read.
+   * The most a withdrawal of an amount pays now, in base units: the direct Comet supply, then the
+   * wrapped position less the wrapper's rounding buffer, within the market's cash. Undefined until
+   * the position is read.
    */
   maxPartialWithdrawal: bigint | undefined;
-  /** Whether a full exit can pay now. A maximum withdrawal is a full exit. */
+  /**
+   * Whether a maximum withdrawal can pay now: the whole direct Comet supply, then a full exit of
+   * the wrapper.
+   */
   canWithdrawAll: boolean;
   /**
-   * What a full exit pays, in base units: the position less the wrapper's rounding buffer.
-   * Undefined until the position is read.
+   * What a maximum withdrawal pays, in base units: the direct Comet supply, and the wrapped position
+   * less the wrapper's rounding buffer. Undefined until the position is read.
    */
   fullExitCash?: bigint;
+  /**
+   * The account's base supply to Comet directly, outside the wrapper, in base units. A withdrawal
+   * takes it first, through Comet. Zero or undefined when there is none.
+   */
+  directSupply?: bigint;
   /**
    * The base token's allowance to the wrapper, which a base supply spends instead of the Comet
    * allowance. Undefined until the position is read, and then treated as zero.
@@ -223,6 +248,11 @@ export type WrappedBaseRules = {
 export type ActionRules = {
   /** Set on the wrapped route, where the market's wrapper carries out base supply and withdrawal. */
   wrappedBase?: WrappedBaseRules;
+  /**
+   * Set when the queue holds at most one action, as on the wrapped route. The Bulker cannot call the
+   * wrapper, so each action there is its own wallet transaction.
+   */
+  isSingleAction?: boolean;
 };
 
 /**
@@ -270,6 +300,9 @@ export function validateAddingAction(
   // A wrapper action has its own review and is never queued with direct actions.
   if (isWrappedActionEntry(actionToAdd)) {
     return [false, 'Wrapped Actions Are Submitted Separately'];
+  }
+  if (rules.isSingleAction && addsSecondAction(actions, actionToAdd)) {
+    return [false, QUEUED_ACTION_FIRST];
   }
   const { baseAsset, collateralAssets } = calculateUpdatedBalances(baseAssetPre, collateralAssetsPre, actions);
 
@@ -399,7 +432,8 @@ export function validateAddingAction(
 
 /**
  * Whether any action in the queue would lend or withdraw the base token as a direct Comet supplier:
- * a base supply, a base withdrawal, or a repay larger than the debt the earlier actions leave. On
+ * a base supply, a base withdrawal, a repay larger than the debt the earlier actions leave, or a
+ * borrow while a direct supply remains, which Comet withdraws before it borrows. On
  * the wrapped route the wrapper carries out base supply and withdrawal, so none of these may reach
  * Comet or the Bulker.
  */
