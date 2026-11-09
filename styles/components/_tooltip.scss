@@ -94,6 +94,13 @@
     &:hover {
       background: var(--ui--foreground--2);
     }
+    // Keeps the trigger's layout while its tooltip is disabled
+    &--disabled {
+      cursor: default;
+      &:hover {
+        background: none;
+      }
+    }
   }
   &__text-trigger {
     padding: 0.25rem 0;

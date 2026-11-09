@@ -1,7 +1,7 @@
 import { marketKey } from '@helpers/markets';
 import { MarketData, MarketDataLoaded } from '@types';
 
-import { AllMarkets, Extension, extensions } from './core';
+import { AllMarkets, Extension, extensions, MarketBulker } from './core';
 
 function extraExtensions(): Extension[] {
   if (import.meta.env.VITE_EXTRA_EXTENSIONS) {
@@ -41,7 +41,8 @@ export function getOperator(extension: Extension, marketData: MarketData | Marke
     return null;
   }
 
-  return extension.supportedMarkets[marketKey(marketData)] || null;
+  const operator = extension.supportedMarkets[marketKey(marketData)];
+  return operator === MarketBulker ? marketData.bulkerAddress : operator || null;
 }
 
 export function getSrc(extension: Extension): string | null {

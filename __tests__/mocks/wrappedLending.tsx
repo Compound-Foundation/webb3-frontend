@@ -5,6 +5,8 @@ import { queueScope, submissionScope, WrappedLending, WrappedLendingContext } fr
 import { useSubmissionStore } from '@hooks/useSubmissionStore';
 import { Action, MarketData, SettledTransaction, Transaction } from '@types';
 
+import { MockMarketsProvider } from './mockMarkets';
+
 const NO_TRANSACTIONS: Transaction[] = [];
 const NO_SETTLED_TRANSACTIONS: SettledTransaction[] = [];
 const ignoreRemoval: (action: Action) => void = () => undefined;
@@ -40,5 +42,9 @@ export function TestLendingProvider({
     settledTransactions,
     removeAction,
   });
-  return <WrappedLendingContext.Provider value={{ ...value, submission }}>{children}</WrappedLendingContext.Provider>;
+  return (
+    <MockMarketsProvider>
+      <WrappedLendingContext.Provider value={{ ...value, submission }}>{children}</WrappedLendingContext.Provider>
+    </MockMarketsProvider>
+  );
 }

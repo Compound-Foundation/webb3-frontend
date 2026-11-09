@@ -2,7 +2,6 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 
 import type { Web3 } from '@contexts/Web3Context';
 import { getBulkerTrxData } from '@helpers/bulkerActions';
-import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import { getMarket } from '@helpers/markets';
 import { MAX_UINT256 } from '@helpers/numbers';
 import { planExecution, submitExecution, WrappedExecutionError } from '@helpers/wrappedActions';
@@ -21,6 +20,8 @@ import {
   StateType,
   Transaction,
 } from '@types';
+
+import { MOCK_MARKETS } from '../../mocks/mockMarkets';
 
 import {
   COMET,
@@ -49,7 +50,7 @@ type DirectHooks = { comet: CometState; writeComet: ReturnType<typeof useWriteCo
 describe.each(FORK_MARKETS)('$label', (forkMarket) => {
   const { market, symbol, label } = forkMarket;
   const account = forkAccount('direct and wrapped', forkMarket);
-  const marketData = getMarket(1, market.cometAddress) as MarketData;
+  const marketData = getMarket(MOCK_MARKETS, 1, market.cometAddress) as MarketData;
   // The standard route's writes take a loaded market. They read only its addresses and native token.
   const loadedMarket = marketData as unknown as MarketDataLoaded;
   // App holds these in state, so every render passes the same objects.
@@ -149,8 +150,6 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         })
       );
       try {
-        // Mainnet USDT takes the app's deprecated price-feed path, which this Comet state read uses.
-        measured.deprecatedFeedPath = getIsDeprecatedwUSDMMarket(marketData.baseAsset, marketData.chainInformation);
         // The standard route's own writes: allow the Bulker, then supply ETH and borrow through it.
         let state = await cometState(app);
         await standardWrite(app, ({ writeComet }) =>

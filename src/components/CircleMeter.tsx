@@ -1,8 +1,9 @@
 type CircleMeterProps = {
   percentageFill: string;
+  disabled?: boolean;
 };
 // reference https://medium.com/@pppped/how-to-code-a-responsive-circular-percentage-chart-with-svg-and-css-3632f8cd7705
-const CircleMeter = ({ percentageFill }: CircleMeterProps) => {
+const CircleMeter = ({ percentageFill, disabled = false }: CircleMeterProps) => {
   // Stoke width is 3px as per design
   const box = 19;
   const diameter = 16;
@@ -19,7 +20,9 @@ const CircleMeter = ({ percentageFill }: CircleMeterProps) => {
     <div className="circle-meter">
       <svg viewBox={`0 0 ${box} ${box}`}>
         <path className="circle-meter__bg" d={d} />
-        <path className="circle-meter__circle" strokeDasharray={`${circleFill},${circumference}`} d={d} />
+        {!disabled && (
+          <path className="circle-meter__circle" strokeDasharray={`${circleFill},${circumference}`} d={d} />
+        )}
       </svg>
     </div>
   );

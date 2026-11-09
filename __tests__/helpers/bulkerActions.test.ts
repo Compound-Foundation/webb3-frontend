@@ -17,11 +17,12 @@ import { Action, ActionType, BaseAssetWithAccountState, MarketDataLoaded, TokenW
 
 import { mockBaseAsset } from '../mocks/mockBaseAsset';
 import { mockCompCollateralAsset, mockEthCollateralAsset } from '../mocks/mockCollateralAssets';
+import { MOCK_MARKETS } from '../mocks/mockMarkets';
 
 const SENDER = '0x0000000000000000000000000000000000000aa1';
 const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-const MARKET = getMarket(1, USDC_COMET) as unknown as MarketDataLoaded;
+const MARKET = getMarket(MOCK_MARKETS, 1, USDC_COMET) as unknown as MarketDataLoaded;
 const WRAPPER_ADDRESSES = HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => market.wrapperAddress);
 
 const BASE_ASSET = mockBaseAsset({ address: USDC, balance: -5_000_000n, walletBalance: 10_000_000n });
