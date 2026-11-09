@@ -1,4 +1,19 @@
 import { ethers } from 'ethers';
+import {
+  sepolia,
+  mainnet,
+  polygon,
+  arbitrum,
+  scroll,
+  optimism,
+  avalanche,
+  avalancheFuji,
+  base,
+  mantle,
+  linea,
+  unichain,
+  ronin,
+} from 'viem/chains';
 
 import {
   ARBITRUM_URL,
@@ -17,13 +32,23 @@ import {
 } from '../../envVars';
 import { ChainInformation } from '../types';
 
+function getRpcUrl(value?: string): string {
+  if (!value) return '';
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'http:' || protocol === 'https:' ? value : '';
+  } catch {
+    return '';
+  }
+}
+
 export const CHAINS: {
   [chainId: number]: ChainInformation;
 } = {
   // XXX uncomment networks as they get supported.
   1: {
     chainId: 1,
-    url: MAINNET_URL,
+    url: getRpcUrl(MAINNET_URL) || mainnet.rpcUrls.default.http[0],
     key: 'mainnet',
     name: 'Ethereum',
     blockExplorerUrls: ['https://etherscan.io'],
@@ -91,7 +116,7 @@ export const CHAINS: {
   },
   11155111: {
     chainId: 11155111,
-    url: SEPOLIA_URL,
+    url: getRpcUrl(SEPOLIA_URL) || sepolia.rpcUrls.default.http[0],
     key: 'sepolia',
     name: 'Sepolia',
     blockExplorerUrls: ['https://sepolia.etherscan.io'],
@@ -125,7 +150,7 @@ export const CHAINS: {
   },
   10: {
     chainId: 10,
-    url: OPTIMISM_URL,
+    url: getRpcUrl(OPTIMISM_URL) || optimism.rpcUrls.default.http[0],
     key: 'op',
     name: 'Optimism',
     blockExplorerUrls: ['https://explorer.optimism.io'],
@@ -160,7 +185,7 @@ export const CHAINS: {
   },
   137: {
     chainId: 137,
-    url: POLYGON_URL,
+    url: getRpcUrl(POLYGON_URL) || polygon.rpcUrls.default.http[0],
     key: 'polygon',
     name: 'Polygon',
     blockExplorerUrls: ['https://polygonscan.com/'],
@@ -207,7 +232,7 @@ export const CHAINS: {
   },
   43113: {
     chainId: 43113,
-    url: FUJI_URL,
+    url: getRpcUrl(FUJI_URL) || avalancheFuji.rpcUrls.default.http[0],
     key: 'fuji',
     name: 'Avalanche Fuji',
     blockExplorerUrls: ['https://testnet.snowtrace.io'],
@@ -224,7 +249,7 @@ export const CHAINS: {
   },
   43114: {
     chainId: 43114,
-    url: AVALANCHE_URL,
+    url: getRpcUrl(AVALANCHE_URL) || avalanche.rpcUrls.default.http[0],
     key: 'Avax',
     name: 'Avalanche',
     blockExplorerUrls: ['https://snowtrace.io'],
@@ -241,7 +266,7 @@ export const CHAINS: {
   },
   42161: {
     chainId: 42161,
-    url: ARBITRUM_URL,
+    url: getRpcUrl(ARBITRUM_URL) || arbitrum.rpcUrls.default.http[0],
     key: 'arb',
     v3ApiNetworkKeyOverride: 'arbitrum-mainnet',
     name: 'Arbitrum',
@@ -288,7 +313,7 @@ export const CHAINS: {
   },
   8453: {
     chainId: 8453,
-    url: BASE_MAINNET_URL,
+    url: getRpcUrl(BASE_MAINNET_URL) || base.rpcUrls.default.http[0],
     key: 'basemainnet',
     v3ApiNetworkKeyOverride: 'base-mainnet',
     name: 'Base',
@@ -329,7 +354,7 @@ export const CHAINS: {
   },
   534352: {
     chainId: 534352,
-    url: SCROLL_URL,
+    url: getRpcUrl(SCROLL_URL) || scroll.rpcUrls.default.http[0],
     key: 'scroll',
     v3ApiNetworkKeyOverride: 'scroll-mainnet',
     name: 'Scroll',
@@ -370,7 +395,7 @@ export const CHAINS: {
   },
   5000: {
     chainId: 5000,
-    url: MANTLE_URL,
+    url: getRpcUrl(MANTLE_URL) || mantle.rpcUrls.default.http[0],
     key: 'mantle',
     v3ApiNetworkKeyOverride: 'mantle-mainnet',
     name: 'Mantle',
@@ -405,7 +430,7 @@ export const CHAINS: {
   },
   59144: {
     chainId: 59144,
-    url: LINEA_URL,
+    url: getRpcUrl(LINEA_URL) || linea.rpcUrls.default.http[0],
     key: 'linea',
     v3ApiNetworkKeyOverride: 'linea-mainnet',
     name: 'Linea',
@@ -434,7 +459,7 @@ export const CHAINS: {
   },
   130: {
     chainId: 130,
-    url: UNICHAIN_URL,
+    url: getRpcUrl(UNICHAIN_URL) || unichain.rpcUrls.default.http[0],
     key: 'unichain',
     v3ApiNetworkKeyOverride: 'unichain-mainnet',
     name: 'Unichain',
@@ -463,7 +488,7 @@ export const CHAINS: {
   },
   2020: {
     chainId: 2020,
-    url: RONIN_URL,
+    url: getRpcUrl(RONIN_URL) || ronin.rpcUrls.default.http[0],
     key: 'ronin',
     v3ApiNetworkKeyOverride: 'ronin-mainnet',
     name: 'Ronin',
