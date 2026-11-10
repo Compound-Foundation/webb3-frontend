@@ -1,7 +1,10 @@
+import { INSTITUTIONAL_BOOST_END_DATE } from '@helpers/institutionalRates';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import { RewardsState, StateType } from '@types';
 
 const LOADING_REWARDS_STATE: RewardsState = [StateType.Loading];
+
+jest.spyOn(Date, 'now').mockReturnValue(INSTITUTIONAL_BOOST_END_DATE.getTime() - 1);
 
 describe('getMarketRewardsAPRs', () => {
   it('institutional market: uses institutionalSupplyRewardRate, borrowRewardsAPR is 0', () => {

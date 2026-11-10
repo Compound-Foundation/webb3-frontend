@@ -23,6 +23,9 @@ export const INSTITUTIONAL_BOOST_END_DATE_LABEL = INSTITUTIONAL_BOOST_END_DATE.t
   day: 'numeric',
   year: 'numeric',
 });
+
+export const isInstitutionalBoostOver = () => Date.now() >= INSTITUTIONAL_BOOST_END_DATE.getTime();
+
 const LEVEL_STEP_DOLLARS = 500_000;
 const FIRST_LEVEL_DOLLARS = 500_000;
 const LAST_LEVEL_DOLLARS = 20_000_000;
@@ -35,7 +38,7 @@ const DOLLAR_SCALE = 10n ** BigInt(PRICE_PRECISION);
  * @returns the reward supply rate, at FACTOR_PRECISION
  */
 export function institutionalSupplyRewardRate(totalSuppliedUsd: bigint): bigint {
-  if (totalSuppliedUsd < BigInt(FIRST_LEVEL_DOLLARS) * DOLLAR_SCALE) {
+  if (isInstitutionalBoostOver() || totalSuppliedUsd < BigInt(FIRST_LEVEL_DOLLARS) * DOLLAR_SCALE) {
     return 0n;
   }
   const cappedUsd = BigInt(LAST_LEVEL_DOLLARS) * DOLLAR_SCALE;

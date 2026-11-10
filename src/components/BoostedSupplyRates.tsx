@@ -1,5 +1,5 @@
 import { Lightning } from '@components/Icons/Lightning';
-import { INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
+import { INSTITUTIONAL_BOOST_END_DATE_LABEL, isInstitutionalBoostOver } from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { formatRateFactor } from '@helpers/numbers';
 import { INSTITUTIONAL_MARKET_URL, INSTITUTIONAL_REGISTER_URL } from '@helpers/urls';
@@ -36,6 +36,7 @@ const BoostedSupplyRates = ({
   // floored so a small base rate still reads as a visible segment
   const boostShare = totalAPR > 0n ? Number((boostAPR * 100n) / totalAPR) : 0;
   const baseShare = 100 - boostShare;
+  const boostOver = isInstitutionalBoostOver();
 
   let whitelistCard: JSX.Element;
   if (whitelistStatus === InstitutionalWhitelistStatus.Whitelisted) {
@@ -99,23 +100,27 @@ const BoostedSupplyRates = ({
           className="boosted-supply-rates__bar__segment boosted-supply-rates__bar__segment--base"
           style={{ flexGrow: baseShare }}
         ></div>
-        <div
-          className="boosted-supply-rates__bar__segment boosted-supply-rates__bar__segment--boost"
-          style={{ flexGrow: boostShare }}
-        ></div>
+        {!boostOver && (
+          <div
+            className="boosted-supply-rates__bar__segment boosted-supply-rates__bar__segment--boost"
+            style={{ flexGrow: boostShare }}
+          ></div>
+        )}
       </div>
       <div className="boosted-supply-rates__labels">
         <span className="L4 meta">
           <span className="boosted-supply-rates__labels__value">{formatRateFactor(earnAPR)}</span>
           <span className="text-color--2"> Base Interest</span>
         </span>
-        <span className="L4 meta boosted-supply-rates__labels__container">
-          <Lightning className="boosted-supply-rates__labels__icon" />
-          <span className="boosted-supply-rates__labels__value">{formatRateFactor(boostAPR)}</span>
-          <span className="text-color--2"> {boostLabel}</span>
-        </span>
+        {!boostOver && (
+          <span className="L4 meta boosted-supply-rates__labels__container">
+            <Lightning className="boosted-supply-rates__labels__icon" />
+            <span className="boosted-supply-rates__labels__value">{formatRateFactor(boostAPR)}</span>
+            <span className="text-color--2"> {boostLabel}</span>
+          </span>
+        )}
       </div>
-      {showWhitelistCard && whitelistCard}
+      {showWhitelistCard && !boostOver && whitelistCard}
     </div>
   );
 };
