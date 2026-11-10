@@ -302,14 +302,8 @@ export const formatUnitsWithTruncation = ({ amount }: { amount: string }) => {
   })}`;
 };
 
-export const formatRateFactor = (value: bigint, maximumFractionDigits = 2, minimumFractionDigits = 2): string => {
-  const rate = Number((value * 10_000n) / BASE_FACTOR) / 100;
-
-  return `${rate.toLocaleString('en-US', {
-    maximumFractionDigits,
-    minimumFractionDigits,
-  })}%`;
-};
+export const formatRateFactor = (value: bigint, maximumFractionDigits = 2, minimumFractionDigits = 2): string =>
+  formatRate(Number(value) / Number(BASE_FACTOR), maximumFractionDigits, minimumFractionDigits);
 
 export const formatRate = (value: number, maximumFractionDigits = 2, minimumFractionDigits = 2): string => {
   const rate = value * 100;
