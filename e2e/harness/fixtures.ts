@@ -12,13 +12,16 @@
 // - `harnessWallet`: the wallet the provider announces, MetaMask unless a spec sets another with
 //   `test.use({ harnessWallet: ANCHORAGE_WALLET })`.
 // - Before each test, the wallet resets: anvil resets the fork to its block from the upstream proxy, and
-//   every account, request, permission, chain setting and screening behaviour is cleared.
+//   every account, request, permission, chain setting and screening behaviour is cleared. With the fork
+//   cache on, the test's keyed accounts come from its identity. They then repeat in every run and differ
+//   from other tests' accounts.
 import fs from 'node:fs';
 
 import { test as base, expect, type Browser, type BrowserContext, type Frame, type Page } from '@playwright/test';
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { mainnet } from 'viem/chains';
 
+import { connectPoolBrowser } from './browserPool';
 import { ControlClient } from './controlClient';
 import { allowLoopbackWebSocket, applyEgress, closePagesItDidNotOpen, type BlockedRequest } from './egress';
 import type { LaneInfo } from './forkLanes';
@@ -32,11 +35,11 @@ import {
 import type { Manifest } from './services';
 import { v3ApiReadPrefixes } from './settings';
 import { trustHarnessCertificate } from './tls';
-import type { WalletRequest } from './walletServer';
+import { accountSeedOf, type WalletRequest } from './walletServer';
 
 export { expect };
 
-export type AppTarget = 'dev' | 'prod-missing-endpoint' | 'prod-allowed';
+export type AppTarget = 'dev' | 'prod-missing-endpoint' | 'prod-allowed' | 'prod-development-node-env';
 
 export function readManifest(): Manifest {
   const file = process.env.BROWSER_HARNESS_MANIFEST;
@@ -67,7 +70,9 @@ export function withLane(manifest: Manifest, lane: LaneInfo): Manifest {
 export function originOf(manifest: Manifest, target: AppTarget): string {
   if (target === 'dev') return manifest.app.devOrigin;
   if (manifest.production.isSkipped) throw new Error(`production builds were skipped: ${manifest.production.reason}`);
-  return target === 'prod-allowed' ? manifest.production.allowed.origin : manifest.production.missingEndpoint.origin;
+  if (target === 'prod-allowed') return manifest.production.allowed.origin;
+  if (target === 'prod-development-node-env') return manifest.production.developmentNodeEnv.origin;
+  return manifest.production.missingEndpoint.origin;
 }
 
 type BindingSource = { page: Page | null; frame: Frame };
@@ -136,7 +141,10 @@ export async function harnessContext(
       webSocket: new Set(appOrigin === manifest.app.devOrigin ? [manifest.app.hmrOrigin] : []),
     },
     blocked,
-    { origins: new Set([manifest.services.rpcProxy, manifest.services.screening]), value: String(lane) }
+    { origins: new Set([manifest.services.rpcProxy, manifest.services.screening]), value: String(lane) },
+    appOrigin === manifest.app.devOrigin && manifest.app.devResolved.bundled === true
+      ? { bundledDev: { origin: appOrigin } }
+      : undefined
   );
   await context.exposeBinding(BINDING_NAME, bindingHandler(appOrigin, wallet));
   await context.addInitScript(installHarnessProvider, {
@@ -149,7 +157,13 @@ export async function harnessContext(
   return context;
 }
 
-type WorkerFixtures = { lane: LaneInfo; manifest: Manifest; wallet: ControlClient; fork: PublicClient };
+type WorkerFixtures = {
+  lane: LaneInfo;
+  manifest: Manifest;
+  wallet: ControlClient;
+  fork: PublicClient;
+  preparedPoolConnection: Browser | undefined;
+};
 type TestFixtures = {
   appTarget: AppTarget;
   harnessWallet: HarnessWallet;
@@ -157,6 +171,7 @@ type TestFixtures = {
   blocked: BlockedRequest[];
   consoleMessages: string[];
   resetWallet: void;
+  devDiagnostics: void;
 };
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -170,13 +185,39 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       use(createPublicClient({ chain: mainnet, transport: http(manifest.fork.localUrl) }) as PublicClient),
     { scope: 'worker' },
   ],
+  preparedPoolConnection: [
+    async ({ playwright, headless }, use, workerInfo) => {
+      const endpointsFile = process.env.BROWSER_HARNESS_BROWSER_POOL_FILE;
+      if (endpointsFile === undefined) {
+        await use(undefined);
+        return;
+      }
+      if (!headless) throw new Error('BROWSER_TEST_BROWSER_POOL requires headless browsers.');
+      const browser = await connectPoolBrowser(playwright.chromium, workerInfo.parallelIndex, endpointsFile);
+      try {
+        await use(browser);
+      } finally {
+        // This disconnects the worker. The server still owns Chromium.
+        await browser.close();
+      }
+    },
+    // Automatic worker setup precedes the test's trace recorder. A failed connect cannot record its URL.
+    { scope: 'worker', auto: true },
+  ],
   browser: [
-    async ({ playwright, manifest, headless }, use) => {
+    async ({ playwright, manifest, headless, preparedPoolConnection }, use) => {
       // The egress route fetches each browser request in Node, so this worker trusts the harness certificate.
       trustHarnessCertificate(fs.readFileSync(manifest.tls.certPath, 'utf8'));
+      if (preparedPoolConnection !== undefined) {
+        await use(preparedPoolConnection);
+        return;
+      }
       const browser = await playwright.chromium.launch({ headless });
-      await use(browser);
-      await browser.close();
+      try {
+        await use(browser);
+      } finally {
+        await browser.close();
+      }
     },
     { scope: 'worker' },
   ],
@@ -199,9 +240,21 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     });
   },
   resetWallet: [
-    async ({ wallet }, use) => {
-      await wallet.reset();
+    async ({ wallet }, use, testInfo) => {
+      // With the fork cache on, the seed gives the test's accounts the same addresses in every run. The cache
+      // then holds what anvil read for them. Other tests get other addresses.
+      await wallet.reset(accountSeedOf(testInfo));
       await use();
+    },
+    { auto: true },
+  ],
+  devDiagnostics: [
+    async ({ manifest, appTarget }, use, testInfo) => {
+      await use();
+      const sourceMapsFile = manifest.app.devSourceMapsFile;
+      if (appTarget === 'dev' && sourceMapsFile !== undefined && testInfo.status !== testInfo.expectedStatus) {
+        await testInfo.attach('dev-source-maps.json.gz', { path: sourceMapsFile, contentType: 'application/gzip' });
+      }
     },
     { auto: true },
   ],

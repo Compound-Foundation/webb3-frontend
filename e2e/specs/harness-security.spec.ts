@@ -711,12 +711,14 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
     // The workers are children of the Playwright runner, which runs the services in-process.
     const runner = listeningAddresses(process.ppid);
     const anvil = listeningAddresses(manifest.fork.anvilPid);
+    const poolServers = manifest.browserPool?.servers ?? [];
+    const poolAddresses = poolServers.flatMap((server) => listeningAddresses(server.serverPid));
     // The lanes started by the time of the listing. Lanes only start, so a listing read after the sockets
     // holds every wallet server that was listening then.
     const lanes = await ControlClient.forUrl(manifest.services.lanes).request<LaneInfo[]>('GET', '/v1/lanes');
     const port = (url: string) => /:(\d+)/.exec(url)?.[1] as string;
     // The upstream proxy, RPC proxy, screening stub, lane server, a wallet server for each lane, the dev
-    // server, and the two production servers when the builds ran. Vite's HMR shares the dev server's port.
+    // server, and the three production servers when the builds ran. Vite's HMR shares the dev server's port.
     const expected = new Set(
       [
         manifest.services.bindings.upstreamProxy,
@@ -727,12 +729,17 @@ test.describe('harness boundaries', { tag: ['@AC8', '@AC9'] }, () => {
         ...lanes.map((lane) => lane.walletUrl),
         ...(manifest.production.isSkipped
           ? []
-          : [manifest.production.allowed.origin, manifest.production.missingEndpoint.origin]),
+          : [
+              manifest.production.allowed.origin,
+              manifest.production.missingEndpoint.origin,
+              manifest.production.developmentNodeEnv.origin,
+            ]),
       ].map(port)
     );
-    for (const address of [...runner, ...anvil]) expect(address).toMatch(/^127\.0\.0\.1:\d+$/);
+    for (const address of [...runner, ...anvil, ...poolAddresses]) expect(address).toMatch(/^127\.0\.0\.1:\d+$/);
     for (const address of runner) expect(expected.has(address.split(':')[1]), address).toBe(true);
-    const ports = new Set([...runner, ...anvil].map((address) => address.split(':')[1]));
+    expect(poolAddresses.sort()).toEqual(poolServers.map((server) => new URL(server.origin).host).sort());
+    const ports = new Set([...runner, ...anvil, ...poolAddresses].map((address) => address.split(':')[1]));
     for (const url of Object.values(manifest.services.bindings)) expect(ports.has(port(url)), url).toBe(true);
     expect(anvil).toEqual([`127.0.0.1:${new URL(manifest.fork.localUrl).port}`]);
   });
