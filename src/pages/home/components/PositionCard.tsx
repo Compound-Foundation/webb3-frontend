@@ -113,6 +113,7 @@ const PositionCard = ({ state }: PositionCardProps) => {
   const {
     baseAssetSymbol,
     baseAssetWalletBalance,
+    baseAssetIcon,
     actionInputView,
     actionInputViewActive,
     actionQueueItems,
@@ -126,7 +127,6 @@ const PositionCard = ({ state }: PositionCardProps) => {
     borrowCapacity,
     availableToBorrow,
     rates,
-    onBaseAssetClicked,
   } = getContent(state, market as MarketData, currency);
   const itemClassName = 'body body--emphasized';
 
@@ -143,10 +143,7 @@ const PositionCard = ({ state }: PositionCardProps) => {
           </div>
           <div className="position-card__row">
             <div className="position-card__row__info">
-              <span
-                className={`asset asset--${assetIconForAssetSymbol(baseAssetSymbol)}`}
-                onClick={onBaseAssetClicked}
-              ></span>
+              {baseAssetIcon}
               <div>
                 {baseAssetWalletBalance}
                 {additionalWalletBalance}
@@ -211,6 +208,7 @@ const PositionCard = ({ state }: PositionCardProps) => {
 type Content = {
   baseAssetSymbol: string;
   baseAssetWalletBalance: ReactNode;
+  baseAssetIcon: ReactNode;
   rates: ReactNode;
   actionInputView: ReactNode;
   actionInputViewActive: boolean;
@@ -224,7 +222,6 @@ type Content = {
   additionalLiquidationPoint: ReactNode;
   additionalBorrowCapacity: ReactNode;
   additionalAvailableToBorrow: ReactNode;
-  onBaseAssetClicked: () => void;
 };
 
 function getContent(state: PositionCardState, market: MarketData, currency: Currency): Content {
@@ -234,6 +231,12 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
   const defaultPanelState: Content = {
     baseAssetSymbol: 'USDC',
     baseAssetWalletBalance: <span className="placeholder-content" style={{ width: '70px' }}></span>,
+    baseAssetIcon: (
+      <span
+        className="placeholder-content placeholder-content--circle"
+        style={{ width: '36px', height: '36px' }}
+      ></span>
+    ),
     actionInputView: null,
     actionInputViewActive: false,
     actionQueueItems: null,
@@ -247,7 +250,6 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
     additionalBorrowCapacity: null,
     additionalAvailableToBorrow: null,
     rates: null,
-    onBaseAssetClicked: noop,
   };
 
   if (stateType === StateType.Loading) {
@@ -342,6 +344,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
       ...defaultPanelState,
       rates,
       baseAssetSymbol: baseAsset.symbol,
+      baseAssetIcon: <span className={`asset asset--${assetIconForAssetSymbol(baseAsset.symbol)}`}></span>,
       baseAssetWalletBalance: <span className="text-color--2">0.0000</span>,
       collateralValue: <span className="text-color--2">{formattedZeroValueForCurrency}</span>,
       liquidationPoint: <span className="text-color--2">{formattedZeroValueForCurrency}</span>,
@@ -643,6 +646,9 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
     borrowCapacity,
     rates,
     baseAssetSymbol: baseAsset.symbol,
+    baseAssetIcon: (
+      <span className={`asset asset--${assetIconForAssetSymbol(baseAsset.symbol)}`} onClick={onDripClicked}></span>
+    ),
     baseAssetWalletBalance: (
       <h3 className={`heading heading--emphasized text-color--1`}>
         {wholeNumberWalletBalance}
@@ -650,7 +656,6 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
       </h3>
     ),
     collateralValue: collateralValueDisplay,
-    onBaseAssetClicked: () => onDripClicked && onDripClicked(),
   };
 }
 
