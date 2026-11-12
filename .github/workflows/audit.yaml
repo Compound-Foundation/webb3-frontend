@@ -21,11 +21,12 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '25'
-          corepack: true
+          node-version: '26'
 
-      - name: Enable Corepack
-        run: corepack enable
+      - name: Install and enable Corepack
+        run: |
+          npm install --global corepack@0.36.0
+          corepack enable
 
       # Runs `yarn audit` against yarn.lock (no install needed) and fails on
       # any high/critical advisory not allowlisted (with justification) in
