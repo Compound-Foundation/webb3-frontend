@@ -1,6 +1,6 @@
 # Anchorage wrapper registry: deployment evidence and release checks
 
-`src/constants/wrappedMarkets.ts` maps three Ethereum Comet markets to their ERC-4626 wrappers. This document records where each address comes from and what was read on chain to confirm it. It also lists the checks that must pass before wrapped deposits or exits are switched on. Both release controls, `isDepositEnabled` and `isExitEnabled`, are `false` for every entry until the checks under [Unresolved release checks](#unresolved-release-checks) are closed.
+`src/constants/wrappedMarkets.ts` maps three Ethereum Comet markets to their ERC-4626 wrappers. This document records where each address comes from and what was read on chain to confirm it. It also lists the checks that must pass before wrapped deposits or exits are switched on. Both release controls, `isDepositEnabled` and `isExitEnabled`, are `true` for every entry. [Unresolved release checks](#unresolved-release-checks) lists the checks that gate them.
 
 The app also checks each mapping at run time, before it enables a wrapped action. Through the configured chain's public RPC, it reads the factory's `getWrapper(comet)`, the wrapper's `asset()` and `decimals()`, the Comet's `baseToken()` and the base token's `decimals()`, and compares them with the mapping. The factory address and the list of routed markets are kept in code, apart from the replaceable configuration source.
 
