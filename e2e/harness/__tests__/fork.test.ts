@@ -21,7 +21,10 @@ import {
   failedToStartOnUpstream,
   forkCacheRoot,
   forkCacheState,
+  forkTarget,
   isBlockHeader,
+  isKeyLike,
+  isKeyLikeSegmentOrValue,
   isLogArray,
   loadForkCache,
   MAX_RELAYED_LOGS,
@@ -99,6 +102,46 @@ describe('upstream endpoints', () => {
   test('literal secrets, such as the control token, are redacted as written', () => {
     expect(createRedactor([], ['f'.repeat(64)]).redact(`token ${'f'.repeat(64)}.`)).toBe('token <redacted>.');
   });
+
+  test('a host label or path segment of short words, such as a network name, is not key-like', () => {
+    for (const phrase of ['ethereum-mainnet', 'quiet-amber-river', 'arbitrum_one_mainnet']) {
+      expect(isKeyLike(phrase)).toBe(false);
+      expect(isKeyLikeSegmentOrValue(phrase)).toBe(false);
+    }
+    // A key: one long run of characters, or words with a digit or a word of 16 letters or more.
+    for (const key of [CANARY, 'abcdefghijklmnop', 'abcd-efgh-ijkl-0123', `name-${'q'.repeat(16)}`]) {
+      expect(isKeyLike(key)).toBe(true);
+    }
+    // The whole host stays key-like, so an echo of it is redacted, while a library's network URL is not.
+    const url = 'https://quiet-amber-river.ethereum-mainnet.rpc-provider.example/';
+    const { redact } = createRedactor(upstreamEndpoints({ BROWSER_FORK_RPC_URL: url })[0].secretPatterns);
+    expect(redact('nve=`https://${x0}/ethereum-mainnet`')).toBe('nve=`https://${x0}/ethereum-mainnet`');
+    expect(redact(`error: ${new URL(url).host}`)).toBe('error: <redacted>');
+  });
+
+  test('a private token is sent as an x-token header, labelled without it and redacted in every form', () => {
+    const url = 'https://quiet-amber-river.ethereum-mainnet.rpc-provider.example/';
+    const [endpoint] = upstreamEndpoints({ BROWSER_FORK_RPC_URL: url, BROWSER_FORK_RPC_TOKEN: CANARY });
+    expect(endpoint.headers).toEqual({ 'x-token': CANARY });
+    expect(endpoint.label).not.toContain(CANARY);
+    const { redact } = createRedactor(endpoint.secretPatterns);
+    for (const echo of [CANARY, encodeURIComponent(CANARY), CANARY.toUpperCase(), JSON.stringify({ token: CANARY })]) {
+      expect(redact(`error: ${echo}`).toLowerCase()).not.toContain(CANARY.toLowerCase());
+    }
+    expect(upstreamEndpoints({ BROWSER_FORK_RPC_URL: url })[0].headers).toEqual({});
+    for (const each of upstreamEndpoints({})) expect(each.headers).toEqual({});
+  });
+
+  test('refuses a token without a private URL, and a token that is not one run of visible ASCII, never quoting it', () => {
+    expect(() => upstreamEndpoints({ BROWSER_FORK_RPC_TOKEN: CANARY })).toThrow('needs BROWSER_FORK_RPC_URL');
+    const url = 'https://rpc.example.com/';
+    for (const token of [`${CANARY}\r\nx-other: 1`, `${CANARY} `, `${CANARY}é`]) {
+      expect(() => upstreamEndpoints({ BROWSER_FORK_RPC_URL: url, BROWSER_FORK_RPC_TOKEN: token })).toThrow(
+        'visible ASCII'
+      );
+      expect(() => upstreamEndpoints({ BROWSER_FORK_RPC_URL: url, BROWSER_FORK_RPC_TOKEN: token })).not.toThrow(CANARY);
+    }
+  });
 });
 
 describe('a JSON-RPC call', () => {
@@ -120,6 +163,30 @@ describe('a JSON-RPC call', () => {
     await expect(rpc(node.url, 'eth_fails', [], { isPrivate: true })).rejects.not.toThrow(CANARY);
     await expect(rpc(node.url, 'eth_fails')).rejects.toThrow(CANARY);
     expect(await rpc(node.url, 'eth_chainId')).toBe('0x1');
+  });
+
+  test('sends the headers it is given', async () => {
+    node.calls.length = 0;
+    expect(await rpc(node.url, 'eth_chainId', [], { headers: { 'x-token': CANARY } })).toBe('0x1');
+    expect(node.calls[0].headers['x-token']).toBe(CANARY);
+  });
+
+  test("asks a private endpoint for the fork's block with the endpoint's headers", async () => {
+    node.calls.length = 0;
+    node.handlers.set('eth_chainId', () => '0x2');
+    const endpoint = {
+      label: 'test',
+      url: node.url,
+      isPrivate: true,
+      secretPatterns: [],
+      headers: { 'x-token': CANARY },
+    };
+    try {
+      await expect(forkTarget(endpoint, 'pinned')).rejects.toThrow('not Ethereum mainnet');
+    } finally {
+      node.handlers.set('eth_chainId', () => '0x1');
+    }
+    expect(node.calls[0].headers['x-token']).toBe(CANARY);
   });
 
   test('refuses to follow a redirect', async () => {
@@ -238,6 +305,26 @@ describe('the upstream proxy', () => {
       ).toBe(403);
     }
     expect(upstream.calls.map((call) => call.method)).toEqual(['eth_getLogs']);
+  });
+
+  test("sends the endpoint's headers upstream, and never a header of the request it forwards", async () => {
+    const withToken = await startUpstreamProxy(
+      { label: 'test', url: upstream.url, isPrivate: true, secretPatterns: [], headers: { 'x-token': CANARY } },
+      { printable: String }
+    );
+    try {
+      const answer = await fetch(withToken.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded': 'from anvil' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId' }),
+      });
+      expect((await answer.json()).result).toBe('0x1');
+      expect(upstream.calls[0].headers['x-token']).toBe(CANARY);
+      expect(upstream.calls[0].headers['x-forwarded']).toBeUndefined();
+    } finally {
+      withToken.server.closeAllConnections();
+      await new Promise((resolve) => withToken.server.close(resolve));
+    }
   });
 
   test('records its bursts: the most upstream requests open at once, and the most started in one second', async () => {

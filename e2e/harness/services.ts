@@ -343,8 +343,9 @@ export async function startServices({
 
     // 3. The fork.
     const endpoints = upstreamEndpoints();
-    // Only the runner holds the private URL: the workers, which inherit the environment, never see it.
+    // Only the runner holds the private URL and token: the workers, which inherit the environment, never see them.
     delete process.env.BROWSER_FORK_RPC_URL;
+    delete process.env.BROWSER_FORK_RPC_TOKEN;
     for (const endpoint of endpoints) for (const pattern of endpoint.secretPatterns) registerSecretPattern(pattern);
     const redactor = createRedactor(endpoints.flatMap((endpoint) => endpoint.secretPatterns));
     const anvil = findAnvil();

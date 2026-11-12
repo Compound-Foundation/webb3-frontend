@@ -3,7 +3,7 @@
 // The registry lives on `globalThis` in the Playwright runner, where the global setup, the wallet server and
 // the reporters run, so the summary reporter can scan the outputs after every other reporter has finished.
 // It holds the control token, every key the wallet made, the fork cache's account salt and the private
-// upstream URL's patterns. Each literal is held with its kind, which names it in a report.
+// upstream URL's and token's patterns. Each literal is held with its kind, which names it in a report.
 //
 // The scan reads each file whole, each member of a ZIP file (a Playwright trace) after inflating it, and
 // the ZIP that Playwright's HTML report embeds in its index.html, in
@@ -83,7 +83,7 @@ export function findSecrets(texts: { file: string; content: Buffer | string }[])
       if (needleForms.some((form) => lowerText.includes(form))) leaks.push({ file, secret: kind });
     }
     for (const expression of expressions)
-      if (expression.test(text)) leaks.push({ file, secret: 'the private upstream URL' });
+      if (expression.test(text)) leaks.push({ file, secret: 'the private upstream URL or token' });
   }
   return leaks;
 }
