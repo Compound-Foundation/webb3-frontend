@@ -6,11 +6,11 @@ import {
   initSentry,
   isSentryEnabled,
   PRODUCTION_TRACES_SAMPLE_RATE,
-  redactSpan,
+  redactingTransport,
   redactWalletIdentity,
   redactWalletIdentityText,
   sentryRootOptions,
-  type SentrySpanJSON,
+  type SentryTransportFactory,
 } from '../../src/helpers/sentry';
 
 const ADDRESS = '0x52908400098527886E0F7030069857D2E4169EE7';
@@ -20,6 +20,8 @@ const CALLDATA = `0xa9059cbb000000000000000000000000${LOWERCASE_ADDRESS.slice(
   2
 )}0000000000000000000000000000000000000000000000000de0b6b3a7640000`;
 const DSN = 'https://public@o0.ingest.us.sentry.io/0';
+const COMMIT_SHA = 'c793fd76f0cce3f8cc29edb6c5f3188c623a8577';
+const ADDRESS_BYTES = Array.from(Buffer.from(ADDRESS.slice(2), 'hex'));
 
 describe('redactWalletIdentityText', () => {
   it('replaces addresses in either case', () => {
@@ -42,6 +44,24 @@ describe('redactWalletIdentityText', () => {
 
   it('replaces ENS names made of non-ASCII letters or emoji', () => {
     expect(redactWalletIdentityText('owner ü.eth and 🦊.eth')).toBe('owner [ens] and [ens]');
+  });
+
+  it('replaces ENS names whatever their case', () => {
+    expect(redactWalletIdentityText('owner Alice.ETH and alice.Eth')).toBe('owner [ens] and [ens]');
+  });
+
+  it('replaces ENS names with combining marks, flags, keycaps and joined emoji whole', () => {
+    expect(redactWalletIdentityText('e\u0301.eth 🇺🇸.eth 1️⃣.eth #️⃣.eth 👨‍👩‍👧‍👦.eth')).toBe('[ens] [ens] [ens] [ens] [ens]');
+  });
+
+  it('replaces an ENS name followed by punctuation, and keeps a word that only starts with eth', () => {
+    expect(redactWalletIdentityText('“alice.eth”, alice.eth. alice.ethereum')).toBe('[ens]”, [ens]. alice.ethereum');
+  });
+
+  it('replaces bytes printed as decimal numbers, and keeps a shorter list', () => {
+    expect(redactWalletIdentityText(`data ${ADDRESS_BYTES.join(',')} end`)).toBe('data [bytes] end');
+    expect(redactWalletIdentityText(`data ${ADDRESS_BYTES.join(', ')} end`)).toBe('data [bytes] end');
+    expect(redactWalletIdentityText('rgb 12,34,56 version 1.2.3')).toBe('rgb 12,34,56 version 1.2.3');
   });
 
   it('replaces addresses and hashes printed without 0x', () => {
@@ -92,6 +112,40 @@ describe('redactWalletIdentity', () => {
   it('replaces raw bytes, which could hold an address', () => {
     const bytes = Uint8Array.from(Buffer.from(ADDRESS.slice(2), 'hex'));
     expect(redactWalletIdentity({ data: bytes, buffer: bytes.buffer })).toEqual({ data: '[bytes]', buffer: '[bytes]' });
+  });
+
+  it('replaces bytes held as a list of numbers or as the indexed object the SDK makes of a typed array', () => {
+    expect(redactWalletIdentity({ list: ADDRESS_BYTES, indexed: { ...ADDRESS_BYTES } })).toEqual({
+      list: '[bytes]',
+      indexed: '[bytes]',
+    });
+  });
+
+  it('keeps numbers that cannot hold an address', () => {
+    const payload = {
+      short: ADDRESS_BYTES.slice(1),
+      notBytes: [...ADDRESS_BYTES.slice(1), 256],
+      keyed: { ...ADDRESS_BYTES.slice(1), amount: 5 },
+    };
+    expect(redactWalletIdentity(payload)).toEqual(payload);
+  });
+
+  it('keeps a string equal to the release, and redacts the same digits elsewhere', () => {
+    const payload = { release: COMMIT_SHA, message: `failed at ${COMMIT_SHA}`, other: ADDRESS.slice(2) };
+    expect(redactWalletIdentity(payload, COMMIT_SHA)).toEqual({
+      release: COMMIT_SHA,
+      message: 'failed at [hex]',
+      other: '[hex]',
+    });
+    expect(redactWalletIdentity(payload)).toEqual({ release: '[hex]', message: 'failed at [hex]', other: '[hex]' });
+  });
+
+  it('redacts what toJSON returns and drops functions, as serializing would', () => {
+    const session = { owner: ADDRESS, toJSON: () => ({ owner: ADDRESS, started: new Date(0) }) };
+    expect(redactWalletIdentity({ session, callback: () => ADDRESS })).toEqual({
+      session: { owner: '0x[address]', started: '1970-01-01T00:00:00.000Z' },
+      callback: undefined,
+    });
   });
 
   it('redacts an object each time it appears, when it is shared but not cyclic', () => {
@@ -148,14 +202,12 @@ describe('buildSentryOptions', () => {
     });
   });
 
-  it('redacts wallet identity from events, spans and breadcrumbs', () => {
+  it('sets no hooks, because the transport redacts everything', () => {
     const options = buildSentryOptions({ dsn: DSN, isDev: false, environment: 'production' });
-    const event = { message: ADDRESS } as ErrorEvent;
-    expect(options?.beforeSend?.(event, {})).toEqual({ message: '0x[address]' });
-    expect(options?.beforeSendSpan).toBe(redactSpan);
-    expect(options?.beforeBreadcrumb?.({ message: `connected ${ADDRESS}` })).toEqual({
-      message: 'connected 0x[address]',
-    });
+    expect(options?.transport).toEqual(expect.any(Function));
+    expect(options?.beforeSend).toBeUndefined();
+    expect(options?.beforeSendSpan).toBeUndefined();
+    expect(options?.beforeBreadcrumb).toBeUndefined();
   });
 
   it('leaves the release unset when it is empty', () => {
@@ -173,38 +225,54 @@ describe('initSentry', () => {
   });
 });
 
-describe('redactSpan', () => {
-  const span: SentrySpanJSON = {
-    trace_id: 'a'.repeat(32),
-    span_id: 'b'.repeat(16),
-    name: `GET https://api.example/account/${ADDRESS}/rewards`,
-    start_timestamp: 1,
-    status: 'ok',
-    is_segment: false,
-    attributes: { 'url.full': `https://api.example/account/${ADDRESS}/rewards` },
+describe('redactingTransport', () => {
+  type Envelope = Parameters<ReturnType<SentryTransportFactory>['send']>[0];
+  const transportOptions = {
+    url: 'https://o0.ingest.us.sentry.io/api/0/envelope/',
+    recordDroppedEvent: () => undefined,
   };
 
-  it('redacts the name and attributes and keeps the trace and span IDs', () => {
-    expect(redactSpan(span)).toEqual({
-      ...span,
-      name: 'GET https://api.example/account/0x[address]/rewards',
-      attributes: { 'url.full': 'https://api.example/account/0x[address]/rewards' },
+  function recordingTransport(sent: unknown[]): SentryTransportFactory {
+    return () => ({
+      send: async (envelope) => {
+        sent.push(envelope);
+        return { statusCode: 200 };
+      },
+      flush: async () => true,
     });
+  }
+
+  it('redacts the headers and the items of an envelope and keeps the release', async () => {
+    const sent: unknown[] = [];
+    const transport = redactingTransport(recordingTransport(sent), COMMIT_SHA)(transportOptions);
+    const envelope = [
+      { trace: { transaction: `GET /account/${ADDRESS}`, release: COMMIT_SHA } },
+      [[{ type: 'event' }, { message: `Failed for ${ADDRESS}`, release: COMMIT_SHA }]],
+    ] as unknown as Envelope;
+
+    await expect(transport.send(envelope)).resolves.toEqual({ statusCode: 200 });
+    expect(sent).toEqual([
+      [
+        { trace: { transaction: 'GET /account/0x[address]', release: COMMIT_SHA } },
+        [[{ type: 'event' }, { message: 'Failed for 0x[address]', release: COMMIT_SHA }]],
+      ],
+    ]);
   });
 
-  it('strips the name and attributes of a span it cannot walk, since the SDK sends a span unchanged on a throw', () => {
-    const attributes = {};
-    Object.defineProperty(attributes, 'url.full', {
+  it('sends nothing when an envelope cannot be redacted', async () => {
+    const sent: unknown[] = [];
+    const transport = redactingTransport(recordingTransport(sent))(transportOptions);
+    const unreadable = {};
+    Object.defineProperty(unreadable, 'message', {
       enumerable: true,
       get() {
         throw new Error('unreadable');
       },
     });
-    expect(redactSpan({ ...span, attributes })).toEqual({
-      ...span,
-      name: '[redacted]',
-      attributes: {},
-      links: undefined,
-    });
+
+    await expect(transport.send([{}, [[{ type: 'event' }, unreadable]]] as unknown as Envelope)).rejects.toThrow(
+      'unreadable'
+    );
+    expect(sent).toEqual([]);
   });
 });

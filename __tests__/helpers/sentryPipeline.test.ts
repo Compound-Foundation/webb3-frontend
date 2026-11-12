@@ -1,25 +1,28 @@
 import * as Sentry from '@sentry/react';
 
-import { buildSentryOptions } from '../../src/helpers/sentry';
+import { buildSentryOptions, type SentryTransportFactory } from '../../src/helpers/sentry';
 
-// Runs the real SDK with the app's options and a transport that records each envelope, so the test checks what
-// would leave the browser rather than calling the hooks directly.
+// Runs the real SDK with the app's options. The transport the app would wrap around `fetch` wraps a recorder
+// here instead, so each test checks what would leave the browser, envelope headers included.
 const ADDRESS = '0x52908400098527886E0F7030069857D2E4169EE7';
 const ADDRESS_PATTERN = /52908400098527886E0F7030069857D2E4169EE7/i;
+const ADDRESS_BYTES = Uint8Array.from(Buffer.from(ADDRESS.slice(2), 'hex'));
 const URL_WITH_ADDRESS = `https://api.example/account/${ADDRESS}/rewards`;
+// CI names the release after the commit, and a commit SHA has as many hex digits as an address.
+const RELEASE = 'c793fd76f0cce3f8cc29edb6c5f3188c623a8577';
 
 const envelopes: string[] = [];
 
-type Transport = ReturnType<NonNullable<Sentry.BrowserOptions['transport']>>;
+const recordingTransport: SentryTransportFactory = () => ({
+  send: async (envelope) => {
+    envelopes.push(JSON.stringify(envelope));
+    return {};
+  },
+  flush: async () => true,
+});
 
-function recordingTransport(): Transport {
-  return {
-    send: async (envelope) => {
-      envelopes.push(JSON.stringify(envelope));
-      return {};
-    },
-    flush: async () => true,
-  };
+function sentText(): string {
+  return envelopes.join('\n');
 }
 
 beforeAll(() => {
@@ -27,12 +30,11 @@ beforeAll(() => {
   if (typeof performance.getEntriesByType !== 'function') {
     Object.assign(performance, { getEntriesByType: () => [], getEntriesByName: () => [] });
   }
-  const options = buildSentryOptions({
-    dsn: 'https://public@o0.ingest.us.sentry.io/0',
-    isDev: true,
-    environment: 'test',
-  });
-  Sentry.init({ ...options, transport: recordingTransport });
+  const options = buildSentryOptions(
+    { dsn: 'https://public@o0.ingest.us.sentry.io/0', isDev: true, environment: 'test', release: RELEASE },
+    recordingTransport
+  );
+  Sentry.init(options ?? {});
 });
 
 afterAll(async () => {
@@ -47,18 +49,25 @@ test('an error leaves the browser with its address redacted', async () => {
   Sentry.captureException(new Error(`Supply failed for ${ADDRESS}`));
   await Sentry.flush(2000);
 
-  const sent = envelopes.join('\n');
-  expect(sent).toContain('Supply failed for 0x[address]');
-  expect(sent).not.toMatch(ADDRESS_PATTERN);
+  expect(sentText()).toContain('Supply failed for 0x[address]');
+  expect(sentText()).not.toMatch(ADDRESS_PATTERN);
 });
 
 test('a span leaves the browser with the address redacted from its name and attributes', async () => {
   Sentry.startSpan({ name: `GET ${URL_WITH_ADDRESS}`, attributes: { 'url.full': URL_WITH_ADDRESS } }, () => undefined);
   await Sentry.flush(2000);
 
-  const sent = envelopes.join('\n');
-  expect(sent).toContain('https://api.example/account/0x[address]/rewards');
-  expect(sent).not.toMatch(ADDRESS_PATTERN);
+  expect(sentText()).toContain('https://api.example/account/0x[address]/rewards');
+  expect(sentText()).not.toMatch(ADDRESS_PATTERN);
+});
+
+test('a root span leaves the browser with the address redacted from the envelope header too', async () => {
+  // The SDK copies a root span's name into the envelope's `trace.transaction` header after `beforeSendSpan`.
+  Sentry.withActiveSpan(null, () => Sentry.startSpan({ name: `GET ${URL_WITH_ADDRESS}` }, () => undefined));
+  await Sentry.flush(2000);
+
+  expect(sentText()).toContain('"transaction":"GET https://api.example/account/0x[address]/rewards"');
+  expect(sentText()).not.toMatch(ADDRESS_PATTERN);
 });
 
 test('a breadcrumb leaves the browser with its address redacted', async () => {
@@ -66,7 +75,45 @@ test('a breadcrumb leaves the browser with its address redacted', async () => {
   Sentry.captureMessage('after the breadcrumb');
   await Sentry.flush(2000);
 
-  const sent = envelopes.join('\n');
-  expect(sent).toContain('connected 0x[address]');
-  expect(sent).not.toMatch(ADDRESS_PATTERN);
+  expect(sentText()).toContain('connected 0x[address]');
+  expect(sentText()).not.toMatch(ADDRESS_PATTERN);
+});
+
+test('a thrown object leaves the browser without the bytes of an address it holds', async () => {
+  // The SDK turns the typed array into an object of numbers before any hook sees the event.
+  Sentry.captureException({ message: 'wallet error', data: ADDRESS_BYTES });
+  await Sentry.flush(2000);
+
+  expect(sentText()).toContain('"__serialized__":{"message":"wallet error","data":"[bytes]"}');
+  expect(sentText()).not.toContain('"0":82,"1":144');
+});
+
+test('a breadcrumb leaves the browser without the bytes of an address it holds', async () => {
+  Sentry.addBreadcrumb({ category: 'console', message: String(ADDRESS_BYTES), data: { arguments: [ADDRESS_BYTES] } });
+  Sentry.captureMessage('after the bytes');
+  await Sentry.flush(2000);
+
+  expect(sentText()).toContain('"message":"[bytes]"');
+  expect(sentText()).not.toContain('82,144,132');
+  expect(sentText()).not.toContain('"0":82,"1":144');
+});
+
+test('ENS names in capitals, with combining marks or made of joined emoji leave the browser redacted', async () => {
+  Sentry.addBreadcrumb({ category: 'console', message: 'resolved Alice.ETH' });
+  Sentry.captureException(new Error('No resolver for é.eth, 🇺🇸.eth, 1️⃣.eth or 👨‍👩‍👧‍👦.eth'));
+  await Sentry.flush(2000);
+
+  expect(sentText()).toContain('resolved [ens]');
+  expect(sentText()).toContain('No resolver for [ens], [ens], [ens] or [ens]');
+  expect(sentText()).not.toMatch(/\.eth/i);
+});
+
+test('errors, sessions and spans keep the commit SHA as their release', async () => {
+  Sentry.captureException(new Error('release check'));
+  Sentry.withActiveSpan(null, () => Sentry.startSpan({ name: 'release check' }, () => undefined));
+  await Sentry.flush(2000);
+
+  expect(sentText()).toContain(`"release":"${RELEASE}"`);
+  expect(sentText()).toContain(`"sentry.release":{"value":"${RELEASE}","type":"string"}`);
+  expect(sentText()).not.toContain('[hex]');
 });

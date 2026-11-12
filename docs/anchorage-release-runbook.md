@@ -416,7 +416,7 @@ The rehearsal has two parts.
 
 ## Observe without collecting wallet identity data
 
-The app's only telemetry is Sentry error reporting, in a build that sets `VITE_SENTRY_DSN`. Before an error, span or breadcrumb leaves the browser, `src/helpers/sentry.ts` replaces addresses, transaction hashes, other long hex strings and ENS names. Sentry gets no user data, cookies, headers, request bodies or query strings. An error message can still name a contract, a function, an amount and a chain, which with the time can point to one transaction. Do not use Sentry to follow holders.
+The app's only telemetry is Sentry error reporting, in a build that sets `VITE_SENTRY_DSN`. Just before anything the SDK sends leaves the browser, `src/helpers/sentry.ts` replaces addresses, transaction hashes, other long hex strings, raw bytes and ENS names. Sentry gets no user data, cookies, headers, request bodies or query strings. An error message can still name a contract, a function, an amount and a chain, which with the time can point to one transaction. Do not use Sentry to follow holders.
 
 The app turns off the Coinbase Wallet SDK's telemetry (`src/helpers/wagmiConfig.ts:40-43`). A release-control PR adds no telemetry. Use these existing facilities:
 
