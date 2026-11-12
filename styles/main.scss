@@ -17,7 +17,6 @@
 @use 'components/connect-wallet-modal';
 @use 'components/connected-wallet';
 @use 'components/currency-toggle';
-@use 'components/delegate-modal';
 @use 'components/detail-sheet';
 @use 'components/divider';
 @use 'components/dropdown';
@@ -26,7 +25,6 @@
 @use 'components/footer';
 @use 'components/go-to-desktop';
 @use 'components/hamburger';
-@use 'components/gov-profile';
 @use 'components/boosted-supply-rates';
 @use 'components/header';
 @use 'components/header-nav-button-highlight';
@@ -49,7 +47,6 @@
 @use 'components/additional-market-data-panel';
 @use 'components/market-stats';
 @use 'components/masthead';
-@use 'components/meter';
 @use 'components/modal';
 @use 'components/net-rates-graph';
 @use 'components/net-rates-tooltip';
@@ -57,7 +54,6 @@
 @use 'components/panel-with-header';
 @use 'components/panel-with-no-header';
 @use 'components/position-card';
-@use 'components/proposals';
 @use 'components/rewards';
 @use 'components/screening-error-overlay';
 @use 'components/svg';
@@ -67,10 +63,6 @@
 @use 'components/tooltip';
 @use 'components/unit-transaction';
 @use 'components/utilization-meter';
-@use 'components/vote-hero-panel';
-@use 'components/vote-modal';
-@use 'components/vote-transaction-modal';
-@use 'components/vote-wallet';
 @use 'components/wallet-trx-history-row';
 @use 'components/rewards-card';
 @use 'components/rewards-banner';
@@ -81,7 +73,6 @@
 @use 'pages/extensions';
 @use 'pages/extension-list';
 @use 'pages/transactions';
-@use 'pages/vote';
 @use 'pages/redirect';
 @use 'pages/rewards-page';
 

@@ -21,7 +21,6 @@ test('no app source, HTML entry point or build configuration refers to the harne
     'index.html',
     'markets/index.html',
     'extensions/index.html',
-    'vote/index.html',
     'transactions/index.html',
     'rewards/index.html',
     'redirect/index.html',

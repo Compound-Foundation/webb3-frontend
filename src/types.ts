@@ -130,15 +130,6 @@ export type V3MarketApiBucket = {
   borrow_apr: string;
 };
 
-export type V3GovernanceApiProposal = {
-  title: string;
-  end_block: number;
-  start_block: number;
-  id: number;
-  for_votes: number;
-  against_votes: number;
-};
-
 export type MarketHistoricalBucket = {
   blockTimestamp: number;
   supplyTotal: number;
@@ -207,98 +198,6 @@ export type DisplayAccount = {
   imageUrl?: string;
   votes?: string;
   voteWeight?: string;
-};
-
-// matches responses for states in Contract enum
-export enum ProposalStateEnum {
-  Pending = 'review',
-  Active = 'active',
-  Succeeded = 'passed',
-  Failed = 'failed',
-  Queued = 'queued',
-  Executed = 'executed',
-  Canceled = 'canceled',
-  Expired = 'expired',
-}
-
-export enum DelegateTypeEnum {
-  Delegated = 'delegated',
-  Undelegated = 'undelegated',
-  Self = 'self',
-}
-
-export enum VoteValueEnum {
-  Against,
-  For,
-  Abstain,
-}
-
-export type VoteReceipt = {
-  voted: boolean;
-  value: VoteValueEnum;
-  proposalId: bigint;
-};
-
-export type BlockProposalState = {
-  state: ProposalStateEnum;
-  startBlock: number;
-  endBlock?: number;
-};
-
-export type UnixProposalState = {
-  state: ProposalStateEnum;
-  startTime: number;
-  endTime: number;
-};
-
-export type BlockProposal = {
-  id: bigint;
-  title: string;
-  description: string;
-  forVotes: bigint;
-  againstVotes: bigint;
-  abstainVotes: bigint;
-  startBlock: bigint;
-  endBlock: bigint;
-  eta: bigint;
-  state: BlockProposalState;
-};
-
-export type Proposal = Omit<BlockProposal, 'state'> & {
-  state: UnixProposalState;
-};
-
-export type CompAccount = {
-  address: string;
-  balance: bigint;
-  votes: bigint;
-  delegateType: DelegateTypeEnum;
-  delegate: string;
-};
-
-export type ProposalAction = {
-  title: string;
-  subtitles: string[];
-  target: string;
-  value: bigint;
-  signature: string;
-  data: string;
-};
-
-export type VoteNoAccountState = {
-  proposals: Proposal[];
-  chainKey: string;
-  chainId: number;
-  decimals: number;
-  canWrite: boolean;
-  proposalThreshold: bigint;
-  compAddress: string;
-  govAddress: string;
-};
-
-export type VoteAccountState = VoteNoAccountState & {
-  compAccount: CompAccount;
-  voteReceipts: Map<bigint, VoteReceipt>;
 };
 
 export type RewardsTokenState = {
@@ -458,11 +357,6 @@ export type MarketOverviewState = MarketOverviewStateLoading | MarketOverviewSta
 export type MarketStateLoading = [StateType.Loading];
 export type MarketStateHydrated = [StateType.Hydrated, ProtocolAndMarketsState | V2ProtocolState];
 export type MarketState = MarketStateLoading | MarketStateHydrated;
-
-export type VoteStateLoading = [StateType.Loading];
-export type VoteStateNoWallet = [StateType.NoWallet, VoteNoAccountState];
-export type VoteStateHydrated = [StateType.Hydrated, VoteAccountState];
-export type VoteState = VoteStateLoading | VoteStateNoWallet | VoteStateHydrated;
 
 export type RewardStateInfo = [string, { chainInformation: ChainInformation; rewardsStates: RewardsTokenState[] }];
 export type RewardAccountStateInfo = [
