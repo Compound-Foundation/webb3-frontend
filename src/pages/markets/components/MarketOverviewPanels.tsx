@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 import CircleMeter from '@components/CircleMeter';
@@ -264,13 +264,21 @@ const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: Panel
             <table className="assets-table">
               <TableHead />
               <tbody>
-                {institutionalSummaries.map((marketSummary) => {
+                {institutionalSummaries.map((marketSummary, index) => {
                   return (
-                    <PanelRow
-                      key={marketSummary.comet.address}
-                      marketSummary={marketSummary}
-                      institutionalWhitelistStatus={institutionalWhitelistStatus}
-                    />
+                    <Fragment key={marketSummary.comet.address}>
+                      {/* Institutional rows paint their own outlines, which touch when the
+                          rows are adjacent; a slim spacer row keeps them apart */}
+                      {index > 0 && (
+                        <tr className="market-overview-panels__table-spacer-row" aria-hidden="true">
+                          <td colSpan={8} />
+                        </tr>
+                      )}
+                      <PanelRow
+                        marketSummary={marketSummary}
+                        institutionalWhitelistStatus={institutionalWhitelistStatus}
+                      />
+                    </Fragment>
                   );
                 })}
                 {institutionalSummaries.length > 0 && standardSummaries.length > 0 && (
