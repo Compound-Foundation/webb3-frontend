@@ -104,12 +104,23 @@ test('finds a key with or without 0x, JSON-escaped or base64, and the private UR
   expect(leaks).toEqual([
     { file: 'a', secret: 'a key the wallet made' },
     { file: 'b', secret: 'a key the wallet made' },
-    { file: 'c', secret: 'the private upstream URL' },
+    { file: 'c', secret: 'the private upstream URL or token' },
   ]);
   expect(JSON.stringify(leaks)).not.toContain(KEY.slice(2));
   // The salt has the token's length, and is named by the kind it was registered with.
   expect(findSecrets([{ file: 'e', content: `salt ${SALT}` }])).toEqual([{ file: 'e', secret: 'the account salt' }]);
   expect(createRedactor([], [TOKEN]).redact(TOKEN)).toBe('<redacted>');
+});
+
+test("does not report a network name that the private URL's host shares with a library in the bundle", () => {
+  // A wallet library in the production bundle builds `https://${host}/ethereum-mainnet`. Before, every host label
+  // of 16 characters was a secret, so this endpoint's `ethereum-mainnet` label failed every private run.
+  const url = 'https://quiet-amber-river.ethereum-mainnet.rpc-provider.example/';
+  for (const pattern of secretPatternsOf(url)) registerSecretPattern(pattern);
+  expect(findSecrets([{ file: 'main.js', content: 'nve=`https://${x0}/ethereum-mainnet`' }])).toEqual([]);
+  expect(findSecrets([{ file: 'log', content: `fetch ${new URL(url).host} failed` }])).toEqual([
+    { file: 'log', secret: 'the private upstream URL or token' },
+  ]);
 });
 
 /** A secret whose JSON-escaped form differs from the text as written. */
@@ -138,12 +149,12 @@ test('finds each form, in either letter case, and reports leaks in text order, t
     { file: 'without 0x', secret: 'a key the wallet made' },
     { file: 'JSON-escaped only', secret: 'a secret with escapes' },
     { file: 'base64', secret: 'a key the wallet made' },
-    { file: 'URL, upper case', secret: 'the private upstream URL' },
+    { file: 'URL, upper case', secret: 'the private upstream URL or token' },
     { file: 'every kind', secret: 'the control token' },
     { file: 'every kind', secret: 'a key the wallet made' },
     { file: 'every kind', secret: 'the account salt' },
     { file: 'every kind', secret: 'a secret with escapes' },
-    { file: 'every kind', secret: 'the private upstream URL' },
+    { file: 'every kind', secret: 'the private upstream URL or token' },
   ]);
   for (const secret of [TOKEN, KEY.slice(2), SALT, ESCAPED, json]) expect(JSON.stringify(leaks)).not.toContain(secret);
 });
