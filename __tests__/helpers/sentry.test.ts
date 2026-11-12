@@ -54,6 +54,13 @@ describe('redactWalletIdentityText', () => {
     expect(redactWalletIdentityText('e\u0301.eth 🇺🇸.eth 1️⃣.eth #️⃣.eth 👨‍👩‍👧‍👦.eth')).toBe('[ens] [ens] [ens] [ens] [ens]');
   });
 
+  it('replaces ENS names with a dollar sign or an apostrophe, which ENS allows', () => {
+    expect(redactWalletIdentityText("owner $.eth, cash$.eth, pay.cash$.eth and o'brien.eth")).toBe(
+      'owner [ens], [ens], [ens] and [ens]'
+    );
+    expect(redactWalletIdentityText("resolved 'alice.eth'")).toBe("resolved [ens]'");
+  });
+
   it('replaces an ENS name followed by punctuation, and keeps a word that only starts with eth', () => {
     expect(redactWalletIdentityText('“alice.eth”, alice.eth. alice.ethereum')).toBe('[ens]”, [ens]. alice.ethereum');
   });

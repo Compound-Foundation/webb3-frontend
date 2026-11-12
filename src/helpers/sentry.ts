@@ -11,10 +11,11 @@ const PREFIXED_HEX_PATTERN = /0x[0-9a-fA-F]{40,}/g;
 const BARE_HEX_PATTERN = /(?<![0-9a-zA-Z])[0-9a-fA-F]{40,}(?![0-9a-zA-Z])/g;
 
 /**
- * A character of an ENS label. Any non-ASCII character counts, so that accents, joined emoji, flags and
+ * A character of an ENS label. ENS allows `$` and an apostrophe besides letters, digits, `_` and `-`. Any
+ * non-ASCII character counts, so that accents, joined emoji, flags and
  * keycaps are redacted whole. Unicode properties would miss some of them.
  */
-const ENS_LABEL_CHARACTER = String.raw`(?:[a-z0-9_-]|[#*]\uFE0F?\u20E3|[^\s\x00-\x7F])`;
+const ENS_LABEL_CHARACTER = String.raw`(?:[a-z0-9_$'-]|[#*]\uFE0F?\u20E3|[^\s\x00-\x7F])`;
 
 /**
  * ENS names in any case, such as `alice.eth`, `pay.alice.eth`, `Alice.ETH` or `🇺🇸.eth`. A name may be followed

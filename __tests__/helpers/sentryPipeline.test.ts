@@ -108,6 +108,14 @@ test('ENS names in capitals, with combining marks or made of joined emoji leave 
   expect(sentText()).not.toMatch(/\.eth/i);
 });
 
+test('an ENS name with a dollar sign leaves the browser redacted', async () => {
+  Sentry.captureException(new Error('No resolver for cash$.eth'));
+  await Sentry.flush(2000);
+
+  expect(sentText()).toContain('No resolver for [ens]');
+  expect(sentText()).not.toContain('cash$');
+});
+
 test('errors, sessions and spans keep the commit SHA as their release', async () => {
   Sentry.captureException(new Error('release check'));
   Sentry.withActiveSpan(null, () => Sentry.startSpan({ name: 'release check' }, () => undefined));
