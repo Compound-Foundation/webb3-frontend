@@ -24,6 +24,7 @@ import {
   forkTarget,
   isBlockHeader,
   isKeyLike,
+  isKeyLikeHostLabel,
   isKeyLikeSegmentOrValue,
   isLogArray,
   loadForkCache,
@@ -103,14 +104,18 @@ describe('upstream endpoints', () => {
     expect(createRedactor([], ['f'.repeat(64)]).redact(`token ${'f'.repeat(64)}.`)).toBe('token <redacted>.');
   });
 
-  test('a host label or path segment of short words, such as a network name, is not key-like', () => {
-    for (const phrase of ['ethereum-mainnet', 'quiet-amber-river', 'arbitrum_one_mainnet']) {
-      expect(isKeyLike(phrase)).toBe(false);
-      expect(isKeyLikeSegmentOrValue(phrase)).toBe(false);
-    }
-    // A key: one long run of characters, or words with a digit or a word of 16 letters or more.
-    for (const key of [CANARY, 'abcdefghijklmnop', 'abcd-efgh-ijkl-0123', `name-${'q'.repeat(16)}`]) {
-      expect(isKeyLike(key)).toBe(true);
+  test('a host label of lowercase words, such as a network name, is not key-like', () => {
+    for (const label of ['ethereum-mainnet', 'quiet-amber-river']) expect(isKeyLikeHostLabel(label)).toBe(false);
+    // A key: one long run of characters, mixed case, a digit, an underscore or a word of 16 letters or more.
+    for (const key of [
+      CANARY,
+      'abcdefghijklmnop',
+      'abcd-efgh-ijkl-0123',
+      'kQzRtYbWmPxJhN-vLdFgHsAcEuIoTy-B',
+      'arbitrum_one_mainnet',
+      `name-${'q'.repeat(16)}`,
+    ]) {
+      expect(isKeyLikeHostLabel(key)).toBe(true);
     }
     // The whole host stays key-like, so an echo of it is redacted, while a library's network URL is not.
     const url = 'https://quiet-amber-river.ethereum-mainnet.rpc-provider.example/';
@@ -119,27 +124,50 @@ describe('upstream endpoints', () => {
     expect(redact(`error: ${new URL(url).host}`)).toBe('error: <redacted>');
   });
 
+  test('a path segment or query value of words joined by separators stays key-like', () => {
+    // A base64url key, as some providers issue, can be letters joined by `-` and `_`.
+    const key = 'kQzRtYbWmPxJhN-vLdFgHsAcEuIoTy_B';
+    expect(isKeyLike('ethereum-mainnet')).toBe(true);
+    expect(isKeyLikeSegmentOrValue(key)).toBe(true);
+    for (const url of [`https://eth-mainnet.rpc.example/v2/${key}`, `https://rpc.example/ethereum?dkey=${key}`]) {
+      const { redact } = createRedactor(upstreamEndpoints({ BROWSER_FORK_RPC_URL: url })[0].secretPatterns);
+      expect(redact(`error: key ${key}`)).toBe('error: key <redacted>');
+    }
+  });
+
   test('a private token is sent as an x-token header, labelled without it and redacted in every form', () => {
     const url = 'https://quiet-amber-river.ethereum-mainnet.rpc-provider.example/';
     const [endpoint] = upstreamEndpoints({ BROWSER_FORK_RPC_URL: url, BROWSER_FORK_RPC_TOKEN: CANARY });
     expect(endpoint.headers).toEqual({ 'x-token': CANARY });
     expect(endpoint.label).not.toContain(CANARY);
-    const { redact } = createRedactor(endpoint.secretPatterns);
-    for (const echo of [CANARY, encodeURIComponent(CANARY), CANARY.toUpperCase(), JSON.stringify({ token: CANARY })]) {
-      expect(redact(`error: ${echo}`).toLowerCase()).not.toContain(CANARY.toLowerCase());
+    // A token with characters that encoding and JSON escaping change.
+    const token = 'Ab/c+d"e\\f%g0123456789';
+    const { redact } = createRedactor(
+      upstreamEndpoints({ BROWSER_FORK_RPC_URL: url, BROWSER_FORK_RPC_TOKEN: token })[0].secretPatterns
+    );
+    for (const echo of [
+      token,
+      token.toUpperCase(),
+      encodeURIComponent(token),
+      encodeURIComponent(encodeURIComponent(token)),
+      JSON.stringify(token).slice(1, -1),
+    ]) {
+      expect(redact(`error: ${echo} end`)).toBe('error: <redacted> end');
     }
     expect(upstreamEndpoints({ BROWSER_FORK_RPC_URL: url })[0].headers).toEqual({});
     for (const each of upstreamEndpoints({})) expect(each.headers).toEqual({});
   });
 
-  test('refuses a token without a private URL, and a token that is not one run of visible ASCII, never quoting it', () => {
+  test('refuses a token without a private URL, and a token that is not one run of 16 or more visible ASCII characters, never quoting it', () => {
     expect(() => upstreamEndpoints({ BROWSER_FORK_RPC_TOKEN: CANARY })).toThrow('needs BROWSER_FORK_RPC_URL');
     const url = 'https://rpc.example.com/';
-    for (const token of [`${CANARY}\r\nx-other: 1`, `${CANARY} `, `${CANARY}é`]) {
+    for (const token of [`${CANARY}\r\nx-other: 1`, `${CANARY} `, `${CANARY}é`, CANARY.slice(0, 15)]) {
       expect(() => upstreamEndpoints({ BROWSER_FORK_RPC_URL: url, BROWSER_FORK_RPC_TOKEN: token })).toThrow(
         'visible ASCII'
       );
-      expect(() => upstreamEndpoints({ BROWSER_FORK_RPC_URL: url, BROWSER_FORK_RPC_TOKEN: token })).not.toThrow(CANARY);
+      expect(() => upstreamEndpoints({ BROWSER_FORK_RPC_URL: url, BROWSER_FORK_RPC_TOKEN: token })).not.toThrow(
+        CANARY.slice(0, 15)
+      );
     }
   });
 });

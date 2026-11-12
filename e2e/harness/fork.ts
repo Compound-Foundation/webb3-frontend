@@ -8,8 +8,8 @@
 // merged into one module once #67 is on main. The changes from the source:
 // - The private URL comes from BROWSER_FORK_RPC_URL. A private key can instead go in an `x-token` header, from
 //   BROWSER_FORK_RPC_TOKEN, so that the URL carries none.
-// - A part of the private URL made of short words, such as the host label `ethereum-mainnet`, is not key-like
-//   (`isKeyLike`), because libraries in the app's bundle carry network names.
+// - A host label of lowercase words, such as `ethereum-mainnet`, is not key-like (`isKeyLikeHostLabel`),
+//   because libraries in the app's bundle carry network names.
 // - The proxy also forwards a bounded `eth_getLogs` (`isBoundedLogQuery`), because anvil forwards a
 //   historical log query upstream. A private upstream's answer to it must be a bounded array of logs
 //   (`isLogArray`). The proxy reads at most 64 MB of any answer.
@@ -130,16 +130,17 @@ export type Endpoint = {
   headers?: Record<string, string>;
 };
 
-/** Two or more words of letters, each shorter than 16, joined by hyphens or underscores: `ethereum-mainnet`. */
-const WORD_PHRASE = /^[A-Za-z]{1,15}(?:[-_][A-Za-z]{1,15})+$/;
+/** A part of the private URL that can be a key: 16 characters or more. */
+export const isKeyLike = (part: string) => part.length >= 16;
 
 /**
- * A part of the private URL that can be a key: 16 characters or more, unless it is a phrase of short words,
- * such as `ethereum-mainnet`. Such a phrase names a network or an endpoint, not a key, and libraries in the
- * app's bundle carry network names, so treating it as a secret reports a leak in every private run. The whole
- * URL and the whole host stay secret.
+ * A label of the private URL's host that can be a key: key-like, unless it is two or more lowercase words of
+ * letters joined by hyphens, such as `ethereum-mainnet`. Such a label names a network or an endpoint, and
+ * libraries in the app's bundle carry network names, so treating it as a secret reports a leak in every
+ * private run. A random key is mixed-case or holds digits. The whole host, and every path segment and query
+ * field, stay as `isKeyLike` and `isKeyLikeSegmentOrValue` decide.
  */
-export const isKeyLike = (part: string) => part.length >= 16 && !WORD_PHRASE.test(part);
+export const isKeyLikeHostLabel = (label: string) => isKeyLike(label) && !/^[a-z]{1,15}(?:-[a-z]{1,15})+$/.test(label);
 
 /**
  * A path segment or a query field that can be a key: key-like from 6 characters, unless it is a word of
@@ -200,25 +201,20 @@ function urlParts(privateUrl: string, url: URL) {
       ...fields(url.search.slice(1)),
       ...[...url.searchParams].flat(),
     ],
-    otherParts: [
-      authority,
-      ...authority.split(/[.:@]/),
-      url.host,
-      ...url.hostname.split('.'),
-      query,
-      fragment,
-      url.hash.slice(1),
-    ],
+    hostLabels: [...authority.split(/[.:@]/), ...url.hostname.split('.')],
+    otherParts: [authority, url.host, query, fragment, url.hash.slice(1)],
   };
 }
 
 /** The patterns of the secrets in a private URL: the whole URL, and each key-like part, as written and decoded. */
 export function secretPatternsOf(privateUrl: string): string[] {
   const url = new URL(privateUrl);
-  const { segmentsAndFields, otherParts } = urlParts(privateUrl, url);
-  const parts = [...segmentsAndFields.filter(isKeyLikeSegmentOrValue), ...otherParts.filter(isKeyLike)].flatMap(
-    (part) => [part, decoded(part)].filter((form): form is string => form !== undefined)
-  );
+  const { segmentsAndFields, hostLabels, otherParts } = urlParts(privateUrl, url);
+  const parts = [
+    ...segmentsAndFields.filter(isKeyLikeSegmentOrValue),
+    ...hostLabels.filter(isKeyLikeHostLabel),
+    ...otherParts.filter(isKeyLike),
+  ].flatMap((part) => [part, decoded(part)].filter((form): form is string => form !== undefined));
   return [...new Set([privateUrl, url.href, ...parts])].map((secret) => [...secret].map(characterPattern).join(''));
 }
 
@@ -242,12 +238,15 @@ export function checkedPrivateUrl(value: string, name: string): URL {
 }
 
 /**
- * Checks a private token from the environment: one run of visible ASCII, which an HTTP header can carry
- * as written. `name` is the variable's name, which the error names in place of the token.
+ * Checks a private token from the environment: one run of at least 16 visible ASCII characters, which an
+ * HTTP header can carry as written. A shorter token would be redacted inside ordinary words, and found in
+ * every production bundle. `name` is the variable's name, which the error names in place of the token.
  */
 export function checkedPrivateToken(value: string, name: string): string {
   // fetch refuses a header value with a line break, and its error quotes the value.
-  if (!/^[\x21-\x7e]+$/.test(value)) throw new Error(`${name} must be one run of visible ASCII characters.`);
+  if (!/^[\x21-\x7e]{16,}$/.test(value)) {
+    throw new Error(`${name} must be one run of at least 16 visible ASCII characters.`);
+  }
   return value;
 }
 

@@ -346,7 +346,11 @@ export async function startServices({
     // Only the runner holds the private URL and token: the workers, which inherit the environment, never see them.
     delete process.env.BROWSER_FORK_RPC_URL;
     delete process.env.BROWSER_FORK_RPC_TOKEN;
-    for (const endpoint of endpoints) for (const pattern of endpoint.secretPatterns) registerSecretPattern(pattern);
+    for (const endpoint of endpoints) {
+      for (const pattern of endpoint.secretPatterns) registerSecretPattern(pattern);
+      // As a literal too, so that the scan also finds the token in base64 and names it on its own.
+      for (const value of Object.values(endpoint.headers ?? {})) registerSecret(value, 'the private upstream token');
+    }
     const redactor = createRedactor(endpoints.flatMap((endpoint) => endpoint.secretPatterns));
     const anvil = findAnvil();
     const blockOption = process.env.BROWSER_FORK_BLOCK === 'latest' ? 'latest' : 'pinned';
