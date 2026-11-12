@@ -1,4 +1,4 @@
-// The browser harness's mainnet fork: the upstream endpoints, the redaction of a private upstream URL, the
+// The browser harness's mainnet fork: the upstream endpoints, the redaction of a private upstream URL and token, the
 // read-only upstream proxy that anvil forks through, and anvil's start, identity check and stop.
 //
 // Adapted from COM-289's wrapped lending fork runner at commit 2fa1c72 (PR #67):
@@ -6,7 +6,10 @@
 // private upstream's results) and `scripts/test-wrapped-lending-fork.js` (`forkTarget`, `startFork`,
 // `verifyFork`, `stopped`). It is a copy, so that this harness does not depend on #67; the two are to be
 // merged into one module once #67 is on main. The changes from the source:
-// - The private URL comes from BROWSER_FORK_RPC_URL.
+// - The private URL comes from BROWSER_FORK_RPC_URL. A private key can instead go in an `x-token` header, from
+//   BROWSER_FORK_RPC_TOKEN, so that the URL carries none.
+// - A host label of lowercase words, such as `ethereum-mainnet`, is not key-like (`isKeyLikeHostLabel`),
+//   because libraries in the app's bundle carry network names.
 // - The proxy also forwards a bounded `eth_getLogs` (`isBoundedLogQuery`), because anvil forwards a
 //   historical log query upstream. A private upstream's answer to it must be a bounded array of logs
 //   (`isLogArray`). The proxy reads at most 64 MB of any answer.
@@ -118,10 +121,26 @@ async function boundedBody(response: Response, limit: number): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-export type Endpoint = { label: string; url: string; isPrivate: boolean; secretPatterns: string[] };
+export type Endpoint = {
+  label: string;
+  url: string;
+  isPrivate: boolean;
+  secretPatterns: string[];
+  /** The headers every request to the endpoint carries: a private endpoint's `x-token`, or none. */
+  headers?: Record<string, string>;
+};
 
 /** A part of the private URL that can be a key: 16 characters or more. */
 export const isKeyLike = (part: string) => part.length >= 16;
+
+/**
+ * A label of the private URL's host that can be a key: key-like, unless it is two or more lowercase words of
+ * letters joined by hyphens, such as `ethereum-mainnet`. Such a label names a network or an endpoint, and
+ * libraries in the app's bundle carry network names, so treating it as a secret reports a leak in every
+ * private run. A random key is mixed-case or holds digits. The whole host, and every path segment and query
+ * field, stay as `isKeyLike` and `isKeyLikeSegmentOrValue` decide.
+ */
+export const isKeyLikeHostLabel = (label: string) => isKeyLike(label) && !/^[a-z]{1,15}(?:-[a-z]{1,15})+$/.test(label);
 
 /**
  * A path segment or a query field that can be a key: key-like from 6 characters, unless it is a word of
@@ -182,25 +201,20 @@ function urlParts(privateUrl: string, url: URL) {
       ...fields(url.search.slice(1)),
       ...[...url.searchParams].flat(),
     ],
-    otherParts: [
-      authority,
-      ...authority.split(/[.:@]/),
-      url.host,
-      ...url.hostname.split('.'),
-      query,
-      fragment,
-      url.hash.slice(1),
-    ],
+    hostLabels: [...authority.split(/[.:@]/), ...url.hostname.split('.')],
+    otherParts: [authority, url.host, query, fragment, url.hash.slice(1)],
   };
 }
 
 /** The patterns of the secrets in a private URL: the whole URL, and each key-like part, as written and decoded. */
 export function secretPatternsOf(privateUrl: string): string[] {
   const url = new URL(privateUrl);
-  const { segmentsAndFields, otherParts } = urlParts(privateUrl, url);
-  const parts = [...segmentsAndFields.filter(isKeyLikeSegmentOrValue), ...otherParts.filter(isKeyLike)].flatMap(
-    (part) => [part, decoded(part)].filter((form): form is string => form !== undefined)
-  );
+  const { segmentsAndFields, hostLabels, otherParts } = urlParts(privateUrl, url);
+  const parts = [
+    ...segmentsAndFields.filter(isKeyLikeSegmentOrValue),
+    ...hostLabels.filter(isKeyLikeHostLabel),
+    ...otherParts.filter(isKeyLike),
+  ].flatMap((part) => [part, decoded(part)].filter((form): form is string => form !== undefined));
   return [...new Set([privateUrl, url.href, ...parts])].map((secret) => [...secret].map(characterPattern).join(''));
 }
 
@@ -223,21 +237,51 @@ export function checkedPrivateUrl(value: string, name: string): URL {
   return url;
 }
 
-/** The upstream endpoints to try: the private BROWSER_FORK_RPC_URL alone, or the public endpoints in order. */
+/**
+ * Checks a private token from the environment: one run of at least 16 visible ASCII characters, which an
+ * HTTP header can carry as written. A shorter token would be redacted inside ordinary words, and found in
+ * every production bundle. `name` is the variable's name, which the error names in place of the token.
+ */
+export function checkedPrivateToken(value: string, name: string): string {
+  // fetch refuses a header value with a line break, and its error quotes the value.
+  if (!/^[\x21-\x7e]{16,}$/.test(value)) {
+    throw new Error(`${name} must be one run of at least 16 visible ASCII characters.`);
+  }
+  return value;
+}
+
+/**
+ * The upstream endpoints to try: the private BROWSER_FORK_RPC_URL alone, or the public endpoints in order. A
+ * private endpoint sends BROWSER_FORK_RPC_TOKEN, when it is set, as its `x-token` header.
+ */
 export function upstreamEndpoints(env: NodeJS.ProcessEnv = process.env): Endpoint[] {
   const privateUrl = env.BROWSER_FORK_RPC_URL;
+  const privateToken = env.BROWSER_FORK_RPC_TOKEN;
+  const hasToken = privateToken !== undefined && privateToken !== '';
   if (privateUrl !== undefined && privateUrl !== '') {
     checkedPrivateUrl(privateUrl, 'BROWSER_FORK_RPC_URL');
+    const token = hasToken ? checkedPrivateToken(privateToken, 'BROWSER_FORK_RPC_TOKEN') : undefined;
     return [
       {
         label: 'BROWSER_FORK_RPC_URL (private, not printed)',
         url: privateUrl,
         isPrivate: true,
-        secretPatterns: secretPatternsOf(privateUrl),
+        secretPatterns: [
+          ...secretPatternsOf(privateUrl),
+          ...(token === undefined ? [] : [[...token].map(characterPattern).join('')]),
+        ],
+        headers: token === undefined ? {} : { 'x-token': token },
       },
     ];
   }
-  return PUBLIC_ENDPOINTS.map((url) => ({ label: `${url} (public)`, url, isPrivate: false, secretPatterns: [] }));
+  if (hasToken) throw new Error('BROWSER_FORK_RPC_TOKEN needs BROWSER_FORK_RPC_URL, the endpoint it is sent to.');
+  return PUBLIC_ENDPOINTS.map((url) => ({
+    label: `${url} (public)`,
+    url,
+    isPrivate: false,
+    secretPatterns: [],
+    headers: {},
+  }));
 }
 
 export type Redactor = ReturnType<typeof createRedactor>;
@@ -334,14 +378,18 @@ export async function rpc<T = unknown>(
   url: string,
   method: string,
   params: unknown[] = [],
-  { timeoutMs = 20_000, isPrivate = false }: { timeoutMs?: number; isPrivate?: boolean } = {}
+  {
+    timeoutMs = 20_000,
+    isPrivate = false,
+    headers = {},
+  }: { timeoutMs?: number; isPrivate?: boolean; headers?: Record<string, string> } = {}
 ): Promise<T> {
   let response: Response | undefined;
   let text: string;
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { ...headers, 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
       signal: AbortSignal.timeout(timeoutMs),
       redirect: 'error',
@@ -647,7 +695,7 @@ export function startUpstreamProxy(
       try {
         const upstream = await fetch(endpoint.url, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { ...endpoint.headers, 'content-type': 'application/json' },
           body: JSON.stringify(Array.isArray(parsed) ? checked : checked[0]),
           signal: AbortSignal.timeout(timeoutMs),
           redirect: 'error',
@@ -734,7 +782,7 @@ export type ForkTarget = { number: number; hash: string; timestamp: number; mode
  */
 export async function forkTarget(endpoint: Endpoint, block: 'pinned' | 'latest'): Promise<ForkTarget | undefined> {
   const call = <T>(method: string, params: unknown[] = []) =>
-    rpc<T>(endpoint.url, method, params, { isPrivate: endpoint.isPrivate });
+    rpc<T>(endpoint.url, method, params, { isPrivate: endpoint.isPrivate, headers: endpoint.headers });
   if ((await call('eth_chainId')) !== '0x1') throw new Error('the endpoint is not Ethereum mainnet');
   if (block === 'pinned') {
     const header = await call<unknown>('eth_getBlockByNumber', [hex(PINNED_BLOCK), false]);
