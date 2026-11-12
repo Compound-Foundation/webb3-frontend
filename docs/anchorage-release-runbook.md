@@ -416,7 +416,7 @@ The rehearsal has two parts.
 
 ## Observe without collecting wallet identity data
 
-The app sends no telemetry of its own. A search of `package.json`, `index.html` and `src/` for Sentry, PostHog, Google Tag Manager, Mixpanel, Amplitude, Datadog, Plausible, LogRocket, Hotjar, New Relic, Bugsnag and Rollbar found none. The app turns off the Coinbase Wallet SDK's telemetry (`src/helpers/wagmiConfig.ts:40-43`). This release adds no telemetry. Use these existing facilities:
+The app's only telemetry is Sentry error reporting, which runs when a build sets `VITE_SENTRY_DSN`. It sends errors and a 10% sample of page-load traces, with no Session Replay. Before anything leaves the browser, `src/helpers/sentry.ts` replaces addresses, transaction hashes, other long hex strings and ENS names, and drops user data, cookies, headers, request bodies and query strings. Sentry therefore holds no wallet identity data to observe a release with. The app turns off the Coinbase Wallet SDK's telemetry (`src/helpers/wagmiConfig.ts:40-43`). This release adds no telemetry. Use these existing facilities:
 
 1. **Chain data, counted per wrapper.** Count the wrappers' `Deposit` and `Withdraw` events and the failed transactions to each wrapper, per day, and read the failed ones' error selectors. Do not build lists of holder addresses, and do not link an address to a person.
 2. **Quotes against receipts.** The fork suite at a recent block compares the app's quotes with the chain's receipts, with no wallet data. Run it after each stage.
