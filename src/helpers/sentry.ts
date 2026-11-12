@@ -5,15 +5,21 @@ import * as Sentry from '@sentry/react';
  * signatures and calldata. Calldata encodes addresses, so every long hex string is redacted, not only
  * addresses and hashes.
  */
-const HEX_PATTERN = /0x[0-9a-fA-F]{40,}/g;
+const PREFIXED_HEX_PATTERN = /0x[0-9a-fA-F]{40,}/g;
 
-/** ENS names such as `alice.eth` or `pay.alice.eth`. */
-const ENS_PATTERN = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.eth\b/gi;
+/** Runs of 40 or more hex digits without `0x`, as some wallet libraries print addresses and hashes. */
+const BARE_HEX_PATTERN = /(?<![0-9a-zA-Z])[0-9a-fA-F]{40,}(?![0-9a-zA-Z])/g;
 
-/** Objects nested deeper than this are replaced, so that a cyclic or huge payload cannot stall the app. */
+/** ENS names such as `alice.eth`, `pay.alice.eth` or `ü.eth`, including names made of emoji. */
+const ENS_PATTERN = /(?<![\p{L}\p{N}_-])(?:[\p{L}\p{N}\p{Extended_Pictographic}_-]+\.)+eth(?![\p{L}\p{N}_-])/gu;
+
+/** Objects nested deeper than this are replaced, so that a huge payload cannot stall the app. */
 const MAX_REDACTION_DEPTH = 20;
 
-function redactHex(hex: string): string {
+/** Keys or items an object or array keeps. The rest are dropped, for the same reason. */
+const MAX_REDACTION_BREADTH = 1000;
+
+function redactPrefixedHex(hex: string): string {
   const digitCount = hex.length - 2;
   if (digitCount === 40) {
     return '0x[address]';
@@ -26,22 +32,31 @@ function redactHex(hex: string): string {
 
 /** Replaces wallet identity in a string: addresses, hashes, other long hex data and ENS names. */
 export function redactWalletIdentityText(text: string): string {
-  return text.replace(HEX_PATTERN, redactHex).replace(ENS_PATTERN, '[ens]');
+  return text
+    .replace(PREFIXED_HEX_PATTERN, redactPrefixedHex)
+    .replace(BARE_HEX_PATTERN, '[hex]')
+    .replace(ENS_PATTERN, '[ens]');
 }
 
-function redactValue(value: unknown, depth: number, visited: WeakSet<object>): unknown {
+function redactValue(value: unknown, depth: number, ancestors: WeakSet<object>): unknown {
   if (typeof value === 'string') {
     return redactWalletIdentityText(value);
   }
   if (value === null || typeof value !== 'object') {
     return value;
   }
-  if (depth >= MAX_REDACTION_DEPTH || visited.has(value)) {
+  // Raw bytes can hold an address, and `String()` would print them as decimal numbers.
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+    return '[bytes]';
+  }
+  if (depth >= MAX_REDACTION_DEPTH || ancestors.has(value)) {
     return '[redacted]';
   }
-  visited.add(value);
   if (Array.isArray(value)) {
-    return value.map((item) => redactValue(item, depth + 1, visited));
+    ancestors.add(value);
+    const redacted = value.slice(0, MAX_REDACTION_BREADTH).map((item) => redactValue(item, depth + 1, ancestors));
+    ancestors.delete(value);
+    return redacted;
   }
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) {
@@ -49,10 +64,12 @@ function redactValue(value: unknown, depth: number, visited: WeakSet<object>): u
     // redacted text rather than walked.
     return redactWalletIdentityText(String(value));
   }
+  ancestors.add(value);
   const redacted: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
-    redacted[redactWalletIdentityText(key)] = redactValue(item, depth + 1, visited);
+  for (const [key, item] of Object.entries(value).slice(0, MAX_REDACTION_BREADTH)) {
+    redacted[redactWalletIdentityText(key)] = redactValue(item, depth + 1, ancestors);
   }
+  ancestors.delete(value);
   return redacted;
 }
 
@@ -60,11 +77,26 @@ function redactValue(value: unknown, depth: number, visited: WeakSet<object>): u
  * Returns a copy of a Sentry payload with wallet identity removed from every string and object key.
  *
  * The app collects no wallet identity data (see `docs/anchorage-release-runbook.md`). Wallet, viem and RPC
- * errors, request URLs and console breadcrumbs routinely carry addresses, transaction hashes and calldata, so
- * every event, transaction and breadcrumb passes through this before it leaves the browser.
+ * errors, request URLs and console breadcrumbs often carry addresses, hashes and calldata. Every event, span
+ * and breadcrumb therefore passes through this function before it leaves the browser.
  */
 export function redactWalletIdentity<T>(payload: T): T {
   return redactValue(payload, 0, new WeakSet()) as T;
+}
+
+/** A span as `beforeSendSpan` receives it. `@sentry/react` does not export the type. */
+export type SentrySpanJSON = Parameters<NonNullable<Sentry.BrowserOptions['beforeSendSpan']>>[0];
+
+/**
+ * Redacts a span. The SDK sends a span unchanged when `beforeSendSpan` throws, so a span this function cannot
+ * redact loses its name and attributes instead.
+ */
+export function redactSpan(span: SentrySpanJSON): SentrySpanJSON {
+  try {
+    return redactWalletIdentity(span);
+  } catch {
+    return { ...span, name: '[redacted]', attributes: {}, links: undefined };
+  }
 }
 
 /** The build-time values that configure Sentry, read from `import.meta.env` by `initSentry`. */
@@ -103,7 +135,7 @@ export function buildSentryOptions({
     integrations: [Sentry.browserTracingIntegration()],
     tracesSampleRate: isDev ? DEV_TRACES_SAMPLE_RATE : PRODUCTION_TRACES_SAMPLE_RATE,
     // Add no trace headers to outgoing requests. The API, RPC and screening hosts are cross-origin, and an
-    // unexpected header would fail their CORS preflight.
+    // unexpected header fails their CORS preflight.
     tracePropagationTargets: [],
     // Keep the app's own fetch errors unchanged. Wallet error handling reads their messages.
     enhanceFetchErrorMessages: 'report-only',
@@ -116,7 +148,8 @@ export function buildSentryOptions({
       stackFrameVariables: false,
     },
     beforeSend: (event) => redactWalletIdentity(event),
-    beforeSendTransaction: (event) => redactWalletIdentity(event),
+    // The SDK streams spans by default and then calls only `beforeSendSpan`, never `beforeSendTransaction`.
+    beforeSendSpan: redactSpan,
     beforeBreadcrumb: (breadcrumb) => redactWalletIdentity(breadcrumb),
   };
 }

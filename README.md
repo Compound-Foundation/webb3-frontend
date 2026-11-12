@@ -80,13 +80,13 @@ The application requires the following environment variables to be set in order 
 - `VITE_V3_WALLET_CONNECT_PROJECT_ID` - A Wallet Connect project id used if you want the app to support Wallet Connect.
 - `VITE_SCREENING_ENDPOINT` - The wallet address screening endpoint (a Cloudflare Worker that lives in a separate repo). Screening is fail-closed, so in a deployed build an unset or unreachable endpoint blocks every connected wallet.
 
-Three optional variables send errors and a sample of page-load traces to Sentry. With `VITE_SENTRY_DSN` unset, the app sends nothing.
+Three optional variables turn on Sentry error reporting. With `VITE_SENTRY_DSN` unset, the app sends nothing.
 
 - `VITE_SENTRY_DSN` - The DSN of the `webb3-frontend` project in the `compound-foundation` Sentry organization. A DSN is public, so it is safe in the bundle.
 - `VITE_SENTRY_ENVIRONMENT` - The environment to tag events with, such as `production` or `preview`. Defaults to the Vite mode.
 - `VITE_SENTRY_RELEASE` - The release to tag events with, such as the commit SHA.
 
-Before an event, trace or breadcrumb leaves the browser, `src/helpers/sentry.ts` replaces addresses, transaction hashes, other long hex strings and ENS names. It collects no user data, cookies, headers, request bodies or query strings, and it records no Session Replay.
+Sentry receives errors and, from 10% of page loads, a trace of the page load, its navigations, its requests and its web vitals. It records no Session Replay. `src/helpers/sentry.ts` replaces addresses, transaction hashes, other long hex strings, raw bytes and ENS names in every error, span and breadcrumb before it leaves the browser. Sentry gets no user data, cookies, headers, request bodies or query strings. Error messages can still name a contract, a function, an amount and a chain. With the time of the error, these can point to one transaction.
 
 On the local dev server (`yarn dev`), leaving `VITE_SCREENING_ENDPOINT` unset skips the screening call entirely, so you can connect a wallet locally without an endpoint. Set it (e.g. in `.env.local`) to a worker that allowlists your dev origin if you need to exercise screening locally. This applies to the dev server only — `vite build` always screens.
 
