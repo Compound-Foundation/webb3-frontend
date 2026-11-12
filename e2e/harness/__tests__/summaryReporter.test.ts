@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import type { FullConfig, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 
+import * as secrets from '../secrets';
 import SummaryReporter, { testId } from '../summaryReporter';
 
 /** A test case as the reporter reads one. */
@@ -41,6 +42,7 @@ const MANIFEST = {
     isSkipped: false,
     missingEndpoint: { resolved: { DEV: false, PROD: true } },
     allowed: { resolved: { DEV: false, PROD: true } },
+    developmentNodeEnv: { resolved: { DEV: true, PROD: false } },
   },
   app: { devResolved: { DEV: true } },
   tls: { mode: 'node-trusts-harness-certificate' },
@@ -48,24 +50,34 @@ const MANIFEST = {
   contracts: { usdcImplementation: '0x00' },
 };
 
+/** What the reporter's last `onEnd` in `summaryOf` returned to Playwright and printed to the console. */
+let lastEnd: { result: unknown; console: string } = { result: undefined, console: '' };
+
 async function summaryOf(
   selected: readonly (readonly string[])[],
   inventory: () => string[],
   manifest: object = MANIFEST,
-  stats?: object
+  stats?: object,
+  outputs: Record<string, string> = {}
 ) {
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-summary-'));
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(manifest));
   if (stats !== undefined) fs.writeFileSync(path.join(runDir, 'stats.json'), JSON.stringify(stats));
+  for (const [name, content] of Object.entries(outputs)) fs.writeFileSync(path.join(runDir, name), content);
   // The synthetic inventory holds none of the real required cases, which the last tests below cover.
   const reporter = new SummaryReporter({ runDir, inventory, requiredCases: [] });
   const tests = selected.map(([project, file, title]) => testCase(project, file, title));
   reporter.onBegin({ projects: [] } as unknown as FullConfig, { allTests: () => tests } as unknown as Suite);
   for (const each of tests) reporter.onTestEnd(each, passed);
   const write = process.stdout.write;
-  process.stdout.write = (() => true) as typeof process.stdout.write;
+  const printed: string[] = [];
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    printed.push(chunk.toString());
+    return true;
+  }) as typeof process.stdout.write;
   try {
-    await reporter.onEnd({ status: 'passed' } as never);
+    const result = await reporter.onEnd({ status: 'passed' } as never);
+    lastEnd = { result, console: printed.join('') };
   } finally {
     process.stdout.write = write;
   }
@@ -259,4 +271,33 @@ test('the proxies section gives the upstream bursts and the reads by lane', asyn
   expect(summary).toContain(
     '- Upstream bursts: 40 requests in all, at most 6 open at once and 9 started in one second'
   );
+});
+
+describe('the secret scan', () => {
+  const TOKEN = 'f'.repeat(64);
+  beforeAll(() => secrets.registerSecret(TOKEN, 'the control token'));
+  afterEach(() => jest.restoreAllMocks());
+
+  test('a secret in an output fails the run, and the summary names its kind and file, never its value', async () => {
+    const summary = await summaryOf(FULL, () => FULL.map(id), MANIFEST, undefined, { 'trace.log': `Bearer ${TOKEN}` });
+    expect(summary).toContain('Verdict: **FAIL**');
+    expect(summary).toContain('**1 secret(s) found:** the control token in trace.log');
+    expect(summary).not.toContain(TOKEN);
+    // The reporter's result is what fails the Playwright run.
+    expect(lastEnd.result).toEqual({ status: 'failed' });
+    expect(lastEnd.console).toContain('FAIL');
+    expect(lastEnd.console).not.toContain(TOKEN);
+  });
+
+  test('the summary counts the outputs it scanned, which it lists once', async () => {
+    const outputsUnder = jest.spyOn(secrets, 'outputsUnder');
+    const summary = await summaryOf(FULL, () => FULL.map(id), MANIFEST, undefined, { 'a.log': 'one', 'b.log': 'two' });
+    expect(summary).toContain('Verdict: **PASS**');
+    // manifest.json, test-output.log, a.log and b.log.
+    expect(summary).toMatch(
+      /No secret found\. \d+ secrets were registered, and 4 files and trace members were scanned/
+    );
+    expect(outputsUnder).toHaveBeenCalledTimes(1);
+    expect(lastEnd.result).toBeUndefined();
+  });
 });

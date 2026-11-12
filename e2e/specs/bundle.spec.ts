@@ -51,7 +51,11 @@ test.describe('the production bundle', { tag: ['@AC10'] }, () => {
     test.skip(manifest.production.isSkipped, 'the production builds were skipped');
     if (manifest.production.isSkipped) return;
     const token = fs.readFileSync(manifest.tokenFile, 'utf8').trim();
-    const outputs = [manifest.production.missingEndpoint.outDir, manifest.production.allowed.outDir];
+    const outputs = [
+      manifest.production.missingEndpoint.outDir,
+      manifest.production.allowed.outDir,
+      manifest.production.developmentNodeEnv.outDir,
+    ];
     const repositoryDist = path.join(REPO_ROOT, 'dist');
     if (fs.existsSync(repositoryDist)) outputs.push(repositoryDist);
     await test

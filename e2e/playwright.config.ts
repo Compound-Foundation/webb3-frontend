@@ -50,7 +50,9 @@ export default defineConfig({
   projects: isInteractive
     ? [{ name: 'interactive', testMatch: /interactive\.session\.ts/, timeout: 0 }]
     : [
-        { name: 'dev', testMatch: /\.spec\.ts$/, testIgnore: /(prod-build|bundle)\.spec\.ts$/ },
+        { name: 'dev', testMatch: /\.spec\.ts$/, testIgnore: /(prod-build|bundle|dev-server-security)\.spec\.ts$/ },
+        // Its probe makes Vite broadcast an error overlay to every open dev page, so it runs after `dev`.
+        { name: 'dev-server-security', testMatch: /dev-server-security\.spec\.ts$/, dependencies: ['dev'] },
         { name: 'prod-build', testMatch: /(prod-build|bundle)\.spec\.ts$/ },
       ],
 });

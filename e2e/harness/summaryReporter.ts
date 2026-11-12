@@ -236,10 +236,9 @@ export default class SummaryReporter implements Reporter {
     const stats = read('stats.json');
 
     // The scan runs last, over every output of the run, after the HTML report and the traces are written.
-    const leaks = findSecrets([
-      ...outputsUnder([this.#runDir]),
-      { file: 'test stdout and stderr', content: this.#output.join('') },
-    ]);
+    // The summary counts the same outputs it scanned, so they are read once.
+    const outputs = outputsUnder([this.#runDir]);
+    const leaks = findSecrets([...outputs, { file: 'test stdout and stderr', content: this.#output.join('') }]);
 
     // The run's tests against the full suite's inventory and the required acceptance cases.
     const selection = this.#notSelected();
@@ -348,7 +347,7 @@ export default class SummaryReporter implements Reporter {
     lines.push(
       leaks.length === 0
         ? `No secret found. ${registeredSecretCount()} secrets were registered, and ${
-            outputsUnder([this.#runDir]).length
+            outputs.length
           } files and trace members were scanned, with the test output.`
         : `**${leaks.length} secret(s) found:** ${leaks
             .map((leak) => `${leak.secret} in ${path.relative(this.#runDir, leak.file) || leak.file}`)
@@ -369,7 +368,7 @@ export default class SummaryReporter implements Reporter {
     if (manifest !== undefined) {
       const production = manifest.production.isSkipped
         ? `skipped (${manifest.production.reason})`
-        : `no endpoint: DEV=${manifest.production.missingEndpoint.resolved.DEV}, PROD=${manifest.production.missingEndpoint.resolved.PROD}; allowed control: DEV=${manifest.production.allowed.resolved.DEV}, PROD=${manifest.production.allowed.resolved.PROD}`;
+        : `no endpoint: DEV=${manifest.production.missingEndpoint.resolved.DEV}, PROD=${manifest.production.missingEndpoint.resolved.PROD}; allowed control: DEV=${manifest.production.allowed.resolved.DEV}, PROD=${manifest.production.allowed.resolved.PROD}; no endpoint with NODE_ENV=development: DEV=${manifest.production.developmentNodeEnv.resolved.DEV}, PROD=${manifest.production.developmentNodeEnv.resolved.PROD}`;
       lines.push(
         '',
         '## Run',

@@ -27,8 +27,25 @@ function loadConfig(): PlaywrightTestConfig {
   }
 }
 
+// Playwright refuses to load twice in one process, so the tests share one load.
+const config = loadConfig();
+
 test('runs the tests of a spec file in parallel, with no retries', () => {
-  const config = loadConfig();
   expect(config.fullyParallel).toBe(true);
   expect(config.retries).toBe(0);
+});
+
+test('runs the dev-server probe in its own project, after every other dev-server test', () => {
+  const projects = config.projects ?? [];
+  const matches = (pattern: unknown, file: string) => pattern instanceof RegExp && pattern.test(file);
+  const projectsOf = (file: string) =>
+    projects
+      .filter((project) => matches(project.testMatch, file) && !matches(project.testIgnore, file))
+      .map((project) => project.name);
+  expect(projectsOf('dev-server-security.spec.ts')).toEqual(['dev-server-security']);
+  expect(projectsOf('harness-security.spec.ts')).toEqual(['dev']);
+  expect(projectsOf('bundle.spec.ts')).toEqual(['prod-build']);
+  expect(projectsOf('prod-build.spec.ts')).toEqual(['prod-build']);
+  expect(projects.find((project) => project.name === 'dev-server-security')?.dependencies).toEqual(['dev']);
+  expect(projects.find((project) => project.name === 'prod-build')?.dependencies).toBeUndefined();
 });

@@ -7,11 +7,11 @@
 //
 // The scan reads each file whole, each member of a ZIP file (a Playwright trace) after inflating it, and
 // the ZIP that Playwright's HTML report embeds in its index.html, in
-// text, in its JSON-escaped form and in the base64 an attachment can take. Finding a secret after the run is
-// evidence of a leak, not a prevention of it: the token never enters the page by design.
+// text, in its JSON-escaped form and in the base64 an attachment can take. Gzip attachments are inflated too.
+// A secret found after the run proves a leak. The scan does not prevent it: the token never enters the page by design.
 import fs from 'node:fs';
 import path from 'node:path';
-import { inflateRawSync } from 'node:zlib';
+import { gunzipSync, inflateRawSync } from 'node:zlib';
 
 const REGISTRY = Symbol.for('cf-browser-harness.secrets');
 type Registry = { literals: Map<string, string>; patterns: Set<string> };
@@ -56,6 +56,7 @@ export function zipMembers(buffer: Buffer): { name: string; content: Buffer }[] 
   return members;
 }
 
+/** The forms of `secret` a scan looks for: as written, without `0x`, JSON-escaped and in base64. */
 const forms = (secret: string) => [
   secret,
   secret.replace(/^0x/, ''),
@@ -68,14 +69,18 @@ export type Leak = { file: string; secret: string };
 /** Each place in `texts` that holds a registered secret. A secret is named by kind only, never shown. */
 export function findSecrets(texts: { file: string; content: Buffer | string }[]): Leak[] {
   const { literals, patterns } = registry();
+  // The needles and expressions do not depend on the text, so they are made once per scan, not per text.
+  const needles = [...literals].map(([secret, kind]) => ({
+    kind,
+    forms: [...new Set(forms(secret).map((form) => form.toLowerCase()))],
+  }));
   const expressions = [...patterns].map((pattern) => new RegExp(pattern, 'i'));
   const leaks: Leak[] = [];
   for (const { file, content } of texts) {
     const text = typeof content === 'string' ? content : content.toString('latin1');
-    for (const [secret, kind] of literals) {
-      if (forms(secret).some((form) => text.toLowerCase().includes(form.toLowerCase()))) {
-        leaks.push({ file, secret: kind });
-      }
+    const lowerText = text.toLowerCase();
+    for (const { kind, forms: needleForms } of needles) {
+      if (needleForms.some((form) => lowerText.includes(form))) leaks.push({ file, secret: kind });
     }
     for (const expression of expressions)
       if (expression.test(text)) leaks.push({ file, secret: 'the private upstream URL' });
@@ -83,9 +88,16 @@ export function findSecrets(texts: { file: string; content: Buffer | string }[])
   return leaks;
 }
 
-/** Every file under each of `roots`, and every member of each ZIP among them. */
+/** Files under `roots`, their ZIP members, and gzip contents in either. */
 export function outputsUnder(roots: string[]): { file: string; content: Buffer }[] {
   const outputs: { file: string; content: Buffer }[] = [];
+  const add = (file: string, content: Buffer) => {
+    outputs.push({ file, content });
+    // Trace and report attachments can have hashed names without the original .gz suffix.
+    if (content[0] === 0x1f && content[1] === 0x8b && content[2] === 0x08) {
+      outputs.push({ file: `${file}#gunzip`, content: gunzipSync(content) });
+    }
+  };
   const visit = (entry: string) => {
     if (!fs.existsSync(entry)) return;
     const stat = fs.statSync(entry);
@@ -94,10 +106,10 @@ export function outputsUnder(roots: string[]): { file: string; content: Buffer }
       return;
     }
     const content = fs.readFileSync(entry);
-    outputs.push({ file: entry, content });
+    add(entry, content);
     if (entry.endsWith('.zip')) {
       for (const member of zipMembers(content)) {
-        outputs.push({ file: `${entry}#${member.name}`, content: member.content });
+        add(`${entry}#${member.name}`, member.content);
       }
     }
     // Playwright's HTML report embeds its data, every test's errors, output and attachments, as a
@@ -105,7 +117,7 @@ export function outputsUnder(roots: string[]): { file: string; content: Buffer }
     if (entry.endsWith('.html')) {
       for (const match of content.toString('latin1').matchAll(/data:application\/zip;base64,([A-Za-z0-9+/=]+)/g)) {
         for (const member of zipMembers(Buffer.from(match[1], 'base64'))) {
-          outputs.push({ file: `${entry}#embedded/${member.name}`, content: member.content });
+          add(`${entry}#embedded/${member.name}`, member.content);
         }
       }
     }
