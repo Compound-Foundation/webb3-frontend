@@ -13,30 +13,34 @@ import pluginRewriteAll from 'vite-plugin-rewrite-all';
 const nodeGlobalsPolyfill = (file) => resolve(__dirname, 'node_modules/@esbuild-plugins/node-globals-polyfill', file);
 
 // Vite replaces `process.env.NODE_ENV` in the build only after other plugins' transforms. By then the Node
-// polyfills below have rewritten `process` to their shim, so React's entry points keep a run-time check and the
-// build bundles React's development and production builds and runs the development one. This build-only plugin
-// runs first and replaces `process.env.NODE_ENV` with the value Vite gives it: NODE_ENV, else the mode.
-// It parses the code, so it changes expressions only, never strings or comments. It handles JavaScript only,
-// which is where React's entry points and other dependencies read NODE_ENV.
+// polyfills below have rewritten `process` to their shim. The shim's `process.env` has no NODE_ENV, so React's
+// entry points take their development branch at run time, and the build ships and runs development React.
+//
+// This build-only plugin runs before the polyfills. It replaces `process.env.NODE_ENV` with the value Vite
+// would give it: a `define` entry for it, else NODE_ENV, else the mode. It parses the code, so it changes
+// expressions only, never strings or comments. It handles JavaScript files only. Application code reads no
+// `process.env`, and the dependencies that read NODE_ENV, React among them, ship JavaScript.
 const replaceNodeEnvBeforePolyfills = () => {
   let define;
+  let sourcemap;
   return {
     name: 'replace-node-env-before-polyfills',
     enforce: 'pre',
     apply: 'build',
     configResolved(config) {
-      const nodeEnv = JSON.stringify(process.env.NODE_ENV || config.mode);
+      const nodeEnv = config.define?.['process.env.NODE_ENV'] ?? JSON.stringify(process.env.NODE_ENV || config.mode);
       define = {
         'process.env.NODE_ENV': nodeEnv,
         'global.process.env.NODE_ENV': nodeEnv,
         'globalThis.process.env.NODE_ENV': nodeEnv,
       };
+      sourcemap = Boolean(config.build.sourcemap);
     },
     transform: {
       filter: { id: /\.[cm]?js$/, code: 'process.env.NODE_ENV' },
       async handler(code, id) {
-        const result = await transformWithOxc(code, id, { lang: 'js', define, tsconfig: false, sourcemap: true });
-        return { code: result.code, map: result.map };
+        const result = await transformWithOxc(code, id, { lang: 'js', define, tsconfig: false, sourcemap });
+        return { code: result.code, map: result.map ?? null };
       },
     },
   };

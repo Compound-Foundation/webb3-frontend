@@ -151,15 +151,22 @@ test("the harness's bundled dev server keeps the configuration's entries and plu
 }, 120_000);
 
 describe("the production build's React", () => {
-  // Marker strings that only ReactDOM's development build contains.
-  const DEVELOPMENT_MARKERS = ['Each child in a list should have a unique', 'Referentially unequal but deeply equal'];
+  // Marker strings that only the development builds contain: the first is React's, the others are ReactDOM's.
+  const DEVELOPMENT_MARKERS = [
+    'is deprecated in plain JavaScript React classes',
+    'Each child in a list should have a unique',
+    'Referentially unequal but deeply equal',
+  ];
+  // Production ReactDOM reports errors by code instead of the development build's messages.
+  const PRODUCTION_MARKER = 'Minified React error';
+  const MARKERS = [...DEVELOPMENT_MARKERS, PRODUCTION_MARKER];
 
   /**
    * Builds React and ReactDOM's client through the repository's configuration with `nodeEnv` as NODE_ENV, as
-   * `vite build` does, and returns which of `markers` the bundled JavaScript contains. Only the entry differs
-   * from the app's build.
+   * `vite build` does, and returns which of `MARKERS` the bundled JavaScript contains. The plugins, Node
+   * polyfills and target are the app's. The entry, output, minifier and env directory are not.
    */
-  function buildReact(nodeEnv: 'development' | 'production', markers: string[]): Record<string, boolean> {
+  function buildReact(nodeEnv: 'development' | 'production'): Record<string, boolean> {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vite-config-react-'));
     const entry = path.join(directory, 'entry.js');
     // The entry imports React's CommonJS entry points, which choose a build from process.env.NODE_ENV.
@@ -198,7 +205,7 @@ describe("the production build's React", () => {
     try {
       return inChild<Record<string, boolean>>(
         script,
-        { root: ROOT, envDir: directory, entry, outDir: path.join(directory, 'out'), markers },
+        { root: ROOT, envDir: directory, entry, outDir: path.join(directory, 'out'), markers: MARKERS },
         nodeEnv
       );
     } finally {
@@ -206,24 +213,20 @@ describe("the production build's React", () => {
     }
   }
 
-  // Production React reports errors by code instead of the development build's messages.
-  const PRODUCTION_MARKER = 'Minified React error';
+  /** The marker results expected when the bundle holds only the development builds, or only the production ones. */
+  const expected = (development: boolean) =>
+    Object.fromEntries([
+      ...DEVELOPMENT_MARKERS.map((marker) => [marker, development]),
+      [PRODUCTION_MARKER, !development],
+    ]);
 
   test('is the production build of React and ReactDOM', () => {
-    expect(buildReact('production', [...DEVELOPMENT_MARKERS, PRODUCTION_MARKER])).toEqual({
-      [DEVELOPMENT_MARKERS[0]]: false,
-      [DEVELOPMENT_MARKERS[1]]: false,
-      [PRODUCTION_MARKER]: true,
-    });
+    expect(buildReact('production')).toEqual(expected(false));
   }, 120_000);
 
   test('follows NODE_ENV=development to the development build, as Vite does', () => {
     // The browser harness builds the app with NODE_ENV=development to compile DEV=true in mode production.
-    expect(buildReact('development', [...DEVELOPMENT_MARKERS, PRODUCTION_MARKER])).toEqual({
-      [DEVELOPMENT_MARKERS[0]]: true,
-      [DEVELOPMENT_MARKERS[1]]: true,
-      [PRODUCTION_MARKER]: false,
-    });
+    expect(buildReact('development')).toEqual(expected(true));
   }, 120_000);
 });
 
