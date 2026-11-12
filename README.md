@@ -82,11 +82,11 @@ The application requires the following environment variables to be set in order 
 
 Three optional variables turn on Sentry error reporting. With `VITE_SENTRY_DSN` unset, the app sends nothing.
 
-- `VITE_SENTRY_DSN` - The DSN of the `webb3-frontend` project in the `compound-foundation` Sentry organization. A DSN is public, so it is safe in the bundle.
+- `VITE_SENTRY_DSN` - The DSN of the `webb3-frontend` project in the `compound-foundation` Sentry organization. A DSN is public, so it is safe in the bundle. CI's build reads it from the `VITE_SENTRY_DSN` repository secret, not a repository variable, and reads the source map token from the `SENTRY_AUTH_TOKEN` secret.
 - `VITE_SENTRY_ENVIRONMENT` - The environment to tag events with, such as `production` or `preview`. Defaults to the Vite mode.
 - `VITE_SENTRY_RELEASE` - The release to tag events with, such as the commit SHA.
 
-Sentry receives errors and, from 10% of page loads, a trace of the page load, its navigations, its requests and its web vitals. It records no Session Replay. `src/helpers/sentry.ts` replaces addresses, transaction hashes, other long hex strings, raw bytes and ENS names in everything the SDK sends, just before it leaves the browser. It keeps the release name, which CI sets to the commit SHA. Sentry gets no user data, cookies, headers, request bodies or query strings. Error messages can still name a contract, a function, an amount and a chain. With the time of the error, these can point to one transaction.
+Sentry receives errors and, from 10% of page loads, a trace of the page load, its navigations, its requests and its web vitals. It records no Session Replay. `src/helpers/sentry.ts` replaces addresses, transaction hashes, other long hex strings, raw bytes and ENS names in everything the SDK sends, just before it leaves the browser. It keeps the release name, which CI sets to the commit SHA. Sentry gets no user data, cookies, headers, request bodies or query strings. An ENS name is replaced only when its `.eth` suffix is in ASCII letters: `alice.ｅｔｈ`, which ENS also accepts, is not. Error messages can still name a contract, a function, an amount and a chain. With the time of the error, these can point to one transaction.
 
 On the local dev server (`yarn dev`), leaving `VITE_SCREENING_ENDPOINT` unset skips the screening call entirely, so you can connect a wallet locally without an endpoint. Set it (e.g. in `.env.local`) to a worker that allowlists your dev origin if you need to exercise screening locally. This applies to the dev server only — `vite build` always screens.
 

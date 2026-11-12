@@ -20,6 +20,9 @@ const ENS_LABEL_CHARACTER = String.raw`(?:[a-z0-9_$'-]|[#*]\uFE0F?\u20E3|[^\s\x0
 /**
  * ENS names in any case, such as `alice.eth`, `pay.alice.eth`, `Alice.ETH` or `🇺🇸.eth`. A name may be followed
  * by punctuation, such as a closing quote, but not by a letter or digit: `alice.ethereum` is not a name.
+ *
+ * The suffix must be ASCII. ENS also accepts spellings it normalizes to `eth`, such as fullwidth `ｅｔｈ` or
+ * `eth` followed by a variation selector. Those are not matched, which is a known gap.
  */
 const ENS_PATTERN = new RegExp(
   `(?<!${ENS_LABEL_CHARACTER})(?:${ENS_LABEL_CHARACTER}+\\.)+eth(?![\\p{L}\\p{N}\\p{M}_-])`,
