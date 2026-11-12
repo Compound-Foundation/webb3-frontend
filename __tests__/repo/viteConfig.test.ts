@@ -27,6 +27,9 @@ const HTML_ENTRIES = [
   'redirect',
 ];
 
+// The build-only plugin that replaces process.env.NODE_ENV before the Node polyfills rewrite `process`.
+const NODE_ENV_PLUGIN = 'replace-node-env-before-polyfills';
+
 /** Runs `script` as an ES module in a child Node process with `input`, and returns what it writes as JSON. */
 function inChild<T>(script: string, input: unknown, nodeEnv: 'development' | 'production'): T {
   const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('VITE_')));
@@ -50,6 +53,7 @@ type Resolved = {
   cssMinify: unknown;
   inputs: string[];
   plugins: string[];
+  vitePlugins: string[];
   output: Record<string, unknown> | undefined;
   renderedUrl: unknown;
   walletConnect: string | undefined;
@@ -81,6 +85,7 @@ function resolve(command: 'build' | 'serve', inline: object = {}): Resolved {
       cssMinify: config.build.cssMinify,
       inputs: Object.keys(options.input ?? {}),
       plugins: [options.plugins ?? []].flat(Infinity).map((plugin) => plugin?.name),
+      vitePlugins: config.plugins.map((plugin) => plugin.name),
       output: options.output,
       renderedUrl: render === undefined ? null : render('assets/x.js', { hostId: 'index.html', hostType: 'html', type: 'asset', ssr: false }),
       walletConnect: aliases.find((alias) => alias.find === '@walletconnect/ethereum-provider')?.replacement,
@@ -118,6 +123,7 @@ test('the production build keeps its target, minifiers, nine HTML entries, relat
   });
   expect(resolved.inputs).toEqual(HTML_ENTRIES);
   expect(resolved.plugins).toEqual(['polyfill-node']);
+  expect(resolved.vitePlugins).toContain(NODE_ENV_PLUGIN);
   expect(resolved.define).toMatchObject({ global: 'globalThis' });
   // The harness's bundled dev setting is not in the configuration file.
   expect(resolved.output?.strictExecutionOrder).toBeUndefined();
@@ -126,6 +132,8 @@ test('the production build keeps its target, minifiers, nine HTML entries, relat
 test('the default dev server is unbundled and runs no esbuild plugin in the dependency optimizer', () => {
   const resolved = resolve('serve');
   expect(resolved).toMatchObject({ isProduction: false, DEV: true, PROD: false, bundledDev: false, esbuildPlugins: 0 });
+  // The dev server keeps React's development build.
+  expect(resolved.vitePlugins).not.toContain(NODE_ENV_PLUGIN);
   expect(resolved.output?.strictExecutionOrder).toBeUndefined();
 }, 120_000);
 
@@ -137,9 +145,87 @@ test("the harness's bundled dev server keeps the configuration's entries and plu
   expect(resolved.inputs).toEqual(HTML_ENTRIES);
   expect(resolved.plugins).toEqual(['polyfill-node']);
   expect(resolved.output).toEqual({ strictExecutionOrder: true });
+  expect(resolved.vitePlugins).not.toContain(NODE_ENV_PLUGIN);
   // Vite drops `renderBuiltUrl` in bundled dev only. The production test above checks that the build keeps it.
   expect(resolved.renderedUrl).toBeNull();
 }, 120_000);
+
+describe("the production build's React", () => {
+  // Marker strings that only ReactDOM's development build contains.
+  const DEVELOPMENT_MARKERS = ['Each child in a list should have a unique', 'Referentially unequal but deeply equal'];
+
+  /**
+   * Builds React and ReactDOM's client through the repository's configuration with `nodeEnv` as NODE_ENV, as
+   * `vite build` does, and returns which of `markers` the bundled JavaScript contains. Only the entry differs
+   * from the app's build.
+   */
+  function buildReact(nodeEnv: 'development' | 'production', markers: string[]): Record<string, boolean> {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vite-config-react-'));
+    const entry = path.join(directory, 'entry.js');
+    // The entry imports React's CommonJS entry points, which choose a build from process.env.NODE_ENV.
+    fs.writeFileSync(
+      entry,
+      `import { createElement } from ${JSON.stringify(path.join(ROOT, 'node_modules/react/index.js'))};
+       import { createRoot } from ${JSON.stringify(path.join(ROOT, 'node_modules/react-dom/client.js'))};
+       createRoot(document.body).render(createElement('div'));`
+    );
+    const script = `
+      const { build, loadConfigFromFile } = await import(${JSON.stringify(
+        path.join(ROOT, 'node_modules/vite/dist/node/index.js')
+      )});
+      const { root, envDir, entry, outDir, markers } = JSON.parse(process.argv[1]);
+      const loaded = await loadConfigFromFile({ command: 'build', mode: 'production' }, root + '/vite.config.js', root, 'silent');
+      const config = loaded.config;
+      const output = await build({
+        ...config,
+        configFile: false,
+        root,
+        envDir,
+        mode: 'production',
+        logLevel: 'silent',
+        build: {
+          ...config.build,
+          outDir,
+          write: false,
+          minify: false,
+          rollupOptions: { ...config.build.rollupOptions, input: { entry } },
+        },
+      });
+      const chunks = [output].flat().flatMap((result) => result.output).filter((file) => file.type === 'chunk');
+      const code = chunks.map((chunk) => chunk.code).join('\\n');
+      process.stdout.write(JSON.stringify(Object.fromEntries(markers.map((marker) => [marker, code.includes(marker)]))));
+    `;
+    try {
+      return inChild<Record<string, boolean>>(
+        script,
+        { root: ROOT, envDir: directory, entry, outDir: path.join(directory, 'out'), markers },
+        nodeEnv
+      );
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  // Production React reports errors by code instead of the development build's messages.
+  const PRODUCTION_MARKER = 'Minified React error';
+
+  test('is the production build of React and ReactDOM', () => {
+    expect(buildReact('production', [...DEVELOPMENT_MARKERS, PRODUCTION_MARKER])).toEqual({
+      [DEVELOPMENT_MARKERS[0]]: false,
+      [DEVELOPMENT_MARKERS[1]]: false,
+      [PRODUCTION_MARKER]: true,
+    });
+  }, 120_000);
+
+  test('follows NODE_ENV=development to the development build, as Vite does', () => {
+    // The browser harness builds the app with NODE_ENV=development to compile DEV=true in mode production.
+    expect(buildReact('development', [...DEVELOPMENT_MARKERS, PRODUCTION_MARKER])).toEqual({
+      [DEVELOPMENT_MARKERS[0]]: true,
+      [DEVELOPMENT_MARKERS[1]]: true,
+      [PRODUCTION_MARKER]: false,
+    });
+  }, 120_000);
+});
 
 describe('the dependency optimizer', () => {
   const polyfills = path.join(ROOT, 'node_modules/@esbuild-plugins/node-globals-polyfill');
