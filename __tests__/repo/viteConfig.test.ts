@@ -226,7 +226,7 @@ describe("the production build's React", () => {
 
   test('follows NODE_ENV=development to the development build, as Vite does', () => {
     // The browser harness builds the app with NODE_ENV=development to compile DEV=true in mode production.
-    // Every marker survives the app's minifier, so `yarn build`'s check would reject this bundle.
+    // Every marker survives the app's minifier, so `yarn build`'s check rejects this bundle.
     const markers = buildReact('development');
     expect(markers.foundDevelopment).toEqual(markers.development);
     expect(markers.foundProduction).toBe(false);

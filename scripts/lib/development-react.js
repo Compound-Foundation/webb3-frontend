@@ -96,10 +96,12 @@ export function scanForDevelopmentReact(directory) {
   return { fileCount: javaScriptFiles.length, matches, hasProductionReact, symbolicLinks };
 }
 
-// Checks a build directory and writes the result. Returns the exit status: 0 when every marker is still in
-// its file, the directory holds JavaScript, none of it contains a development marker and some of it contains
-// the production marker, otherwise 1. A stale marker, a missing directory, a directory without JavaScript or
-// without production React, or a symbolic link in the build fails, because then the check proves nothing.
+// Checks a build directory and writes the result. Returns the exit status, 0 or 1. The check fails when:
+// - a marker is no longer in its file in the installed React or ReactDOM;
+// - the directory is missing, or holds a symbolic link or no JavaScript;
+// - a JavaScript file contains a development marker;
+// - no JavaScript file contains the production marker.
+// Each failure but the third means the check cannot show the build is production React.
 export function checkProductionReact(
   directory,
   { packageDirectory = installedPackageDirectory, log = console.log, error = console.error } = {}
