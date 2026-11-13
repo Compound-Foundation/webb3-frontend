@@ -25,7 +25,11 @@ function sentText(): string {
   return envelopes.join('\n');
 }
 
+const consoleInfo = console.info;
+
 beforeAll(() => {
+  // Silence `console.info` before the SDK wraps it, so that a test can log through the wrapper.
+  console.info = () => undefined;
   // jsdom has no Performance Timeline, which the SDK's web vitals read.
   if (typeof performance.getEntriesByType !== 'function') {
     Object.assign(performance, { getEntriesByType: () => [], getEntriesByName: () => [] });
@@ -39,6 +43,7 @@ beforeAll(() => {
 
 afterAll(async () => {
   await Sentry.close();
+  console.info = consoleInfo;
 });
 
 beforeEach(() => {
@@ -68,6 +73,26 @@ test('a root span leaves the browser with the address redacted from the envelope
 
   expect(sentText()).toContain('"transaction":"GET https://api.example/account/0x[address]/rewards"');
   expect(sentText()).not.toMatch(ADDRESS_PATTERN);
+});
+
+test('an address written with a capital 0X prefix leaves the browser redacted', async () => {
+  Sentry.captureException(new Error(`Supply failed for 0X${ADDRESS.slice(2)}`));
+  await Sentry.flush(2000);
+
+  expect(sentText()).toContain('Supply failed for 0x[address]');
+  expect(sentText()).not.toMatch(ADDRESS_PATTERN);
+});
+
+test('console output does not leave the browser as a breadcrumb', async () => {
+  // Call through the SDK's wrapper of `console.info`, which is how the app's own logging reaches the SDK.
+  console.info('Screening failed', new Error('lookup refused'));
+  Sentry.captureMessage('after the console output');
+  await Sentry.flush(2000);
+
+  expect(sentText()).toContain('after the console output');
+  expect(sentText()).not.toContain('Screening failed');
+  expect(sentText()).not.toContain('lookup refused');
+  expect(sentText()).not.toContain('"Console"');
 });
 
 test('a breadcrumb leaves the browser with its address redacted', async () => {

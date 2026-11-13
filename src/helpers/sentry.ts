@@ -1,11 +1,11 @@
 import * as Sentry from '@sentry/react';
 
 /**
- * Hex strings of 40 or more digits after `0x`: wallet and contract addresses (40), transaction hashes (64),
- * signatures and calldata. Calldata encodes addresses, so every long hex string is redacted, not only
+ * Hex strings of 40 or more digits after `0x` or `0X`: wallet and contract addresses (40), transaction hashes
+ * (64), signatures and calldata. Calldata encodes addresses, so every long hex string is redacted, not only
  * addresses and hashes.
  */
-const PREFIXED_HEX_PATTERN = /0x[0-9a-fA-F]{40,}/g;
+const PREFIXED_HEX_PATTERN = /0[xX][0-9a-fA-F]{40,}/g;
 
 /** Runs of 40 or more hex digits without `0x`, as some wallet libraries print addresses and hashes. */
 const BARE_HEX_PATTERN = /(?<![0-9a-zA-Z])[0-9a-fA-F]{40,}(?![0-9a-zA-Z])/g;
@@ -186,6 +186,9 @@ export type SentryEnvironment = {
   release?: string;
 };
 
+/** The SDK's default integration that records each `console` call as a breadcrumb. */
+const CONSOLE_INTEGRATION_NAME = 'Console';
+
 /** The sample rate for traces: every trace on a development build, 10% otherwise. */
 export const DEV_TRACES_SAMPLE_RATE = 1.0;
 export const PRODUCTION_TRACES_SAMPLE_RATE = 0.1;
@@ -205,7 +208,12 @@ export function buildSentryOptions(
     dsn,
     environment,
     release: release || undefined,
-    integrations: [Sentry.browserTracingIntegration()],
+    // Console output is not sent as breadcrumbs. The app logs whole wallet, screening and RPC errors, which
+    // say more than an error report needs.
+    integrations: (defaultIntegrations) => [
+      ...defaultIntegrations.filter((integration) => integration.name !== CONSOLE_INTEGRATION_NAME),
+      Sentry.browserTracingIntegration(),
+    ],
     tracesSampleRate: isDev ? DEV_TRACES_SAMPLE_RATE : PRODUCTION_TRACES_SAMPLE_RATE,
     // Add no trace headers to outgoing requests. The API, RPC and screening hosts are cross-origin, and an
     // unexpected header fails their CORS preflight.

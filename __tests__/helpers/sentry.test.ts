@@ -28,6 +28,14 @@ describe('redactWalletIdentityText', () => {
     expect(redactWalletIdentityText(`from ${ADDRESS} to ${LOWERCASE_ADDRESS}`)).toBe('from 0x[address] to 0x[address]');
   });
 
+  it('replaces an address or hash written with a capital 0X prefix', () => {
+    const capitalPrefixAddress = `0X${ADDRESS.slice(2)}`;
+    const capitalPrefixHash = `0X${TX_HASH.slice(2)}`;
+    expect(redactWalletIdentityText(`from ${capitalPrefixAddress} in ${capitalPrefixHash}`)).toBe(
+      'from 0x[address] in 0x[hash]'
+    );
+  });
+
   it('replaces transaction hashes', () => {
     expect(redactWalletIdentityText(`tx ${TX_HASH} reverted`)).toBe('tx 0x[hash] reverted');
   });
@@ -207,6 +215,13 @@ describe('buildSentryOptions', () => {
         stackFrameVariables: false,
       },
     });
+  });
+
+  it('removes the console integration and keeps the other default integrations', () => {
+    const integrations = buildSentryOptions({ dsn: DSN, isDev: false, environment: 'production' })?.integrations;
+    const defaults = [{ name: 'Breadcrumbs' }, { name: 'Console' }, { name: 'GlobalHandlers' }];
+    const names = typeof integrations === 'function' ? integrations(defaults).map(({ name }) => name) : [];
+    expect(names).toEqual(['Breadcrumbs', 'GlobalHandlers', 'BrowserTracing']);
   });
 
   it('sets no hooks, because the transport redacts everything', () => {
