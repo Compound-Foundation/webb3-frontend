@@ -416,7 +416,7 @@ The rehearsal has two parts.
 
 ## Observe without collecting wallet identity data
 
-The app's only telemetry is Sentry error reporting, in a build that sets `VITE_SENTRY_DSN`. It is the one exception to this section: nothing in a report is redacted, so an error, a breadcrumb or a trace can carry a wallet address, an ENS name or a transaction hash. Sentry gets no console output, cookies, headers, request bodies or query strings. The SDK sends no IP address, and the Sentry project's "Prevent Storing of IP Addresses" setting is on, so Sentry does not store the address its servers see. It does still record the country the report came from. Use Sentry to debug errors. Do not use it to follow holders.
+The app's only telemetry is Sentry error reporting, in a build that sets `VITE_SENTRY_DSN`. It is the one exception to this section: nothing in a report is redacted, so an error, a breadcrumb or a trace can carry a wallet address, an ENS name or a transaction hash. Sentry gets no console output, cookies, headers, request bodies or query strings. The SDK sends no IP address, and the Sentry project's "Prevent Storing of IP Addresses" setting is on, so Sentry does not store the address its servers see. It does still record the country the report came from. A build that also sets `VITE_SENTRY_TUNNEL` sends through Compound's relay worker at `relay.compound.xyz`. The relay keeps no logs and passes Sentry none of the browser's headers, so Sentry sees a Cloudflare address and its country instead of the user's. Use Sentry to debug errors. Do not use it to follow holders.
 
 The app turns off the Coinbase Wallet SDK's telemetry (`src/helpers/wagmiConfig.ts:40-43`). A release-control PR adds no telemetry. Use these existing facilities:
 
