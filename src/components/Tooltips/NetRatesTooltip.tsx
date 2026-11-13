@@ -28,6 +28,7 @@ export type MarketRewards =
   type: RewardsType.Institutional;
   whitelistStatus?: InstitutionalWhitelistStatus;
   boostLabel?: string;
+  boostEndDate?: Date;
 });
 
 export interface NetRatesTooltipProps {
@@ -78,6 +79,7 @@ const NetRatesTooltip = ({ borrowAPR, earnAPR, rewards, view }: NetRatesTooltipP
       <BoostedSupplyRates
         earnAPR={earnAPR}
         boostAPR={rewards.supplyAPR}
+        boostEndDate={rewards.boostEndDate}
         whitelistStatus={rewards.whitelistStatus ?? InstitutionalWhitelistStatus.NoWallet}
         boostLabel={rewards.boostLabel}
       />

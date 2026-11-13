@@ -59,7 +59,8 @@ export const getMarketRewardsAPRs = (
     };
   }
 
-  if (market?.institutional) {
+  // After the boost ends, the market is shown like a plain one
+  if (market?.institutional && Date.now() < (market.boostEndDate?.getTime() ?? Infinity)) {
     return {
       borrowRewardsAPR: 0n,
       supplyRewardsAPR: institutionalSupplyRewardRate(totalBaseSupplyInDollars),

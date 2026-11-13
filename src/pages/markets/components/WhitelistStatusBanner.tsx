@@ -1,9 +1,11 @@
-import { INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
+import { format } from 'date-fns';
+
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { INSTITUTIONAL_REGISTER_URL } from '@helpers/urls';
 
 type WhitelistStatusBannerProps = {
   whitelistStatus: InstitutionalWhitelistStatus;
+  boostEndDate?: Date;
 };
 
 /**
@@ -11,7 +13,7 @@ type WhitelistStatusBannerProps = {
  * account's access to the boosted supply rate. Shown only while the boost is
  * paying.
  */
-const WhitelistStatusBanner = ({ whitelistStatus }: WhitelistStatusBannerProps) => {
+const WhitelistStatusBanner = ({ whitelistStatus, boostEndDate }: WhitelistStatusBannerProps) => {
   if (whitelistStatus === InstitutionalWhitelistStatus.Whitelisted) {
     return (
       <div className="whitelist-status-banner grid-column--12">
@@ -20,7 +22,11 @@ const WhitelistStatusBanner = ({ whitelistStatus }: WhitelistStatusBannerProps) 
           <span className="new-badge label label--secondary">Approved</span>
           <p className="whitelist-status-banner__title L3 body body--emphasized">You are earning boosted yield</p>
         </div>
-        <p className="whitelist-status-banner__detail L4 body">Boosted yield applies until {INSTITUTIONAL_BOOST_END_DATE_LABEL}.</p>
+        {boostEndDate && (
+          <p className="whitelist-status-banner__detail L4 body">
+            Boosted yield applies until {format(boostEndDate, 'MMMM d, yyyy')}.
+          </p>
+        )}
       </div>
     );
   }

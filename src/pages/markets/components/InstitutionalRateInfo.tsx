@@ -2,6 +2,7 @@ import { Lightning } from '@components/Icons/Lightning';
 import Tooltip from '@components/Tooltip';
 import NetRatesTooltip, { NetRatesTooltipView, RewardsType } from '@components/Tooltips/NetRatesTooltip';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
+import { getMarket } from '@helpers/markets';
 
 import { MarketSummary } from '../../../types';
 
@@ -38,6 +39,7 @@ const InstitutionalRateInfo = ({
             borrowAPR: 0n,
             whitelistStatus,
             boostLabel: 'Whitelisted Extra APY',
+            boostEndDate: getMarket(marketSummary.chainId, marketSummary.comet.address)?.boostEndDate,
           }}
           view={NetRatesTooltipView.Supply}
         />
