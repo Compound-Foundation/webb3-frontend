@@ -184,6 +184,11 @@ export type SentryEnvironment = {
   environment: string;
   /** `import.meta.env.VITE_SENTRY_RELEASE`. */
   release?: string;
+  /**
+   * `import.meta.env.VITE_SENTRY_TUNNEL`: the URL of the relay that forwards events to Sentry, which ad blockers
+   * do not block as they block Sentry's own hosts. Without it, events go to Sentry directly.
+   */
+  tunnel?: string;
 };
 
 /** The SDK's default integration that records each `console` call as a breadcrumb. */
@@ -198,7 +203,7 @@ export const PRODUCTION_TRACES_SAMPLE_RATE = 0.1;
  * set no DSN, so they send nothing. `makeTransport` makes the transport that sends the redacted envelopes.
  */
 export function buildSentryOptions(
-  { dsn, isDev, environment, release }: SentryEnvironment,
+  { dsn, isDev, environment, release, tunnel }: SentryEnvironment,
   makeTransport: SentryTransportFactory = Sentry.makeFetchTransport
 ): Sentry.BrowserOptions | undefined {
   if (!dsn) {
@@ -208,6 +213,7 @@ export function buildSentryOptions(
     dsn,
     environment,
     release: release || undefined,
+    tunnel: tunnel || undefined,
     // Console output is not sent as breadcrumbs. The app logs whole wallet, screening and RPC errors, which
     // say more than an error report needs.
     integrations: (defaultIntegrations) => [
@@ -246,6 +252,7 @@ export function initSentry(): void {
     isDev: Boolean(import.meta.env.DEV),
     environment: import.meta.env.VITE_SENTRY_ENVIRONMENT || import.meta.env.MODE || 'production',
     release: import.meta.env.VITE_SENTRY_RELEASE,
+    tunnel: import.meta.env.VITE_SENTRY_TUNNEL,
   });
   if (!options) {
     return;

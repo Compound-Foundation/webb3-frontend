@@ -237,6 +237,19 @@ describe('buildSentryOptions', () => {
       undefined
     );
   });
+
+  it('sends events through the tunnel when one is set', () => {
+    const tunnel = 'https://relay.compound.xyz/';
+    expect(buildSentryOptions({ dsn: DSN, isDev: false, environment: 'production', tunnel })?.tunnel).toBe(tunnel);
+  });
+
+  it('sends events to Sentry directly when the tunnel is unset or empty', () => {
+    for (const tunnel of [undefined, '']) {
+      const options = buildSentryOptions({ dsn: DSN, isDev: false, environment: 'production', tunnel });
+      expect(options).toBeDefined();
+      expect(options?.tunnel).toBeUndefined();
+    }
+  });
 });
 
 describe('initSentry', () => {
