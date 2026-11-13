@@ -1,3 +1,5 @@
+// Starts Sentry before any other module runs. Keep it the first import.
+import './instrument';
 import { SafeProvider } from '@safe-global/safe-apps-react-sdk';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
@@ -7,6 +9,7 @@ import { WagmiProvider } from 'wagmi';
 
 import { Web3Provider } from '@contexts/Web3Context';
 import { SAFE_ALLOWED_DOMAINS } from '@helpers/safe';
+import { sentryRootOptions } from '@helpers/sentry';
 
 import App from './App';
 import './init';
@@ -25,7 +28,7 @@ const { pathname } = window.location;
 const ipfsMatch = new RegExp('.*/ba[a-zA-Z0-9]{57}/').exec(pathname);
 const queryClient = new QueryClient();
 
-createRoot(document.getElementById('root') as HTMLElement).render(
+createRoot(document.getElementById('root') as HTMLElement, sentryRootOptions()).render(
   <React.StrictMode>
     <Router basename={ipfsMatch ? ipfsMatch[0] : '/'}>
       {/*

@@ -48,6 +48,13 @@ jobs:
           VITE_V3_WALLET_CONNECT_PROJECT_ID: ${{secrets.VITE_V3_WALLET_CONNECT_PROJECT_ID}}
           VITE_SCREENING_ENDPOINT: ${{secrets.VITE_SCREENING_ENDPOINT}}
           VITE_TURNSTILE_SITE_KEY: ${{secrets.VITE_TURNSTILE_SITE_KEY}}
+          # Sentry error reporting. The DSN is public: it is a secret only because the build's other Vite
+          # settings are. Without it the build reports nothing.
+          VITE_SENTRY_DSN: ${{secrets.VITE_SENTRY_DSN}}
+          VITE_SENTRY_ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
+          VITE_SENTRY_RELEASE: ${{ github.sha }}
+          # Uploads source maps to Sentry and deletes them before the IPFS upload. See vite.config.js.
+          SENTRY_AUTH_TOKEN: ${{secrets.SENTRY_AUTH_TOKEN}}
 
       - name: Archive App
         uses: actions/upload-artifact@v4

@@ -15,6 +15,10 @@ import { defineConfig } from '@playwright/test';
 import { estimateWorkers, readSignals, type WorkerSelection } from './harness/concurrency';
 import { RUNS_DIR } from './harness/paths';
 
+// The harness builds the app against a fork. A build with SENTRY_AUTH_TOKEN would upload its source maps and
+// create a Sentry release (vite.config.js), so the runner drops the token before any build or worker starts.
+delete process.env.SENTRY_AUTH_TOKEN;
+
 // The run ID and the worker count are set once, in the runner, and the workers inherit them: each worker loads
 // this file again, and must not sample the machine again or choose another count.
 process.env.BROWSER_HARNESS_RUN_ID ??= `${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}`;

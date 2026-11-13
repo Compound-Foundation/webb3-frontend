@@ -80,6 +80,14 @@ The application requires the following environment variables to be set in order 
 - `VITE_V3_WALLET_CONNECT_PROJECT_ID` - A Wallet Connect project id used if you want the app to support Wallet Connect.
 - `VITE_SCREENING_ENDPOINT` - The wallet address screening endpoint (a Cloudflare Worker that lives in a separate repo). Screening is fail-closed, so in a deployed build an unset or unreachable endpoint blocks every connected wallet.
 
+Three optional variables turn on Sentry error reporting. With `VITE_SENTRY_DSN` unset, the app sends nothing.
+
+- `VITE_SENTRY_DSN` - The DSN of the `webb3-frontend` project in the `compound-foundation` Sentry organization. A DSN is public, so it is safe in the bundle. CI's build reads it from the `VITE_SENTRY_DSN` repository secret, not a repository variable, and reads the source map token from the `SENTRY_AUTH_TOKEN` secret.
+- `VITE_SENTRY_ENVIRONMENT` - The environment to tag events with, such as `production` or `preview`. Defaults to the Vite mode.
+- `VITE_SENTRY_RELEASE` - The release to tag events with, such as the commit SHA.
+
+Sentry receives errors and, from 10% of page loads, a trace of the page load, its navigations, its requests and its web vitals. With an error come breadcrumbs: the clicks, navigations and request URLs that led up to it. Each page load also reports a session, so that Sentry can show the share of loads that hit an error. Sentry records no Session Replay and gets no console output, cookies, headers, request bodies or query strings. Nothing is redacted: an error, a breadcrumb or a trace can carry a wallet address, an ENS name or a transaction hash, and these are kept because they are needed to debug a report. The SDK sends no IP address, and the Sentry project's "Prevent Storing of IP Addresses" setting is on, so Sentry does not store the address its servers see. It does still record the country the report came from.
+
 On the local dev server (`yarn dev`), leaving `VITE_SCREENING_ENDPOINT` unset skips the screening call entirely, so you can connect a wallet locally without an endpoint. Set it (e.g. in `.env.local`) to a worker that allowlists your dev origin if you need to exercise screening locally. This applies to the dev server only — `vite build` always screens.
 
 ## Running the Backend Locally

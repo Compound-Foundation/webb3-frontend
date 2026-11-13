@@ -34,6 +34,7 @@
     "@safe-global/safe-apps-provider": "^0.18.6",
     "@safe-global/safe-apps-react-sdk": "^4.7.2",
     "@safe-global/safe-apps-sdk": "^9.1.0",
+    "@sentry/react": "11.11.0",
     "@tanstack/react-query": "^5.90.2",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
@@ -55,6 +56,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
+    "@sentry/bundler-plugins": "11.11.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.0",
     "@testing-library/react": "^16.3.0",
