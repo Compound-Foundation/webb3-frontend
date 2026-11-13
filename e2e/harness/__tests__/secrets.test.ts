@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { deflateRawSync } from 'node:zlib';
+import { deflateRawSync, gzipSync } from 'node:zlib';
 
 import { createRedactor, secretPatternsOf } from '../fork';
 import { findSecrets, outputsUnder, registerSecret, registerSecretPattern, zipMembers } from '../secrets';
@@ -16,12 +16,12 @@ const KEY = `0x${'d'.repeat(64)}`;
 const SALT = 'e'.repeat(64);
 
 /** A ZIP of `members`, deflated, as Playwright writes a trace. */
-function zip(members: Record<string, string>): Buffer {
+function zip(members: Record<string, string | Buffer>): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
   for (const [name, text] of Object.entries(members)) {
-    const data = deflateRawSync(Buffer.from(text));
+    const data = deflateRawSync(text);
     const nameBytes = Buffer.from(name);
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
@@ -110,4 +110,97 @@ test('finds a key with or without 0x, JSON-escaped or base64, and the private UR
   // The salt has the token's length, and is named by the kind it was registered with.
   expect(findSecrets([{ file: 'e', content: `salt ${SALT}` }])).toEqual([{ file: 'e', secret: 'the account salt' }]);
   expect(createRedactor([], [TOKEN]).redact(TOKEN)).toBe('<redacted>');
+});
+
+/** A secret whose JSON-escaped form differs from the text as written. */
+const ESCAPED = 'quote"back\\slash';
+
+test('finds each form, in either letter case, and reports leaks in text order, then registration order', () => {
+  registerSecret(ESCAPED, 'a secret with escapes');
+  const json = JSON.stringify(ESCAPED).slice(1, -1);
+  const texts = [
+    { file: 'with 0x, upper case', content: `key ${KEY.toUpperCase()}` },
+    { file: 'without 0x', content: Buffer.from(`key ${KEY.slice(2)}`) },
+    { file: 'JSON-escaped only', content: `{"value":"${json}"}` },
+    { file: 'base64', content: `data:text/plain;base64,${Buffer.from(KEY).toString('base64')}` },
+    { file: 'URL, upper case', content: 'HTTPS://RPC.EXAMPLE.COM/V2/PRIVATEKEY0123456789ABCDEF' },
+    { file: 'clean', content: 'nothing here' },
+    {
+      file: 'every kind',
+      content: `${SALT} ${ESCAPED} ${KEY} ${TOKEN} https://rpc.example.com/v2/PrivateKey0123456789abcdef`,
+    },
+  ];
+  // The JSON-escaped text holds no other form of the secret.
+  expect(texts[2].content).not.toContain(ESCAPED);
+  const leaks = findSecrets(texts);
+  expect(leaks).toEqual([
+    { file: 'with 0x, upper case', secret: 'a key the wallet made' },
+    { file: 'without 0x', secret: 'a key the wallet made' },
+    { file: 'JSON-escaped only', secret: 'a secret with escapes' },
+    { file: 'base64', secret: 'a key the wallet made' },
+    { file: 'URL, upper case', secret: 'the private upstream URL' },
+    { file: 'every kind', secret: 'the control token' },
+    { file: 'every kind', secret: 'a key the wallet made' },
+    { file: 'every kind', secret: 'the account salt' },
+    { file: 'every kind', secret: 'a secret with escapes' },
+    { file: 'every kind', secret: 'the private upstream URL' },
+  ]);
+  for (const secret of [TOKEN, KEY.slice(2), SALT, ESCAPED, json]) expect(JSON.stringify(leaks)).not.toContain(secret);
+});
+
+test('attributes each leak to the raw file, trace member or embedded report member that holds it', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-harness-containers-'));
+  try {
+    fs.writeFileSync(path.join(root, 'a-raw.log'), `Bearer ${TOKEN}`);
+    fs.writeFileSync(
+      path.join(root, 'b-trace.zip'),
+      zip({ 'clean.trace': 'nothing here', 'trace.network': `{"key":"${KEY}"}`, 'trace.stacks': `salt ${SALT}` })
+    );
+    const embedded = zip({ 'report.json': `{"stdout":["${Buffer.from(TOKEN).toString('base64')}"]}` });
+    fs.writeFileSync(
+      path.join(root, 'c-index.html'),
+      `<template>data:application/zip;base64,${embedded.toString('base64')}</template>`
+    );
+    const outputs = outputsUnder([root]);
+    expect(outputs.map((output) => path.relative(root, output.file))).toEqual([
+      'a-raw.log',
+      'b-trace.zip',
+      'b-trace.zip#clean.trace',
+      'b-trace.zip#trace.network',
+      'b-trace.zip#trace.stacks',
+      'c-index.html',
+      'c-index.html#embedded/report.json',
+    ]);
+    expect(findSecrets(outputs).map((leak) => [path.relative(root, leak.file), leak.secret])).toEqual([
+      ['a-raw.log', 'the control token'],
+      ['b-trace.zip#trace.network', 'a key the wallet made'],
+      ['b-trace.zip#trace.stacks', 'the account salt'],
+      ['c-index.html#embedded/report.json', 'the control token'],
+    ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A gzip attachment has a hashed name inside traces and HTML reports. Detect its bytes, not its suffix.
+test('scans original source maps inside gzip files and ZIP or HTML attachments', () => {
+  registerSecret(TOKEN, 'the control token');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-gzip-scan-'));
+  try {
+    const compressed = gzipSync(JSON.stringify({ sourcesContent: [TOKEN] }));
+    fs.writeFileSync(path.join(directory, 'source-maps.json.gz'), compressed);
+    const attached = zip({ 'resources/hashed-attachment': compressed });
+    fs.writeFileSync(path.join(directory, 'trace.zip'), attached);
+    fs.writeFileSync(
+      path.join(directory, 'index.html'),
+      `<template>data:application/zip;base64,${attached.toString('base64')}</template>`
+    );
+    expect(findSecrets(outputsUnder([directory])).map(({ file }) => path.relative(directory, file))).toEqual([
+      'index.html#embedded/resources/hashed-attachment#gunzip',
+      'source-maps.json.gz#gunzip',
+      'trace.zip#resources/hashed-attachment#gunzip',
+    ]);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
