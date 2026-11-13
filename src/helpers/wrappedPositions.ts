@@ -9,7 +9,7 @@ import ERC20Abi from '@helpers/abis/ERC20';
 import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
 import { lendsBaseDirectly } from '@helpers/actions';
 import { LendingRoute } from '@helpers/lendingRoute';
-import { MULTICALL3_ADDRESS, readClient } from '@helpers/multicall';
+import { readClient } from '@helpers/multicall';
 import { getTokenValue } from '@helpers/numbers';
 import type { WithdrawalLimits } from '@helpers/wrappedWithdrawals';
 import { Action, BaseAssetWithAccountState, CometState, Currency, ProtocolAndAccountState, StateType } from '@types';
@@ -21,10 +21,9 @@ const COMET_TRANSFER_LOSS = 2n;
 
 /** A read that produced no trustworthy position. The UI shows the error, and never shows zero for it. */
 export class WrappedPositionReadError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
+  constructor(message: string) {
     super(message);
     this.name = 'WrappedPositionReadError';
-    if (options?.cause !== undefined) this.cause = options.cause;
   }
 }
 
@@ -151,32 +150,18 @@ function toBigInt(value: unknown, name: string): bigint {
 }
 
 /**
- * Reads `account`'s position in `market`'s wrapper. Every figure comes from one multicall, so
- * one block. The read fails, rather than returning zero, when the batch or any of its calls fails
- * or the wrapper does not hold the configured Comet.
+ * Reads `account`'s position in `market`'s wrapper. Every figure is read in one multicall batch,
+ * so from one block. The read fails, rather than returning zero, when any read fails or the
+ * wrapper does not hold the configured Comet.
  */
 export async function readWrappedPosition(
-  client: Pick<ReturnType<typeof readClient>, 'multicall'>,
+  client: Pick<ReturnType<typeof readClient>, 'readContract'>,
   market: WrappedMarket,
   account: string
 ): Promise<WrappedPosition> {
   const wrapper = { address: market.wrapperAddress as Address, abi: WrappedCometAbi } as const;
   const comet = { address: market.cometAddress as Address, abi: CometAbi } as const;
   const baseToken = { address: market.baseTokenAddress as Address, abi: ERC20Abi } as const;
-  const reading = client.multicall({
-    multicallAddress: MULTICALL3_ADDRESS,
-    allowFailure: false,
-    contracts: [
-      { ...wrapper, functionName: 'balanceOf', args: [account as Address] },
-      { ...wrapper, functionName: 'totalSupply' },
-      { ...wrapper, functionName: 'asset' },
-      { ...comet, functionName: 'balanceOf', args: [market.wrapperAddress as Address] },
-      { ...comet, functionName: 'totalsBasic' },
-      { ...comet, functionName: 'isWithdrawPaused' },
-      { ...baseToken, functionName: 'balanceOf', args: [account as Address] },
-      { ...baseToken, functionName: 'allowance', args: [account as Address, market.wrapperAddress as Address] },
-    ],
-  });
   const [
     shares,
     totalSupply,
@@ -186,9 +171,20 @@ export async function readWrappedPosition(
     isWithdrawPaused,
     baseWalletBalance,
     wrapperAllowance,
-  ] = await reading.catch((error) => {
-    throw new WrappedPositionReadError('The wrapper position could not be read.', { cause: error });
-  });
+  ] = await Promise.all([
+    client.readContract({ ...wrapper, functionName: 'balanceOf', args: [account as Address] }),
+    client.readContract({ ...wrapper, functionName: 'totalSupply' }),
+    client.readContract({ ...wrapper, functionName: 'asset' }),
+    client.readContract({ ...comet, functionName: 'balanceOf', args: [market.wrapperAddress as Address] }),
+    client.readContract({ ...comet, functionName: 'totalsBasic' }),
+    client.readContract({ ...comet, functionName: 'isWithdrawPaused' }),
+    client.readContract({ ...baseToken, functionName: 'balanceOf', args: [account as Address] }),
+    client.readContract({
+      ...baseToken,
+      functionName: 'allowance',
+      args: [account as Address, market.wrapperAddress as Address],
+    }),
+  ]);
 
   if (asset.toLowerCase() !== market.cometAddress.toLowerCase()) {
     throw new WrappedPositionReadError('The wrapper does not hold the configured market.');

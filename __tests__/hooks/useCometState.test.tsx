@@ -38,10 +38,10 @@ jest.mock('@helpers/sleuth/sleuth', () => {
   return { Sleuth: Object.assign(Sleuth, { querySol: jest.fn(() => 'query') }) };
 });
 
-const mockMulticall = jest.fn();
+const mockReadContract = jest.fn();
 jest.mock('@helpers/multicall', () => ({
   ...jest.requireActual('@helpers/multicall'),
-  readClient: () => ({ multicall: (...args: unknown[]) => mockMulticall(...args) }),
+  readClient: () => ({ readContract: (...args: unknown[]) => mockReadContract(...args) }),
 }));
 
 const mockQueryCometData = queryCometData as jest.Mock;
@@ -249,14 +249,14 @@ describe('queryCometDataWithAccount when the Sleuth query fails', () => {
 
   beforeEach(() => {
     mockSleuthFetch.mockReset();
-    mockMulticall.mockReset();
+    mockReadContract.mockReset();
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
 
-  test('reads the account state with queryWithAccount and the stETH state through a multicall', async () => {
+  test('reads the account state with queryWithAccount and the stETH state through readContract', async () => {
     const state = stateWithWstETH();
     mockSleuthFetch.mockRejectedValueOnce(new Error('stETH read reverted')).mockResolvedValueOnce(state);
-    mockMulticall.mockResolvedValue([1n, 2n, 3n]);
+    mockReadContract.mockResolvedValueOnce(1n).mockResolvedValueOnce(2n).mockResolvedValueOnce(3n);
 
     const response = await queryCometDataWithAccount('http://localhost', market, ACCOUNT);
 
@@ -268,9 +268,11 @@ describe('queryCometDataWithAccount when the Sleuth query fails', () => {
         wstETHPerStETH: BigNumber.from(3),
       },
     });
-    expect(
-      mockMulticall.mock.calls[0][0].contracts.map(({ functionName }: { functionName: string }) => functionName)
-    ).toEqual(['allowance', 'balanceOf', 'tokensPerStEth']);
+    expect(mockReadContract.mock.calls.map(([{ functionName }]) => functionName)).toEqual([
+      'allowance',
+      'balanceOf',
+      'tokensPerStEth',
+    ]);
   });
 
   test('skips the stETH reads for a market without wstETH collateral, as the Sleuth query does', async () => {
@@ -282,6 +284,6 @@ describe('queryCometDataWithAccount when the Sleuth query fails', () => {
       state,
       stETHState: { bulkerAllowance: zero, walletBalance: zero, wstETHPerStETH: zero },
     });
-    expect(mockMulticall).not.toHaveBeenCalled();
+    expect(mockReadContract).not.toHaveBeenCalled();
   });
 });

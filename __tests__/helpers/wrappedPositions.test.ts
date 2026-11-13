@@ -46,7 +46,7 @@ type ChainValues = {
   isWithdrawPaused: boolean;
 };
 
-/** A viem client stand-in whose multicall answers each call by contract address and function name. */
+/** A viem client stand-in that answers each read by contract address and function name. */
 function fakeClient(market: WrappedMarket, values: ChainValues) {
   const answer = (target: string, name: string): unknown => {
     const address = target.toLowerCase();
@@ -66,10 +66,12 @@ function fakeClient(market: WrappedMarket, values: ChainValues) {
     }
     throw new Error(`unexpected call ${name} on ${target}`);
   };
-  const multicall = jest.fn(async ({ contracts }: { contracts: { address: string; functionName: string }[] }) =>
-    contracts.map(({ address, functionName }) => answer(address, functionName))
+  const readContract = jest.fn(async ({ address, functionName }: { address: string; functionName: string }) =>
+    answer(address, functionName)
   );
-  return { multicall } as unknown as Parameters<typeof readWrappedPosition>[0] & { multicall: typeof multicall };
+  return { readContract } as unknown as Parameters<typeof readWrappedPosition>[0] & {
+    readContract: typeof readContract;
+  };
 }
 
 // 1,000.5 USDC of wrapper assets. With the 10 ** 12 virtual shares, the supply divides into
@@ -131,13 +133,12 @@ describe('getWrappedPositionValueInDollars', () => {
 });
 
 describe('readWrappedPosition', () => {
-  it('reads every figure in one batch and keeps each in its own units', async () => {
+  it('reads every figure and keeps each in its own units', async () => {
     const market = usdcMarket();
     const client = fakeClient(market, BASE_VALUES);
 
     const position = await readWrappedPosition(client, market, ACCOUNT);
 
-    expect(client.multicall).toHaveBeenCalledTimes(1);
     expect(position).toEqual({
       shares: 250n * 10n ** 18n,
       shareDecimals: 18,
@@ -154,7 +155,7 @@ describe('readWrappedPosition', () => {
         baseSupplyIndex: 1_050_000_000_000_000n,
       },
     });
-    const { contracts } = client.multicall.mock.calls[0][0];
+    const contracts = client.readContract.mock.calls.map(([contract]) => contract);
     // The allowance is the base token's, with the wrapper as spender.
     expect(contracts).toContainEqual(
       expect.objectContaining({
@@ -179,13 +180,6 @@ describe('readWrappedPosition', () => {
       ...BASE_VALUES,
       asset: '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840',
     });
-    await expect(readWrappedPosition(client, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
-  });
-
-  it('fails when the batch fails, instead of reading zero', async () => {
-    const market = usdcMarket();
-    const client = fakeClient(market, BASE_VALUES);
-    client.multicall.mockRejectedValue(new Error('rpc down'));
     await expect(readWrappedPosition(client, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
   });
 });

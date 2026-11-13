@@ -1,6 +1,7 @@
 import { JsonRpcProvider } from '@ethersproject/providers';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { CHAINS } from '@constants/chains';
 import { WrappedMarket } from '@constants/wrappedMarkets';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
 import { readClient } from '@helpers/multicall';
@@ -31,7 +32,7 @@ export const WRAPPED_POSITION_READ_FAILED =
   'Your wrapped position could not be loaded. Check your connection and try again.';
 
 const readWithMulticall: WrappedPositionReader = (provider, market, account) =>
-  readWrappedPosition(readClient(provider), market, account);
+  readWrappedPosition(readClient(provider, CHAINS[market.chainId]), market, account);
 
 /**
  * A `refreshToken` that changes whenever a transaction is added or settles. A settled transaction,

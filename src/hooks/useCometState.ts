@@ -12,7 +12,7 @@ import { recordCometStateSource } from '@helpers/cometStateSource';
 import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import { aprAt, toRateModel } from '@helpers/interestRates';
 import { shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
-import { MULTICALL3_ADDRESS, readClient, sleuthWithFallback } from '@helpers/multicall';
+import { readClient, sleuthWithFallback } from '@helpers/multicall';
 import { getCapacity, getCollateralValue, MAX_UINT256, REFRESH_INTERVAL } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
@@ -222,15 +222,16 @@ export const queryCometDataWithAccount = (
         return { state, stETHState: { bulkerAllowance: zero, walletBalance: zero, wstETHPerStETH: zero } };
       }
       const stETHToken = { address: stETH.address as Address, abi: ERC20 } as const;
-      const [bulkerAllowance, walletBalance, wstETHPerStETH] = await readClient(provider).multicall({
-        multicallAddress: MULTICALL3_ADDRESS,
-        allowFailure: false,
-        contracts: [
-          { ...stETHToken, functionName: 'allowance', args: [account as Address, market.bulkerAddress as Address] },
-          { ...stETHToken, functionName: 'balanceOf', args: [account as Address] },
-          { address: wstETHAddress as Address, abi: WSTETH_ABI, functionName: 'tokensPerStEth' },
-        ],
-      });
+      const client = readClient(provider, market.chainInformation);
+      const [bulkerAllowance, walletBalance, wstETHPerStETH] = await Promise.all([
+        client.readContract({
+          ...stETHToken,
+          functionName: 'allowance',
+          args: [account as Address, market.bulkerAddress as Address],
+        }),
+        client.readContract({ ...stETHToken, functionName: 'balanceOf', args: [account as Address] }),
+        client.readContract({ address: wstETHAddress as Address, abi: WSTETH_ABI, functionName: 'tokensPerStEth' }),
+      ]);
       return {
         state,
         stETHState: {
@@ -387,10 +388,8 @@ const maybeHydrateStEthCollateral = (
                 symbol: unwrappedAsset.symbol,
                 name: unwrappedAsset.name,
               };
-            } else {
-              console.error('Unknown handling for extra collateral asset: ', unwrappedAsset);
-              throw new Error(`Unknown handling for extra collateral asset ${unwrappedAsset.symbol}`);
             }
+            throw new Error(`Unknown handling for extra collateral asset ${unwrappedAsset.symbol}`);
           })
       : ([] as TokenWithAccountState[]);
   cometStateFormatted[1].collateralAssets = cometStateFormatted[1].collateralAssets.concat(

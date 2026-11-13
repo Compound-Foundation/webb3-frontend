@@ -19,10 +19,10 @@ jest.mock('@helpers/sleuth/sleuth', () => {
   return { Sleuth: Object.assign(Sleuth, { querySol: jest.fn(() => 'query') }) };
 });
 
-const mockMulticall = jest.fn();
+const mockReadContract = jest.fn();
 jest.mock('@helpers/multicall', () => ({
   ...jest.requireActual('@helpers/multicall'),
-  readClient: () => ({ multicall: (...args: unknown[]) => mockMulticall(...args) }),
+  readClient: () => ({ readContract: (...args: unknown[]) => mockReadContract(...args) }),
 }));
 
 jest.mock('@ethersproject/providers', () => ({
@@ -193,7 +193,7 @@ describe('useMarketsState when the Sleuth query fails', () => {
     ({ address, liquidationFactor: 9n * 10n ** 17n } as unknown as MarketDataLoaded['collateralAssets'][number]);
   const collateralInfo = (collateralAsset: string) => ({ collateralAsset, price: ONE, totalSupply: ONE });
 
-  test('reads the state with query() and the reserves through a multicall, skipping a collateral whose reserves revert', async () => {
+  test('reads the state with query() and the reserves through readContract, skipping a collateral whose reserves revert', async () => {
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const withCollaterals: MarketDataLoaded = {
       ...market,
@@ -204,20 +204,22 @@ describe('useMarketsState when the Sleuth query fails', () => {
         collateralAssets: [collateralInfo(COLLATERAL_A), collateralInfo(COLLATERAL_B)],
       } as unknown as Partial<CometStateResponse>).state
     );
-    mockMulticall.mockResolvedValueOnce([7n, 8n]).mockResolvedValueOnce([
-      { status: 'success', result: 9n },
-      { status: 'failure', error: new Error('getCollateralReserves reverted') },
-    ]);
+    mockReadContract
+      .mockResolvedValueOnce(7n)
+      .mockResolvedValueOnce(8n)
+      .mockResolvedValueOnce(9n)
+      .mockRejectedValueOnce(new Error('getCollateralReserves reverted'));
 
     const state = await renderMarketState([StateType.Hydrated, withCollaterals]);
 
     expect(state.reserves).toEqual(7n);
     expect(state.targetReserves).toEqual(8n);
     expect(state.collateralAssets.map(({ address, reserves }) => [address, reserves])).toEqual([[COLLATERAL_A, 9n]]);
-    expect(
-      mockMulticall.mock.calls.flatMap(([{ contracts }]) =>
-        contracts.map(({ functionName }: { functionName: string }) => functionName)
-      )
-    ).toEqual(['getReserves', 'targetReserves', 'getCollateralReserves', 'getCollateralReserves']);
+    expect(mockReadContract.mock.calls.map(([{ functionName }]) => functionName)).toEqual([
+      'getReserves',
+      'targetReserves',
+      'getCollateralReserves',
+      'getCollateralReserves',
+    ]);
   });
 });

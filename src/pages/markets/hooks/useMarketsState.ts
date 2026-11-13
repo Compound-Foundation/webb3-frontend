@@ -13,7 +13,7 @@ import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import { aprAt, toRateModel } from '@helpers/interestRates';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
-import { MULTICALL3_ADDRESS, readClient, sleuthWithFallback } from '@helpers/multicall';
+import { readClient, sleuthWithFallback } from '@helpers/multicall';
 import { FACTOR_PRECISION } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
@@ -67,32 +67,26 @@ const readMarket = (provider: JsonRpcProvider, market: MarketDataLoaded): Promis
         collaterals,
       ]),
     async () => {
-      const client = readClient(provider);
+      const client = readClient(provider, market.chainInformation);
       const comet = { address: market.marketAddress as Address, abi: Comet } as const;
-      const [state, [reserves, targetReserves], collateralReserves] = await Promise.all([
+      const [state, reserves, targetReserves, collateralReserves] = await Promise.all([
         sleuth.fetch<CometStateResponse, CometStateQuery>(QUERY, stateQuery),
-        client.multicall({
-          multicallAddress: MULTICALL3_ADDRESS,
-          allowFailure: false,
-          contracts: [
-            { ...comet, functionName: 'getReserves' },
-            { ...comet, functionName: 'targetReserves' },
-          ],
-        }),
-        client.multicall({
-          multicallAddress: MULTICALL3_ADDRESS,
-          contracts: collaterals.map(
-            (asset) => ({ ...comet, functionName: 'getCollateralReserves', args: [asset as Address] } as const)
-          ),
-        }),
+        client.readContract({ ...comet, functionName: 'getReserves' }),
+        client.readContract({ ...comet, functionName: 'targetReserves' }),
+        Promise.all(
+          collaterals.map((asset) =>
+            client
+              .readContract({ ...comet, functionName: 'getCollateralReserves', args: [asset as Address] })
+              .then((collateralReserve) => BigNumber.from(collateralReserve))
+              .catch(() => undefined)
+          )
+        ),
       ]);
       return {
         state,
         reserves: BigNumber.from(reserves),
         targetReserves: BigNumber.from(targetReserves),
-        collateralReserves: collateralReserves.map((result) =>
-          result.status === 'success' ? BigNumber.from(result.result) : undefined
-        ),
+        collateralReserves,
       };
     }
   );

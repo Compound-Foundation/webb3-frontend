@@ -6,7 +6,7 @@ import type { Address } from 'viem';
 import type { Web3 } from '@contexts/Web3Context';
 import Comet from '@helpers/abis/Comet';
 import { isV2Market } from '@helpers/markets';
-import { MULTICALL3_ADDRESS, readClient, sleuthWithFallback } from '@helpers/multicall';
+import { readClient, sleuthWithFallback } from '@helpers/multicall';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
 import { OperatorAllowancesQuery, OperatorAllowancesResponse } from '@helpers/sleuth/types';
@@ -35,22 +35,21 @@ export function queryOperatorAllowances(
         accountAddress,
         operators,
       ]),
-    () =>
-      readClient(provider)
-        .multicall({
-          multicallAddress: MULTICALL3_ADDRESS,
-          allowFailure: false,
-          contracts: operators.map(
-            (operator) =>
-              ({
-                address: marketData.marketAddress as Address,
-                abi: Comet,
-                functionName: 'allowance',
-                args: [accountAddress as Address, operator as Address],
-              } as const)
-          ),
-        })
-        .then((allowances) => allowances.map((allowance) => BigNumber.from(allowance)))
+    () => {
+      const client = readClient(provider, marketData.chainInformation);
+      return Promise.all(
+        operators.map((operator) =>
+          client
+            .readContract({
+              address: marketData.marketAddress as Address,
+              abi: Comet,
+              functionName: 'allowance',
+              args: [accountAddress as Address, operator as Address],
+            })
+            .then((allowance) => BigNumber.from(allowance))
+        )
+      );
+    }
   );
 }
 
