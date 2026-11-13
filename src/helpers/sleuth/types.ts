@@ -11,6 +11,15 @@ export type RateModelResponse = {
   perSecondInterestRateSlopeHigh: BigNumber;
 };
 
+export type OperatorAllowancesQuery = [
+  string, // comet address
+  string, // account address
+  string[] // operator addresses
+];
+
+// One allowance per operator, in the order of the query
+export type OperatorAllowancesResponse = BigNumber[];
+
 export type CometWithAccountStateQuery = [
   string, // comet address
   string, // nativeTokenToUsd (extra price feed)
@@ -19,6 +28,23 @@ export type CometWithAccountStateQuery = [
   string, // wrapped native token symbol
   boolean // checkDeprecatedwUSDM
 ];
+
+export type CometWithAccountAndStEthQuery = [
+  ...CometWithAccountStateQuery,
+  string, // stETH address, or the zero address
+  string // wstETH address, or the zero address
+];
+
+export type StEthStateResponse = {
+  bulkerAllowance: BigNumber;
+  walletBalance: BigNumber;
+  wstETHPerStETH: BigNumber;
+};
+
+export type CometWithAccountAndStEthResponse = {
+  state: CometWithAccountStateResponse;
+  stETHState: StEthStateResponse;
+};
 
 export type CometWithAccountStateResponse = {
   baseAsset: {
@@ -74,6 +100,21 @@ export type CometStateQuery = [
   string, // nativeTokenToUsd (extra price feed)
   boolean // checkDeprecatedwUSDM
 ];
+
+export type CometWithReservesQuery = [
+  string, // comet address
+  string, // nativeTokenToUsd (extra price feed)
+  boolean, // checkDeprecatedwUSDM
+  string[] // collateral assets to read reserves for
+];
+
+export type CometWithReservesResponse = {
+  state: CometStateResponse;
+  reserves: BigNumber;
+  targetReserves: BigNumber;
+  // Same order as the query's collateral assets
+  collateralReserves: BigNumber[];
+};
 
 export type CometStateResponse = {
   baseAsset: {

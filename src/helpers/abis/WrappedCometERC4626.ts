@@ -76,4 +76,4 @@ export default [
     name: 'ERC20InsufficientBalance',
     type: 'error',
   },
-];
+] as const;

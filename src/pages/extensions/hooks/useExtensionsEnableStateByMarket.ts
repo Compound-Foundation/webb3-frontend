@@ -1,15 +1,57 @@
 import { JsonRpcProvider, StaticJsonRpcProvider } from '@ethersproject/providers';
 import { BigNumber } from 'ethers';
-import { Contract, Provider } from 'ethers-multicall';
 import { useEffect, useState } from 'react';
+import type { Address } from 'viem';
 
 import type { Web3 } from '@contexts/Web3Context';
 import Comet from '@helpers/abis/Comet';
 import { isV2Market } from '@helpers/markets';
+import { readClient, sleuthWithFallback } from '@helpers/multicall';
+import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
+import { Sleuth } from '@helpers/sleuth/sleuth';
+import { OperatorAllowancesQuery, OperatorAllowancesResponse } from '@helpers/sleuth/types';
+import { getSleuthOptions } from '@hooks/useSelectedMarket';
 import { MarketData, MarketDataLoaded, MarketDataState, StateType, ExtensionsEnableState } from '@types';
 
 import { Extension } from '../helpers/core';
 import { allExtensions, getOperator } from '../helpers/list';
+
+const QUERY_OPERATOR_ALLOWANCES = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryOperatorAllowances' });
+
+// Comet allowance of each operator for the account: an extension is enabled when its operator's is above zero.
+export function queryOperatorAllowances(
+  rawProvider: JsonRpcProvider,
+  marketData: MarketData | MarketDataLoaded,
+  accountAddress: string,
+  operators: string[]
+): Promise<BigNumber[]> {
+  const provider = new StaticJsonRpcProvider(rawProvider.connection);
+  const sleuth = new Sleuth(provider, getSleuthOptions(marketData.chainInformation.chainId));
+  return sleuthWithFallback<BigNumber[]>(
+    'Extension operator allowances',
+    () =>
+      sleuth.fetch<OperatorAllowancesResponse, OperatorAllowancesQuery>(QUERY_OPERATOR_ALLOWANCES, [
+        marketData.marketAddress,
+        accountAddress,
+        operators,
+      ]),
+    () => {
+      const client = readClient(provider, marketData.chainInformation);
+      return Promise.all(
+        operators.map((operator) =>
+          client
+            .readContract({
+              address: marketData.marketAddress as Address,
+              abi: Comet,
+              functionName: 'allowance',
+              args: [accountAddress as Address, operator as Address],
+            })
+            .then((allowance) => BigNumber.from(allowance))
+        )
+      );
+    }
+  );
+}
 
 // Get the extensions supported for this particular market, which can be either be
 // explicitly enabled (if there's an operator contract), or not enabled, for
@@ -54,14 +96,6 @@ async function getState(
   extensions: Extension[],
   accountAddress: string
 ): Promise<ExtensionsEnableState> {
-  const provider = new StaticJsonRpcProvider(rawProvider.connection);
-  const chainId = marketData?.chainInformation.chainId;
-  const ethcallProvider = new Provider(provider, chainId);
-
-  // Contract address for the V3 market.
-  const cometAddress = marketData?.marketAddress;
-  const cometContract = new Contract(cometAddress, Comet);
-
   // For each extension, hydrate their operator (contract) addresses.
   const extensionswithMaybeOperator = extensions.map((ext) => ({
     ...ext,
@@ -72,10 +106,12 @@ async function getState(
   const extensionsWithOperators = extensionswithMaybeOperator.filter((ext) => !!ext.operatorAddress);
   // Look up on comet market contract, whether the operator is allowed to perform extension
   // actions on behalf of the account.
-  const extensionsEnableStatusCall = extensionsWithOperators.map((ext) =>
-    cometContract.allowance(accountAddress, ext.operatorAddress)
+  const extensionsEnableStatus = await queryOperatorAllowances(
+    rawProvider,
+    marketData,
+    accountAddress,
+    extensionsWithOperators.map((ext) => ext.operatorAddress as string)
   );
-  const extensionsEnableStatus = await ethcallProvider.all<BigNumber[]>(extensionsEnableStatusCall);
 
   const enabledExtensionsIds = extensionsWithOperators
     .filter((_, idx) => extensionsEnableStatus[idx].gt(0))

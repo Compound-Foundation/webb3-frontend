@@ -1,3 +1,4 @@
+import { BigNumber } from '@ethersproject/bignumber';
 import { renderHook, waitFor } from '@testing-library/react';
 import { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
@@ -5,33 +6,62 @@ import { MemoryRouter } from 'react-router';
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { Web3 } from '@contexts/Web3Context';
 import { getMarkets } from '@helpers/markets';
+import { CometStateResponse, CometWithReservesResponse, RateModelResponse } from '@helpers/sleuth/types';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
 import { useMarketsState } from '@pages/markets/hooks/useMarketsState';
 import { MarketDataLoaded, MarketDataState, StateType, V3MarketApiBucket } from '@types';
 
 import { rest, server } from '../../../../handlers/server';
 
-// On-chain reads return the value set in mockReads for that contract function, or 1e18,
-// which is enough for the hook to build its state without a node
-let mockReads: Record<string, bigint> = {};
-
-jest.mock('ethers-multicall', () => {
-  const { BigNumber } = jest.requireActual('@ethersproject/bignumber');
-  return {
-    Contract: jest.fn(() => new Proxy({}, { get: (_target, name) => () => name })),
-    Provider: jest.fn(() => ({
-      all: (calls: string[]) =>
-        Promise.resolve(calls.map((name) => BigNumber.from((mockReads[name] ?? 10n ** 18n).toString()))),
-    })),
-  };
+const mockSleuthFetch = jest.fn();
+jest.mock('@helpers/sleuth/sleuth', () => {
+  const Sleuth = jest.fn().mockImplementation(() => ({ fetch: (...args: unknown[]) => mockSleuthFetch(...args) }));
+  return { Sleuth: Object.assign(Sleuth, { querySol: jest.fn(() => 'query') }) };
 });
+
+const mockReadContract = jest.fn();
+jest.mock('@helpers/multicall', () => ({
+  ...jest.requireActual('@helpers/multicall'),
+  readClient: () => ({ readContract: (...args: unknown[]) => mockReadContract(...args) }),
+}));
 
 jest.mock('@ethersproject/providers', () => ({
   ...jest.requireActual('@ethersproject/providers'),
   StaticJsonRpcProvider: jest.fn(),
 }));
 
-const marketData = getMarkets(false).find((market) => market.chainInformation.chainId === 1 && !market.rewardsOverwrite);
+const ONE = BigNumber.from((10n ** 18n).toString());
+
+const rateModel = (base: bigint): RateModelResponse => ({
+  kink: ONE,
+  perSecondInterestRateBase: BigNumber.from(base.toString()),
+  perSecondInterestRateSlopeLow: ONE,
+  perSecondInterestRateSlopeHigh: ONE,
+});
+
+// Every number is 1e18 unless a test overrides it, which is enough for the hook to build its state
+const cometResponse = (overrides: Partial<CometStateResponse> = {}) =>
+  ({
+    state: {
+      baseAsset: { price: ONE, balanceOfComet: ONE },
+      borrowRateModel: rateModel(10n ** 18n),
+      collateralAssets: [],
+      factorScale: ONE,
+      nativeAssetInDollars: ONE,
+      supplyRateModel: rateModel(10n ** 18n),
+      totalBorrow: ONE,
+      totalSupply: ONE,
+      utilization: ONE,
+      ...overrides,
+    },
+    reserves: ONE,
+    targetReserves: ONE,
+    collateralReserves: [],
+  } as unknown as CometWithReservesResponse);
+
+const marketData = getMarkets(false).find(
+  (market) => market.chainInformation.chainId === 1 && !market.rewardsOverwrite
+);
 
 if (marketData === undefined) {
   throw new Error('Expected a mainnet market without a rewards overwrite');
@@ -68,8 +98,8 @@ const serveHistory = (buckets: V3MarketApiBucket[]) =>
     rest.get(`${getMarketDataUrlForMarket(market)}/historical/summary`, (_req, res, ctx) => res(ctx.json(buckets)))
   );
 
-const renderMarketState = async () => {
-  const { result } = renderHook(() => useMarketsState(web3, marketState), { wrapper: Wrapper });
+const renderMarketState = async (state: MarketDataState = marketState) => {
+  const { result } = renderHook(() => useMarketsState(web3, state), { wrapper: Wrapper });
   await waitFor(() => expect(result.current[0]).toEqual(StateType.Hydrated));
 
   if (result.current[0] !== StateType.Hydrated || result.current[1].type !== 'ProtocolAndMarketState') {
@@ -80,18 +110,20 @@ const renderMarketState = async () => {
 
 const renderMarketHistory = async () => (await renderMarketState()).marketHistory;
 
-afterEach(() => {
-  mockReads = {};
+beforeEach(() => {
+  mockSleuthFetch.mockResolvedValue(cometResponse());
 });
 
 describe('useMarketsState current APRs', () => {
   test('are the base rates when nothing is borrowed', async () => {
     const secondsPerYear = 31_536_000n;
-    mockReads = {
-      getUtilization: 0n,
-      borrowPerSecondInterestRateBase: 475_646_879n,
-      supplyPerSecondInterestRateBase: 317_097_919n,
-    };
+    mockSleuthFetch.mockResolvedValue(
+      cometResponse({
+        utilization: BigNumber.from(0),
+        borrowRateModel: rateModel(475_646_879n),
+        supplyRateModel: rateModel(317_097_919n),
+      })
+    );
 
     const { borrowAPR, earnAPR } = await renderMarketState();
 
@@ -151,5 +183,43 @@ describe('useMarketsState history APRs', () => {
 
     expect(await renderMarketHistory()).toEqual([]);
     expect(console.error).toHaveBeenCalledWith('Error fetching historical market data: ', expect.any(Error));
+  });
+});
+
+describe('useMarketsState when the Sleuth query fails', () => {
+  const COLLATERAL_A = '0x00000000000000000000000000000000000000a1';
+  const COLLATERAL_B = '0x00000000000000000000000000000000000000b1';
+  const collateral = (address: string) =>
+    ({ address, liquidationFactor: 9n * 10n ** 17n } as unknown as MarketDataLoaded['collateralAssets'][number]);
+  const collateralInfo = (collateralAsset: string) => ({ collateralAsset, price: ONE, totalSupply: ONE });
+
+  test('reads the state with query() and the reserves through readContract, skipping a collateral whose reserves revert', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const withCollaterals: MarketDataLoaded = {
+      ...market,
+      collateralAssets: [collateral(COLLATERAL_A), collateral(COLLATERAL_B)],
+    };
+    mockSleuthFetch.mockRejectedValueOnce(new Error('queryWithReserves reverted')).mockResolvedValueOnce(
+      cometResponse({
+        collateralAssets: [collateralInfo(COLLATERAL_A), collateralInfo(COLLATERAL_B)],
+      } as unknown as Partial<CometStateResponse>).state
+    );
+    mockReadContract
+      .mockResolvedValueOnce(7n)
+      .mockResolvedValueOnce(8n)
+      .mockResolvedValueOnce(9n)
+      .mockRejectedValueOnce(new Error('getCollateralReserves reverted'));
+
+    const state = await renderMarketState([StateType.Hydrated, withCollaterals]);
+
+    expect(state.reserves).toEqual(7n);
+    expect(state.targetReserves).toEqual(8n);
+    expect(state.collateralAssets.map(({ address, reserves }) => [address, reserves])).toEqual([[COLLATERAL_A, 9n]]);
+    expect(mockReadContract.mock.calls.map(([{ functionName }]) => functionName)).toEqual([
+      'getReserves',
+      'targetReserves',
+      'getCollateralReserves',
+      'getCollateralReserves',
+    ]);
   });
 });

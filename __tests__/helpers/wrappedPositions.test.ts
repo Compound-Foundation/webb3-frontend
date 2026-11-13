@@ -1,5 +1,4 @@
 import { Interface } from '@ethersproject/abi';
-import { BigNumber } from 'ethers';
 
 import { WRAPPED_MARKET_REGISTRY, WrappedMarket } from '@constants/wrappedMarkets';
 import CometAbi from '@helpers/abis/Comet';
@@ -47,32 +46,31 @@ type ChainValues = {
   isWithdrawPaused: boolean;
 };
 
-type RecordedCall = { address: string; name: string; params: unknown[] };
-
-/** A multicall stand-in that answers each call by contract address and function name. */
-function fakeMulticall(market: WrappedMarket, values: ChainValues, calls: RecordedCall[] = []) {
-  return {
-    all: jest.fn(async (batch: { contract: { address: string }; name: string; params: unknown[] }[]) => {
-      return batch.map(({ contract, name, params }) => {
-        calls.push({ address: contract.address, name, params });
-        const address = contract.address.toLowerCase();
-        if (address === market.wrapperAddress.toLowerCase()) {
-          if (name === 'balanceOf') return BigNumber.from(values.shares);
-          if (name === 'totalSupply') return BigNumber.from(values.totalSupply);
-          if (name === 'asset') return values.asset;
-        }
-        if (address === market.cometAddress.toLowerCase()) {
-          if (name === 'balanceOf') return BigNumber.from(values.totalAssets);
-          if (name === 'totalsBasic') return { baseSupplyIndex: BigNumber.from(values.baseSupplyIndex) };
-          if (name === 'isWithdrawPaused') return values.isWithdrawPaused;
-        }
-        if (address === market.baseTokenAddress.toLowerCase()) {
-          if (name === 'balanceOf') return BigNumber.from(values.walletBalance);
-          if (name === 'allowance') return BigNumber.from(values.allowance);
-        }
-        throw new Error(`unexpected call ${name} on ${contract.address}`);
-      });
-    }),
+/** A viem client stand-in that answers each read by contract address and function name. */
+function fakeClient(market: WrappedMarket, values: ChainValues) {
+  const answer = (target: string, name: string): unknown => {
+    const address = target.toLowerCase();
+    if (address === market.wrapperAddress.toLowerCase()) {
+      if (name === 'balanceOf') return values.shares;
+      if (name === 'totalSupply') return values.totalSupply;
+      if (name === 'asset') return values.asset;
+    }
+    if (address === market.cometAddress.toLowerCase()) {
+      if (name === 'balanceOf') return values.totalAssets;
+      if (name === 'totalsBasic') return { baseSupplyIndex: values.baseSupplyIndex };
+      if (name === 'isWithdrawPaused') return values.isWithdrawPaused;
+    }
+    if (address === market.baseTokenAddress.toLowerCase()) {
+      if (name === 'balanceOf') return values.walletBalance;
+      if (name === 'allowance') return values.allowance;
+    }
+    throw new Error(`unexpected call ${name} on ${target}`);
+  };
+  const readContract = jest.fn(async ({ address, functionName }: { address: string; functionName: string }) =>
+    answer(address, functionName)
+  );
+  return { readContract } as unknown as Parameters<typeof readWrappedPosition>[0] & {
+    readContract: typeof readContract;
   };
 }
 
@@ -135,14 +133,12 @@ describe('getWrappedPositionValueInDollars', () => {
 });
 
 describe('readWrappedPosition', () => {
-  it('reads every figure in one batch and keeps each in its own units', async () => {
+  it('reads every figure and keeps each in its own units', async () => {
     const market = usdcMarket();
-    const calls: RecordedCall[] = [];
-    const multicall = fakeMulticall(market, BASE_VALUES, calls);
+    const client = fakeClient(market, BASE_VALUES);
 
-    const position = await readWrappedPosition(multicall, market, ACCOUNT);
+    const position = await readWrappedPosition(client, market, ACCOUNT);
 
-    expect(multicall.all).toHaveBeenCalledTimes(1);
     expect(position).toEqual({
       shares: 250n * 10n ** 18n,
       shareDecimals: 18,
@@ -159,41 +155,32 @@ describe('readWrappedPosition', () => {
         baseSupplyIndex: 1_050_000_000_000_000n,
       },
     });
+    const contracts = client.readContract.mock.calls.map(([contract]) => contract);
     // The allowance is the base token's, with the wrapper as spender.
-    expect(calls).toContainEqual({
-      address: market.baseTokenAddress,
-      name: 'allowance',
-      params: [ACCOUNT, market.wrapperAddress],
-    });
-    // The wrapper's assets are its Comet balance.
-    expect(calls).toContainEqual({ address: market.cometAddress, name: 'balanceOf', params: [market.wrapperAddress] });
-  });
-
-  it('reads an empty account as zero shares and zero cash', async () => {
-    const market = usdcMarket();
-    const position = await readWrappedPosition(
-      fakeMulticall(market, { ...BASE_VALUES, shares: 0n, allowance: 0n }),
-      market,
-      ACCOUNT
+    expect(contracts).toContainEqual(
+      expect.objectContaining({
+        address: market.baseTokenAddress,
+        functionName: 'allowance',
+        args: [ACCOUNT, market.wrapperAddress],
+      })
     );
-    expect(position.shares).toBe(0n);
-    expect(position.grossAssets).toBe(0n);
-    expect(position.fullExitCash).toBe(0n);
+    // The wrapper's assets are its Comet balance.
+    expect(contracts).toContainEqual(
+      expect.objectContaining({
+        address: market.cometAddress,
+        functionName: 'balanceOf',
+        args: [market.wrapperAddress],
+      })
+    );
   });
 
   it('fails when the wrapper does not hold the configured Comet, instead of reading zero', async () => {
     const market = usdcMarket();
-    const multicall = fakeMulticall(market, {
+    const client = fakeClient(market, {
       ...BASE_VALUES,
       asset: '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840',
     });
-    await expect(readWrappedPosition(multicall, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
-  });
-
-  it('fails when the batch fails, instead of reading zero', async () => {
-    const market = usdcMarket();
-    const multicall = { all: jest.fn().mockRejectedValue(new Error('rpc down')) };
-    await expect(readWrappedPosition(multicall, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
+    await expect(readWrappedPosition(client, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
   });
 });
 

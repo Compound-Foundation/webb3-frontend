@@ -5,7 +5,7 @@ import { BigNumber } from 'ethers';
 import { Web3 } from '@contexts/Web3Context';
 import { withCometStateSource } from '@helpers/cometStateSource';
 import { CometStateResponse } from '@helpers/sleuth/types';
-import { useCometState } from '@hooks/useCometState';
+import { queryCometDataWithAccount, useCometState } from '@hooks/useCometState';
 import { queryCometData } from '@hooks/useSelectedMarket';
 import { MarketData, MarketDataState, RewardsState, StateType, Transaction } from '@types';
 
@@ -37,6 +37,12 @@ jest.mock('@helpers/sleuth/sleuth', () => {
   const Sleuth = jest.fn().mockImplementation(() => ({ fetch: (...args: unknown[]) => mockSleuthFetch(...args) }));
   return { Sleuth: Object.assign(Sleuth, { querySol: jest.fn(() => 'query') }) };
 });
+
+const mockReadContract = jest.fn();
+jest.mock('@helpers/multicall', () => ({
+  ...jest.requireActual('@helpers/multicall'),
+  readClient: () => ({ readContract: (...args: unknown[]) => mockReadContract(...args) }),
+}));
 
 const mockQueryCometData = queryCometData as jest.Mock;
 
@@ -78,14 +84,21 @@ const cometResponse = (supplyRatePerSecond: number) =>
 const cometResponseWithAccount = (baseBalance: number) => {
   const response = cometResponse(0);
   return {
-    ...response,
-    bulkerAllowance: BigNumber.from(0),
-    baseAsset: {
-      ...response.baseAsset,
-      allowance: BigNumber.from(0),
-      balance: BigNumber.from(baseBalance),
+    state: {
+      ...response,
+      bulkerAllowance: BigNumber.from(0),
+      baseAsset: {
+        ...response.baseAsset,
+        allowance: BigNumber.from(0),
+        balance: BigNumber.from(baseBalance),
+        bulkerAllowance: BigNumber.from(0),
+        walletBalance: BigNumber.from(0),
+      },
+    },
+    stETHState: {
       bulkerAllowance: BigNumber.from(0),
       walletBalance: BigNumber.from(0),
+      wstETHPerStETH: BigNumber.from(0),
     },
   };
 };
@@ -222,5 +235,55 @@ describe('useCometState', () => {
       market: { chainId: MARKET_A.chainInformation.chainId, cometAddress: MARKET_A.marketAddress },
       account: undefined,
     });
+  });
+});
+
+describe('queryCometDataWithAccount when the Sleuth query fails', () => {
+  const ACCOUNT = '0x00000000000000000000000000000000000000b1';
+  const market = mockMarket({ bulkerAddress: '0x00000000000000000000000000000000000000c1' });
+  const WSTETH = '0x4942BBAf745f235e525BAff49D31450810EDed5b';
+  const stateWithWstETH = () => ({
+    ...cometResponseWithAccount(5).state,
+    collateralAssets: [{ collateralAsset: WSTETH }],
+  });
+
+  beforeEach(() => {
+    mockSleuthFetch.mockReset();
+    mockReadContract.mockReset();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  test('reads the account state with queryWithAccount and the stETH state through readContract', async () => {
+    const state = stateWithWstETH();
+    mockSleuthFetch.mockRejectedValueOnce(new Error('stETH read reverted')).mockResolvedValueOnce(state);
+    mockReadContract.mockResolvedValueOnce(1n).mockResolvedValueOnce(2n).mockResolvedValueOnce(3n);
+
+    const response = await queryCometDataWithAccount('http://localhost', market, ACCOUNT);
+
+    expect(response).toEqual({
+      state,
+      stETHState: {
+        bulkerAllowance: BigNumber.from(1),
+        walletBalance: BigNumber.from(2),
+        wstETHPerStETH: BigNumber.from(3),
+      },
+    });
+    expect(mockReadContract.mock.calls.map(([{ functionName }]) => functionName)).toEqual([
+      'allowance',
+      'balanceOf',
+      'tokensPerStEth',
+    ]);
+  });
+
+  test('skips the stETH reads for a market without wstETH collateral, as the Sleuth query does', async () => {
+    const { state } = cometResponseWithAccount(5);
+    mockSleuthFetch.mockRejectedValueOnce(new Error('Sleuth contract missing')).mockResolvedValueOnce(state);
+
+    const zero = BigNumber.from(0);
+    expect(await queryCometDataWithAccount('http://localhost', market, ACCOUNT)).toEqual({
+      state,
+      stETHState: { bulkerAllowance: zero, walletBalance: zero, wstETHPerStETH: zero },
+    });
+    expect(mockReadContract).not.toHaveBeenCalled();
   });
 });
