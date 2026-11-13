@@ -14,12 +14,6 @@ import { FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 // the constants below. Dollar amounts are whole dollars.
 const REWARDS_BUDGET_DOLLARS_PER_YEAR = 800_000;
 
-export const isInstitutionalBoostOver = (boostEndDate?: Date) =>
-  boostEndDate !== undefined && Date.now() >= boostEndDate.getTime();
-
-export const formatInstitutionalBoostEndDate = (boostEndDate: Date) =>
-  boostEndDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-
 const LEVEL_STEP_DOLLARS = 500_000;
 const FIRST_LEVEL_DOLLARS = 500_000;
 const LAST_LEVEL_DOLLARS = 20_000_000;

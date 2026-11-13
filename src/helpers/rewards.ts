@@ -1,4 +1,4 @@
-import { institutionalSupplyRewardRate, isInstitutionalBoostOver } from '@helpers/institutionalRates';
+import { institutionalSupplyRewardRate } from '@helpers/institutionalRates';
 import { getRewardsAPR } from '@helpers/numbers';
 import {
   AccountRewardsState, MarketData,
@@ -60,7 +60,7 @@ export const getMarketRewardsAPRs = (
   }
 
   // After the boost ends, the market is shown like a plain one
-  if (market?.institutional && !isInstitutionalBoostOver(market.boostEndDate)) {
+  if (market?.institutional && Date.now() < (market.boostEndDate?.getTime() ?? Infinity)) {
     return {
       borrowRewardsAPR: 0n,
       supplyRewardsAPR: institutionalSupplyRewardRate(totalBaseSupplyInDollars),

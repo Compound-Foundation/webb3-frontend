@@ -100,7 +100,12 @@ export const MARKETS: MarketData[] = [
         'USDC',
         'USDC Institutional',
         mainnetInstitutionalUSDCRoots,
-        { slug: 'usdc-institutional', institutional: true, isNew: true, boostEndDate: new Date(2026, 11, 8) },
+        {
+          slug: 'usdc-institutional',
+          institutional: true,
+          isNew: true,
+          boostEndDate: new Date(2026, 11, 8)
+        },
       ],
       [137, 'USDC.e', 'USD Coin (Bridged)', polygonUSDCRoots],
       [137, 'USDT0', 'Tether', polygonUSDTRoots],

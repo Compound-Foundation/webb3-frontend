@@ -1,5 +1,6 @@
+import { format } from 'date-fns';
+
 import { Lightning } from '@components/Icons/Lightning';
-import { formatInstitutionalBoostEndDate } from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { formatRateFactor } from '@helpers/numbers';
 import { INSTITUTIONAL_MARKET_URL, INSTITUTIONAL_REGISTER_URL } from '@helpers/urls';
@@ -50,7 +51,7 @@ const BoostedSupplyRates = ({
           </p>
           {boostEndDate && (
             <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">
-              Boosted yield applies until {formatInstitutionalBoostEndDate(boostEndDate)}.
+              Boosted yield applies until {format(boostEndDate, 'MMMM d, yyyy')}.
             </p>
           )}
         </div>

@@ -1,4 +1,5 @@
-import { formatInstitutionalBoostEndDate } from '@helpers/institutionalRates';
+import { format } from 'date-fns';
+
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { INSTITUTIONAL_REGISTER_URL } from '@helpers/urls';
 
@@ -23,7 +24,7 @@ const WhitelistStatusBanner = ({ whitelistStatus, boostEndDate }: WhitelistStatu
         </div>
         {boostEndDate && (
           <p className="whitelist-status-banner__detail L4 body">
-            Boosted yield applies until {formatInstitutionalBoostEndDate(boostEndDate)}.
+            Boosted yield applies until {format(boostEndDate, 'MMMM d, yyyy')}.
           </p>
         )}
       </div>
