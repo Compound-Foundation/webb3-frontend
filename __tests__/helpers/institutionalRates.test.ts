@@ -1,5 +1,4 @@
 import {
-  INSTITUTIONAL_BOOST_END_DATE,
   institutionalSupplyRewardRate,
 } from '@helpers/institutionalRates';
 import { getMarkets } from '@helpers/markets';
@@ -14,8 +13,6 @@ const standardMarket = getMarkets(true).find((market) => !market.institutional);
 if (institutionalMarket === undefined || standardMarket === undefined) {
   throw new Error('Expected both an institutional and a standard market to be configured');
 }
-
-jest.spyOn(Date, 'now').mockReturnValue(INSTITUTIONAL_BOOST_END_DATE.getTime() - 1);
 
 describe('institutionalSupplyRewardRate', () => {
   test('pays nothing below the first level', () => {

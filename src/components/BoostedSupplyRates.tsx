@@ -1,5 +1,5 @@
 import { Lightning } from '@components/Icons/Lightning';
-import { INSTITUTIONAL_BOOST_END_DATE_LABEL, isInstitutionalBoostOver } from '@helpers/institutionalRates';
+import { formatInstitutionalBoostEndDate } from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { formatRateFactor } from '@helpers/numbers';
 import { INSTITUTIONAL_MARKET_URL, INSTITUTIONAL_REGISTER_URL } from '@helpers/urls';
@@ -9,6 +9,7 @@ type BoostedSupplyRatesProps = {
   earnAPR: bigint;
   // The institutional program's boost on top of the floating rate, at FACTOR_PRECISION
   boostAPR: bigint;
+  boostEndDate?: Date;
   whitelistStatus?: InstitutionalWhitelistStatus;
   // Label for the boosted portion of the rate (e.g. "Whitelisted Extra APY" on
   // the markets page)
@@ -27,6 +28,7 @@ type BoostedSupplyRatesProps = {
 const BoostedSupplyRates = ({
   earnAPR,
   boostAPR,
+  boostEndDate,
   whitelistStatus = InstitutionalWhitelistStatus.NoWallet,
   boostLabel = 'Boosted APR',
   showWhitelistCard = true,
@@ -36,7 +38,6 @@ const BoostedSupplyRates = ({
   // floored so a small base rate still reads as a visible segment
   const boostShare = totalAPR > 0n ? Number((boostAPR * 100n) / totalAPR) : 0;
   const baseShare = 100 - boostShare;
-  const boostOver = isInstitutionalBoostOver();
 
   let whitelistCard: JSX.Element;
   if (whitelistStatus === InstitutionalWhitelistStatus.Whitelisted) {
@@ -47,9 +48,11 @@ const BoostedSupplyRates = ({
           <p className="boosted-supply-rates__whitelist-card__title L3 body body--emphasized">
             You are earning boosted yield
           </p>
-          <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">
-            Boosted yield applies until {INSTITUTIONAL_BOOST_END_DATE_LABEL}.
-          </p>
+          {boostEndDate && (
+            <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">
+              Boosted yield applies until {formatInstitutionalBoostEndDate(boostEndDate)}.
+            </p>
+          )}
         </div>
       </div>
     );
@@ -100,27 +103,23 @@ const BoostedSupplyRates = ({
           className="boosted-supply-rates__bar__segment boosted-supply-rates__bar__segment--base"
           style={{ flexGrow: baseShare }}
         ></div>
-        {!boostOver && (
-          <div
-            className="boosted-supply-rates__bar__segment boosted-supply-rates__bar__segment--boost"
-            style={{ flexGrow: boostShare }}
-          ></div>
-        )}
+        <div
+          className="boosted-supply-rates__bar__segment boosted-supply-rates__bar__segment--boost"
+          style={{ flexGrow: boostShare }}
+        ></div>
       </div>
       <div className="boosted-supply-rates__labels">
         <span className="L4 meta">
           <span className="boosted-supply-rates__labels__value">{formatRateFactor(earnAPR)}</span>
           <span className="text-color--2"> Base Interest</span>
         </span>
-        {!boostOver && (
-          <span className="L4 meta boosted-supply-rates__labels__container">
-            <Lightning className="boosted-supply-rates__labels__icon" />
-            <span className="boosted-supply-rates__labels__value">{formatRateFactor(boostAPR)}</span>
-            <span className="text-color--2"> {boostLabel}</span>
-          </span>
-        )}
+        <span className="L4 meta boosted-supply-rates__labels__container">
+          <Lightning className="boosted-supply-rates__labels__icon" />
+          <span className="boosted-supply-rates__labels__value">{formatRateFactor(boostAPR)}</span>
+          <span className="text-color--2"> {boostLabel}</span>
+        </span>
       </div>
-      {showWhitelistCard && !boostOver && whitelistCard}
+      {showWhitelistCard && whitelistCard}
     </div>
   );
 };

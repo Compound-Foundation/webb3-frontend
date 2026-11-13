@@ -273,6 +273,7 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
         borrowAPR: borrowRewardsAPR ?? 0n,
         assetSymbol: rewardsAssetSymbol,
         whitelistStatus: institutionalWhitelistStatus,
+        boostEndDate: market?.boostEndDate,
       }
     : {
         type: RewardsType.Standard,

@@ -68,6 +68,7 @@ type MastheadHydrated = [
     onWithdrawAction: (pendingAction?: PendingAction) => void;
     setCompare: Dispatch<boolean>;
     isInstitutional: boolean;
+    boostEndDate?: Date;
     /**
      * On the wrapped route, the wrapped position's value when Home could not add it to the base
      * balance because the account borrows directly. It is shown beneath the borrow, never netted
@@ -255,6 +256,7 @@ function getContent(state: MastheadState): Content {
     theme,
     transaction,
     isInstitutional,
+    boostEndDate,
     onSupplyAction,
     onWithdrawAction,
     setCompare,
@@ -323,7 +325,8 @@ function getContent(state: MastheadState): Content {
       supplyAPR: earnRewardsAPR ?? 0n,
       borrowAPR: borrowRewardsAPR ?? 0n,
       assetSymbol: rewardsAssetSymbol,
-      whitelistStatus: institutionalWhitelistStatus
+      whitelistStatus: institutionalWhitelistStatus,
+      boostEndDate
     }
     : {
       type: RewardsType.Standard,

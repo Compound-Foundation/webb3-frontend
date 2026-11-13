@@ -14,17 +14,11 @@ import { FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 // the constants below. Dollar amounts are whole dollars.
 const REWARDS_BUDGET_DOLLARS_PER_YEAR = 800_000;
 
-// The date through which the boosted yield program applies, shown on the
-// whitelisted card. Update when the program is extended.
-export const INSTITUTIONAL_BOOST_END_DATE = new Date(2026, 11, 8); // December 8, 2026
-// Display form of the end date, formatted once at module load
-export const INSTITUTIONAL_BOOST_END_DATE_LABEL = INSTITUTIONAL_BOOST_END_DATE.toLocaleDateString('en-US', {
-  month: 'long',
-  day: 'numeric',
-  year: 'numeric',
-});
+export const isInstitutionalBoostOver = (boostEndDate?: Date) =>
+  boostEndDate !== undefined && Date.now() >= boostEndDate.getTime();
 
-export const isInstitutionalBoostOver = () => Date.now() >= INSTITUTIONAL_BOOST_END_DATE.getTime();
+export const formatInstitutionalBoostEndDate = (boostEndDate: Date) =>
+  boostEndDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
 const LEVEL_STEP_DOLLARS = 500_000;
 const FIRST_LEVEL_DOLLARS = 500_000;
@@ -38,7 +32,7 @@ const DOLLAR_SCALE = 10n ** BigInt(PRICE_PRECISION);
  * @returns the reward supply rate, at FACTOR_PRECISION
  */
 export function institutionalSupplyRewardRate(totalSuppliedUsd: bigint): bigint {
-  if (isInstitutionalBoostOver() || totalSuppliedUsd < BigInt(FIRST_LEVEL_DOLLARS) * DOLLAR_SCALE) {
+  if (totalSuppliedUsd < BigInt(FIRST_LEVEL_DOLLARS) * DOLLAR_SCALE) {
     return 0n;
   }
   const cappedUsd = BigInt(LAST_LEVEL_DOLLARS) * DOLLAR_SCALE;
