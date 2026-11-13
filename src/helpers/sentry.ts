@@ -186,7 +186,8 @@ export type SentryEnvironment = {
   release?: string;
   /**
    * `import.meta.env.VITE_SENTRY_TUNNEL`: the URL of the relay that forwards events to Sentry, which ad blockers
-   * do not block as they block Sentry's own hosts. Without it, events go to Sentry directly.
+   * do not block as they block Sentry's own hosts. Without it, events go to Sentry directly, which the CSP of the
+   * production hosts does not allow.
    */
   tunnel?: string;
 };
