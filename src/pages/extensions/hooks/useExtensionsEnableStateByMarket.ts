@@ -1,57 +1,15 @@
-import { JsonRpcProvider, StaticJsonRpcProvider } from '@ethersproject/providers';
-import { BigNumber } from 'ethers';
+import { JsonRpcProvider } from '@ethersproject/providers';
 import { useEffect, useState } from 'react';
 import type { Address } from 'viem';
 
 import type { Web3 } from '@contexts/Web3Context';
 import Comet from '@helpers/abis/Comet';
 import { isV2Market } from '@helpers/markets';
-import { readClient, sleuthWithFallback } from '@helpers/multicall';
-import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
-import { Sleuth } from '@helpers/sleuth/sleuth';
-import { OperatorAllowancesQuery, OperatorAllowancesResponse } from '@helpers/sleuth/types';
-import { getSleuthOptions } from '@hooks/useSelectedMarket';
+import { readClient } from '@helpers/multicall';
 import { MarketData, MarketDataLoaded, MarketDataState, StateType, ExtensionsEnableState } from '@types';
 
 import { Extension } from '../helpers/core';
 import { allExtensions, getOperator } from '../helpers/list';
-
-const QUERY_OPERATOR_ALLOWANCES = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryOperatorAllowances' });
-
-// Comet allowance of each operator for the account: an extension is enabled when its operator's is above zero.
-export function queryOperatorAllowances(
-  rawProvider: JsonRpcProvider,
-  marketData: MarketData | MarketDataLoaded,
-  accountAddress: string,
-  operators: string[]
-): Promise<BigNumber[]> {
-  const provider = new StaticJsonRpcProvider(rawProvider.connection);
-  const sleuth = new Sleuth(provider, getSleuthOptions(marketData.chainInformation.chainId));
-  return sleuthWithFallback<BigNumber[]>(
-    'Extension operator allowances',
-    () =>
-      sleuth.fetch<OperatorAllowancesResponse, OperatorAllowancesQuery>(QUERY_OPERATOR_ALLOWANCES, [
-        marketData.marketAddress,
-        accountAddress,
-        operators,
-      ]),
-    () => {
-      const client = readClient(provider, marketData.chainInformation);
-      return Promise.all(
-        operators.map((operator) =>
-          client
-            .readContract({
-              address: marketData.marketAddress as Address,
-              abi: Comet,
-              functionName: 'allowance',
-              args: [accountAddress as Address, operator as Address],
-            })
-            .then((allowance) => BigNumber.from(allowance))
-        )
-      );
-    }
-  );
-}
 
 // Get the extensions supported for this particular market, which can be either be
 // explicitly enabled (if there's an operator contract), or not enabled, for
@@ -96,6 +54,8 @@ async function getState(
   extensions: Extension[],
   accountAddress: string
 ): Promise<ExtensionsEnableState> {
+  const client = readClient(rawProvider, marketData.chainInformation);
+
   // For each extension, hydrate their operator (contract) addresses.
   const extensionswithMaybeOperator = extensions.map((ext) => ({
     ...ext,
@@ -106,15 +66,19 @@ async function getState(
   const extensionsWithOperators = extensionswithMaybeOperator.filter((ext) => !!ext.operatorAddress);
   // Look up on comet market contract, whether the operator is allowed to perform extension
   // actions on behalf of the account.
-  const extensionsEnableStatus = await queryOperatorAllowances(
-    rawProvider,
-    marketData,
-    accountAddress,
-    extensionsWithOperators.map((ext) => ext.operatorAddress as string)
+  const extensionsEnableStatus = await Promise.all(
+    extensionsWithOperators.map((ext) =>
+      client.readContract({
+        address: marketData.marketAddress as Address,
+        abi: Comet,
+        functionName: 'allowance',
+        args: [accountAddress as Address, ext.operatorAddress as Address],
+      })
+    )
   );
 
   const enabledExtensionsIds = extensionsWithOperators
-    .filter((_, idx) => extensionsEnableStatus[idx].gt(0))
+    .filter((_, idx) => extensionsEnableStatus[idx] > 0n)
     .map((ext) => ext.id);
   // Any supported extensions that are not enabled are considered disabled.
   const notEnabledExtensionsIds = extensionswithMaybeOperator

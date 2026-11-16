@@ -24,20 +24,3 @@ export function readClient(provider: JsonRpcProvider, chain: ChainInformation) {
     batch: { multicall: true },
   });
 }
-
-/**
- * The Sleuth query, or `fallback` when it fails: a chain without the Sleuth contract, or a market
- * that reverts one of the query's reads.
- */
-export async function sleuthWithFallback<T>(
-  label: string,
-  query: () => Promise<T>,
-  fallback: () => Promise<T>
-): Promise<T> {
-  try {
-    return await query();
-  } catch (error) {
-    console.warn(`${label}: the Sleuth query failed, reading through the fallback`, error);
-    return fallback();
-  }
-}

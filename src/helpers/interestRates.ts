@@ -1,5 +1,3 @@
-import { RateModelResponse } from './sleuth/types';
-
 const SECONDS_PER_YEAR = BigInt(60 * 60 * 24 * 365);
 
 export type RateModel = {
@@ -8,13 +6,6 @@ export type RateModel = {
   slopeLow: bigint;
   slopeHigh: bigint;
 };
-
-export const toRateModel = (rateModel: RateModelResponse): RateModel => ({
-  kink: rateModel.kink.toBigInt(),
-  base: rateModel.perSecondInterestRateBase.toBigInt(),
-  slopeLow: rateModel.perSecondInterestRateSlopeLow.toBigInt(),
-  slopeHigh: rateModel.perSecondInterestRateSlopeHigh.toBigInt(),
-});
 
 function perSecondRateAt(
   utilization: bigint,

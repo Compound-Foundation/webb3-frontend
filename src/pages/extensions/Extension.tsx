@@ -1,4 +1,5 @@
 import { ExtMessage, InMessage } from '@compound-finance/comet-extension';
+import { Contract } from '@ethersproject/contracts';
 import { ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router';
 
@@ -8,6 +9,7 @@ import LoadSpinner from '@components/LoadSpinner';
 import { SimpleLink } from '@components/SimpleLink';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
+import Comet from '@helpers/abis/Comet';
 import { getShortAddress } from '@helpers/address';
 import { filterMap } from '@helpers/functions';
 import { PreEstimatedAction } from '@helpers/gasEstimator';
@@ -22,7 +24,6 @@ import { CometState, MarketData, MarketDataLoaded, StateType, Transaction } from
 import { AllMarkets, Extension as ExtensionType } from './helpers/core';
 import { Context, handleMessage } from './helpers/handler';
 import { allExtensions, getOperator, getSrc } from './helpers/list';
-import { queryOperatorAllowances } from './hooks/useExtensionsEnableStateByMarket';
 import usePoll from './hooks/usePoll';
 
 type BaseProps = {
@@ -161,13 +162,11 @@ const Extension = ({
           setExtensionState(StateType.Loading);
         }
 
-        const account = web3.write.account;
-        const provider = web3.read.provider;
-        if (selectedMarketData !== undefined && provider !== undefined) {
+        if (selectedMarketData !== undefined) {
           (async () => {
-            const [allowance] = await queryOperatorAllowances(provider, selectedMarketData, account, [operator]);
+            const comet = new Contract(selectedMarketData.marketAddress, Comet, web3.read.provider);
 
-            const migratorEnabled = allowance.gt(0);
+            const migratorEnabled = (await comet.allowance(web3.write.account, operator))?.toBigInt() > 0n;
             const shortenedOperatorAddress = getShortAddress(operator);
             const [description, approval] = migratorEnabled
               ? [`Disable Operator - ${shortenedOperatorAddress}`, false]
