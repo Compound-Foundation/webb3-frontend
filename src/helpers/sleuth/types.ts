@@ -20,6 +20,23 @@ export type CometWithAccountStateQuery = [
   boolean // checkDeprecatedwUSDM
 ];
 
+export type CometWithAccountAndStEthQuery = [
+  ...CometWithAccountStateQuery,
+  string, // stETH address, or the zero address
+  string // wstETH address, or the zero address
+];
+
+export type StEthStateResponse = {
+  bulkerAllowance: BigNumber;
+  walletBalance: BigNumber;
+  wstETHPerStETH: BigNumber;
+};
+
+export type CometWithAccountAndStEthResponse = {
+  state: CometWithAccountStateResponse;
+  stETHState: StEthStateResponse;
+};
+
 export type CometWithAccountStateResponse = {
   baseAsset: {
     baseAsset: string;

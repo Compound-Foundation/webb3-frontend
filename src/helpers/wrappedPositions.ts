@@ -157,7 +157,7 @@ function toBigInt(value: unknown, name: string): bigint {
 export async function readWrappedPosition(
   client: Pick<ReturnType<typeof readClient>, 'readContract'>,
   market: WrappedMarket,
-  account: string
+  account: Address
 ): Promise<WrappedPosition> {
   const wrapper = { address: market.wrapperAddress as Address, abi: WrappedCometAbi } as const;
   const comet = { address: market.cometAddress as Address, abi: CometAbi } as const;
@@ -172,17 +172,17 @@ export async function readWrappedPosition(
     baseWalletBalance,
     wrapperAllowance,
   ] = await Promise.all([
-    client.readContract({ ...wrapper, functionName: 'balanceOf', args: [account as Address] }),
+    client.readContract({ ...wrapper, functionName: 'balanceOf', args: [account] }),
     client.readContract({ ...wrapper, functionName: 'totalSupply' }),
     client.readContract({ ...wrapper, functionName: 'asset' }),
     client.readContract({ ...comet, functionName: 'balanceOf', args: [market.wrapperAddress as Address] }),
     client.readContract({ ...comet, functionName: 'totalsBasic' }),
     client.readContract({ ...comet, functionName: 'isWithdrawPaused' }),
-    client.readContract({ ...baseToken, functionName: 'balanceOf', args: [account as Address] }),
+    client.readContract({ ...baseToken, functionName: 'balanceOf', args: [account] }),
     client.readContract({
       ...baseToken,
       functionName: 'allowance',
-      args: [account as Address, market.wrapperAddress as Address],
+      args: [account, market.wrapperAddress as Address],
     }),
   ]);
 

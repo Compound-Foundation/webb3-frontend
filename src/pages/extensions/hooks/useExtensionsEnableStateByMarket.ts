@@ -41,7 +41,7 @@ export function useExtensionsEnableStateByMarket(web3: Web3, selectedMarket: Mar
       setState([StateType.Hydrated, { enabled: [], notEnabled: supportedExtensions.map((ext) => ext.id) }]);
     } else {
       // Look up which supported extensions are enabled for this account.
-      getState(web3Provider, marketData, supportedExtensions, maybeAccountAddress).then(setState);
+      getState(web3Provider, marketData, supportedExtensions, maybeAccountAddress as Address).then(setState);
     }
   }, [marketData, maybeAccountAddress]);
 
@@ -52,7 +52,7 @@ async function getState(
   rawProvider: JsonRpcProvider,
   marketData: MarketData | MarketDataLoaded,
   extensions: Extension[],
-  accountAddress: string
+  accountAddress: Address
 ): Promise<ExtensionsEnableState> {
   const client = readClient(rawProvider, marketData.chainInformation);
 
@@ -72,7 +72,7 @@ async function getState(
         address: marketData.marketAddress as Address,
         abi: Comet,
         functionName: 'allowance',
-        args: [accountAddress as Address, ext.operatorAddress as Address],
+        args: [accountAddress, ext.operatorAddress as Address],
       })
     )
   );

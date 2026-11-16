@@ -111,7 +111,7 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     supplyBase,
     supplySlopeLow,
     supplySlopeHigh,
-    collaterals,
+    ...collaterals
   ] = await Promise.all([
     client.readContract({ ...comet, functionName: 'getUtilization' }),
     client.readContract({ ...comet, functionName: 'factorScale' }),
@@ -135,18 +135,16 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     client.readContract({ ...comet, functionName: 'supplyPerSecondInterestRateBase' }),
     client.readContract({ ...comet, functionName: 'supplyPerSecondInterestRateSlopeLow' }),
     client.readContract({ ...comet, functionName: 'supplyPerSecondInterestRateSlopeHigh' }),
-    Promise.all(
-      market.collateralAssets.map((asset) =>
-        Promise.all([
-          collateralPrice(asset.priceFeed),
-          client.readContract({ ...comet, functionName: 'totalsCollateral', args: [asset.address as Address] }),
-          // getCollateralReserves reverts when the asset's balanceOf reverts or Comet's balance drops
-          // below its recorded supply. Such a collateral shows 0 reserves instead of breaking the page.
-          client
-            .readContract({ ...comet, functionName: 'getCollateralReserves', args: [asset.address as Address] })
-            .catch(() => 0n),
-        ])
-      )
+    ...market.collateralAssets.map((asset) =>
+      Promise.all([
+        collateralPrice(asset.priceFeed),
+        client.readContract({ ...comet, functionName: 'totalsCollateral', args: [asset.address as Address] }),
+        // getCollateralReserves reverts when the asset's balanceOf reverts or Comet's balance drops
+        // below its recorded supply. Such a collateral shows 0 reserves instead of breaking the page.
+        client
+          .readContract({ ...comet, functionName: 'getCollateralReserves', args: [asset.address as Address] })
+          .catch(() => 0n),
+      ])
     ),
   ]);
 
