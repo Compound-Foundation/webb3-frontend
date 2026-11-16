@@ -17,7 +17,7 @@ const InstitutionalBanner = ({ market }: InstitutionalBannerProps) => {
     <div className="institutional-banner L1">
       <h1 className="institutional-banner__title heading heading--emphasized">
         {TITLE}
-        <span className="new-badge new-badge--large label">{NEW}</span>
+        {market.isNew && <span className="new-badge new-badge--large label">{NEW}</span>}
       </h1>
     </div>
   );

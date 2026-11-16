@@ -96,19 +96,21 @@ export const MARKETS: MarketData[] = [
       [1, 'wstETH', 'Lido Wrapped Staked ETH', mainnetWSTETHRoots],
       [1, 'USDS', 'USDS', mainnetUSDSRoots],
       [1, 'WBTC', 'Wrapped BTC', mainnetWBTCRoots],
-      [
-        1,
-        'USDC',
-        'USDC Institutional',
-        mainnetInstitutionalUSDCRoots,
-        { slug: 'usdc-institutional', institutional: true, isNew: true },
-      ],
+      // USDG leads the institutional group and carries the New badge; the USDC
+      // institutional market is established, so it is listed second without one
       [
         1,
         'USDG',
         'USDG Institutional',
         mainnetInstitutionalUSDGRoots,
         { slug: 'usdg-institutional', institutional: true, isNew: true },
+      ],
+      [
+        1,
+        'USDC',
+        'USDC Institutional',
+        mainnetInstitutionalUSDCRoots,
+        { slug: 'usdc-institutional', institutional: true },
       ],
       [137, 'USDC.e', 'USD Coin (Bridged)', polygonUSDCRoots],
       [137, 'USDT0', 'Tether', polygonUSDTRoots],
