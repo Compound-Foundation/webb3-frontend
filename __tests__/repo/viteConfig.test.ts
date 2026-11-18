@@ -30,12 +30,22 @@ const HTML_ENTRIES = [
 // The build-only plugin that replaces process.env.NODE_ENV before the Node polyfills rewrite `process`.
 const NODE_ENV_PLUGIN = 'replace-node-env-before-polyfills';
 
-/** Runs `script` as an ES module in a child Node process with `input`, and returns what it writes as JSON. */
-function inChild<T>(script: string, input: unknown, nodeEnv: 'development' | 'production'): T {
-  const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('VITE_')));
+/**
+ * Runs `script` as an ES module in a child Node process with `input`, and returns what it writes as JSON. The
+ * child gets no `VITE_*` variable or SENTRY_AUTH_TOKEN from this process, only those in `extraEnvironment`.
+ */
+function inChild<T>(
+  script: string,
+  input: unknown,
+  nodeEnv: 'development' | 'production',
+  extraEnvironment: Record<string, string> = {}
+): T {
+  const environment = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith('VITE_') && name !== 'SENTRY_AUTH_TOKEN')
+  );
   const output = execFileSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(input)], {
     cwd: ROOT,
-    env: { ...environment, NODE_ENV: nodeEnv },
+    env: { ...environment, ...extraEnvironment, NODE_ENV: nodeEnv },
     encoding: 'utf8',
     timeout: 90_000,
   });
@@ -61,10 +71,18 @@ type Resolved = {
   host: unknown;
   optimizer: { define?: Record<string, string>; inject?: Record<string, [string, string]>; target?: string };
   esbuildPlugins: number;
+  sourcemap: unknown;
 };
 
-/** Resolves the repository's configuration for `command` with `inline` merged in, as Vite does on start. */
-function resolve(command: 'build' | 'serve', inline: object = {}): Resolved {
+/**
+ * Resolves the repository's configuration for `command` with `inline` merged in, as Vite does on start, in a
+ * process with `extraEnvironment`.
+ */
+function resolve(
+  command: 'build' | 'serve',
+  inline: object = {},
+  extraEnvironment: Record<string, string> = {}
+): Resolved {
   const envDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vite-config-env-'));
   const script = `
     const { resolveConfig } = await import(${JSON.stringify(path.join(ROOT, 'node_modules/vite/dist/node/index.js'))});
@@ -93,13 +111,15 @@ function resolve(command: 'build' | 'serve', inline: object = {}): Resolved {
       host: config.server.host,
       optimizer: config.optimizeDeps.rolldownOptions?.transform ?? {},
       esbuildPlugins: config.optimizeDeps.esbuildOptions?.plugins?.length ?? 0,
+      sourcemap: config.build.sourcemap,
     }));
   `;
   try {
     return inChild<Resolved>(
       script,
       { root: ROOT, envDir, command, inline },
-      command === 'build' ? 'production' : 'development'
+      command === 'build' ? 'production' : 'development',
+      extraEnvironment
     );
   } finally {
     fs.rmSync(envDir, { recursive: true, force: true });
@@ -128,6 +148,29 @@ test('the production build keeps its target, minifiers, nine HTML entries, relat
   // The harness's bundled dev setting is not in the configuration file.
   expect(resolved.output?.strictExecutionOrder).toBeUndefined();
 }, 120_000);
+
+describe("the production build's Sentry source maps", () => {
+  const SENTRY_PLUGIN = /^sentry/;
+
+  test('are off without SENTRY_AUTH_TOKEN: no source maps and no Sentry plugin', () => {
+    const resolved = resolve('build');
+    expect(resolved.sourcemap).toBe(false);
+    expect(resolved.vitePlugins.filter((name) => SENTRY_PLUGIN.test(name))).toEqual([]);
+  }, 120_000);
+
+  test('are hidden with SENTRY_AUTH_TOKEN, and the Sentry plugins come after the app plugins', () => {
+    const resolved = resolve('build', {}, { SENTRY_AUTH_TOKEN: 'test-token-not-used' });
+    expect(resolved.sourcemap).toBe('hidden');
+    const sentryNames = resolved.vitePlugins.filter((name) => SENTRY_PLUGIN.test(name));
+    expect(sentryNames).toContain('sentry-source-map-directory');
+    const lastAppPlugin = Math.max(
+      resolved.vitePlugins.indexOf(NODE_ENV_PLUGIN),
+      resolved.vitePlugins.indexOf('vite:react-babel'),
+      resolved.vitePlugins.indexOf('vite:react-refresh')
+    );
+    expect(resolved.vitePlugins.indexOf(sentryNames[0])).toBeGreaterThan(lastAppPlugin);
+  }, 120_000);
+});
 
 test('the default dev server is unbundled and runs no esbuild plugin in the dependency optimizer', () => {
   const resolved = resolve('serve');
