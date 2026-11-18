@@ -17,12 +17,12 @@ export type CometWithAccountStateQuery = [
   string, // account address
   string, // bulker address
   string, // wrapped native token symbol
-  boolean, // checkDeprecatedwUSDM
-  string, // stETH address, or the zero address
-  string // wstETH address, or the zero address
+  boolean // checkDeprecatedwUSDM
 ];
 
 export type StEthStateResponse = {
+  stETH: string;
+  wstETH: string;
   bulkerAllowance: BigNumber;
   walletBalance: BigNumber;
   wstETHPerStETH: BigNumber;

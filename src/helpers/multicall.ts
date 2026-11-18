@@ -7,11 +7,11 @@ import { ChainInformation } from '@types';
 const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
 
 /**
- * A viem client that reads from the same RPC endpoint as `provider`. Contract reads started in the
- * same tick go out together as one Multicall3 call.
+ * Returns viem's `readContract` for the RPC endpoint of `provider`. Reads started in the same tick
+ * go out together as one Multicall3 call.
  */
-export function spawnMulticallClient(provider: JsonRpcProvider, chain: ChainInformation) {
-  return createPublicClient({
+export function multicallReader(provider: JsonRpcProvider, chain: ChainInformation) {
+  const client = createPublicClient({
     // viem batches reads only when the chain names its Multicall3 address; otherwise each read is its own eth_call
     chain: defineChain({
       id: chain.chainId,
@@ -23,4 +23,5 @@ export function spawnMulticallClient(provider: JsonRpcProvider, chain: ChainInfo
     transport: http(provider.connection.url),
     batch: { multicall: true },
   });
+  return client.readContract;
 }

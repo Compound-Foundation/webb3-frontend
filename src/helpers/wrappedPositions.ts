@@ -9,10 +9,17 @@ import ERC20Abi from '@helpers/abis/ERC20';
 import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
 import { lendsBaseDirectly } from '@helpers/actions';
 import { LendingRoute } from '@helpers/lendingRoute';
-import { spawnMulticallClient } from '@helpers/multicall';
+import { multicallReader } from '@helpers/multicall';
 import { getTokenValue } from '@helpers/numbers';
 import type { WithdrawalLimits } from '@helpers/wrappedWithdrawals';
-import { Action, BaseAssetWithAccountState, CometState, Currency, ProtocolAndAccountState, StateType } from '@types';
+import {
+  Action,
+  BaseAssetWithAccountState,
+  CometState,
+  Currency,
+  ProtocolAndAccountState,
+  StateType
+} from '@types';
 
 /** The wrapper's divisor for Comet's supply index in its redeem buffer. */
 const BASE_INDEX_SCALE = 10n ** 15n;
@@ -155,11 +162,12 @@ function toBigInt(value: unknown, name: string): bigint {
  * wrapper does not hold the configured Comet.
  */
 export async function readWrappedPosition(
-  client: Pick<ReturnType<typeof spawnMulticallClient>, 'readContract'>,
+  readContract: ReturnType<typeof multicallReader>,
   market: WrappedMarket,
   account: Address
 ): Promise<WrappedPosition> {
-  const wrapper = { address: market.wrapperAddress as Address, abi: WrappedCometAbi } as const;
+  const wrapperAddress = market.wrapperAddress as Address;
+  const wrapper = { address: wrapperAddress, abi: WrappedCometAbi } as const;
   const comet = { address: market.cometAddress as Address, abi: CometAbi } as const;
   const baseToken = { address: market.baseTokenAddress as Address, abi: ERC20Abi } as const;
   const [
@@ -172,18 +180,14 @@ export async function readWrappedPosition(
     baseWalletBalance,
     wrapperAllowance,
   ] = await Promise.all([
-    client.readContract({ ...wrapper, functionName: 'balanceOf', args: [account] }),
-    client.readContract({ ...wrapper, functionName: 'totalSupply' }),
-    client.readContract({ ...wrapper, functionName: 'asset' }),
-    client.readContract({ ...comet, functionName: 'balanceOf', args: [market.wrapperAddress as Address] }),
-    client.readContract({ ...comet, functionName: 'totalsBasic' }),
-    client.readContract({ ...comet, functionName: 'isWithdrawPaused' }),
-    client.readContract({ ...baseToken, functionName: 'balanceOf', args: [account] }),
-    client.readContract({
-      ...baseToken,
-      functionName: 'allowance',
-      args: [account, market.wrapperAddress as Address],
-    }),
+    readContract({ ...wrapper, functionName: 'balanceOf', args: [account] }),
+    readContract({ ...wrapper, functionName: 'totalSupply' }),
+    readContract({ ...wrapper, functionName: 'asset' }),
+    readContract({ ...comet, functionName: 'balanceOf', args: [wrapperAddress] }),
+    readContract({ ...comet, functionName: 'totalsBasic' }),
+    readContract({ ...comet, functionName: 'isWithdrawPaused' }),
+    readContract({ ...baseToken, functionName: 'balanceOf', args: [account] }),
+    readContract({ ...baseToken, functionName: 'allowance', args: [account, wrapperAddress] }),
   ]);
 
   if (asset.toLowerCase() !== market.cometAddress.toLowerCase()) {

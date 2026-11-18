@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router';
 
 import RewardsStateContext from '@contexts/RewardsStateContext';
 import { Web3 } from '@contexts/Web3Context';
+import Comet from '@helpers/abis/Comet';
 import { getMarkets } from '@helpers/markets';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
 import { useMarketsState } from '@pages/markets/hooks/useMarketsState';
@@ -14,12 +15,12 @@ import { rest, server } from '../../../../handlers/server';
 // On-chain reads return the value set in mockReads for that contract function, or 1e18,
 // which is enough for the hook to build its state without a node
 let mockReads: Record<string, bigint> = {};
-type Read = { functionName: string; args?: readonly string[] };
+type Read = { address: string; abi: unknown; functionName: string; args?: readonly string[] };
 const readFromMockReads = ({ functionName }: Read) => Promise.resolve(mockReads[functionName] ?? 10n ** 18n);
 const mockReadContract = jest.fn<Promise<unknown>, [Read]>(readFromMockReads);
 
 jest.mock('@helpers/multicall', () => ({
-  spawnMulticallClient: () => ({ readContract: (read: Read) => mockReadContract(read) }),
+  multicallReader: () => (read: Read) => mockReadContract(read),
 }));
 
 const marketData = getMarkets(false).find((market) => market.chainInformation.chainId === 1 && !market.rewardsOverwrite);
@@ -155,6 +156,7 @@ describe('useMarketsState collaterals', () => {
 
   test('reads each collateral by its own address, with 0 reserves when its reserves read reverts', async () => {
     mockReadContract.mockImplementation((read: Read) => {
+      if (read.address !== market.marketAddress || read.abi !== Comet) return readFromMockReads(read);
       const [arg] = read.args ?? [];
       if (read.functionName === 'getPrice' && arg === '0xfeeda') return Promise.resolve(3n);
       if (read.functionName === 'getPrice' && arg === '0xfeedb') return Promise.resolve(4n);

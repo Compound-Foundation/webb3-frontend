@@ -5,7 +5,7 @@ import type { Address } from 'viem';
 import type { Web3 } from '@contexts/Web3Context';
 import Comet from '@helpers/abis/Comet';
 import { isV2Market } from '@helpers/markets';
-import { spawnMulticallClient } from '@helpers/multicall';
+import { multicallReader } from '@helpers/multicall';
 import { MarketData, MarketDataLoaded, MarketDataState, StateType, ExtensionsEnableState } from '@types';
 
 import { Extension } from '../helpers/core';
@@ -54,7 +54,7 @@ async function getState(
   extensions: Extension[],
   accountAddress: Address
 ): Promise<ExtensionsEnableState> {
-  const client = spawnMulticallClient(rawProvider, marketData.chainInformation);
+  const readContract = multicallReader(rawProvider, marketData.chainInformation);
 
   // For each extension, hydrate their operator (contract) addresses.
   const extensionswithMaybeOperator = extensions.map((ext) => ({
@@ -68,7 +68,7 @@ async function getState(
   // actions on behalf of the account.
   const extensionsEnableStatus = await Promise.all(
     extensionsWithOperators.map((ext) =>
-      client.readContract({
+      readContract({
         address: marketData.marketAddress as Address,
         abi: Comet,
         functionName: 'allowance',

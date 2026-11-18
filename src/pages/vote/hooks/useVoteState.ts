@@ -11,7 +11,7 @@ import { getEventLogCoders, proposalEvents, RawLog } from '@helpers/coders';
 import { SECONDS_PER_BLOCK } from '@helpers/constants';
 import { getGovernanceContractAddress, GovernanceNetworksEnum } from '@helpers/contracts';
 import { parseTitleDescriptionFromBody } from '@helpers/functions';
-import { spawnMulticallClient } from '@helpers/multicall';
+import { multicallReader } from '@helpers/multicall';
 import { TIMESTAMP_API } from '@helpers/urls';
 import {
   VoteState,
@@ -107,7 +107,7 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
 
   const chainInfo: ChainInformation = CHAINS[chainId];
   const provider = new StaticJsonRpcProvider(chainInfo.url);
-  const client = spawnMulticallClient(provider, chainInfo);
+  const readContract = multicallReader(provider, chainInfo);
 
   // use Sepolia testnet info for any testnet
   // otherwise, use Eth mainnet for any other network, or no wallet connected
@@ -124,12 +124,12 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
   // fetch all proposal events within the timelock delay, to capture any queued proposals as well
   const currentBlock = await provider.getBlockNumber();
   const [votingPeriod, votingDelay, timelockDelay, gracePeriod, quorumVotes, proposalThreshold] = await Promise.all([
-    client.readContract({ ...governor, functionName: 'votingPeriod' }),
-    client.readContract({ ...governor, functionName: 'votingDelay' }),
-    client.readContract({ ...timelock, functionName: 'delay' }),
-    client.readContract({ ...timelock, functionName: 'GRACE_PERIOD' }),
-    client.readContract({ ...governor, functionName: 'quorumVotes' }),
-    client.readContract({ ...governor, functionName: 'proposalThreshold' }),
+    readContract({ ...governor, functionName: 'votingPeriod' }),
+    readContract({ ...governor, functionName: 'votingDelay' }),
+    readContract({ ...timelock, functionName: 'delay' }),
+    readContract({ ...timelock, functionName: 'GRACE_PERIOD' }),
+    readContract({ ...governor, functionName: 'quorumVotes' }),
+    readContract({ ...governor, functionName: 'proposalThreshold' }),
   ]);
 
   // we'll use this coder to determine the topic hash, and decode the raw log data
@@ -262,7 +262,7 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
   const currentTime = new Date().getTime() / 1000;
 
   const proposalVotes = await Promise.all(
-    [...rawProposals.keys()].map((id) => client.readContract({ ...governor, functionName: 'proposals', args: [id] }))
+    [...rawProposals.keys()].map((id) => readContract({ ...governor, functionName: 'proposals', args: [id] }))
   );
 
   const proposals: Proposal[] = [];
@@ -370,13 +370,13 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
     const activeProposals = proposals.filter((proposal) => proposal.state.state === ProposalStateEnum.Active);
 
     const [decimals, balance, votes, delegate, receipts] = await Promise.all([
-      client.readContract({ ...compToken, functionName: 'decimals' }),
-      client.readContract({ ...compToken, functionName: 'balanceOf', args: [account as Address] }),
-      client.readContract({ ...compToken, functionName: 'getCurrentVotes', args: [account as Address] }),
-      client.readContract({ ...compToken, functionName: 'delegates', args: [account as Address] }),
+      readContract({ ...compToken, functionName: 'decimals' }),
+      readContract({ ...compToken, functionName: 'balanceOf', args: [account as Address] }),
+      readContract({ ...compToken, functionName: 'getCurrentVotes', args: [account as Address] }),
+      readContract({ ...compToken, functionName: 'delegates', args: [account as Address] }),
       Promise.all(
         activeProposals.map((proposal) =>
-          client.readContract({ ...governor, functionName: 'getReceipt', args: [proposal.id, account as Address] })
+          readContract({ ...governor, functionName: 'getReceipt', args: [proposal.id, account as Address] })
         )
       ),
     ]);

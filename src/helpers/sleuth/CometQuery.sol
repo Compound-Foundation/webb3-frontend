@@ -135,6 +135,12 @@ interface WstETH {
   function tokensPerStEth() external view returns (uint);
 }
 
+interface Bulker {
+  function steth() external view returns (address);
+
+  function wsteth() external view returns (address);
+}
+
 contract CometQuery {
   // Interest rate model parameters, per second at factorScale precision. The app computes the APRs
   // from them because service-patched Comets return a zero rate from getBorrowRate/getSupplyRate
@@ -148,6 +154,8 @@ contract CometQuery {
 
   // The account's stETH, which the bulker wraps into the market's wstETH collateral
   struct StEthState {
+    address stETH;
+    address wstETH;
     uint bulkerAllowance;
     uint walletBalance;
     uint wstETHPerStETH;
@@ -302,9 +310,7 @@ contract CometQuery {
     address payable account,
     address payable bulker,
     string memory wrappedNativeTokenSymbol,
-    bool checkDeprecatedwUSDM,
-    address stETH,
-    address wstETH
+    bool checkDeprecatedwUSDM
   ) public view returns (CometStateWithAccountState memory) {
     CometState memory response = query(comet, nativeTokenToUsd, checkDeprecatedwUSDM);
 
@@ -335,12 +341,22 @@ contract CometQuery {
     CollateralAssetWithAccountState[] memory tokens = new CollateralAssetWithAccountState[](
       response.collateralAssets.length
     );
+    // Only the mainnet bulker wraps stETH. The other bulkers have no wsteth(), so the call reverts.
+    address stETH;
+    address wstETH;
+    try Bulker(bulker).wsteth() returns (address bulkerWstETH) {
+      wstETH = bulkerWstETH;
+      stETH = Bulker(bulker).steth();
+    } catch {}
+
     // Stays zero unless wstETH is a collateral of this market
     StEthState memory stETHState;
     for (uint8 i = 0; i < response.collateralAssets.length; i++) {
       tokens[i] = collateralInfoWithAccount(comet, bulker, response.collateralAssets[i], account, wrappedNativeTokenSymbol);
       if (tokens[i].collateralAsset == wstETH) {
         stETHState = StEthState({
+          stETH: stETH,
+          wstETH: wstETH,
           bulkerAllowance: ERC20(stETH).allowance(account, bulker),
           walletBalance: ERC20(stETH).balanceOf(account),
           wstETHPerStETH: WstETH(wstETH).tokensPerStEth()

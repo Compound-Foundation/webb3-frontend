@@ -13,7 +13,7 @@ import { getHardcodedFeedPrice, getRemappedPriceFeed } from '@helpers/deprecated
 import { aprAt, RateModel } from '@helpers/interestRates';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
-import { spawnMulticallClient } from '@helpers/multicall';
+import { multicallReader } from '@helpers/multicall';
 import { FACTOR_PRECISION } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
@@ -84,13 +84,13 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
 
   if (market.type === 'MarketData') return [StateType.Loading];
 
-  const client = spawnMulticallClient(rawProvider, market.chainInformation);
+  const readContract = multicallReader(rawProvider, market.chainInformation);
   const comet = { address: market.marketAddress as Address, abi: Comet } as const;
 
   // A deprecated feed's reads revert, so its hardcoded price is used instead of reading it
   const collateralPrice = (priceFeed: string) =>
     getRemappedPriceFeed(priceFeed) === ''
-      ? client.readContract({ ...comet, functionName: 'getPrice', args: [priceFeed as Address] })
+      ? readContract({ ...comet, functionName: 'getPrice', args: [priceFeed as Address] })
       : getHardcodedFeedPrice(priceFeed);
 
   const [
@@ -113,37 +113,39 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
     supplySlopeHigh,
     ...collaterals
   ] = await Promise.all([
-    client.readContract({ ...comet, functionName: 'getUtilization' }),
-    client.readContract({ ...comet, functionName: 'factorScale' }),
-    client.readContract({ ...comet, functionName: 'getReserves' }),
-    client.readContract({ ...comet, functionName: 'totalSupply' }),
-    client.readContract({ ...comet, functionName: 'totalBorrow' }),
-    client.readContract({ ...comet, functionName: 'targetReserves' }),
-    client.readContract({ ...comet, functionName: 'getPrice', args: [getBaseAssetPriceFeed(market) as Address] }),
-    client.readContract({ ...comet, functionName: 'getPrice', args: [market.baseAsset.priceFeed as Address] }),
-    client.readContract({
+    readContract({ ...comet, functionName: 'getUtilization' }),
+    readContract({ ...comet, functionName: 'factorScale' }),
+    readContract({ ...comet, functionName: 'getReserves' }),
+    readContract({ ...comet, functionName: 'totalSupply' }),
+    readContract({ ...comet, functionName: 'totalBorrow' }),
+    readContract({ ...comet, functionName: 'targetReserves' }),
+    readContract({ ...comet, functionName: 'getPrice', args: [getBaseAssetPriceFeed(market) as Address] }),
+    readContract({ ...comet, functionName: 'getPrice', args: [market.baseAsset.priceFeed as Address] }),
+    readContract({
       address: market.baseAsset.address as Address,
       abi: ERC20,
       functionName: 'balanceOf',
       args: [market.marketAddress as Address],
     }),
-    client.readContract({ ...comet, functionName: 'borrowKink' }),
-    client.readContract({ ...comet, functionName: 'borrowPerSecondInterestRateBase' }),
-    client.readContract({ ...comet, functionName: 'borrowPerSecondInterestRateSlopeLow' }),
-    client.readContract({ ...comet, functionName: 'borrowPerSecondInterestRateSlopeHigh' }),
-    client.readContract({ ...comet, functionName: 'supplyKink' }),
-    client.readContract({ ...comet, functionName: 'supplyPerSecondInterestRateBase' }),
-    client.readContract({ ...comet, functionName: 'supplyPerSecondInterestRateSlopeLow' }),
-    client.readContract({ ...comet, functionName: 'supplyPerSecondInterestRateSlopeHigh' }),
+    readContract({ ...comet, functionName: 'borrowKink' }),
+    readContract({ ...comet, functionName: 'borrowPerSecondInterestRateBase' }),
+    readContract({ ...comet, functionName: 'borrowPerSecondInterestRateSlopeLow' }),
+    readContract({ ...comet, functionName: 'borrowPerSecondInterestRateSlopeHigh' }),
+    readContract({ ...comet, functionName: 'supplyKink' }),
+    readContract({ ...comet, functionName: 'supplyPerSecondInterestRateBase' }),
+    readContract({ ...comet, functionName: 'supplyPerSecondInterestRateSlopeLow' }),
+    readContract({ ...comet, functionName: 'supplyPerSecondInterestRateSlopeHigh' }),
     ...market.collateralAssets.map((asset) =>
       Promise.all([
         collateralPrice(asset.priceFeed),
-        client.readContract({ ...comet, functionName: 'totalsCollateral', args: [asset.address as Address] }),
+        readContract({ ...comet, functionName: 'totalsCollateral', args: [asset.address as Address] }),
         // getCollateralReserves reverts when the asset's balanceOf reverts or Comet's balance drops
         // below its recorded supply. Such a collateral shows 0 reserves instead of breaking the page.
-        client
-          .readContract({ ...comet, functionName: 'getCollateralReserves', args: [asset.address as Address] })
-          .catch(() => 0n),
+        readContract({
+          ...comet,
+          functionName: 'getCollateralReserves',
+          args: [asset.address as Address],
+        }).catch(() => 0n),
       ])
     ),
   ]);

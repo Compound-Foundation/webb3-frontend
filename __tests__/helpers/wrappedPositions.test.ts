@@ -2,6 +2,7 @@ import { Interface } from '@ethersproject/abi';
 
 import { WRAPPED_MARKET_REGISTRY, WrappedMarket } from '@constants/wrappedMarkets';
 import CometAbi from '@helpers/abis/Comet';
+import ERC20Abi from '@helpers/abis/ERC20';
 import { LendingRoute } from '@helpers/lendingRoute';
 import { MAX_UINT256 } from '@helpers/numbers';
 import {
@@ -46,8 +47,8 @@ type ChainValues = {
   isWithdrawPaused: boolean;
 };
 
-/** A viem client stand-in that answers each read by contract address and function name. */
-function fakeClient(market: WrappedMarket, values: ChainValues) {
+/** A readContract stand-in that answers each read by contract address and function name. */
+function fakeReader(market: WrappedMarket, values: ChainValues) {
   const answer = (target: string, name: string): unknown => {
     const address = target.toLowerCase();
     if (address === market.wrapperAddress.toLowerCase()) {
@@ -69,9 +70,7 @@ function fakeClient(market: WrappedMarket, values: ChainValues) {
   const readContract = jest.fn(async ({ address, functionName }: { address: string; functionName: string }) =>
     answer(address, functionName)
   );
-  return { readContract } as unknown as Parameters<typeof readWrappedPosition>[0] & {
-    readContract: typeof readContract;
-  };
+  return readContract as unknown as Parameters<typeof readWrappedPosition>[0] & typeof readContract;
 }
 
 // 1,000.5 USDC of wrapper assets. With the 10 ** 12 virtual shares, the supply divides into
@@ -135,9 +134,9 @@ describe('getWrappedPositionValueInDollars', () => {
 describe('readWrappedPosition', () => {
   it('reads every figure and keeps each in its own units', async () => {
     const market = usdcMarket();
-    const client = fakeClient(market, BASE_VALUES);
+    const readContract = fakeReader(market, BASE_VALUES);
 
-    const position = await readWrappedPosition(client, market, ACCOUNT);
+    const position = await readWrappedPosition(readContract, market, ACCOUNT);
 
     expect(position).toEqual({
       shares: 250n * 10n ** 18n,
@@ -155,32 +154,36 @@ describe('readWrappedPosition', () => {
         baseSupplyIndex: 1_050_000_000_000_000n,
       },
     });
-    const contracts = client.readContract.mock.calls.map(([contract]) => contract);
     // The allowance is the base token's, with the wrapper as spender.
-    expect(contracts).toContainEqual(
-      expect.objectContaining({
-        address: market.baseTokenAddress,
-        functionName: 'allowance',
-        args: [ACCOUNT, market.wrapperAddress],
-      })
-    );
+    expect(readContract).toHaveBeenCalledWith({
+      address: market.baseTokenAddress,
+      abi: ERC20Abi,
+      functionName: 'allowance',
+      args: [ACCOUNT, market.wrapperAddress],
+    });
     // The wrapper's assets are its Comet balance.
-    expect(contracts).toContainEqual(
-      expect.objectContaining({
-        address: market.cometAddress,
-        functionName: 'balanceOf',
-        args: [market.wrapperAddress],
-      })
-    );
+    expect(readContract).toHaveBeenCalledWith({
+      address: market.cometAddress,
+      abi: CometAbi,
+      functionName: 'balanceOf',
+      args: [market.wrapperAddress],
+    });
   });
 
   it('fails when the wrapper does not hold the configured Comet, instead of reading zero', async () => {
     const market = usdcMarket();
-    const client = fakeClient(market, {
+    const readContract = fakeReader(market, {
       ...BASE_VALUES,
       asset: '0x3Afdc9BCA9213A35503b077a6072F3D0d5AB0840',
     });
-    await expect(readWrappedPosition(client, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
+    await expect(readWrappedPosition(readContract, market, ACCOUNT)).rejects.toThrow(WrappedPositionReadError);
+  });
+
+  it('fails when a read fails, instead of reading zero', async () => {
+    const market = usdcMarket();
+    const readContract = fakeReader(market, BASE_VALUES);
+    readContract.mockRejectedValueOnce(new Error('rpc down'));
+    await expect(readWrappedPosition(readContract, market, ACCOUNT)).rejects.toThrow('rpc down');
   });
 });
 

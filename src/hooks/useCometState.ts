@@ -1,5 +1,4 @@
 import { StaticJsonRpcProvider } from '@ethersproject/providers';
-import { constants } from 'ethers';
 import { ConnectionInfo } from 'ethers/lib/utils';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -19,9 +18,7 @@ import {
   CometWithAccountStateQuery,
   CometWithAccountStateResponse,
   RateModelResponse,
-  StEthStateResponse,
 } from '@helpers/sleuth/types';
-import { isStETH, isWrappedStETH } from '@helpers/steth';
 import { delaysCometRefresh } from '@hooks/useTransactionManager';
 import { useWaiter } from '@hooks/useWaiter';
 import {
@@ -81,7 +78,22 @@ export function useCometState(
             account
           );
           newState = formatCometStateHydrated(cometResponse, marketStateData, rewards);
-          maybeHydrateStEthCollateral(newState, marketStateData, cometResponse.stETHState);
+          // stETHState names the bulker's stETH and wstETH, or zero addresses when wstETH is not a collateral here
+          const { stETHState } = cometResponse;
+          const wstETH = newState[1].collateralAssets.find((asset) => asset.address === stETHState.wstETH);
+          const stETH = marketStateData.chainInformation.unwrappedCollateralAssets[stETHState.wstETH];
+          if (wstETH && stETH?.address.toLowerCase() === stETHState.stETH.toLowerCase()) {
+            newState[1].collateralAssets.push({
+              ...wstETH,
+              balance: 0n,
+              bulkerAllowance: stETHState.bulkerAllowance.toBigInt(),
+              price: (wstETH.price * stETHState.wstETHPerStETH.toBigInt()) / BigInt(10 ** wstETH.decimals),
+              walletBalance: stETHState.walletBalance.toBigInt(),
+              address: stETH.address,
+              symbol: stETH.symbol,
+              name: stETH.name,
+            });
+          }
         } else {
           const cometResponse = await queryCometData(web3.read.provider.connection, marketStateData);
           newState = formatCometStateNoWallet(cometResponse, marketStateData, rewards);
@@ -183,10 +195,6 @@ export const queryCometDataWithAccount = (
 
   const wrappedNativeTokenSymbol = `W${market.chainInformation.nativeToken.symbol}`;
   const checkDeprecatedwUSDM = getIsDeprecatedwUSDMMarket(market.baseAsset, market.chainInformation);
-  const [wstETHAddress = constants.AddressZero, stETH] =
-    Object.entries(market.chainInformation.unwrappedCollateralAssets).find(([, token]) =>
-      isStETH(token.symbol)
-    ) ?? [];
   return sleuth.fetch<CometWithAccountStateResponse, CometWithAccountStateQuery>(QUERY_WITH_ACCOUNT, [
     market.marketAddress,
     nativeTokenToUsdPriceFeed,
@@ -194,8 +202,6 @@ export const queryCometDataWithAccount = (
     market.bulkerAddress,
     wrappedNativeTokenSymbol,
     checkDeprecatedwUSDM,
-    stETH?.address ?? constants.AddressZero,
-    wstETHAddress,
   ]);
 };
 
@@ -324,30 +330,6 @@ const formatCometStateHydrated = (
   };
 
   return [StateType.Hydrated, state];
-};
-
-const maybeHydrateStEthCollateral = (
-  cometStateFormatted: CometStateHydrated,
-  market: MarketData | MarketDataLoaded,
-  stETHState: StEthStateResponse
-): void => {
-  const stETHCollateralAssets = cometStateFormatted[1].collateralAssets.flatMap((asset) => {
-    const unwrappedAsset = market.chainInformation.unwrappedCollateralAssets[asset.address];
-    if (unwrappedAsset === undefined || !isWrappedStETH(asset.symbol) || !isStETH(unwrappedAsset.symbol)) return [];
-    return [
-      {
-        ...asset,
-        balance: 0n,
-        bulkerAllowance: stETHState.bulkerAllowance.toBigInt(),
-        price: (asset.price * stETHState.wstETHPerStETH.toBigInt()) / BigInt(10 ** asset.decimals),
-        walletBalance: stETHState.walletBalance.toBigInt(),
-        address: unwrappedAsset.address,
-        symbol: unwrappedAsset.symbol,
-        name: unwrappedAsset.name,
-      },
-    ];
-  });
-  cometStateFormatted[1].collateralAssets.push(...stETHCollateralAssets);
 };
 
 const formatCometStateNoWallet = (
