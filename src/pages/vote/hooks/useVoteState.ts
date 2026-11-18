@@ -11,7 +11,7 @@ import { getEventLogCoders, proposalEvents, RawLog } from '@helpers/coders';
 import { SECONDS_PER_BLOCK } from '@helpers/constants';
 import { getGovernanceContractAddress, GovernanceNetworksEnum } from '@helpers/contracts';
 import { parseTitleDescriptionFromBody } from '@helpers/functions';
-import { readClient } from '@helpers/multicall';
+import { spawnMulticallClient } from '@helpers/multicall';
 import { TIMESTAMP_API } from '@helpers/urls';
 import {
   VoteState,
@@ -107,7 +107,7 @@ const getState = async (chainId = 1, account?: string): Promise<VoteState> => {
 
   const chainInfo: ChainInformation = CHAINS[chainId];
   const provider = new StaticJsonRpcProvider(chainInfo.url);
-  const client = readClient(provider, chainInfo);
+  const client = spawnMulticallClient(provider, chainInfo);
 
   // use Sepolia testnet info for any testnet
   // otherwise, use Eth mainnet for any other network, or no wallet connected

@@ -13,7 +13,7 @@ import { getHardcodedFeedPrice, getRemappedPriceFeed } from '@helpers/deprecated
 import { aprAt, RateModel } from '@helpers/interestRates';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
-import { readClient } from '@helpers/multicall';
+import { spawnMulticallClient } from '@helpers/multicall';
 import { FACTOR_PRECISION } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import { getMarketDataUrlForMarket } from '@helpers/urls';
@@ -84,7 +84,7 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
 
   if (market.type === 'MarketData') return [StateType.Loading];
 
-  const client = readClient(rawProvider, market.chainInformation);
+  const client = spawnMulticallClient(rawProvider, market.chainInformation);
   const comet = { address: market.marketAddress as Address, abi: Comet } as const;
 
   // A deprecated feed's reads revert, so its hardcoded price is used instead of reading it

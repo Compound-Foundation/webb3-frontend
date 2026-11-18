@@ -257,6 +257,7 @@ contract CometQuery {
     uint factorScale;
     uint nativeAssetInDollars;
     uint nativeAssetWalletBalance;
+    StEthState stETHState;
     RateModel supplyRateModel;
     uint totalBorrow;
     uint totalBorrowPrincipal;
@@ -301,7 +302,9 @@ contract CometQuery {
     address payable account,
     address payable bulker,
     string memory wrappedNativeTokenSymbol,
-    bool checkDeprecatedwUSDM
+    bool checkDeprecatedwUSDM,
+    address stETH,
+    address wstETH
   ) public view returns (CometStateWithAccountState memory) {
     CometState memory response = query(comet, nativeTokenToUsd, checkDeprecatedwUSDM);
 
@@ -332,8 +335,17 @@ contract CometQuery {
     CollateralAssetWithAccountState[] memory tokens = new CollateralAssetWithAccountState[](
       response.collateralAssets.length
     );
+    // Stays zero unless wstETH is a collateral of this market
+    StEthState memory stETHState;
     for (uint8 i = 0; i < response.collateralAssets.length; i++) {
       tokens[i] = collateralInfoWithAccount(comet, bulker, response.collateralAssets[i], account, wrappedNativeTokenSymbol);
+      if (tokens[i].collateralAsset == wstETH) {
+        stETHState = StEthState({
+          bulkerAllowance: ERC20(stETH).allowance(account, bulker),
+          walletBalance: ERC20(stETH).balanceOf(account),
+          wstETHPerStETH: WstETH(wstETH).tokensPerStEth()
+        });
+      }
     }
 
     return
@@ -348,6 +360,7 @@ contract CometQuery {
         factorScale: response.factorScale,
         nativeAssetInDollars: response.nativeAssetInDollars,
         nativeAssetWalletBalance: account.balance,
+        stETHState: stETHState,
         supplyRateModel: response.supplyRateModel,
         totalBorrow: response.totalBorrow,
         totalBorrowPrincipal: response.totalBorrowPrincipal,
@@ -356,30 +369,6 @@ contract CometQuery {
         trackingIndexScale: response.trackingIndexScale,
         utilization: response.utilization
       });
-  }
-
-  // stETHState stays zero unless wstETH is a collateral of this market
-  function queryWithAccountAndStEth(
-    Comet comet,
-    address nativeTokenToUsd,
-    address payable account,
-    address payable bulker,
-    string memory wrappedNativeTokenSymbol,
-    bool checkDeprecatedwUSDM,
-    address stETH,
-    address wstETH
-  ) public view returns (CometStateWithAccountState memory state, StEthState memory stETHState) {
-    state = queryWithAccount(comet, nativeTokenToUsd, account, bulker, wrappedNativeTokenSymbol, checkDeprecatedwUSDM);
-    for (uint i = 0; i < state.collateralAssets.length; i++) {
-      if (state.collateralAssets[i].collateralAsset == wstETH) {
-        stETHState = StEthState({
-          bulkerAllowance: ERC20(stETH).allowance(account, bulker),
-          walletBalance: ERC20(stETH).balanceOf(account),
-          wstETHPerStETH: WstETH(wstETH).tokensPerStEth()
-        });
-        break;
-      }
-    }
   }
 
   function cometStateMinusCollateralInfo(Comet comet, address nativeTokenToUsd) public view returns (CometStateWithoutCollateralAssets memory) {

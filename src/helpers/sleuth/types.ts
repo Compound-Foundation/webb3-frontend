@@ -17,11 +17,7 @@ export type CometWithAccountStateQuery = [
   string, // account address
   string, // bulker address
   string, // wrapped native token symbol
-  boolean // checkDeprecatedwUSDM
-];
-
-export type CometWithAccountAndStEthQuery = [
-  ...CometWithAccountStateQuery,
+  boolean, // checkDeprecatedwUSDM
   string, // stETH address, or the zero address
   string // wstETH address, or the zero address
 ];
@@ -30,11 +26,6 @@ export type StEthStateResponse = {
   bulkerAllowance: BigNumber;
   walletBalance: BigNumber;
   wstETHPerStETH: BigNumber;
-};
-
-export type CometWithAccountAndStEthResponse = {
-  state: CometWithAccountStateResponse;
-  stETHState: StEthStateResponse;
 };
 
 export type CometWithAccountStateResponse = {
@@ -77,6 +68,7 @@ export type CometWithAccountStateResponse = {
   factorScale: BigNumber;
   nativeAssetInDollars: BigNumber;
   nativeAssetWalletBalance: BigNumber;
+  stETHState: StEthStateResponse;
   supplyRateModel: RateModelResponse;
   totalBorrow: BigNumber;
   totalBorrowPrincipal: BigNumber;

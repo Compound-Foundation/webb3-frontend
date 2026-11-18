@@ -78,16 +78,14 @@ const cometResponse = (supplyRatePerSecond: number) =>
 const cometResponseWithAccount = (baseBalance: number) => {
   const response = cometResponse(0);
   return {
-    state: {
-      ...response,
+    ...response,
+    bulkerAllowance: BigNumber.from(0),
+    baseAsset: {
+      ...response.baseAsset,
+      allowance: BigNumber.from(0),
+      balance: BigNumber.from(baseBalance),
       bulkerAllowance: BigNumber.from(0),
-      baseAsset: {
-        ...response.baseAsset,
-        allowance: BigNumber.from(0),
-        balance: BigNumber.from(baseBalance),
-        bulkerAllowance: BigNumber.from(0),
-        walletBalance: BigNumber.from(0),
-      },
+      walletBalance: BigNumber.from(0),
     },
     stETHState: {
       bulkerAllowance: BigNumber.from(0),

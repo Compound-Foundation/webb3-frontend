@@ -16,8 +16,7 @@ import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
 import { Sleuth } from '@helpers/sleuth/sleuth';
 import {
   CometStateResponse,
-  CometWithAccountAndStEthQuery,
-  CometWithAccountAndStEthResponse,
+  CometWithAccountStateQuery,
   CometWithAccountStateResponse,
   RateModelResponse,
   StEthStateResponse,
@@ -76,13 +75,13 @@ export function useCometState(
       ) {
         let newState: CometState;
         if (account) {
-          const { state: cometResponse, stETHState } = await queryCometDataWithAccount(
+          const cometResponse = await queryCometDataWithAccount(
             web3.read.provider.connection,
             marketStateData,
             account
           );
           newState = formatCometStateHydrated(cometResponse, marketStateData, rewards);
-          maybeHydrateStEthCollateral(newState, marketStateData, stETHState);
+          maybeHydrateStEthCollateral(newState, marketStateData, cometResponse.stETHState);
         } else {
           const cometResponse = await queryCometData(web3.read.provider.connection, marketStateData);
           newState = formatCometStateNoWallet(cometResponse, marketStateData, rewards);
@@ -171,12 +170,12 @@ export function useCometState(
   return state;
 }
 
-const QUERY_WITH_ACCOUNT_AND_STETH = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryWithAccountAndStEth' });
+const QUERY_WITH_ACCOUNT = Sleuth.querySol(CometQuery, { queryFunctionName: 'queryWithAccount' });
 export const queryCometDataWithAccount = (
   providerConnection: string | ConnectionInfo,
   market: MarketData | MarketDataLoaded,
   account: string
-): Promise<CometWithAccountAndStEthResponse> => {
+): Promise<CometWithAccountStateResponse> => {
   const provider = new StaticJsonRpcProvider(providerConnection);
   const sleuth = new Sleuth(provider, getSleuthOptions(market.chainInformation.chainId));
 
@@ -185,10 +184,10 @@ export const queryCometDataWithAccount = (
   const wrappedNativeTokenSymbol = `W${market.chainInformation.nativeToken.symbol}`;
   const checkDeprecatedwUSDM = getIsDeprecatedwUSDMMarket(market.baseAsset, market.chainInformation);
   const [wstETHAddress = constants.AddressZero, stETH] =
-    Object.entries(market.chainInformation.unwrappedCollateralAssets ?? {}).find(([, token]) =>
+    Object.entries(market.chainInformation.unwrappedCollateralAssets).find(([, token]) =>
       isStETH(token.symbol)
     ) ?? [];
-  return sleuth.fetch<CometWithAccountAndStEthResponse, CometWithAccountAndStEthQuery>(QUERY_WITH_ACCOUNT_AND_STETH, [
+  return sleuth.fetch<CometWithAccountStateResponse, CometWithAccountStateQuery>(QUERY_WITH_ACCOUNT, [
     market.marketAddress,
     nativeTokenToUsdPriceFeed,
     account,
@@ -332,30 +331,23 @@ const maybeHydrateStEthCollateral = (
   market: MarketData | MarketDataLoaded,
   stETHState: StEthStateResponse
 ): void => {
-  const extraCollateralAssetsWithAccountState: TokenWithAccountState[] =
-    market.chainInformation.unwrappedCollateralAssets !== undefined
-      ? cometStateFormatted[1].collateralAssets
-          .filter((asset) => {
-            const unwrappedAsset = market.chainInformation.unwrappedCollateralAssets[asset.address];
-            return unwrappedAsset !== undefined && isWrappedStETH(asset.symbol) && isStETH(unwrappedAsset.symbol);
-          })
-          .map((asset) => {
-            const unwrappedAsset = market.chainInformation.unwrappedCollateralAssets[asset.address];
-            return {
-              ...asset,
-              balance: 0n,
-              bulkerAllowance: stETHState.bulkerAllowance.toBigInt(),
-              price: (asset.price * stETHState.wstETHPerStETH.toBigInt()) / BigInt(10 ** asset.decimals),
-              walletBalance: stETHState.walletBalance.toBigInt(),
-              address: unwrappedAsset.address,
-              symbol: unwrappedAsset.symbol,
-              name: unwrappedAsset.name,
-            };
-          })
-      : ([] as TokenWithAccountState[]);
-  cometStateFormatted[1].collateralAssets = cometStateFormatted[1].collateralAssets.concat(
-    extraCollateralAssetsWithAccountState
-  );
+  const stETHCollateralAssets = cometStateFormatted[1].collateralAssets.flatMap((asset) => {
+    const unwrappedAsset = market.chainInformation.unwrappedCollateralAssets[asset.address];
+    if (unwrappedAsset === undefined || !isWrappedStETH(asset.symbol) || !isStETH(unwrappedAsset.symbol)) return [];
+    return [
+      {
+        ...asset,
+        balance: 0n,
+        bulkerAllowance: stETHState.bulkerAllowance.toBigInt(),
+        price: (asset.price * stETHState.wstETHPerStETH.toBigInt()) / BigInt(10 ** asset.decimals),
+        walletBalance: stETHState.walletBalance.toBigInt(),
+        address: unwrappedAsset.address,
+        symbol: unwrappedAsset.symbol,
+        name: unwrappedAsset.name,
+      },
+    ];
+  });
+  cometStateFormatted[1].collateralAssets.push(...stETHCollateralAssets);
 };
 
 const formatCometStateNoWallet = (

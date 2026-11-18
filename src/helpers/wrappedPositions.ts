@@ -9,7 +9,7 @@ import ERC20Abi from '@helpers/abis/ERC20';
 import WrappedCometAbi from '@helpers/abis/WrappedCometERC4626';
 import { lendsBaseDirectly } from '@helpers/actions';
 import { LendingRoute } from '@helpers/lendingRoute';
-import { readClient } from '@helpers/multicall';
+import { spawnMulticallClient } from '@helpers/multicall';
 import { getTokenValue } from '@helpers/numbers';
 import type { WithdrawalLimits } from '@helpers/wrappedWithdrawals';
 import { Action, BaseAssetWithAccountState, CometState, Currency, ProtocolAndAccountState, StateType } from '@types';
@@ -155,7 +155,7 @@ function toBigInt(value: unknown, name: string): bigint {
  * wrapper does not hold the configured Comet.
  */
 export async function readWrappedPosition(
-  client: Pick<ReturnType<typeof readClient>, 'readContract'>,
+  client: Pick<ReturnType<typeof spawnMulticallClient>, 'readContract'>,
   market: WrappedMarket,
   account: Address
 ): Promise<WrappedPosition> {

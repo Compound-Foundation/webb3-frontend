@@ -19,7 +19,7 @@ const readFromMockReads = ({ functionName }: Read) => Promise.resolve(mockReads[
 const mockReadContract = jest.fn<Promise<unknown>, [Read]>(readFromMockReads);
 
 jest.mock('@helpers/multicall', () => ({
-  readClient: () => ({ readContract: (read: Read) => mockReadContract(read) }),
+  spawnMulticallClient: () => ({ readContract: (read: Read) => mockReadContract(read) }),
 }));
 
 const marketData = getMarkets(false).find((market) => market.chainInformation.chainId === 1 && !market.rewardsOverwrite);
