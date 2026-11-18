@@ -11,7 +11,7 @@ import { HistoryItemType, TransactionAction, TransactionActionType, TransactionH
 
 import BulkTransactionGraph from './BulkTransactionGraph';
 import TransactionDate from './TransactionDate';
-import { renderMarketDescriptorElement } from './TransactionRowByMonth';
+import { MarketDescriptor } from './TransactionRowByMonth';
 import TransactionTextHolder from './TransactionTextHolder';
 
 // for liquidation transactions, we message regarding seized assets
@@ -57,7 +57,7 @@ const BulkTransaction = ({
               <span className={`icon icon--${iconName}`}></span>
             </div>
             <TransactionTextHolder headerText={headerText}>
-              {renderMarketDescriptorElement(actions[0].contract.address, chainId)}
+              <MarketDescriptor address={actions[0].contract.address} chainId={chainId} />
               {getInitiatedByDescriptor({ account, transaction })}
             </TransactionTextHolder>
           </div>

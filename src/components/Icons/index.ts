@@ -8,6 +8,7 @@ export * from './CheckMark';
 export * from './CircleCheckmark';
 export * from './CircleClose';
 export * from './CircleExclamation';
+export * from './CircleExclamationSmall';
 export * from './CircleMinus';
 export * from './CirclePlus';
 export * from './CircleRightArrow';

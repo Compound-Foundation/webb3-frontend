@@ -1,7 +1,5 @@
 import { getAddress, isAddress, zeroAddress } from 'viem';
 
-import { getMarket, isV2Market } from '@helpers/markets';
-
 /**
  * The EIP-6963 RDNS the Anchorage Digital extension announces, and so the id of its wagmi
  * connector. Any extension can announce it. It selects a user experience only. It is not
@@ -141,10 +139,6 @@ function validateEntry(source: WrappedMarketSource, cometAddress: string): Wrapp
   if (!baseToken.ok) return { problem: baseToken.problem, detail: `baseTokenAddress is ${baseToken.problem}` };
   const inconsistent = (detail: string): Invalid => ({ problem: 'inconsistent', detail });
 
-  const market = getMarket(source.chainId, cometAddress);
-  if (market === undefined || isV2Market(market)) {
-    return inconsistent('the Comet is not a market the frontend lists on that chain');
-  }
   if (new Set([cometAddress, wrapper.address, baseToken.address]).size !== 3) {
     return inconsistent('the Comet, wrapper and base token must be three different contracts');
   }

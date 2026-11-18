@@ -19,6 +19,7 @@ import { getMarket } from '@helpers/markets';
 import { useLendingRoute } from '@hooks/useLendingRoute';
 import { MarketData } from '@types';
 
+import { MOCK_MARKETS } from '../mocks/mockMarkets';
 import { mockWeb3 } from '../mocks/mockWeb3';
 
 // wagmi ships ESM only, which Jest does not load here, so neither it nor the context that
@@ -61,8 +62,8 @@ const WRAPPED_MARKET_ADDRESSES = {
 };
 const USDC = WRAPPED_MARKET_ADDRESSES.usdc;
 
-const USDC_MARKET = getMarket(1, USDC.comet) as MarketData;
-const USDT_MARKET = getMarket(1, WRAPPED_MARKET_ADDRESSES.usdt.comet) as MarketData;
+const USDC_MARKET = getMarket(MOCK_MARKETS, 1, USDC.comet) as MarketData;
+const USDT_MARKET = getMarket(MOCK_MARKETS, 1, WRAPPED_MARKET_ADDRESSES.usdt.comet) as MarketData;
 
 function openRegistry(baseDecimals = 6): WrappedMarketRegistry {
   return buildWrappedMarketRegistry({

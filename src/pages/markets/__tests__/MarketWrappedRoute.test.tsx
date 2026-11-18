@@ -8,6 +8,7 @@ import { STANDARD_LENDING, WrappedLending, WrappedLendingContext } from '@contex
 import { getMarket } from '@helpers/markets';
 import { MarketData, StateType } from '@types';
 
+import { MOCK_MARKETS, MockMarketsProvider } from '../../../../__tests__/mocks/mockMarkets';
 import { mockWeb3 } from '../../../../__tests__/mocks/mockWeb3';
 import Market from '../Market';
 
@@ -26,7 +27,7 @@ jest.mock('../components/CollateralAssetsPanel', () => mockMarker('collateral-as
 jest.mock('@components/IconPair', () => mockMarker('icon-pair'));
 
 const INSTITUTIONAL_COMET = '0x207158a267CBD2598BB3d611D8CBdEE2709F2F8C';
-const INSTITUTIONAL_MARKET = getMarket(1, INSTITUTIONAL_COMET) as MarketData;
+const INSTITUTIONAL_MARKET = getMarket(MOCK_MARKETS, 1, INSTITUTIONAL_COMET) as MarketData;
 
 jest.mock('../hooks/useMarketsState', () => ({
   useMarketsState: () => [
@@ -85,19 +86,21 @@ function wrappedLending(): WrappedLending {
 function renderMarket(lending: WrappedLending) {
   const SelectedMarketContext = SelectedMarketContextHelpers.getSelectedMarketContext();
   render(
-    <MemoryRouter>
-      <WrappedLendingContext.Provider value={lending}>
-        <SelectedMarketContext.Provider
-          value={{
-            selectedMarket: [StateType.Hydrated, INSTITUTIONAL_MARKET],
-            selectMarket: jest.fn(),
-            selectMarketByAddress: jest.fn(),
-          }}
-        >
-          <Market web3={mockWeb3} />
-        </SelectedMarketContext.Provider>
-      </WrappedLendingContext.Provider>
-    </MemoryRouter>
+    <MockMarketsProvider>
+      <MemoryRouter>
+        <WrappedLendingContext.Provider value={lending}>
+          <SelectedMarketContext.Provider
+            value={{
+              selectedMarket: [StateType.Hydrated, INSTITUTIONAL_MARKET],
+              selectMarket: jest.fn(),
+              selectMarketByAddress: jest.fn(),
+            }}
+          >
+            <Market web3={mockWeb3} />
+          </SelectedMarketContext.Provider>
+        </WrappedLendingContext.Provider>
+      </MemoryRouter>
+    </MockMarketsProvider>
   );
 }
 
