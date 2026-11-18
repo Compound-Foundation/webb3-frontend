@@ -56,6 +56,7 @@ const getHistoricalMarketSummaries = async (
   const historicalMarketSummaries = await historicalMarketSummariesResponse.json();
   const sanitizedHistoricalMarketSummaries: MarketSummary[] = historicalMarketSummaries
     .map(convertApiResponse)
+    .filter(({ chainId, comet }: LatestMarketSummaryResponse) => getMarket(markets, chainId, comet.address))
     .map((marketSummary: LatestMarketSummaryResponse) => sanitizeMarketSummary(markets, marketSummary));
 
   // Aggregate historical summaries by date
