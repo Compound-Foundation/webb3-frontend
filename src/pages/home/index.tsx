@@ -342,6 +342,10 @@ const Home = ({
     return selected.collaterals?.find((collateral) => collateral.address.toLowerCase() === summaryAddress);
   };
 
+  // The summary status can lag behind a feed that already reverts, which the market query reports as price 0
+  const hasCollateralError = (token: { address: string; price: bigint }) =>
+    token.price === 0n || getCollateralFor(token.address)?.status === 'error';
+
   const isCollateralShown = (assetAddress: string, balance = 0n) => {
     if (balance > 0n) return true;
 
@@ -737,7 +741,7 @@ const Home = ({
       .map((token, index) => (
         <AssetRow
           key={index}
-          state={[StateType.NoWallet, { asset: token, isCollateralError: getCollateralFor(token.address)?.status === 'error' }]}
+          state={[StateType.NoWallet, { asset: token, isCollateralError: hasCollateralError(token) }]}
         />
       ));
     positionCardState = [
@@ -1712,7 +1716,7 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
-              isCollateralError: collateral?.status === 'error',
+              isCollateralError: hasCollateralError(token),
               isDeprecated: collateral?.isDeprecated,
               unwrappedAssetSupplyAction: stEthWrapSupplyAction,
               onDripClicked: () => {
@@ -1775,7 +1779,7 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
-              isCollateralError: getCollateralFor(token.address)?.status === 'error',
+              isCollateralError: hasCollateralError(token),
               wrappedAsset: matchingWrappedAsset,
               onCancelClicked: () => {
                 if (isFromEarlierVisit() || isQueueLocked()) return;
