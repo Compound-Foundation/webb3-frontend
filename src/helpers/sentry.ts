@@ -10,6 +10,12 @@ export type SentryEnvironment = {
   environment: string;
   /** `import.meta.env.VITE_SENTRY_RELEASE`. */
   release?: string;
+  /**
+   * `import.meta.env.VITE_SENTRY_TUNNEL`: the URL of the relay that forwards events to Sentry, which ad blockers
+   * do not block as they block Sentry's own hosts. Without it, events go to Sentry directly, which the CSP of the
+   * production hosts does not allow.
+   */
+  tunnel?: string;
 };
 
 /** The SDK's default integration that records each `console` call as a breadcrumb. */
@@ -31,6 +37,7 @@ export function buildSentryOptions({
   isDev,
   environment,
   release,
+  tunnel,
 }: SentryEnvironment): Sentry.BrowserOptions | undefined {
   if (!dsn) {
     return undefined;
@@ -39,6 +46,7 @@ export function buildSentryOptions({
     dsn,
     environment,
     release: release || undefined,
+    tunnel: tunnel || undefined,
     // Console output is not sent as breadcrumbs. The app logs whole wallet, screening and RPC errors, which
     // say more than an error report needs.
     integrations: (defaultIntegrations) => [
@@ -76,6 +84,7 @@ export function initSentry(): void {
     isDev: Boolean(import.meta.env.DEV),
     environment: import.meta.env.VITE_SENTRY_ENVIRONMENT || import.meta.env.MODE || 'production',
     release: import.meta.env.VITE_SENTRY_RELEASE,
+    tunnel: import.meta.env.VITE_SENTRY_TUNNEL,
   });
   if (!options) {
     return;
