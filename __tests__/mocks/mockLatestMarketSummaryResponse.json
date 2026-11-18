@@ -1,9 +1,17 @@
 [
   {
     "chain_id": 1,
+    "status": "success",
     "comet": {
-      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3"
+      "address": "0xc3d688b66703497daa19211eedff47f25384cdc3",
+      "rewards": "0x1b0e765f6224c21223aea2af16c1c46e38885a40",
+      "bulker": "0xa397a8c2086c554b531c02e29f3291c9704b00c7"
     },
+    "deployment_key": "usdc",
+    "display_name": "USDC",
+    "base_asset_name": "USD Coin",
+    "is_default": true,
+    "is_institutional": false,
     "borrow_apr": "0.040201180873488",
     "supply_apr": "0.030836040536016",
     "total_borrow_value": "285023684.52920875623012",
@@ -13,13 +21,28 @@
     "base_usd_price": "0.99993411",
     "timestamp": 1694099375,
     "date": "2023-09-07",
-    "collateral_asset_symbols": ["COMP", "WBTC", "WETH", "UNI", "LINK"]
+    "collateral_asset_symbols": ["COMP", "WBTC", "WETH", "UNI", "LINK"],
+    "collaterals": [
+      { "address": "0xc00e94Cb662C3520282E6f5717214004A7f26888", "symbol": "COMP", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", "symbol": "WBTC", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "symbol": "WETH", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984", "symbol": "UNI", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA", "symbol": "LINK", "status": "success", "is_visible": true, "is_deprecated": false }
+    ]
   },
   {
     "chain_id": 1,
+    "status": "success",
     "comet": {
-      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94"
+      "address": "0xa17581a9e3356d9a858b789d68b4d866e593ae94",
+      "rewards": "0x1b0e765f6224c21223aea2af16c1c46e38885a40",
+      "bulker": "0xa397a8c2086c554b531c02e29f3291c9704b00c7"
     },
+    "deployment_key": "weth",
+    "display_name": "ETH",
+    "base_asset_name": "Ether",
+    "is_default": false,
+    "is_institutional": false,
     "borrow_apr": "0.033898024514016",
     "supply_apr": "0.018374010062832",
     "total_borrow_value": "23437.531576900406067212",
@@ -29,13 +52,25 @@
     "base_usd_price": "1643.71",
     "timestamp": 1694099351,
     "date": "2023-09-07",
-    "collateral_asset_symbols": ["cbETH", "wstETH"]
+    "collateral_asset_symbols": ["cbETH", "wstETH"],
+    "collaterals": [
+      { "address": "0xBe9895146f7AF43049ca1c1AE358B0541Ea49704", "symbol": "cbETH", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0", "symbol": "wstETH", "status": "success", "is_visible": true, "is_deprecated": false }
+    ]
   },
   {
     "chain_id": 137,
+    "status": "success",
     "comet": {
-      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445"
+      "address": "0xF25212E676D1F7F89Cd72fFEe66158f541246445",
+      "rewards": "0x45939657d1ca34a8fa39a924b71d28fe8431e581",
+      "bulker": "0x59e242d352ae13166b4987ae5c990c232f7f7cd6"
     },
+    "deployment_key": "usdc",
+    "display_name": "USDC.e",
+    "base_asset_name": "USD Coin (Bridged)",
+    "is_default": false,
+    "is_institutional": false,
     "borrow_apr": "0.041637919658256",
     "supply_apr": "0.0247352111424",
     "total_borrow_value": "17726728.1508639396975",
@@ -45,13 +80,27 @@
     "base_usd_price": "1.0003265",
     "timestamp": 1694099375,
     "date": "2023-09-07",
-    "collateral_asset_symbols": ["WETH", "WBTC", "WMATIC", "MaticX"]
+    "collateral_asset_symbols": ["WETH", "WBTC", "WMATIC", "MaticX"],
+    "collaterals": [
+      { "address": "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", "symbol": "WETH", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6", "symbol": "WBTC", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", "symbol": "WMATIC", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0xfa68FB4628DFF1028CFEc22b4162FCcd0d45efb6", "symbol": "MaticX", "status": "success", "is_visible": true, "is_deprecated": false }
+    ]
   },
   {
     "chain_id": 42161,
+    "status": "success",
     "comet": {
-      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA"
+      "address": "0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA",
+      "rewards": "0x88730d254a2f7e6ac8388c3198afd694ba9f7fae",
+      "bulker": "0xbde8f31d2ddda895264e27dd990fab3dc87b372d"
     },
+    "deployment_key": "usdc.e",
+    "display_name": "USDC.e",
+    "base_asset_name": "USD Coin (Bridged)",
+    "is_default": false,
+    "is_institutional": false,
     "borrow_apr": "0.046244384597376",
     "supply_apr": "0.031191015428496",
     "total_borrow_value": "3281257.63640274643242",
@@ -61,13 +110,27 @@
     "base_usd_price": "1.00023678",
     "timestamp": 1694099377,
     "date": "2023-09-07",
-    "collateral_asset_symbols": ["ARB", "GMX", "WETH", "WBTC"]
+    "collateral_asset_symbols": ["ARB", "GMX", "WETH", "WBTC"],
+    "collaterals": [
+      { "address": "0x912CE59144191C1204E64559FE8253a0e49E6548", "symbol": "ARB", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a", "symbol": "GMX", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", "symbol": "WETH", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", "symbol": "WBTC", "status": "success", "is_visible": true, "is_deprecated": false }
+    ]
   },
   {
     "chain_id": 42161,
+    "status": "success",
     "comet": {
-      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf",
+      "rewards": "0x88730d254a2f7e6ac8388c3198afd694ba9f7fae",
+      "bulker": "0xbde8f31d2ddda895264e27dd990fab3dc87b372d"
     },
+    "deployment_key": "usdc",
+    "display_name": "USDC",
+    "base_asset_name": "USD Coin",
+    "is_default": false,
+    "is_institutional": false,
     "borrow_apr": "0.019339728476112",
     "supply_apr": "0.004029747879312",
     "total_borrow_value": "390635.81432039279304",
@@ -77,13 +140,27 @@
     "base_usd_price": "1.00023678",
     "timestamp": 1694099357,
     "date": "2023-09-07",
-    "collateral_asset_symbols": ["ARB", "GMX", "WETH", "WBTC"]
+    "collateral_asset_symbols": ["ARB", "GMX", "WETH", "WBTC"],
+    "collaterals": [
+      { "address": "0x912CE59144191C1204E64559FE8253a0e49E6548", "symbol": "ARB", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a", "symbol": "GMX", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", "symbol": "WETH", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", "symbol": "WBTC", "status": "success", "is_visible": true, "is_deprecated": false }
+    ]
   },
   {
     "chain_id": 8453,
+    "status": "success",
     "comet": {
-      "address": "0x46e6b214b524310239732D51387075E0e70970bf"
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf",
+      "rewards": "0x123964802e6ababbe1bc9547d72ef1b69b00a6b1",
+      "bulker": "0x78d0677032a35c63d142a48a2037048871212a8c"
     },
+    "deployment_key": "weth",
+    "display_name": "ETH",
+    "base_asset_name": "Ether",
+    "is_default": false,
+    "is_institutional": false,
     "borrow_apr": "0.018165959344512",
     "supply_apr": "0.006306070443552",
     "total_borrow_value": "869.15327682855836023",
@@ -93,13 +170,24 @@
     "base_usd_price": "1628.18570996",
     "timestamp": 1694099345,
     "date": "2023-09-07",
-    "collateral_asset_symbols": ["cbETH"]
+    "collateral_asset_symbols": ["cbETH"],
+    "collaterals": [
+      { "address": "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22", "symbol": "cbETH", "status": "success", "is_visible": true, "is_deprecated": false }
+    ]
   },
   {
     "chain_id": 8453,
+    "status": "success",
     "comet": {
-      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf"
+      "address": "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf",
+      "rewards": "0x123964802e6ababbe1bc9547d72ef1b69b00a6b1",
+      "bulker": "0x78d0677032a35c63d142a48a2037048871212a8c"
     },
+    "deployment_key": "usdbc",
+    "display_name": "USDbC",
+    "base_asset_name": "USD Coin (Bridged)",
+    "is_default": false,
+    "is_institutional": false,
     "borrow_apr": "0.03160986929568",
     "supply_apr": "0.015423450057648",
     "total_borrow_value": "5907613.20826590586256",
@@ -109,6 +197,10 @@
     "base_usd_price": "1.00010948",
     "timestamp": 1694099357,
     "date": "2023-09-07",
-    "collateral_asset_symbols": ["cbETH", "WETH"]
+    "collateral_asset_symbols": ["cbETH", "WETH"],
+    "collaterals": [
+      { "address": "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22", "symbol": "cbETH", "status": "success", "is_visible": true, "is_deprecated": false },
+      { "address": "0x4200000000000000000000000000000000000006", "symbol": "WETH", "status": "success", "is_visible": true, "is_deprecated": false }
+    ]
   }
 ]

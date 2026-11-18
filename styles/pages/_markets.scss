@@ -108,7 +108,6 @@
 .token-pair {
   align-items: flex-start;
   display: flex;
-  margin-bottom: 40px;
 
   &__icons {
     padding-top: 7px;
@@ -185,6 +184,7 @@
   display: flex;
   flex-flow: row wrap;
   justify-content: space-between;
+  margin-top: 40px;
 
   &__item {
     width: 46%;

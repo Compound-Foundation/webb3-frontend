@@ -1,5 +1,25 @@
 @use '../abstracts/variables' as *;
 
+.panel-with-header-wrapper {
+  height: 3.5rem;
+  background: $neutral--90;
+  position: relative;
+  width: calc(100% + 40px);
+  top: -40px;
+  left: -20px;
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  padding: 0 2.5rem;
+
+  @media (max-width: $device--sm) {
+    top: -2rem;
+    left: -0.75rem;
+    width: calc(100% + 1.5rem);
+    padding: 0 2rem;
+  }
+}
+
 .panel-with-header {
   position: relative;
   background-color: var(--ui--foreground--2);
@@ -16,6 +36,10 @@
 
     &__secondary-text {
       margin-left: 0.5rem;
+    }
+
+    &__justify-between {
+      justify-content: space-between;
     }
   }
 
@@ -47,5 +71,11 @@
         padding: 0.75rem 1.25rem 1.25rem 0.5rem;
       }
     }
+  }
+}
+
+.theme--light {
+  .panel-with-header-wrapper {
+    background: $neutral--05;
   }
 }

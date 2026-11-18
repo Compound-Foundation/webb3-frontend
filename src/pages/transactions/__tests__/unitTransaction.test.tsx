@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { TransactionHistoryItem } from '@types';
 
+import { MockMarketsProvider } from '../../../../__tests__/mocks/mockMarkets';
 import {
   mockUnitTransactionTransfer,
   mockUnitTransactionBorrow,
@@ -14,7 +15,11 @@ import {
 import UnitTransaction from '../components/UnitTransaction';
 
 const renderUnitTransaction = (transaction: TransactionHistoryItem) => {
-  return render(<UnitTransaction transaction={transaction} account={'0x123'} />);
+  return render(
+    <MockMarketsProvider>
+      <UnitTransaction transaction={transaction} account={'0x123'} />
+    </MockMarketsProvider>
+  );
 };
 
 describe('Unit Transaction', () => {

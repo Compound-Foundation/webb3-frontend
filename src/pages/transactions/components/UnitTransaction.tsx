@@ -9,7 +9,7 @@ import {
 import { TransactionHistoryItem } from '@types';
 
 import TransactionDate from './TransactionDate';
-import { renderMarketDescriptorElement } from './TransactionRowByMonth';
+import { MarketDescriptor } from './TransactionRowByMonth';
 import TransactionTextHolder from './TransactionTextHolder';
 
 const UnitTransaction = ({ transaction, account }: { transaction: TransactionHistoryItem; account: string }) => {
@@ -35,7 +35,7 @@ const UnitTransaction = ({ transaction, account }: { transaction: TransactionHis
             {icon}
           </div>
           <TransactionTextHolder headerText={headerText}>
-            {renderMarketDescriptorElement(contract.address, chainId)}
+            <MarketDescriptor address={contract.address} chainId={chainId} />
             {getInitiatedByDescriptor({ account, transaction })}
           </TransactionTextHolder>
         </div>

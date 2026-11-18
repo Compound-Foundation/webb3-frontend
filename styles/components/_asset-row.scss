@@ -39,12 +39,58 @@
     margin-top: 0;
   }
 
+  // The symbol and wallet balance of a collateral in the error status; a text-color class
+  // can't do it, the .meta color above wins over it
+  &--error &__info .meta {
+    color: var(--text--3);
+  }
+
   &__detail-content {
     align-items: center;
     display: flex;
     width: 40%;
     z-index: 5;
     cursor: pointer;
+  }
+
+  // On the icon itself, not its container, so the error badge isn't dimmed too
+  &__icon--disabled {
+    opacity: 0.3;
+  }
+
+  &__icon-container {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+
+  &__icon-container--deprecated {
+    border-radius: 50%;
+    outline: 1px dashed $neutral--00;
+    outline-offset: 2px;
+  }
+
+  &__error-icon {
+    position: absolute;
+    top: -0.3125rem;
+    right: -0.0625rem;
+    display: flex;
+    width: 1rem;
+    height: 1rem;
+
+    .svg {
+      width: 100%;
+      height: 100%;
+    }
+  }
+
+  // The tooltip is rendered in a portal, outside of .asset-row
+  &__tooltip-text {
+    display: flex;
+    justify-content: center;
+    font-weight: 400;
+    line-height: 1rem;
+    font-size: 11px;
   }
 
   &__info {
@@ -112,5 +158,11 @@
     & {
       padding: 1.125rem 0.25rem;
     }
+  }
+}
+
+.theme--light {
+  .asset-row__icon-container--deprecated {
+    outline-color: $neutral--90;
   }
 }

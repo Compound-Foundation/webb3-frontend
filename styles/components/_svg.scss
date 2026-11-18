@@ -54,3 +54,9 @@
     }
   }
 }
+
+.theme--light {
+  .svg__outline {
+    stroke: $neutral--00;
+  }
+}

@@ -1,6 +1,8 @@
 import type { TransactionResponse } from '@ethersproject/providers';
 import { ReactNode, useContext, useEffect, useRef, useState } from 'react';
 
+import CollateralEmptyState from '@components/CollateralEmptyState';
+import TokenVisibilityToggle from '@components/TokenVisibilityToggle';
 import { isUnwrappedCollateralAsset } from '@constants/chains';
 import { getActionQueueContext } from '@contexts/ActionQueueContext';
 import RewardsStateContext from '@contexts/RewardsStateContext';
@@ -23,6 +25,7 @@ import {
   sanitizedAmountForAction,
 } from '@helpers/actions';
 import { withCometStateSource } from '@helpers/cometStateSource';
+import { HOME_TOP_COLLATERAL_KEY } from '@helpers/constants';
 import {
   anchorBlock,
   directWithdrawalCalldata,
@@ -36,7 +39,6 @@ import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { WriteBlockReason } from '@helpers/lendingRoute';
-import { DEFAULT_MARKET } from '@helpers/markets';
 import { formatValue, MAX_UINT256 } from '@helpers/numbers';
 import {
   isSingleActionRoute,
@@ -72,6 +74,8 @@ import {
   WrappedPosition,
 } from '@helpers/wrappedPositions';
 import { getWithdrawalLimits, WithdrawalLimits, WithdrawalRequest } from '@helpers/wrappedWithdrawals';
+import { useLocalStorage } from '@hooks/useLocalStorage';
+import { useMarkets } from '@hooks/useMarkets';
 import { Theme } from '@hooks/useThemeManager';
 import type { AddTransaction } from '@hooks/useTransactionManager';
 import type { WrappedActionState } from '@hooks/useWrappedAction';
@@ -296,7 +300,7 @@ type HomeProps = {
 const Home = ({
   transactions,
   web3,
-  cometState: state,
+  cometState: cometStateProp,
   addTransaction,
   switchWriteNetwork,
   estimatedGasMap,
@@ -304,13 +308,16 @@ const Home = ({
 }: HomeProps) => {
   // when V2 market was selected from market page and open up a new window default dashboard with default market
   const { selectedMarket, selectMarket } = useContext(getSelectedMarketContext());
+  const [marketsStateType, marketsState] = useMarkets();
+  const defaultMarket = marketsStateType === StateType.Hydrated ? marketsState.defaultMarket : undefined;
 
   // We use a useEffect here to prevent infinite renders by the state update in selectMarket
   useEffect(() => {
-    if (selectedMarket[0] === 'hydrated' && selectedMarket[1].baseAsset.symbol == 'Compound V2') {
-      selectMarket(DEFAULT_MARKET);
+    const isV2Selected = selectedMarket[0] === 'hydrated' && selectedMarket[1].baseAsset.symbol == 'Compound V2';
+    if (isV2Selected && defaultMarket !== undefined) {
+      selectMarket(defaultMarket);
     }
-  }, [selectedMarket[0], selectedMarket[1]?.baseAsset?.symbol]);
+  }, [selectedMarket[0], selectedMarket[1]?.baseAsset?.symbol, defaultMarket]);
 
   const rewards = useContext(RewardsStateContext);
   const { addOrUpdateAction, clearActions, getActions, getPendingAction, removeAction, setPendingAction } = useContext(
@@ -318,6 +325,44 @@ const Home = ({
   );
 
   const [compare, setCompare] = useState(false);
+  const [showTopCollateralOnly, setShowTopCollateralOnly] = useLocalStorage(HOME_TOP_COLLATERAL_KEY, true);
+  // A market the summary reports in the error status is shown like one whose on-chain data failed to load
+  const selected = selectedMarket[1];
+  const isMarketStatusError = selected?.status === 'error';
+
+  const getCollateralFor = (assetAddress: string) => {
+    if (selected === undefined) return undefined;
+
+    const wrapped = Object.entries(selected.chainInformation.unwrappedCollateralAssets).find(
+      ([, unwrapped]) => unwrapped.address.toLowerCase() === assetAddress.toLowerCase()
+    );
+
+    const summaryAddress = (wrapped ? wrapped[0] : assetAddress).toLowerCase();
+
+    return selected.collaterals?.find((collateral) => collateral.address.toLowerCase() === summaryAddress);
+  };
+
+  // The summary status can lag behind a feed that already reverts, which the market query reports as price 0
+  const hasCollateralError = (token: { address: string; price: bigint }) =>
+    token.price === 0n || getCollateralFor(token.address)?.status === 'error';
+
+  const isCollateralShown = (assetAddress: string, balance = 0n) => {
+    if (balance > 0n) return true;
+
+    const collateral = getCollateralFor(assetAddress);
+
+    if (collateral?.isDeprecated) return false;
+
+    return !showTopCollateralOnly || collateral?.isVisible !== false || collateral?.status === 'error';
+  };
+
+  const sortErrorsLast = (a: Token, b: Token) =>
+    Number(getCollateralFor(a.address)?.status === 'error') - Number(getCollateralFor(b.address)?.status === 'error');
+
+  const isFilterHidingCollateral =
+    showTopCollateralOnly && !!selected?.collaterals?.some((c) => !c.isDeprecated && c.isVisible === false);
+
+  const state: CometState = isMarketStatusError ? [StateType.Loading, undefined] : cometStateProp;
   const [cometState] = state;
 
   const wrappedLending = useWrappedLending();
@@ -690,8 +735,15 @@ const Home = ({
     });
     mastheadState = [StateType.NoWallet, { baseAsset, earnAPR }];
     assetRows = collateralAssets
+      .filter((token) => isCollateralShown(token.address))
       .sort(sortTokensAlphabetically)
-      .map((token, index) => <AssetRow key={index} state={[StateType.NoWallet, { asset: token }]} />);
+      .sort(sortErrorsLast)
+      .map((token, index) => (
+        <AssetRow
+          key={index}
+          state={[StateType.NoWallet, { asset: token, isCollateralError: hasCollateralError(token) }]}
+        />
+      ));
     positionCardState = [
       StateType.NoWallet,
       {
@@ -1617,7 +1669,7 @@ const Home = ({
     ];
 
     const [unwrappedAdditionalCollateralAssets, onlyActualCollateralAssets] = arrayPartition(
-      collateralAssets,
+      collateralAssets.filter((asset) => isCollateralShown(asset.address, asset.balance)),
       (asset) => isUnwrappedCollateralAsset(market.chainInformation, asset.address)
     );
 
@@ -1631,7 +1683,11 @@ const Home = ({
       .filter((asset) => asset.balance === 0n && asset.walletBalance === 0n)
       .sort(sortTokensAlphabetically);
 
-    assetRows = [...positiveBalanceAssets, ...zeroProtocolBalanceAssets, ...zeroBalanceAssets].map((token, index) => {
+    const sortedAssets = [...positiveBalanceAssets, ...zeroProtocolBalanceAssets, ...zeroBalanceAssets].sort(
+      sortErrorsLast
+    );
+
+    assetRows = sortedAssets.map((token, index) => {
       const action = actions.find((action) => action[0] !== ActionType.ClaimRewards && isSameToken(action[1], token));
       let displayAction: Action | undefined;
       if (action !== undefined) {
@@ -1648,6 +1704,7 @@ const Home = ({
         (action) =>
           action[0] === ActionType.SupplyCollateral && isStETH(action[1].symbol) && isWrappedStETH(token.symbol)
       );
+      const collateral = getCollateralFor(token.address);
       return (
         <AssetRow
           key={index}
@@ -1659,6 +1716,8 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
+              isCollateralError: hasCollateralError(token),
+              isDeprecated: collateral?.isDeprecated,
               unwrappedAssetSupplyAction: stEthWrapSupplyAction,
               onDripClicked: () => {
                 if (isFromEarlierVisit()) return;
@@ -1720,6 +1779,7 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
+              isCollateralError: hasCollateralError(token),
               wrappedAsset: matchingWrappedAsset,
               onCancelClicked: () => {
                 if (isFromEarlierVisit() || isQueueLocked()) return;
@@ -1757,11 +1817,24 @@ const Home = ({
       <div className="home__content grid-container">
         <div className="home__assets grid-column--7">
           <div className="panel panel--assets">
-            <div className="panel__header-row">
-              <label className="L2 label text-color--2">Collateral Asset</label>
-              <label className="L2 label text-color--2">Protocol Balance</label>
+            <div className="panel-with-header-wrapper">
+              <TokenVisibilityToggle
+                checked={showTopCollateralOnly}
+                onChange={() => setShowTopCollateralOnly(!showTopCollateralOnly)}
+                isLoading={cometState === StateType.Loading}
+              />
             </div>
-            {assetRows}
+            {assetRows.length === 0 ? (
+              <CollateralEmptyState isFiltered={isFilterHidingCollateral} className={'panel__empty-state'}/>
+            ) : (
+              <>
+                <div className="panel__header-row">
+                  <label className="L2 label text-color--2">Collateral Asset</label>
+                  <label className="L2 label text-color--2">Protocol Balance</label>
+                </div>
+                {assetRows}
+              </>
+            )}
           </div>
           {otherAssetRows.length > 0 && (
             <div className="panel panel--assets">

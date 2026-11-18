@@ -10,7 +10,6 @@ import type { Web3 } from '@contexts/Web3Context';
 import Comet from '@helpers/abis/Comet';
 import ERC20 from '@helpers/abis/ERC20';
 import { adjustCollateralPrice, getBaseAssetPriceFeed } from '@helpers/baseAssetPrice';
-import { getHardcodedFeedPrice, getRemappedPriceFeed } from '@helpers/deprecatedMarkets';
 import { aprAt, RateModel } from '@helpers/interestRates';
 import { isV2Market } from '@helpers/markets';
 import { getMockMarketState } from '@helpers/mocks';
@@ -156,18 +155,7 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
 
   const baseTokenContract = new Contract(market.baseAsset.address, ERC20);
 
-  let ignoredCollateralPriceIndex = -1;
-  const priceCalls = market.collateralAssets.map((asset, index) => {
-    // If the price feed is the now deprecated wUSDM feed then keep track of the
-    // index in the asset list and force a dummy getPrice call that we'll ignore
-    // down below.
-    const remappedDeprecatedPriceFeedAddress = getRemappedPriceFeed(asset.priceFeed);
-    if (remappedDeprecatedPriceFeedAddress !== '') {
-      ignoredCollateralPriceIndex = index;
-      return cometContract.getPrice(remappedDeprecatedPriceFeedAddress);
-    }
-    return cometContract.getPrice(asset.priceFeed);
-  });
+  const priceCalls = market.collateralAssets.map((asset) => cometContract.getPrice(asset.priceFeed));
   const totalsCollateralCalls = market.collateralAssets.map((asset) => cometContract.totalsCollateral(asset.address));
   const collateralReservesCalls = market.collateralAssets.map((asset) =>
     cometContract.getCollateralReserves(asset.address)
@@ -176,23 +164,30 @@ const getState = async (rawProvider: JsonRpcProvider, market: MarketData | Marke
   const [baseTokenPrice, baseAssetBalanceOfComet, ...combinedCalls] = await ethcallProvider.all([
     cometContract.getPrice(market.baseAsset.priceFeed),
     baseTokenContract.balanceOf(market.marketAddress),
-    ...priceCalls,
     ...totalsCollateralCalls,
     ...collateralReservesCalls,
   ]);
 
+  // A reverting price feed reverts the whole multicall, so collateral prices are read on their own
+  // and, if that fails, one by one, with a reverting feed priced at 0 like in the Sleuth query
+  const collateralPrices: BigNumber[] = await ethcallProvider
+    .all(priceCalls)
+    .catch(() =>
+      Promise.all(
+        priceCalls.map((call) =>
+          ethcallProvider
+            .all([call])
+            .then(([price]) => price as BigNumber)
+            .catch(() => BigNumber.from(0))
+        )
+      )
+    );
+
   const numAssets = market.collateralAssets.length;
 
-  const prices = combinedCalls.slice(0, numAssets).map((price, index) => {
-    // If we found a deprecated feed, ignore the dummy call's result and use
-    // the hardcoded price for that feed instead (0 for the wUSDM feeds).
-    if (ignoredCollateralPriceIndex === index) {
-      return getHardcodedFeedPrice(market.collateralAssets[index].priceFeed);
-    }
-    return price.toBigInt();
-  });
-  const totalSupplies = combinedCalls.slice(numAssets, numAssets * 2).map((tc) => tc.totalSupplyAsset.toBigInt());
-  const collateralReserves = combinedCalls.slice(numAssets * 2, numAssets * 3).map((cr) => cr.toBigInt());
+  const prices = collateralPrices.map((price) => price.toBigInt());
+  const totalSupplies = combinedCalls.slice(0, numAssets).map((tc) => tc.totalSupplyAsset.toBigInt());
+  const collateralReserves = combinedCalls.slice(numAssets, numAssets * 2).map((cr) => cr.toBigInt());
 
   const baseAssetPrice = baseTokenPrice.toBigInt();
 

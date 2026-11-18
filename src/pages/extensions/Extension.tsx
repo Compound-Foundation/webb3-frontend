@@ -1,6 +1,6 @@
 import { ExtMessage, InMessage } from '@compound-finance/comet-extension';
 import { Contract } from '@ethersproject/contracts';
-import { ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router';
 
 import IconPair from '@components/IconPair';
@@ -13,8 +13,9 @@ import Comet from '@helpers/abis/Comet';
 import { getShortAddress } from '@helpers/address';
 import { filterMap } from '@helpers/functions';
 import { PreEstimatedAction } from '@helpers/gasEstimator';
-import { DEFAULT_MARKET, getMarkets, marketKey } from '@helpers/markets';
+import { marketKey } from '@helpers/markets';
 import { getBlockExplorerUrlForAddress } from '@helpers/urls';
+import { useMarkets } from '@hooks/useMarkets';
 import { parseMarketKey } from '@hooks/useSelectedMarket';
 import { Theme } from '@hooks/useThemeManager';
 import type { AddTransaction } from '@hooks/useTransactionManager';
@@ -56,14 +57,14 @@ const Extension = ({
 }: BaseProps) => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const showTestnet = searchParams.has('testnet');
   const { extensionId } = useParams();
   const { selectedMarket, selectMarket } = useContext(getSelectedMarketContext());
   const writeState = useWriteCometState(web3, addTransaction);
   const [extensionLoaded, setExtensionLoaded] = useState<boolean>(false);
   const iFrameHeight = 1000;
   const [extensionState, setExtensionState] = useState<ExtensionState>(undefined);
-  const markets = useMemo(() => getMarkets(showTestnet), [showTestnet]);
+  const [marketsStateType, marketsState] = useMarkets();
+  const markets = marketsStateType === StateType.Hydrated ? marketsState.markets : [];
   const timer = usePoll(10000);
   const iFrameRef = useRef<HTMLIFrameElement>(null);
   const sandboxInputRef = useRef<HTMLInputElement>(null);
@@ -347,7 +348,7 @@ const Extension = ({
             <div className="extension-banner L4 body text-color--3">
               <p
                 onClick={() => {
-                  selectMarket(DEFAULT_MARKET);
+                  if (marketsStateType === StateType.Hydrated) selectMarket(marketsState.defaultMarket);
                 }}
                 className="call-to-action"
               >

@@ -7,9 +7,7 @@ import type { Web3 } from '@contexts/Web3Context';
 import { getAssetDisplayName, getAssetDisplaySymbol } from '@helpers/assets';
 import { adjustCollateralPrice, getBaseAssetDollarPrice, getBaseAssetPriceFeed } from '@helpers/baseAssetPrice';
 import { recordCometStateSource } from '@helpers/cometStateSource';
-import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import { aprAt, RateModel } from '@helpers/interestRates';
-import { shouldKeepCollateralAsset } from '@helpers/legacyCollateral';
 import { getCapacity, getCollateralValue, MAX_UINT256, REFRESH_INTERVAL } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import CometQuery from '@helpers/sleuth/out/CometQuery.sol/CometQuery.json';
@@ -148,25 +146,6 @@ export function useCometState(
     return () => clearInterval(intervalId);
   }, [web3.read.account, refreshData]);
 
-  /**
-   * Hide legacy collateral assets per Comet (Linear COM-18). A removed asset is
-   * still shown when the connected user holds a positive collateral balance of it,
-   * so existing positions remain visible and withdrawable.
-   */
-  {
-    const market = marketState[1];
-    const [, marketStateWithCollaterals] = state;
-
-    if (market && marketStateWithCollaterals) {
-      const { chainId } = market.chainInformation;
-      const baseSymbol = market.baseAsset.symbol;
-      marketStateWithCollaterals.collateralAssets = marketStateWithCollaterals.collateralAssets.filter((asset) => {
-        const balance = 'balance' in asset ? (asset.balance as bigint) : 0n;
-        return shouldKeepCollateralAsset(chainId, baseSymbol, asset.symbol, balance);
-      });
-    }
-  }
-
   return state;
 }
 
@@ -182,14 +161,12 @@ export const queryCometDataWithAccount = (
   const nativeTokenToUsdPriceFeed = getBaseAssetPriceFeed(market);
 
   const wrappedNativeTokenSymbol = `W${market.chainInformation.nativeToken.symbol}`;
-  const checkDeprecatedwUSDM = getIsDeprecatedwUSDMMarket(market.baseAsset, market.chainInformation);
   return sleuth.fetch<CometWithAccountStateResponse, CometWithAccountStateQuery>(QUERY_WITH_ACCOUNT, [
     market.marketAddress,
     nativeTokenToUsdPriceFeed,
     account,
     market.bulkerAddress,
     wrappedNativeTokenSymbol,
-    checkDeprecatedwUSDM,
   ]);
 };
 
