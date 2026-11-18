@@ -151,22 +151,21 @@ test("the harness's bundled dev server keeps the configuration's entries and plu
 }, 120_000);
 
 describe("the production build's React", () => {
-  // Marker strings that only the development builds contain: the first is React's, the others are ReactDOM's.
-  const DEVELOPMENT_MARKERS = [
-    'is deprecated in plain JavaScript React classes',
-    'Each child in a list should have a unique',
-    'Referentially unequal but deeply equal',
-  ];
-  // Production ReactDOM reports errors by code instead of the development build's messages.
-  const PRODUCTION_MARKER = 'Minified React error';
-  const MARKERS = [...DEVELOPMENT_MARKERS, PRODUCTION_MARKER];
+  type Markers = {
+    /** The development markers that `yarn build`'s check rejects, and the ones the bundle contains. */
+    development: string[];
+    foundDevelopment: string[];
+    /** Whether the bundle contains the production marker that `yarn build`'s check requires. */
+    foundProduction: boolean;
+  };
 
   /**
    * Builds React and ReactDOM's client through the repository's configuration with `nodeEnv` as NODE_ENV, as
-   * `vite build` does, and returns which of `MARKERS` the bundled JavaScript contains. The plugins, Node
-   * polyfills and target are the app's. The entry, output, minifier and env directory are not.
+   * `vite build` does, and returns which of the markers in `scripts/lib/development-react.js` the bundled
+   * JavaScript contains. That module holds the markers `yarn build` checks the app's bundle for. The plugins,
+   * Node polyfills, target and minifier are the app's. The entry, output and env directory are not.
    */
-  function buildReact(nodeEnv: 'development' | 'production'): Record<string, boolean> {
+  function buildReact(nodeEnv: 'development' | 'production'): Markers {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vite-config-react-'));
     const entry = path.join(directory, 'entry.js');
     // The entry imports React's CommonJS entry points, which choose a build from process.env.NODE_ENV.
@@ -180,7 +179,10 @@ describe("the production build's React", () => {
       const { build, loadConfigFromFile } = await import(${JSON.stringify(
         path.join(ROOT, 'node_modules/vite/dist/node/index.js')
       )});
-      const { root, envDir, entry, outDir, markers } = JSON.parse(process.argv[1]);
+      const { DEVELOPMENT_REACT_MARKERS, PRODUCTION_REACT_MARKER, findDevelopmentReactMarkers } = await import(${JSON.stringify(
+        path.join(ROOT, 'scripts/lib/development-react.js')
+      )});
+      const { root, envDir, entry, outDir } = JSON.parse(process.argv[1]);
       const loaded = await loadConfigFromFile({ command: 'build', mode: 'production' }, root + '/vite.config.js', root, 'silent');
       const config = loaded.config;
       const output = await build({
@@ -194,18 +196,21 @@ describe("the production build's React", () => {
           ...config.build,
           outDir,
           write: false,
-          minify: false,
           rollupOptions: { ...config.build.rollupOptions, input: { entry } },
         },
       });
       const chunks = [output].flat().flatMap((result) => result.output).filter((file) => file.type === 'chunk');
       const code = chunks.map((chunk) => chunk.code).join('\\n');
-      process.stdout.write(JSON.stringify(Object.fromEntries(markers.map((marker) => [marker, code.includes(marker)]))));
+      process.stdout.write(JSON.stringify({
+        development: DEVELOPMENT_REACT_MARKERS.map(({ marker }) => marker),
+        foundDevelopment: findDevelopmentReactMarkers(code),
+        foundProduction: code.includes(PRODUCTION_REACT_MARKER.marker),
+      }));
     `;
     try {
-      return inChild<Record<string, boolean>>(
+      return inChild<Markers>(
         script,
-        { root: ROOT, envDir: directory, entry, outDir: path.join(directory, 'out'), markers: MARKERS },
+        { root: ROOT, envDir: directory, entry, outDir: path.join(directory, 'out') },
         nodeEnv
       );
     } finally {
@@ -213,20 +218,18 @@ describe("the production build's React", () => {
     }
   }
 
-  /** The marker results expected when the bundle holds only the development builds, or only the production ones. */
-  const expected = (development: boolean) =>
-    Object.fromEntries([
-      ...DEVELOPMENT_MARKERS.map((marker) => [marker, development]),
-      [PRODUCTION_MARKER, !development],
-    ]);
-
   test('is the production build of React and ReactDOM', () => {
-    expect(buildReact('production')).toEqual(expected(false));
+    const markers = buildReact('production');
+    expect(markers.development).not.toHaveLength(0);
+    expect(markers).toMatchObject({ foundDevelopment: [], foundProduction: true });
   }, 120_000);
 
   test('follows NODE_ENV=development to the development build, as Vite does', () => {
     // The browser harness builds the app with NODE_ENV=development to compile DEV=true in mode production.
-    expect(buildReact('development')).toEqual(expected(true));
+    // Every marker survives the app's minifier, so `yarn build`'s check rejects this bundle.
+    const markers = buildReact('development');
+    expect(markers.foundDevelopment).toEqual(markers.development);
+    expect(markers.foundProduction).toBe(false);
   }, 120_000);
 });
 
