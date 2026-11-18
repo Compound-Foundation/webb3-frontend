@@ -1,6 +1,6 @@
 import { JsonRpcProvider } from '@ethersproject/providers';
 import { act, renderHook } from '@testing-library/react';
-import { BigNumber } from 'ethers';
+import { BigNumber, constants } from 'ethers';
 
 import { Web3 } from '@contexts/Web3Context';
 import { withCometStateSource } from '@helpers/cometStateSource';
@@ -86,6 +86,13 @@ const cometResponseWithAccount = (baseBalance: number) => {
       balance: BigNumber.from(baseBalance),
       bulkerAllowance: BigNumber.from(0),
       walletBalance: BigNumber.from(0),
+    },
+    stETHState: {
+      stETH: constants.AddressZero,
+      wstETH: constants.AddressZero,
+      bulkerAllowance: BigNumber.from(0),
+      walletBalance: BigNumber.from(0),
+      wstETHPerStETH: BigNumber.from(0),
     },
   };
 };
@@ -221,6 +228,76 @@ describe('useCometState', () => {
     expect(withCometStateSource(result.current)).toMatchObject({
       market: { chainId: MARKET_A.chainInformation.chainId, cometAddress: MARKET_A.marketAddress },
       account: undefined,
+    });
+  });
+
+  describe('stETH collateral', () => {
+    // The mock market's wstETH collateral and the stETH it unwraps to
+    const WSTETH = '0x4942BBAf745f235e525BAff49D31450810EDed5b';
+    const STETH = '0x2DD6530F136D2B56330792D46aF959D9EA62E276';
+
+    // Reads the account's collaterals in a market whose only collateral is wstETH, with the bulker
+    // naming `bulkerStETH` as the stETH it wraps.
+    const readCollaterals = async (bulkerStETH: string) => {
+      mockSleuthFetch.mockResolvedValueOnce({
+        ...cometResponseWithAccount(0),
+        collateralAssets: [
+          {
+            collateralAsset: WSTETH,
+            allowance: BigNumber.from(0),
+            balance: BigNumber.from(0),
+            bulkerAllowance: BigNumber.from(0),
+            walletBalance: BigNumber.from(0),
+            priceFeed: '0x0000000000000000000000000000000000000002',
+            symbol: 'wstETH',
+            decimals: BigNumber.from(18),
+            name: 'Wrapped liquid staked Ether 2.0',
+            collateralFactor: BigNumber.from(0),
+            liquidateCollateralFactor: BigNumber.from(0),
+            liquidationFactor: BigNumber.from(0),
+            supplyCap: BigNumber.from(0),
+            totalSupply: BigNumber.from(0),
+            price: BigNumber.from(300_000_000_000),
+          },
+        ],
+        stETHState: {
+          stETH: bulkerStETH,
+          wstETH: WSTETH,
+          bulkerAllowance: BigNumber.from(5),
+          walletBalance: BigNumber.from(7),
+          wstETHPerStETH: BigNumber.from(8).mul(BigNumber.from(10).pow(17)),
+        },
+      });
+      const web3: Web3 = { ...WEB3, read: { ...WEB3.read, account: '0x00000000000000000000000000000000000000a1' } };
+      const { result } = renderHook(() => useCometState(web3, [StateType.Hydrated, MARKET_A], PENDING, REWARDS));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await heldUpdates[0]();
+      });
+      if (result.current[0] !== StateType.Hydrated) throw new Error('Expected a hydrated state');
+      return result.current[1].collateralAssets;
+    };
+
+    it('adds an stETH row priced from wstETH when the bulker wraps the configured stETH', async () => {
+      const [wstETH, stETH] = await readCollaterals(STETH);
+      expect(stETH).toEqual({
+        ...wstETH,
+        address: STETH,
+        symbol: 'stETH',
+        name: 'Lido Staked ETH',
+        balance: 0n,
+        bulkerAllowance: 5n,
+        walletBalance: 7n,
+        // 3,000 per wstETH at 0.8 wstETH per stETH
+        price: 240_000_000_000n,
+      });
+    });
+
+    it('adds no stETH row when the bulker wraps another stETH', async () => {
+      const collaterals = await readCollaterals('0x0000000000000000000000000000000000000005');
+      expect(collaterals.map(({ address }) => address)).toEqual([WSTETH]);
     });
   });
 });

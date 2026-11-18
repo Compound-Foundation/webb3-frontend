@@ -131,6 +131,16 @@ interface ERC20 {
   function symbol() external view returns (string memory);
 }
 
+interface WstETH {
+  function tokensPerStEth() external view returns (uint);
+}
+
+interface Bulker {
+  function steth() external view returns (address);
+
+  function wsteth() external view returns (address);
+}
+
 contract CometQuery {
   // Interest rate model parameters, per second at factorScale precision. The app computes the APRs
   // from them because service-patched Comets return a zero rate from getBorrowRate/getSupplyRate
@@ -140,6 +150,15 @@ contract CometQuery {
     uint perSecondInterestRateBase;
     uint perSecondInterestRateSlopeLow;
     uint perSecondInterestRateSlopeHigh;
+  }
+
+  // The account's stETH, which the bulker wraps into the market's wstETH collateral
+  struct StEthState {
+    address stETH;
+    address wstETH;
+    uint bulkerAllowance;
+    uint walletBalance;
+    uint wstETHPerStETH;
   }
 
   struct BaseAsset {
@@ -246,6 +265,7 @@ contract CometQuery {
     uint factorScale;
     uint nativeAssetInDollars;
     uint nativeAssetWalletBalance;
+    StEthState stETHState;
     RateModel supplyRateModel;
     uint totalBorrow;
     uint totalBorrowPrincipal;
@@ -321,8 +341,27 @@ contract CometQuery {
     CollateralAssetWithAccountState[] memory tokens = new CollateralAssetWithAccountState[](
       response.collateralAssets.length
     );
+    // Only the mainnet bulker wraps stETH. The other bulkers have no wsteth(), so the call reverts.
+    address stETH;
+    address wstETH;
+    try Bulker(bulker).wsteth() returns (address bulkerWstETH) {
+      wstETH = bulkerWstETH;
+      stETH = Bulker(bulker).steth();
+    } catch {}
+
+    // Stays zero unless wstETH is a collateral of this market
+    StEthState memory stETHState;
     for (uint8 i = 0; i < response.collateralAssets.length; i++) {
       tokens[i] = collateralInfoWithAccount(comet, bulker, response.collateralAssets[i], account, wrappedNativeTokenSymbol);
+      if (tokens[i].collateralAsset == wstETH) {
+        stETHState = StEthState({
+          stETH: stETH,
+          wstETH: wstETH,
+          bulkerAllowance: ERC20(stETH).allowance(account, bulker),
+          walletBalance: ERC20(stETH).balanceOf(account),
+          wstETHPerStETH: WstETH(wstETH).tokensPerStEth()
+        });
+      }
     }
 
     return
@@ -337,6 +376,7 @@ contract CometQuery {
         factorScale: response.factorScale,
         nativeAssetInDollars: response.nativeAssetInDollars,
         nativeAssetWalletBalance: account.balance,
+        stETHState: stETHState,
         supplyRateModel: response.supplyRateModel,
         totalBorrow: response.totalBorrow,
         totalBorrowPrincipal: response.totalBorrowPrincipal,
