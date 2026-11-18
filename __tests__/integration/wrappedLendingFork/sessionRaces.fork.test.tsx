@@ -9,8 +9,14 @@ import { fundedAccount, nonceOf, onSnapshot, supplyDirectly } from './injections
 import { scenario } from './results';
 import { renderWrappedApp, SessionSetup, WrappedApp } from './wrappedApp';
 
-/** The committed registry, with both release controls closed. */
-const COMMITTED_REGISTRY = buildWrappedMarketRegistry(HARDCODED_WRAPPED_LENDING_SOURCE);
+/** The committed registry with both release controls closed, as a rollback leaves it. */
+const CLOSED_REGISTRY = buildWrappedMarketRegistry({
+  markets: HARDCODED_WRAPPED_LENDING_SOURCE.markets.map((market) => ({
+    ...market,
+    isDepositEnabled: false,
+    isExitEnabled: false,
+  })),
+});
 
 describe.each(FORK_MARKETS)('$label', (forkMarket) => {
   const { market, symbol, label } = forkMarket;
@@ -46,7 +52,7 @@ describe.each(FORK_MARKETS)('$label', (forkMarket) => {
         ['market', { cometAddress: otherMarket.market.cometAddress }],
         ['screening', { screeningStatus: 'blocked' }],
         ['connector', { connectorId: 'io.metamask' }],
-        ['release controls', { registry: COMMITTED_REGISTRY }],
+        ['release controls', { registry: CLOSED_REGISTRY }],
       ];
       for (const [name, change] of changes) {
         for (const type of ['supply', 'withdraw'] as const) {
