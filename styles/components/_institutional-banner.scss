@@ -123,6 +123,24 @@
       flex-wrap: wrap;
       padding: 0 0.875rem 0.875rem 0;
 
+      // The coin art renders at half size so it doesn't dominate the
+      // narrow banner
+      .institutional-banner__coins {
+        height: 3.3125rem;
+        width: 3.90625rem;
+
+        &__main {
+          height: 2.5625rem;
+          left: 0.425rem;
+          top: 0.125rem;
+        }
+
+        &__secondary {
+          height: 1.78125rem;
+          left: 1.5rem;
+        }
+      }
+
       .institutional-banner__title {
         font-size: #{$heading-font-size--emphasized--L3};
         line-height: 1.5rem;
