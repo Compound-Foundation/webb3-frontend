@@ -164,6 +164,9 @@ const Market = ({ web3 }: MarketsProps) => {
     // program pays 0% while the market is below its first level, which is
     // exactly when the register invitation matters. The boost does not reach a
     // wrapped position, so the wrapped route shows no banner.
+    // TODO(usdg-launch): revisit before public launch — product may want the
+    // supplyRewardsAPR > 0n gate (or zero-level copy) back once the USDG
+    // program terms are final.
     if (isInstitutional && !isWrappedRoute) {
       whitelistStatusBanner = (
         <WhitelistStatusBanner
