@@ -356,6 +356,9 @@ export type MarketData = {
   slug?: string;
   // Institutional markets are listed in their own section of the market selector
   institutional?: boolean;
+  // Featured markets are pinned above the standard rows on the markets page
+  // with the highlighted row treatment
+  featured?: boolean;
   // Recently launched markets get a 'New' badge in the market selector
   isNew?: boolean;
   type: 'MarketData';

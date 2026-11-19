@@ -247,13 +247,14 @@ const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: Panel
     </div>
   );
 
-  // Institutional markets are pinned above the rest of the network's markets, regardless of sort
-  const isInstitutional = (marketSummary: MarketSummary) =>
-    getMarket(marketSummary.chainId, marketSummary.comet.address)?.institutional === true;
-  const institutionalSummaries: MarketSummary[] = [];
+  // Featured markets are pinned above the rest of the network's markets, regardless of sort;
+  // other institutional markets list among the standard rows
+  const isFeatured = (marketSummary: MarketSummary) =>
+    getMarket(marketSummary.chainId, marketSummary.comet.address)?.featured === true;
+  const featuredSummaries: MarketSummary[] = [];
   const standardSummaries: MarketSummary[] = [];
   for (const marketSummary of marketSummaries) {
-    (isInstitutional(marketSummary) ? institutionalSummaries : standardSummaries).push(marketSummary);
+    (isFeatured(marketSummary) ? featuredSummaries : standardSummaries).push(marketSummary);
   }
 
   return (
@@ -264,10 +265,10 @@ const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: Panel
             <table className="assets-table">
               <TableHead />
               <tbody>
-                {institutionalSummaries.map((marketSummary, index) => {
+                {featuredSummaries.map((marketSummary, index) => {
                   return (
                     <Fragment key={marketSummary.comet.address}>
-                      {/* Institutional rows paint their own outlines, which touch when the
+                      {/* Featured rows paint their own outlines, which touch when the
                           rows are adjacent; a slim spacer row keeps them apart */}
                       {index > 0 && (
                         <tr className="market-overview-panels__table-spacer-row" aria-hidden="true">
@@ -281,7 +282,7 @@ const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: Panel
                     </Fragment>
                   );
                 })}
-                {institutionalSummaries.length > 0 && standardSummaries.length > 0 && (
+                {featuredSummaries.length > 0 && standardSummaries.length > 0 && (
                   <tr className="market-overview-panels__table-divider-row">
                     <td colSpan={8}>
                       <div className="divider"></div>
@@ -292,6 +293,7 @@ const Panel = ({ chainId, marketSummaries, institutionalWhitelistStatus }: Panel
                   return <PanelRow
                     key={marketSummary.comet.address}
                     marketSummary={marketSummary}
+                    institutionalWhitelistStatus={institutionalWhitelistStatus}
                   />;
                 })}
               </tbody>
@@ -338,7 +340,7 @@ const PanelRow = ({ marketSummary, institutionalWhitelistStatus }: PanelRowProps
     scrollTo(0, 0);
   };
 
-  const rowModifier = market?.institutional ? ' market-overview-panels__table-row--institutional' : '';
+  const rowModifier = market?.featured ? ' market-overview-panels__table-row--institutional' : '';
 
   return (
     // The Link component doesn't work here because tr must be

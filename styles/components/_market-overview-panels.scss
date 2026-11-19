@@ -147,10 +147,15 @@
           linear-gradient(var(--institutional-row-outline), var(--institutional-row-outline)) border-box;
       }
 
+      // The end cells carry slices of the USDG banner's halftone art (left-
+      // and right-anchored), dimmed by the same dark tint as the hero banner;
+      // the art's middle is dark, so the plain base in between blends through
       td:first-child {
         border-left: 1px solid transparent;
         background:
           radial-gradient(60% 220% at 0% 100%, rgba(8, 138, 28, 0.3) 0%, rgba(25, 131, 110, 0) 100%) padding-box,
+          linear-gradient(rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0.75)) padding-box,
+          url('/images/institutional-usdg-banner-art.png') left center / auto 100% no-repeat padding-box,
           linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
           linear-gradient(90deg, #00d791 0%, var(--institutional-row-outline) 100%) border-box;
       }
@@ -158,6 +163,8 @@
       td:last-child {
         border-right: 1px solid transparent;
         background:
+          linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.45)) padding-box,
+          url('/images/institutional-usdg-banner-art.png') right center / auto 100% no-repeat padding-box,
           linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
           linear-gradient(90deg, var(--institutional-row-outline) 0%, #00d791 100%) border-box;
       }

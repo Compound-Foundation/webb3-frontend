@@ -103,7 +103,7 @@ export const MARKETS: MarketData[] = [
         'USDG',
         'USDG Institutional',
         mainnetInstitutionalUSDGRoots,
-        { slug: 'usdg-institutional', institutional: true, isNew: true },
+        { slug: 'usdg-institutional', institutional: true, featured: true, isNew: true },
       ],
       [
         1,
@@ -134,7 +134,7 @@ export const MARKETS: MarketData[] = [
       [2020, 'WETH', 'Wrapped Ether', roninWETHRoots],
       [2020, 'RON', 'Ronin', roninWRONRoots],
       [59144, 'ETH', 'Ether', lineaWETHRoots],
-    ] as [number, string, string, { [x: string]: string }, Pick<MarketData, 'slug' | 'institutional' | 'isNew'>?][]
+    ] as [number, string, string, { [x: string]: string }, Pick<MarketData, 'slug' | 'institutional' | 'featured' | 'isNew'>?][]
   ).map(([chainId, baseAsset, baseAssetName, root, options]) => {
     const chain: ChainInformation = CHAINS[chainId];
 
