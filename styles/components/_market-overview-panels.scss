@@ -138,6 +138,9 @@
       // The base color as bare RGB components, for fades over the artwork
       --institutional-row-base-rgb: 9, 22, 28;
       --institutional-row-outline: #174149;
+      // Uniform hover wash painted over every cell, art included, so the
+      // hover highlight covers the whole row instead of skipping the artwork
+      --institutional-row-wash: transparent;
 
       height: 5rem;
 
@@ -145,22 +148,24 @@
         border-bottom: 1px solid transparent;
         border-top: 1px solid transparent;
         background:
+          linear-gradient(var(--institutional-row-wash), var(--institutional-row-wash)) padding-box,
           linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
           linear-gradient(var(--institutional-row-outline), var(--institutional-row-outline)) border-box;
       }
 
-      // The end cells carry slices of the USDG banner's halftone art (left-
-      // and right-anchored), dimmed by the same dark tint as the hero banner.
-      // Each slice fades into the row base toward the cell's inner edge, so
+      // The end cells carry windows into the USDG banner's halftone art: the
+      // first anchored just inside the band, the last on its bright middle.
+      // Each window fades into the row base toward the cell's inner edge, so
       // the art melts into the plain middle cells instead of cutting off at
       // the column boundary.
       td:first-child {
         border-left: 1px solid transparent;
         background:
+          linear-gradient(var(--institutional-row-wash), var(--institutional-row-wash)) padding-box,
           radial-gradient(60% 220% at 0% 100%, rgba(8, 138, 28, 0.3) 0%, rgba(25, 131, 110, 0) 100%) padding-box,
-          linear-gradient(90deg, rgba(var(--institutional-row-base-rgb), 0) 45%, rgba(var(--institutional-row-base-rgb), 1) 95%) padding-box,
-          linear-gradient(rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0.75)) padding-box,
-          url('/images/institutional-usdg-banner-art.png') left center / auto 100% no-repeat padding-box,
+          linear-gradient(90deg, rgba(var(--institutional-row-base-rgb), 0) 55%, rgba(var(--institutional-row-base-rgb), 1) 95%) padding-box,
+          linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.45)) padding-box,
+          url('/images/institutional-usdg-banner-art.png') 15% center / auto 100% no-repeat padding-box,
           linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
           linear-gradient(90deg, #00d791 0%, var(--institutional-row-outline) 100%) border-box;
       }
@@ -168,16 +173,16 @@
       td:last-child {
         border-right: 1px solid transparent;
         background:
-          linear-gradient(270deg, rgba(var(--institutional-row-base-rgb), 0) 45%, rgba(var(--institutional-row-base-rgb), 1) 95%) padding-box,
-          linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.45)) padding-box,
-          url('/images/institutional-usdg-banner-art.png') right center / auto 100% no-repeat padding-box,
+          linear-gradient(var(--institutional-row-wash), var(--institutional-row-wash)) padding-box,
+          linear-gradient(270deg, rgba(var(--institutional-row-base-rgb), 0) 55%, rgba(var(--institutional-row-base-rgb), 1) 95%) padding-box,
+          linear-gradient(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.15)) padding-box,
+          url('/images/institutional-usdg-banner-art.png') 52% center / auto 100% no-repeat padding-box,
           linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
           linear-gradient(90deg, var(--institutional-row-outline) 0%, #00d791 100%) border-box;
       }
 
       &:hover {
-        --institutional-row-base: #0e222c;
-        --institutional-row-base-rgb: 14, 34, 44;
+        --institutional-row-wash: rgba(125, 165, 185, 0.12);
       }
     }
   }
