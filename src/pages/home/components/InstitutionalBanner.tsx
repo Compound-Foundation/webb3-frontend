@@ -1,9 +1,8 @@
+import { INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
 // Imported as modules so the built URLs stay relative to the bundle and work
 // on subpath hosting (IPFS previews); root-absolute /images/ srcs would 404 there
 import usdgCoinSecondaryUrl from '@images/institutional-usdg-coin-secondary.png';
 import usdgCoinUrl from '@images/institutional-usdg-coin.png';
-
-import { INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
 import { MarketData, MarketDataLoaded } from '@types';
 
 const TITLE = 'Compound Institutional Market';

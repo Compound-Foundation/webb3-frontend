@@ -1,8 +1,7 @@
+import { FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 // Imported as a module so the built URL stays relative to the bundle and works
 // on subpath hosting (IPFS previews); a root-absolute /images/ src would 404 there
 import usdgBoostBadgeUrl from '@images/institutional-usdg-boost-badge.png';
-
-import { FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 
 /**
  * The art for the "earn boosted yield" invitations (non-whitelisted and
@@ -91,6 +90,7 @@ export function institutionalSupplyRewardRate(totalSuppliedUsd: bigint, marketSl
   }
   const cappedUsd = BigInt(program.lastLevelDollars) * DOLLAR_SCALE;
   const suppliedUsd = totalSuppliedUsd < cappedUsd ? totalSuppliedUsd : cappedUsd;
-  const levelDollars = (suppliedUsd / (BigInt(program.levelStepDollars) * DOLLAR_SCALE)) * BigInt(program.levelStepDollars);
+  const levelDollars =
+    (suppliedUsd / (BigInt(program.levelStepDollars) * DOLLAR_SCALE)) * BigInt(program.levelStepDollars);
   return (BigInt(program.rewardsBudgetDollarsPerYear) * 10n ** BigInt(FACTOR_PRECISION)) / levelDollars;
 }
