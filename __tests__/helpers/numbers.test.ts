@@ -254,6 +254,11 @@ describe('formatValueInCurrency', () => {
     const result = formatValueInCurrency(8, BigInt(99900000005588n), Currency.USDC);
     expect(result).toEqual('999.00K USDC');
   });
+
+  it('should include the USDG currency suffix', () => {
+    const result = formatValueInCurrency(8, BigInt(99905588n), Currency.USDG);
+    expect(result).toEqual('0.9991 USDG');
+  });
 });
 
 describe('formatValueInDollars', () => {

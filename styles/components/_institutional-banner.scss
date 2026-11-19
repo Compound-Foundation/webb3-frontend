@@ -43,4 +43,116 @@
       font-size: #{$heading-font-size--emphasized--L2};
     }
   }
+
+  // USDG variant: coin artwork flush left, Learn More pill on the right, a
+  // halftone texture across the whole banner, and an asymmetric border that
+  // runs green on the left to lime on the right.
+  &--usdg {
+    justify-content: space-between;
+    min-height: 6.625rem;
+    border-radius: 0.5rem;
+    padding: 0 0.875rem 0 0;
+    // The dark tint between the glows and the texture reproduces the design's
+    // black overlay; without it the halftone art reads much brighter than the mock
+    background:
+      radial-gradient(circle at 0% 100%, rgba(8, 138, 28, 0.25) 0%, rgba(25, 131, 110, 0) 20%) padding-box,
+      radial-gradient(circle at 72% 60%, rgba(177, 225, 68, 0.1) 0%, rgba(177, 225, 68, 0) 40%) padding-box,
+      linear-gradient(90deg, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0.45) 100%) padding-box,
+      url('/images/institutional-usdg-banner-art.png') center / cover no-repeat padding-box,
+      linear-gradient(#09161c, #09161c) padding-box,
+      linear-gradient(90deg, #00d397 0%, #174149 35%, #174149 65%, #89bf26 100%) border-box;
+
+    .institutional-banner__lead {
+      align-items: center;
+      display: flex;
+      gap: 1rem;
+      min-width: 0;
+    }
+
+    // The coin art fills the banner's full height at its left edge; the width
+    // accommodates the secondary coin's right edge at its 3rem inset
+    .institutional-banner__coins {
+      flex: none;
+      height: 6.625rem;
+      overflow: hidden;
+      position: relative;
+      width: 7.8125rem;
+
+      &__main {
+        height: 5.125rem;
+        left: 0.85rem;
+        position: absolute;
+        top: 0.25rem;
+        width: auto;
+      }
+
+      &__secondary {
+        bottom: 0;
+        height: 3.5625rem;
+        left: 3rem;
+        position: absolute;
+        width: auto;
+      }
+    }
+
+    .institutional-banner__title {
+      font-size: #{$heading-font-size--emphasized--L2};
+      line-height: 1.8125rem;
+    }
+
+    // The banner is permanently dark, so the button colors must not follow the
+    // theme (same reasoning as the title color above)
+    .institutional-banner__learn-more {
+      background-color: #14212c;
+      border: 1px solid #333e48;
+      color: #ffffff;
+      flex: none;
+
+      &:hover {
+        background-color: #1b2c3a;
+      }
+    }
+
+    .institutional-banner__actions {
+      align-items: center;
+      display: flex;
+      flex: none;
+    }
+
+    @media (max-width: $device--sm) {
+      flex-wrap: wrap;
+      padding: 0.875rem 0.875rem 0.875rem 0;
+
+      // The coin art renders at 0.65x so it doesn't dominate the narrow banner
+      .institutional-banner__coins {
+        height: 4.30625rem;
+        width: 5.078125rem;
+
+        &__main {
+          height: 3.33125rem;
+          left: 0.5525rem;
+          top: 0;
+        }
+
+        &__secondary {
+          height: 2.315625rem;
+          left: 1.95rem;
+        }
+      }
+
+      // Same mobile title size as the USDC institutional banner above
+      .institutional-banner__title {
+        font-size: #{$heading-font-size--emphasized--L2};
+        line-height: 2.25rem;
+      }
+
+      // The badge and the button share a row under the title, inset from both
+      // edges by the same margin as the banner's top padding
+      .institutional-banner__actions {
+        justify-content: space-between;
+        margin: 0.5rem 0 0 0.875rem;
+        width: calc(100% - 0.875rem);
+      }
+    }
+  }
 }

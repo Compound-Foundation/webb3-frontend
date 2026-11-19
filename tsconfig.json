@@ -22,6 +22,7 @@
       "@hooks/*": ["src/hooks/*"],
       "@contexts/*": ["src/contexts/*"],
       "@helpers/*": ["src/helpers/*"],
+      "@images/*": ["src/images/*"],
       "@types": ["src/types"],
       "@constants/*": ["src/constants/*"],
       "@pages/*": ["src/pages/*"]
