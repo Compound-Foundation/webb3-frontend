@@ -1,3 +1,7 @@
+// Imported as a module so the built URL stays relative to the bundle and works
+// on subpath hosting (IPFS previews); a root-absolute /images/ src would 404 there
+import usdgBoostBadgeUrl from '@images/institutional-usdg-boost-badge.png';
+
 import { FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 
 /**
@@ -8,9 +12,7 @@ import { FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
  * badge in every market.
  */
 export function boostedYieldPromoIcon(marketSlug?: string): string {
-  return marketSlug === 'usdg-institutional'
-    ? '/images/institutional-usdg-boost-badge.png'
-    : '/images/whitelist-coins.png';
+  return marketSlug === 'usdg-institutional' ? usdgBoostBadgeUrl : '/images/whitelist-coins.png';
 }
 
 // Display rules for institutional market supply rates.

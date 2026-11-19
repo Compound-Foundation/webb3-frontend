@@ -47,6 +47,8 @@ export default {
   ],
   moduleNameMapper: {
     '\\.(scss|css)$': 'identity-obj-proxy', // Mock SCSS imports for CSS Modules (if you use them)
+    '\\.(png|jpe?g|gif|webp|svg)$': '<rootDir>/__mocks__/fileMock.js', // Image module imports resolve to a URL string
+    '^@images(.*)$': '<rootDir>/src/images$1',
     '^@components(.*)$': '<rootDir>/src/components$1',
     '^@hooks(.*)$': '<rootDir>/src/hooks$1',
     '^@contexts(.*)$': '<rootDir>/src/contexts$1',

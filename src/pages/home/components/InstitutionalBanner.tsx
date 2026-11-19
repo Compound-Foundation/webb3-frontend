@@ -1,3 +1,8 @@
+// Imported as modules so the built URLs stay relative to the bundle and work
+// on subpath hosting (IPFS previews); root-absolute /images/ srcs would 404 there
+import usdgCoinSecondaryUrl from '@images/institutional-usdg-coin-secondary.png';
+import usdgCoinUrl from '@images/institutional-usdg-coin.png';
+
 import { INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
 import { MarketData, MarketDataLoaded } from '@types';
 
@@ -22,12 +27,8 @@ const InstitutionalBanner = ({ market }: InstitutionalBannerProps) => {
       <div className="institutional-banner institutional-banner--usdg L1">
         <div className="institutional-banner__lead">
           <div className="institutional-banner__coins" aria-hidden="true">
-            <img
-              className="institutional-banner__coins__secondary"
-              src="/images/institutional-usdg-coin-secondary.png"
-              alt=""
-            />
-            <img className="institutional-banner__coins__main" src="/images/institutional-usdg-coin.png" alt="" />
+            <img className="institutional-banner__coins__secondary" src={usdgCoinSecondaryUrl} alt="" />
+            <img className="institutional-banner__coins__main" src={usdgCoinUrl} alt="" />
           </div>
           <h1 className="institutional-banner__title heading heading--emphasized">
             {USDG_TITLE}
