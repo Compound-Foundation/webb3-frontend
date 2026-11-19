@@ -1,5 +1,9 @@
 import { Lightning } from '@components/Icons/Lightning';
-import { boostedYieldBadgeIcon, INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
+import {
+  boostedYieldBadgeIcon,
+  boostedYieldPromoIcon,
+  INSTITUTIONAL_BOOST_END_DATE_LABEL,
+} from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { formatRateFactor } from '@helpers/numbers';
 import { INSTITUTIONAL_MARKET_URL, INSTITUTIONAL_REGISTER_URL } from '@helpers/urls';
@@ -58,7 +62,7 @@ const BoostedSupplyRates = ({
   } else if (whitelistStatus === InstitutionalWhitelistStatus.NotWhitelisted) {
     whitelistCard = (
       <div className="boosted-supply-rates__whitelist-card">
-        <img className="boosted-supply-rates__whitelist-card__badge" src="/images/whitelist-coins.png" alt="" />
+        <img className="boosted-supply-rates__whitelist-card__badge" src={boostedYieldPromoIcon(marketSlug)} alt="" />
         <div>
           <p className="boosted-supply-rates__whitelist-card__title L3 body body--emphasized">Earn boosted yield</p>
           <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">

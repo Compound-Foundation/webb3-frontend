@@ -1,4 +1,8 @@
-import { boostedYieldBadgeIcon, INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
+import {
+  boostedYieldBadgeIcon,
+  boostedYieldPromoIcon,
+  INSTITUTIONAL_BOOST_END_DATE_LABEL,
+} from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { INSTITUTIONAL_REGISTER_URL } from '@helpers/urls';
 
@@ -31,7 +35,7 @@ const WhitelistStatusBanner = ({ whitelistStatus, marketSlug }: WhitelistStatusB
     return (
       <div className="whitelist-status-banner grid-column--12">
         <div className="whitelist-status-banner__lead">
-          <img className="whitelist-status-banner__icon" src="/images/whitelist-coins.png" alt="" />
+          <img className="whitelist-status-banner__icon" src={boostedYieldPromoIcon(marketSlug)} alt="" />
           <p className="whitelist-status-banner__title L3 body body--emphasized">Earn boosted yield</p>
         </div>
         <p className="whitelist-status-banner__detail L4 body">
@@ -53,7 +57,7 @@ const WhitelistStatusBanner = ({ whitelistStatus, marketSlug }: WhitelistStatusB
   return (
     <div className="whitelist-status-banner grid-column--12">
       <div className="whitelist-status-banner__lead">
-        <img className="whitelist-status-banner__icon" src="/images/whitelist-coins.png" alt="" />
+        <img className="whitelist-status-banner__icon" src={boostedYieldPromoIcon(marketSlug)} alt="" />
         <div>
           <p className="whitelist-status-banner__title L3 body body--emphasized">Earn boosted yield</p>
           <p className="whitelist-status-banner__detail L4 body">

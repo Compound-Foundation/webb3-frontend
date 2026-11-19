@@ -11,6 +11,17 @@ export function boostedYieldBadgeIcon(marketSlug?: string): string {
     : '/images/whitelist-badge.png';
 }
 
+/**
+ * The art for the "earn boosted yield" invitations (non-whitelisted and
+ * pre-login states). The USDG market uses its own coin art here too; other
+ * institutional markets keep the original coins illustration.
+ */
+export function boostedYieldPromoIcon(marketSlug?: string): string {
+  return marketSlug === 'usdg-institutional'
+    ? '/images/institutional-usdg-boost-badge.png'
+    : '/images/whitelist-coins.png';
+}
+
 // Display rules for institutional market supply rates.
 //
 // Institutional markets pay rewards denominated in the market's base asset
