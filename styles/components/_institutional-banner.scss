@@ -43,4 +43,87 @@
       font-size: #{$heading-font-size--emphasized--L2};
     }
   }
+
+  // USDG variant: coin artwork flush left, Learn More pill on the right, a
+  // halftone texture across the whole banner, and an asymmetric border that
+  // runs green on the left to lime on the right.
+  &--usdg {
+    justify-content: space-between;
+    min-height: 6.625rem;
+    border-radius: 0.5rem;
+    padding: 0 0.875rem 0 0;
+    background:
+      radial-gradient(circle at 0% 100%, rgba(8, 138, 28, 0.25) 0%, rgba(25, 131, 110, 0) 20%) padding-box,
+      radial-gradient(circle at 72% 60%, rgba(177, 225, 68, 0.14) 0%, rgba(177, 225, 68, 0) 40%) padding-box,
+      url('/images/institutional-usdg-banner-art.png') center / cover no-repeat padding-box,
+      linear-gradient(#09161c, #09161c) padding-box,
+      linear-gradient(90deg, #00d397 0%, #174149 35%, #174149 65%, #89bf26 100%) border-box;
+
+    .institutional-banner__lead {
+      align-items: center;
+      display: flex;
+      gap: 1rem;
+      min-width: 0;
+    }
+
+    // The coin art fills the banner's full height at its left edge
+    .institutional-banner__coins {
+      flex: none;
+      height: 6.625rem;
+      overflow: hidden;
+      position: relative;
+      width: 6.6875rem;
+
+      &__main {
+        height: 5.125rem;
+        left: 2.34375rem;
+        position: absolute;
+        top: 0.125rem;
+        width: auto;
+      }
+
+      &__secondary {
+        height: 3.5625rem;
+        left: 1.75rem;
+        position: absolute;
+        top: 3.09375rem;
+        width: auto;
+      }
+    }
+
+    .institutional-banner__title {
+      font-size: #{$heading-font-size--emphasized--L2};
+      line-height: 1.8125rem;
+    }
+
+    // The banner is permanently dark, so the button colors must not follow the
+    // theme (same reasoning as the title color above)
+    .institutional-banner__learn-more {
+      background-color: #14212c;
+      border: 1px solid #333e48;
+      color: #ffffff;
+      flex: none;
+
+      &:hover {
+        background-color: #1b2c3a;
+      }
+    }
+
+    @media (max-width: $device--sm) {
+      flex-wrap: wrap;
+      padding: 0 0.875rem 0.875rem 0;
+
+      .institutional-banner__title {
+        align-items: flex-start;
+        flex-direction: column;
+        font-size: #{$heading-font-size--emphasized--L3};
+        line-height: 1.5rem;
+      }
+
+      // The button wraps under the title row instead of squeezing beside it
+      .institutional-banner__learn-more {
+        margin: 0.5rem 0 0 auto;
+      }
+    }
+  }
 }
