@@ -121,23 +121,22 @@
 
     @media (max-width: $device--sm) {
       flex-wrap: wrap;
-      padding: 0 0.875rem 0.875rem 0;
+      padding: 0.875rem 0.875rem 0.875rem 0;
 
-      // The coin art renders at half size so it doesn't dominate the
-      // narrow banner
+      // The coin art renders at 0.65x so it doesn't dominate the narrow banner
       .institutional-banner__coins {
-        height: 3.3125rem;
-        width: 3.90625rem;
+        height: 4.30625rem;
+        width: 5.078125rem;
 
         &__main {
-          height: 2.5625rem;
-          left: 0.425rem;
-          top: 0.125rem;
+          height: 3.33125rem;
+          left: 0.5525rem;
+          top: 0.1625rem;
         }
 
         &__secondary {
-          height: 1.78125rem;
-          left: 1.5rem;
+          height: 2.315625rem;
+          left: 1.95rem;
         }
       }
 
@@ -146,12 +145,12 @@
         line-height: 1.5rem;
       }
 
-      // The badge and the button share a full-width row under the title,
-      // keeping the banner short
+      // The badge and the button share a row under the title, inset from both
+      // edges by the same margin as the banner's top padding
       .institutional-banner__actions {
         justify-content: space-between;
         margin: 0.5rem 0 0 0.875rem;
-        width: 100%;
+        width: calc(100% - 0.875rem);
       }
     }
   }
