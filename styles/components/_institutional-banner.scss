@@ -69,26 +69,27 @@
       min-width: 0;
     }
 
-    // The coin art fills the banner's full height at its left edge
+    // The coin art fills the banner's full height at its left edge; the width
+    // accommodates the secondary coin's right edge at its 3rem inset
     .institutional-banner__coins {
       flex: none;
       height: 6.625rem;
       overflow: hidden;
       position: relative;
-      width: 6.6875rem;
+      width: 7.8125rem;
 
       &__main {
         height: 5.125rem;
-        left: 0.5rem;
+        left: 0.85rem;
         position: absolute;
-        top: 0.125rem;
+        top: 0.25rem;
         width: auto;
       }
 
       &__secondary {
         bottom: 0;
         height: 3.5625rem;
-        left: 1.75rem;
+        left: 3rem;
         position: absolute;
         width: auto;
       }
