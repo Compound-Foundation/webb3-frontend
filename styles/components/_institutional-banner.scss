@@ -113,20 +113,27 @@
       }
     }
 
+    .institutional-banner__actions {
+      align-items: center;
+      display: flex;
+      flex: none;
+    }
+
     @media (max-width: $device--sm) {
       flex-wrap: wrap;
       padding: 0 0.875rem 0.875rem 0;
 
       .institutional-banner__title {
-        align-items: flex-start;
-        flex-direction: column;
         font-size: #{$heading-font-size--emphasized--L3};
         line-height: 1.5rem;
       }
 
-      // The button wraps under the title row instead of squeezing beside it
-      .institutional-banner__learn-more {
-        margin: 0.5rem 0 0 auto;
+      // The badge and the button share a full-width row under the title,
+      // keeping the banner short
+      .institutional-banner__actions {
+        justify-content: space-between;
+        margin: 0.5rem 0 0 0.875rem;
+        width: 100%;
       }
     }
   }

@@ -31,17 +31,21 @@ const InstitutionalBanner = ({ market }: InstitutionalBannerProps) => {
           </div>
           <h1 className="institutional-banner__title heading heading--emphasized">
             {USDG_TITLE}
-            {market.isNew && <span className="new-badge new-badge--large label">{NEW}</span>}
+            {market.isNew && <span className="new-badge new-badge--large label mobile-hide">{NEW}</span>}
           </h1>
         </div>
-        <a
-          className="button button--large institutional-banner__learn-more"
-          href={INSTITUTIONAL_MARKET_URL}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Learn More
-        </a>
+        {/* On mobile the badge moves down next to the button, keeping the banner short */}
+        <div className="institutional-banner__actions">
+          {market.isNew && <span className="new-badge new-badge--large label mobile-only">{NEW}</span>}
+          <a
+            className="button button--large institutional-banner__learn-more"
+            href={INSTITUTIONAL_MARKET_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Learn More
+          </a>
+        </div>
       </div>
     );
   }
