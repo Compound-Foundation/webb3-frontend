@@ -52,9 +52,12 @@
     min-height: 6.625rem;
     border-radius: 0.5rem;
     padding: 0 0.875rem 0 0;
+    // The dark tint between the glows and the texture reproduces the design's
+    // black overlay; without it the halftone art reads much brighter than the mock
     background:
       radial-gradient(circle at 0% 100%, rgba(8, 138, 28, 0.25) 0%, rgba(25, 131, 110, 0) 20%) padding-box,
-      radial-gradient(circle at 72% 60%, rgba(177, 225, 68, 0.14) 0%, rgba(177, 225, 68, 0) 40%) padding-box,
+      radial-gradient(circle at 72% 60%, rgba(177, 225, 68, 0.1) 0%, rgba(177, 225, 68, 0) 40%) padding-box,
+      linear-gradient(90deg, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0.45) 100%) padding-box,
       url('/images/institutional-usdg-banner-art.png') center / cover no-repeat padding-box,
       linear-gradient(#09161c, #09161c) padding-box,
       linear-gradient(90deg, #00d397 0%, #174149 35%, #174149 65%, #89bf26 100%) border-box;
@@ -76,17 +79,17 @@
 
       &__main {
         height: 5.125rem;
-        left: 2.34375rem;
+        left: 0.5rem;
         position: absolute;
         top: 0.125rem;
         width: auto;
       }
 
       &__secondary {
+        bottom: 0;
         height: 3.5625rem;
         left: 1.75rem;
         position: absolute;
-        top: 3.09375rem;
         width: auto;
       }
     }
