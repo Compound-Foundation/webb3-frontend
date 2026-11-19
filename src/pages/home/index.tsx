@@ -1471,6 +1471,7 @@ const Home = ({
         earnAPR,
         earnRewardsAPR: supplyIncentives.earnRewardsAPR,
         isInstitutional: supplyIncentives.isInstitutional ?? false,
+        marketSlug: selectedMarket[1]?.slug,
         institutionalWhitelistStatus: whitelistStatus,
         liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,

@@ -1,9 +1,11 @@
-import { INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
+import { boostedYieldBadgeIcon, INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { INSTITUTIONAL_REGISTER_URL } from '@helpers/urls';
 
 type WhitelistStatusBannerProps = {
   whitelistStatus: InstitutionalWhitelistStatus;
+  // Selects per-market boosted-yield art (e.g. the USDG badge)
+  marketSlug?: string;
 };
 
 /**
@@ -11,12 +13,12 @@ type WhitelistStatusBannerProps = {
  * account's access to the boosted supply rate. Shown only while the boost is
  * paying.
  */
-const WhitelistStatusBanner = ({ whitelistStatus }: WhitelistStatusBannerProps) => {
+const WhitelistStatusBanner = ({ whitelistStatus, marketSlug }: WhitelistStatusBannerProps) => {
   if (whitelistStatus === InstitutionalWhitelistStatus.Whitelisted) {
     return (
       <div className="whitelist-status-banner grid-column--12">
         <div className="whitelist-status-banner__lead whitelist-status-banner__lead--badged">
-          <img className="whitelist-status-banner__icon" src="/images/whitelist-badge.png" alt="" />
+          <img className="whitelist-status-banner__icon" src={boostedYieldBadgeIcon(marketSlug)} alt="" />
           <span className="new-badge label label--secondary">Approved</span>
           <p className="whitelist-status-banner__title L3 body body--emphasized">You are earning boosted yield</p>
         </div>

@@ -28,6 +28,8 @@ export type MarketRewards =
   type: RewardsType.Institutional;
   whitelistStatus?: InstitutionalWhitelistStatus;
   boostLabel?: string;
+  // Selects per-market boosted-yield art (e.g. the USDG badge)
+  marketSlug?: string;
 });
 
 export interface NetRatesTooltipProps {
@@ -80,6 +82,7 @@ const NetRatesTooltip = ({ borrowAPR, earnAPR, rewards, view }: NetRatesTooltipP
         boostAPR={rewards.supplyAPR}
         whitelistStatus={rewards.whitelistStatus ?? InstitutionalWhitelistStatus.NoWallet}
         boostLabel={rewards.boostLabel}
+        marketSlug={rewards.marketSlug}
       />
     ) : null;
 

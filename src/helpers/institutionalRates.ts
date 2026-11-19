@@ -1,5 +1,16 @@
 import { FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 
+/**
+ * The badge art for "earning boosted yield" cards and banners. The USDG market
+ * has its own badge (the USDG coin with a lightning bolt); other institutional
+ * markets keep the original whitelist badge.
+ */
+export function boostedYieldBadgeIcon(marketSlug?: string): string {
+  return marketSlug === 'usdg-institutional'
+    ? '/images/institutional-usdg-boost-badge.png'
+    : '/images/whitelist-badge.png';
+}
+
 // Display rules for institutional market supply rates.
 //
 // Institutional markets pay rewards denominated in the market's base asset
