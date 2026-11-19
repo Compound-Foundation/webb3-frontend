@@ -159,10 +159,12 @@ const Market = ({ web3 }: MarketsProps) => {
       isRewardsLoading,
     } = marketStateData;
 
-    // While the boost is paying, a banner describes the connected account's
-    // access to it. The boost does not reach a wrapped position, so the wrapped
-    // route shows no banner.
-    if (isInstitutional && supplyRewardsAPR > 0n && !isWrappedRoute) {
+    // A banner describes the connected account's access to the boosted yield
+    // program. It shows regardless of the current boost rate: a level-based
+    // program pays 0% while the market is below its first level, which is
+    // exactly when the register invitation matters. The boost does not reach a
+    // wrapped position, so the wrapped route shows no banner.
+    if (isInstitutional && !isWrappedRoute) {
       whitelistStatusBanner = (
         <WhitelistStatusBanner
           whitelistStatus={institutionalWhitelistStatus(web3.read.account)}
