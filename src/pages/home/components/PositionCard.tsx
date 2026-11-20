@@ -206,7 +206,7 @@ const PositionCard = ({ state }: PositionCardProps) => {
 };
 
 type Content = {
-  baseAssetSymbol: string;
+  baseAssetSymbol: ReactNode;
   baseAssetWalletBalance: ReactNode;
   baseAssetIcon: ReactNode;
   rates: ReactNode;
@@ -229,7 +229,9 @@ function getContent(state: PositionCardState, market: MarketData, currency: Curr
   const [ratesDetailActive, setRatesDetailActive] = useState(false);
 
   const defaultPanelState: Content = {
-    baseAssetSymbol: 'USDC',
+    baseAssetSymbol: market?.baseAsset.symbol ?? (
+      <span className="placeholder-content" style={{ width: '40px' }}></span>
+    ),
     baseAssetWalletBalance: <span className="placeholder-content" style={{ width: '70px' }}></span>,
     baseAssetIcon: (
       <span
