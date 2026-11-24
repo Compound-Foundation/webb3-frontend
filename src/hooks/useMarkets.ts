@@ -148,7 +148,11 @@ export function summaryToMarkets(summaries: LatestMarketSummaryResponse[]): Mark
     throw new Error('Latest market summary has no supported markets');
   }
 
-  return { markets: [...listed.map(({ market }) => market), V2_MARKET], defaultMarket, summaries };
+  return {
+    markets: [...listed.map(({ market }) => market), V2_MARKET],
+    defaultMarket,
+    summaries: summaries.filter((summary) => listed.some(({ entry }) => entry === summary)),
+  };
 }
 
 async function fetchLatestMarketSummaries(): Promise<LatestMarketSummaryResponse[]> {

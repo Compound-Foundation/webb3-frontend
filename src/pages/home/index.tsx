@@ -331,6 +331,9 @@ const Home = ({
     const statusAddress = getStatusCollateralAddress(selected.chainInformation, assetAddress).toLowerCase();
     return selected.collaterals?.find((collateral) => collateral.address.toLowerCase() === statusAddress)?.status;
   };
+  // The summary status can lag behind a feed that already reverts, which the market query reports as price 0
+  const hasCollateralError = (token: { address: string; price: bigint }) =>
+    token.price === 0n || getCollateralStatusFor(token.address) === 'error';
   const state: CometState = isMarketStatusError ? [StateType.Loading, undefined] : cometStateProp;
   const [cometState] = state;
 
@@ -709,7 +712,7 @@ const Home = ({
       .map((token, index) => (
         <AssetRow
           key={index}
-          state={[StateType.NoWallet, { asset: token, isCollateralError: getCollateralStatusFor(token.address) === 'error' }]}
+          state={[StateType.NoWallet, { asset: token, isCollateralError: hasCollateralError(token) }]}
         />
       ));
     positionCardState = [
@@ -1683,7 +1686,7 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
-              isCollateralError: getCollateralStatusFor(token.address) === 'error',
+              isCollateralError: hasCollateralError(token),
               isMarketInactive: market.isInactive,
               isUtilizationHigh,
               unwrappedAssetSupplyAction: stEthWrapSupplyAction,
@@ -1747,7 +1750,7 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
-              isCollateralError: getCollateralStatusFor(token.address) === 'error',
+              isCollateralError: hasCollateralError(token),
               isMarketInactive: market.isInactive,
               isUtilizationHigh,
               wrappedAsset: matchingWrappedAsset,
