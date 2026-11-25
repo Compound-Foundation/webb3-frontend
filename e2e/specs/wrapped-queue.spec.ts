@@ -1,6 +1,6 @@
 // COM-309: the Anchorage connector on the Ethereum USDC market, through the normal dashboard. The harness
 // provider announces `com.anchorage.connect`, so the app lends through the market's wrapper. The harness's
-// dev server opens the release controls (`releaseControls.ts`); the committed registry keeps them closed.
+// dev server opens any closed release control (`releaseControls.ts`), so the spec runs after a rollback too.
 //
 // The flow has production's screens and order: Approve & Add asks the wallet for an exact approval to the
 // wrapper at once, and the queue row shows Approval Pending; Submit Transaction asks for `supplyAndWrap`

@@ -80,9 +80,9 @@ describe('wrappedMarkets', () => {
           baseTokenAddress: expected.baseToken,
           baseDecimals: 6,
           shareDecimals: 18,
-          // New deposits and exits both stay off until the release checks pass.
-          isDepositEnabled: false,
-          isExitEnabled: false,
+          // New deposits and exits are both open.
+          isDepositEnabled: true,
+          isExitEnabled: true,
         },
       });
 
