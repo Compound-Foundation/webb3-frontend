@@ -53,6 +53,9 @@ jobs:
           VITE_SENTRY_DSN: ${{secrets.VITE_SENTRY_DSN}}
           VITE_SENTRY_ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
           VITE_SENTRY_RELEASE: ${{ github.sha }}
+          # The relay that forwards events to Sentry, so that ad blockers do not drop them. Without it the build
+          # sends events to Sentry directly, which the production hosts' CSP blocks.
+          VITE_SENTRY_TUNNEL: ${{secrets.VITE_SENTRY_TUNNEL}}
           # Uploads source maps to Sentry and deletes them before the IPFS upload. See vite.config.js.
           SENTRY_AUTH_TOKEN: ${{secrets.SENTRY_AUTH_TOKEN}}
 
