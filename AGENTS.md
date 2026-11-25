@@ -13,7 +13,7 @@ No dev-fleet project plugin covers this repository, so agents and reviewers work
 
 ## Develop
 
-- Install with `yarn install`. The repository pins Node 22 through Volta and Yarn 1 through `packageManager`, both in `package.json`. Run `corepack enable` first if `yarn` is missing. Node 25 no longer ships Corepack, so install it there with `npm install -g corepack`.
+- Install with `yarn install`. The repository pins Node 26 through Volta and Yarn 1 through `packageManager`, both in `package.json`. Node 26 does not ship Corepack, so if `yarn` is missing, run `npm install -g corepack@0.36.0`, the version CI installs, and then `corepack enable`.
 - `yarn dev` serves the app on `http://127.0.0.1:5173`. The dev and preview servers bind to loopback so that nobody else on the network can reach them. Do not add `--host` or `host: true`.
 - Path aliases (`@components`, `@helpers`, `@hooks` and the rest) are defined three times: in `tsconfig.json`, in `jest.config.js`'s `moduleNameMapper` and in `vite.config.js`'s `resolve.alias`. Keep the three in step. `@pages` is missing from Vite, so only tests can use it.
 - Configuration comes from `VITE_*` variables, read in `envVars.ts`, `src/init.ts`, `src/helpers/` and `src/pages/extensions/helpers/list.ts`. Vite embeds them in the public bundle, so never add a secret as a `VITE_*` variable.

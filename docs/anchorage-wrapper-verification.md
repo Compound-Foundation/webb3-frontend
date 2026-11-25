@@ -18,7 +18,7 @@ Run the suite from the repository root:
 node scripts/test-wrapped-lending-fork.js --solc-output <path to solc output>
 ```
 
-The runner needs `yarn install`, Node 22 and Foundry's `anvil`. The recorded runs used anvil 1.2.3. Set `ANVIL` to anvil's path if it is not on `PATH`.
+The runner needs `yarn install`, Node 26 and Foundry's `anvil`. The recorded runs used anvil 1.2.3. Set `ANVIL` to anvil's path if it is not on `PATH`.
 
 | Option                                                 | Effect                                                                                                                                                                               |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
