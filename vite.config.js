@@ -1,6 +1,7 @@
+import { sentryVitePlugin } from '@sentry/bundler-plugins/vite';
 import react from '@vitejs/plugin-react';
 
-import { resolve } from 'path';
+import path, { resolve } from 'path';
 
 import nodePolyfills from 'rollup-plugin-polyfill-node';
 
@@ -46,12 +47,45 @@ const replaceNodeEnvBeforePolyfills = () => {
   };
 };
 
+// Source maps for Sentry. Only a build with SENTRY_AUTH_TOKEN generates them. CI's build of this repository's
+// branches has the token. The browser harness drops it, so its fork builds upload nothing. The plugin uploads
+// the maps and then deletes them from the build's output directory, so they never reach IPFS. Local and fork
+// builds have no token and build exactly as before.
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
+
+/** Sentry's plugins, with the source maps to delete taken from the resolved output directory. */
+function sentryPlugins() {
+  let resolveSourceMaps;
+  const sourceMaps = new Promise((resolveGlob) => {
+    resolveSourceMaps = resolveGlob;
+  });
+  return [
+    {
+      name: 'sentry-source-map-directory',
+      apply: 'build',
+      configResolved(config) {
+        resolveSourceMaps(path.join(path.resolve(config.root, config.build.outDir), '**/*.map'));
+      },
+    },
+    ...sentryVitePlugin({
+      org: 'compound-foundation',
+      project: 'webb3-frontend',
+      authToken: sentryAuthToken,
+      // The same release name that src/helpers/sentry.ts tags events with.
+      release: { name: process.env.VITE_SENTRY_RELEASE },
+      sourcemaps: { filesToDeleteAfterUpload: sourceMaps },
+      telemetry: false,
+    }),
+  ];
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   // pluginRewriteAll fixes an issue where the dev server doesn't properly
   // handle paths with a `.`. See https://stackoverflow.com/questions/66734726/paramname-doesnt-match-url-segments-containing-dot-in-react-app-with-vitej
   // eg. /markets/usdc.e-arb
-  plugins: [replaceNodeEnvBeforePolyfills(), react(), pluginRewriteAll()],
+  // The Sentry plugin must come last.
+  plugins: [replaceNodeEnvBeforePolyfills(), react(), pluginRewriteAll(), ...(sentryAuthToken ? sentryPlugins() : [])],
   // Bind dev/preview servers to loopback only — never expose to the network
   // (do not use `--host` / `host: true`). Security: prevents the local dev
   // server from being reachable from the LAN.
@@ -67,6 +101,8 @@ export default defineConfig({
   },
   build: {
     target: ['es2020'],
+    // Hidden: the bundles carry no sourceMappingURL comment.
+    sourcemap: sentryAuthToken ? 'hidden' : false,
     // Vite 8 minifies with Oxc and Lightning CSS by default. Keep esbuild, which built every release so far.
     minify: 'esbuild',
     cssMinify: 'esbuild',

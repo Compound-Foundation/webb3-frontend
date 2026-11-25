@@ -34,6 +34,8 @@
 /.env* @Compound-Foundation/foundation-engineering
 /envVars.ts @Compound-Foundation/foundation-engineering
 /src/init.ts @Compound-Foundation/foundation-engineering
+# Starts Sentry, which decides what error data leaves the browser.
+/src/instrument.ts @Compound-Foundation/foundation-engineering
 /vite.config.js @Compound-Foundation/foundation-engineering
 /*.html @Compound-Foundation/foundation-engineering
 /*/index.html @Compound-Foundation/foundation-engineering
