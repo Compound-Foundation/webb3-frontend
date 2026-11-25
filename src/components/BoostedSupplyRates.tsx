@@ -1,5 +1,5 @@
 import { Lightning } from '@components/Icons/Lightning';
-import { INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
+import { boostedYieldPromoIcon, INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { formatRateFactor } from '@helpers/numbers';
 import { INSTITUTIONAL_MARKET_URL, INSTITUTIONAL_REGISTER_URL } from '@helpers/urls';
@@ -16,6 +16,8 @@ type BoostedSupplyRatesProps = {
   // The market detail page shows the bar and labels alone; its whitelist
   // status renders as a standalone banner instead
   showWhitelistCard?: boolean;
+  // Selects per-market boosted-yield art (e.g. the USDG badge)
+  marketSlug?: string;
 };
 
 /**
@@ -30,6 +32,7 @@ const BoostedSupplyRates = ({
   whitelistStatus = InstitutionalWhitelistStatus.NoWallet,
   boostLabel = 'Boosted APR',
   showWhitelistCard = true,
+  marketSlug,
 }: BoostedSupplyRatesProps) => {
   const totalAPR = earnAPR + boostAPR;
   // Segment widths are proportional to each component's share of the total,
@@ -55,7 +58,7 @@ const BoostedSupplyRates = ({
   } else if (whitelistStatus === InstitutionalWhitelistStatus.NotWhitelisted) {
     whitelistCard = (
       <div className="boosted-supply-rates__whitelist-card">
-        <img className="boosted-supply-rates__whitelist-card__badge" src="/images/whitelist-coins.png" alt="" />
+        <img className="boosted-supply-rates__whitelist-card__badge" src={boostedYieldPromoIcon(marketSlug)} alt="" />
         <div>
           <p className="boosted-supply-rates__whitelist-card__title L3 body body--emphasized">Earn boosted yield</p>
           <p className="boosted-supply-rates__whitelist-card__subtitle L4 meta">

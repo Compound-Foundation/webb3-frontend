@@ -1,9 +1,11 @@
-import { INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
+import { boostedYieldPromoIcon, INSTITUTIONAL_BOOST_END_DATE_LABEL } from '@helpers/institutionalRates';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { INSTITUTIONAL_REGISTER_URL } from '@helpers/urls';
 
 type WhitelistStatusBannerProps = {
   whitelistStatus: InstitutionalWhitelistStatus;
+  // Selects per-market boosted-yield art (e.g. the USDG badge)
+  marketSlug?: string;
 };
 
 /**
@@ -11,7 +13,7 @@ type WhitelistStatusBannerProps = {
  * account's access to the boosted supply rate. Shown only while the boost is
  * paying.
  */
-const WhitelistStatusBanner = ({ whitelistStatus }: WhitelistStatusBannerProps) => {
+const WhitelistStatusBanner = ({ whitelistStatus, marketSlug }: WhitelistStatusBannerProps) => {
   if (whitelistStatus === InstitutionalWhitelistStatus.Whitelisted) {
     return (
       <div className="whitelist-status-banner grid-column--12">
@@ -29,7 +31,7 @@ const WhitelistStatusBanner = ({ whitelistStatus }: WhitelistStatusBannerProps) 
     return (
       <div className="whitelist-status-banner grid-column--12">
         <div className="whitelist-status-banner__lead">
-          <img className="whitelist-status-banner__icon" src="/images/whitelist-coins.png" alt="" />
+          <img className="whitelist-status-banner__icon" src={boostedYieldPromoIcon(marketSlug)} alt="" />
           <p className="whitelist-status-banner__title L3 body body--emphasized">Earn boosted yield</p>
         </div>
         <p className="whitelist-status-banner__detail L4 body">
@@ -51,7 +53,7 @@ const WhitelistStatusBanner = ({ whitelistStatus }: WhitelistStatusBannerProps) 
   return (
     <div className="whitelist-status-banner grid-column--12">
       <div className="whitelist-status-banner__lead">
-        <img className="whitelist-status-banner__icon" src="/images/whitelist-coins.png" alt="" />
+        <img className="whitelist-status-banner__icon" src={boostedYieldPromoIcon(marketSlug)} alt="" />
         <div>
           <p className="whitelist-status-banner__title L3 body body--emphasized">Earn boosted yield</p>
           <p className="whitelist-status-banner__detail L4 body">

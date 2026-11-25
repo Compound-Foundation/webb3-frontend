@@ -136,36 +136,87 @@
     &--institutional {
       --institutional-row-base: #09161c;
       --institutional-row-outline: #174149;
+      // Uniform hover wash painted over the whole row, art included, so the
+      // hover highlight covers the row edge to edge
+      --institutional-row-wash: transparent;
 
       height: 5rem;
 
+      // The artwork lives on the ROW, where it paints continuously behind the
+      // transparent cells (table row backgrounds span the full row): the same
+      // full-width halftone art as the hero banner, under the same glow and a
+      // light tint. clip-path rounds the row's corners to the cell radii,
+      // since row backgrounds ignore the cells' border-radius.
+      background:
+        linear-gradient(var(--institutional-row-wash), var(--institutional-row-wash)),
+        radial-gradient(20% 220% at 0% 100%, rgba(8, 138, 28, 0.3) 0%, rgba(25, 131, 110, 0) 100%),
+        linear-gradient(90deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.25) 60%, rgba(0, 0, 0, 0.4) 100%),
+        url('/images/institutional-usdg-banner-art.png') center / cover no-repeat,
+        linear-gradient(var(--institutional-row-base), var(--institutional-row-base));
+      clip-path: inset(0 round 0.5rem);
+
+      // Cells are transparent so the row's artwork shows through; the gradient
+      // outline is painted by an ::after overlay per cell, clipped to the 1px
+      // border ring by the exclude mask (masking the cell itself would hide
+      // its contents)
       td {
+        background: none;
         border-bottom: 1px solid transparent;
         border-top: 1px solid transparent;
-        background:
-          linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
-          linear-gradient(var(--institutional-row-outline), var(--institutional-row-outline)) border-box;
+        position: relative;
+      }
+
+      td::after {
+        background: linear-gradient(var(--institutional-row-outline), var(--institutional-row-outline)) border-box;
+        border-bottom: 1px solid transparent;
+        border-top: 1px solid transparent;
+        bottom: -1px;
+        content: '';
+        left: 0;
+        -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0) border-box;
+        -webkit-mask-composite: xor;
+        mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0) border-box;
+        mask-composite: exclude;
+        pointer-events: none;
+        position: absolute;
+        right: 0;
+        top: -1px;
       }
 
       td:first-child {
         border-left: 1px solid transparent;
-        background:
-          radial-gradient(60% 220% at 0% 100%, rgba(8, 138, 28, 0.3) 0%, rgba(25, 131, 110, 0) 100%) padding-box,
-          linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
-          linear-gradient(90deg, #00d791 0%, var(--institutional-row-outline) 100%) border-box;
+      }
+
+      td:first-child::after {
+        background: linear-gradient(90deg, #00d791 0%, var(--institutional-row-outline) 100%) border-box;
+        border-left: 1px solid transparent;
+        border-radius: 0.5rem 0 0 0.5rem;
+        left: -1px;
       }
 
       td:last-child {
         border-right: 1px solid transparent;
-        background:
-          linear-gradient(var(--institutional-row-base), var(--institutional-row-base)) padding-box,
-          linear-gradient(90deg, var(--institutional-row-outline) 0%, #00d791 100%) border-box;
+      }
+
+      td:last-child::after {
+        background: linear-gradient(90deg, var(--institutional-row-outline) 0%, #00d791 100%) border-box;
+        border-radius: 0 0.5rem 0.5rem 0;
+        border-right: 1px solid transparent;
+        right: -1px;
       }
 
       &:hover {
-        --institutional-row-base: #0e222c;
+        --institutional-row-wash: rgba(125, 165, 185, 0.12);
       }
     }
+  }
+
+  // Breathing room between adjacent institutional rows, whose painted outlines
+  // would otherwise touch
+  &__table-spacer-row td {
+    padding: 0;
+    height: 0.375rem;
+    background: none;
   }
 
   &__table-divider-row td {

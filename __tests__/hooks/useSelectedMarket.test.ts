@@ -1,4 +1,5 @@
 import mainnetInstitutionalUSDCRoots from 'comet/deployments/mainnet/institutional_usdc/roots.json';
+import mainnetInstitutionalUSDGRoots from 'comet/deployments/mainnet/institutional_usdg/roots.json';
 import mainnetUSDCRoots from 'comet/deployments/mainnet/usdc/roots.json';
 import mainnetWETHRoots from 'comet/deployments/mainnet/weth/roots.json';
 
@@ -28,6 +29,9 @@ describe('shortMarketKey', () => {
     expect(shortMarketKey(marketByAddress(mainnetInstitutionalUSDCRoots['comet']))).toEqual(
       'usdc-institutional-mainnet',
     );
+    expect(shortMarketKey(marketByAddress(mainnetInstitutionalUSDGRoots['comet']))).toEqual(
+      'usdg-institutional-mainnet',
+    );
   });
 });
 
@@ -41,6 +45,9 @@ describe('parseMarketKeyOrDefault', () => {
   test('parses a slug shorthand key', () => {
     expect(parseMarketKeyOrDefault(MARKETS, DEFAULT_MARKET, 'usdc-institutional-mainnet').marketAddress).toEqual(
       mainnetInstitutionalUSDCRoots['comet'],
+    );
+    expect(parseMarketKeyOrDefault(MARKETS, DEFAULT_MARKET, 'usdg-institutional-mainnet').marketAddress).toEqual(
+      mainnetInstitutionalUSDGRoots['comet'],
     );
   });
 

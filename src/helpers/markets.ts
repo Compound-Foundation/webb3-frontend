@@ -10,6 +10,7 @@ import baseMainnetWETHRoots from 'comet/deployments/base/weth/roots.json';
 import lineaMainnetUSDCRoots from 'comet/deployments/linea/usdc/roots.json';
 import lineaWETHRoots from 'comet/deployments/linea/weth/roots.json';
 import mainnetInstitutionalUSDCRoots from 'comet/deployments/mainnet/institutional_usdc/roots.json';
+import mainnetInstitutionalUSDGRoots from 'comet/deployments/mainnet/institutional_usdg/roots.json';
 import mainnetUSDCRoots from 'comet/deployments/mainnet/usdc/roots.json';
 import mainnetUSDSRoots from 'comet/deployments/mainnet/usds/roots.json';
 import mainnetUSDTRoots from 'comet/deployments/mainnet/usdt/roots.json';
@@ -95,12 +96,21 @@ export const MARKETS: MarketData[] = [
       [1, 'wstETH', 'Lido Wrapped Staked ETH', mainnetWSTETHRoots],
       [1, 'USDS', 'USDS', mainnetUSDSRoots],
       [1, 'WBTC', 'Wrapped BTC', mainnetWBTCRoots],
+      // USDG leads the institutional group and carries the New badge; the USDC
+      // institutional market is established, so it is listed second without one
+      [
+        1,
+        'USDG',
+        'USDG Institutional',
+        mainnetInstitutionalUSDGRoots,
+        { slug: 'usdg-institutional', institutional: true, featured: true, isNew: true },
+      ],
       [
         1,
         'USDC',
         'USDC Institutional',
         mainnetInstitutionalUSDCRoots,
-        { slug: 'usdc-institutional', institutional: true, isNew: true },
+        { slug: 'usdc-institutional', institutional: true },
       ],
       [137, 'USDC.e', 'USD Coin (Bridged)', polygonUSDCRoots],
       [137, 'USDT0', 'Tether', polygonUSDTRoots],
@@ -124,7 +134,7 @@ export const MARKETS: MarketData[] = [
       [2020, 'WETH', 'Wrapped Ether', roninWETHRoots],
       [2020, 'RON', 'Ronin', roninWRONRoots],
       [59144, 'ETH', 'Ether', lineaWETHRoots],
-    ] as [number, string, string, { [x: string]: string }, Pick<MarketData, 'slug' | 'institutional' | 'isNew'>?][]
+    ] as [number, string, string, { [x: string]: string }, Pick<MarketData, 'slug' | 'institutional' | 'featured' | 'isNew'>?][]
   ).map(([chainId, baseAsset, baseAssetName, root, options]) => {
     const chain: ChainInformation = CHAINS[chainId];
 

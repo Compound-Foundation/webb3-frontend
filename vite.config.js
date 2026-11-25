@@ -111,6 +111,7 @@ export default defineConfig({
       '@hooks': resolve(__dirname, 'src/hooks'),
       '@contexts': resolve(__dirname, 'src/contexts'),
       '@helpers': resolve(__dirname, 'src/helpers'),
+      '@images': resolve(__dirname, 'src/images'),
       '@types': resolve(__dirname, 'src/types'),
       '@constants': resolve(__dirname, 'src/constants'),
     },
