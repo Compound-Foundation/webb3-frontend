@@ -10,7 +10,7 @@ import NetRatesTooltip, {
   RewardsType
 } from '@components/Tooltips/NetRatesTooltip';
 import { useCurrencyContext } from '@contexts/CurrencyContext';
-import { sanitizedAmountForAction } from '@helpers/actions';
+import { isOverBorrowCapacity, OVER_BORROW_CAPACITY, sanitizedAmountForAction } from '@helpers/actions';
 import { InstitutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import {
   displayValue,
@@ -55,6 +55,8 @@ type MastheadHydrated = [
     collateralValue: bigint;
     collateralValuePost: bigint;
     compare: boolean;
+    /** A deprecated collateral the position holds, named by the hint on a Borrow disabled for no capacity. */
+    deprecatedCollateralName?: string;
     earnAPR: bigint;
     earnRewardsAPR?: bigint;
     institutionalWhitelistStatus?: InstitutionalWhitelistStatus;
@@ -245,6 +247,7 @@ function getContent(state: MastheadState): Content {
     collateralValue,
     collateralValuePost,
     compare,
+    deprecatedCollateralName,
     earnAPR,
     earnRewardsAPR,
     institutionalWhitelistStatus,
@@ -536,14 +539,22 @@ function getContent(state: MastheadState): Content {
     } else if (borrowActionIndex === -1) {
       buttons = (
         <>
-          <button
-            className="button button--large button--borrow"
-            disabled={transaction !== undefined || baseAsset.borrowCapacity === 0n}
-            onClick={() => onWithdrawAction([ActionType.Borrow, baseAssetPost, undefined])}
+          <Tooltip
+            content={<div className="masthead__tooltip-text">{OVER_BORROW_CAPACITY}</div>}
+            width={260}
+            disabled={!isOverBorrowCapacity(baseAssetPost)}
           >
-            {iconForActionType(ActionType.Borrow)}
-            <label className="label">Borrow {baseAssetToUse.symbol}</label>
-          </button>
+            <button
+              className="button button--large button--borrow"
+              disabled={
+                transaction !== undefined || baseAsset.borrowCapacity === 0n || isOverBorrowCapacity(baseAssetPost)
+              }
+              onClick={() => onWithdrawAction([ActionType.Borrow, baseAssetPost, undefined])}
+            >
+              {iconForActionType(ActionType.Borrow)}
+              <label className="label">Borrow {baseAssetToUse.symbol}</label>
+            </button>
+          </Tooltip>
           <button
             className="button button--large button--borrow"
             disabled={transaction !== undefined || baseAsset.walletBalance === 0n}
@@ -770,14 +781,24 @@ function getContent(state: MastheadState): Content {
       );
     } else if (baseAssetToUse.balance === 0n && !pendingSupplyAction && supplyActionIndex === -1) {
       repayBorrowOrWithdrawButton = (
-        <button
-          className="button button--large button--borrow"
-          disabled={transaction !== undefined || baseAssetToUse.borrowCapacity === 0n}
-          onClick={() => onWithdrawAction([ActionType.Borrow, baseAssetPost, undefined])}
+        <Tooltip
+          content={
+            <div className="masthead__tooltip-text">
+              {`${deprecatedCollateralName} is deprecated and doesn't add to your borrow capacity.`}
+            </div>
+          }
+          width={260}
+          disabled={baseAssetToUse.borrowCapacity !== 0n || deprecatedCollateralName === undefined}
         >
-          {iconForActionType(ActionType.Borrow)}
-          <label className="label">Borrow {baseAssetToUse.symbol}</label>
-        </button>
+          <button
+            className="button button--large button--borrow"
+            disabled={transaction !== undefined || baseAssetToUse.borrowCapacity === 0n}
+            onClick={() => onWithdrawAction([ActionType.Borrow, baseAssetPost, undefined])}
+          >
+            {iconForActionType(ActionType.Borrow)}
+            <label className="label">Borrow {baseAssetToUse.symbol}</label>
+          </button>
+        </Tooltip>
       );
     } else if (
       (baseAssetToUse.balance > 0n &&

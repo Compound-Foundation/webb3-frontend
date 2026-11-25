@@ -22,6 +22,7 @@ import {
   calculateUpdatedBalances,
   addsSecondAction,
   getActionFromPendingAction,
+  isOverBorrowCapacity,
   sanitizedAmountForAction,
 } from '@helpers/actions';
 import { withCometStateSource } from '@helpers/cometStateSource';
@@ -1521,6 +1522,9 @@ const Home = ({
         collateralValue,
         collateralValuePost: updatedDataPostActions.collateralValue,
         compare,
+        deprecatedCollateralName: updatedDataPostActions.collateralAssets.find(
+          (asset) => asset.balance > 0n && getCollateralFor(asset.address)?.isDeprecated
+        )?.name,
         earnAPR,
         earnRewardsAPR: supplyIncentives.earnRewardsAPR,
         isInstitutional: supplyIncentives.isInstitutional ?? false,
@@ -1718,6 +1722,7 @@ const Home = ({
               transaction: blockingTransaction,
               isCollateralError: hasCollateralError(token),
               isDeprecated: collateral?.isDeprecated,
+              isOverBorrowCapacity: isOverBorrowCapacity(updatedDataPostActions.baseAsset),
               unwrappedAssetSupplyAction: stEthWrapSupplyAction,
               onDripClicked: () => {
                 if (isFromEarlierVisit()) return;

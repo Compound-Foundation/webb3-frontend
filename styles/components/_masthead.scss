@@ -68,6 +68,12 @@
     align-items: center;
   }
 
+  &__tooltip-text {
+    font-weight: 400;
+    line-height: 1rem;
+    font-size: 11px;
+  }
+
   .meta {
     display: flex;
     align-items: center;
