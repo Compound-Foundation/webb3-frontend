@@ -164,7 +164,10 @@ const Market = ({ web3 }: MarketsProps) => {
     // route shows no banner.
     if (isInstitutional && supplyRewardsAPR > 0n && !isWrappedRoute) {
       whitelistStatusBanner = (
-        <WhitelistStatusBanner whitelistStatus={institutionalWhitelistStatus(web3.read.account)} />
+        <WhitelistStatusBanner
+          whitelistStatus={institutionalWhitelistStatus(web3.read.account)}
+          boostEndDate={configMarket?.boostEndDate}
+        />
       );
     }
 

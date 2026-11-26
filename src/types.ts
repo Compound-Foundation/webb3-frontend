@@ -356,6 +356,8 @@ export type MarketData = {
   slug?: string;
   // Institutional markets are listed in their own section of the market selector
   institutional?: boolean;
+  // The institutional boost stops paying on this date. No date means the boost has no end.
+  boostEndDate?: Date;
   // Recently launched markets get a 'New' badge in the market selector
   isNew?: boolean;
   type: 'MarketData';
