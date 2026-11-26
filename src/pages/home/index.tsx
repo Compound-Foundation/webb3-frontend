@@ -105,7 +105,6 @@ import InactiveMarketBanner from './components/InactiveMarketBanner';
 import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadNotice, MastheadState } from './components/Masthead';
 import PositionCard, { PositionCardState } from './components/PositionCard';
-import SupplyPausedBanner from './components/SupplyPausedBanner';
 
 const sortTokensAlphabetically = (a: Token, b: Token): number => (a.name > b.name ? 1 : a.name === b.name ? 0 : -1);
 
@@ -1787,7 +1786,6 @@ const Home = ({
   return (
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
-      <SupplyPausedBanner />
       <InstitutionalBanner market={selectedMarket[1]} />
       {selected?.isInactive && cometState !== StateType.Loading && !hasPositions && <InactiveMarketBanner />}
       <Masthead state={mastheadState} />
