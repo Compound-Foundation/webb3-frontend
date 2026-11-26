@@ -41,7 +41,7 @@ publishing finishes, links remain in the run summary and the PR comment is not
 updated. A failed build does not replace the previous preview.
 
 Fork code runs on a separate runner with read-only repository permissions and
-the same public browser configuration used by the normal build (the six
+the same public browser configuration used by the normal build (the
 Vite settings in that workflow, stored as repository secrets). Those values
 are embedded in the frontend bundle; private credentials must not be added to
 this job. Preview origins must be allowed by the backend and wallet screening
@@ -73,18 +73,50 @@ Install both Prettier and ESLint through VS Code extensions. (They should show u
 
 ## Required Environment Variables
 
-The application requires the following environment variables to be set in order to function properly:
+Configure the application with the following environment variables:
 
 - `VITE_V3_API_HOST` - The host endpoint used for the v3 api. The Dashboard will function without the api but the Markets page and Rewards balances are rendered from data given by the v3 api.
-- `VITE_V3_RPC_PROVIDER_HOST` - An RPC host provider. This app was designed to work with the v3 api Node Proxy but any RPC provider should work. You should make sure your RPC provider supports all of the supported networks to function properly. See [Running the Backend Locally](#running-the-backend-locally).
+- Per-network RPC URLs: `VITE_MAINNET_URL`, `VITE_SEPOLIA_URL`, `VITE_POLYGON_URL`, `VITE_ARBITRUM_URL`,
+  `VITE_SCROLL_URL`, `VITE_OPTIMISM_URL`, `VITE_AVALANCHE_URL`, `VITE_FUJI_URL`, `VITE_BASE_MAINNET_URL`,
+  `VITE_MANTLE_URL`, `VITE_LINEA_URL`, `VITE_UNICHAIN_URL`, and `VITE_RONIN_URL` - Unset or empty values use each chain's default HTTP RPC URL. See [RPC URL Overrides](#rpc-url-overrides) for the network mapping and defaults.
 - `VITE_V3_WALLET_CONNECT_PROJECT_ID` - A Wallet Connect project id used if you want the app to support Wallet Connect.
 - `VITE_SCREENING_ENDPOINT` - The wallet address screening endpoint (a Cloudflare Worker that lives in a separate repo). Screening is fail-closed, so in a deployed build an unset or unreachable endpoint blocks every connected wallet.
 
 On the local dev server (`yarn dev`), leaving `VITE_SCREENING_ENDPOINT` unset skips the screening call entirely, so you can connect a wallet locally without an endpoint. Set it (e.g. in `.env.local`) to a worker that allowlists your dev origin if you need to exercise screening locally. This applies to the dev server only — `vite build` always screens.
 
+### RPC URL Overrides
+
+Set any of the following optional variables in `.env.local` to use a full RPC endpoint URL for that network. Each valid HTTP(S) override takes precedence over the chain's default HTTP RPC URL from `viem/chains` (also re-exported by Wagmi, `rpcUrls.default.http[0]`). Unset, empty, invalid, or non-HTTP(S) values are treated as empty and use that default.
+
+| Variable | Network | Default URL |
+| --- | --- | --- |
+| `VITE_MAINNET_URL` | Ethereum mainnet | `mainnet.rpcUrls.default.http[0]` |
+| `VITE_SEPOLIA_URL` | Ethereum Sepolia | `sepolia.rpcUrls.default.http[0]` |
+| `VITE_POLYGON_URL` | Polygon | `polygon.rpcUrls.default.http[0]` |
+| `VITE_ARBITRUM_URL` | Arbitrum | `arbitrum.rpcUrls.default.http[0]` |
+| `VITE_SCROLL_URL` | Scroll | `scroll.rpcUrls.default.http[0]` |
+| `VITE_OPTIMISM_URL` | Optimism | `optimism.rpcUrls.default.http[0]` |
+| `VITE_AVALANCHE_URL` | Avalanche | `avalanche.rpcUrls.default.http[0]` |
+| `VITE_FUJI_URL` | Avalanche Fuji | `avalancheFuji.rpcUrls.default.http[0]` |
+| `VITE_BASE_MAINNET_URL` | Base | `base.rpcUrls.default.http[0]` |
+| `VITE_MANTLE_URL` | Mantle | `mantle.rpcUrls.default.http[0]` |
+| `VITE_LINEA_URL` | Linea | `linea.rpcUrls.default.http[0]` |
+| `VITE_UNICHAIN_URL` | Unichain | `unichain.rpcUrls.default.http[0]` |
+| `VITE_RONIN_URL` | Ronin | `ronin.rpcUrls.default.http[0]` |
+
+For example, use custom Ethereum node while keeping chain defaults for other networks:
+
+```dotenv
+...
+VITE_MAINNET_URL=https://ethereum-rpc.publicnode.com
+...
+```
+
+Restart the dev server after changing these values. For deployed builds, set them before `yarn build`: Vite embeds `VITE_*` values in the public frontend bundle, so use only RPC credentials intended for browser exposure.
+
 ## Running the Backend Locally
 
-Full local functionality (wallet balances, positions, on-chain reads) requires the `node-provider-proxy` from [`webb3-backend-api`](https://github.com/Compound-Foundation/webb3-backend-api) running alongside this app. Without it, `VITE_V3_RPC_PROVIDER_HOST` has nothing valid to point at and the app will sit on skeleton loaders indefinitely (RPC calls silently fail).
+Wallet balances, positions and on-chain reads need a reachable RPC endpoint for each network you use. You can set per-network [RPC URL overrides](#rpc-url-overrides), or run the `node-provider-proxy` from [`webb3-backend-api`](https://github.com/Compound-Foundation/webb3-backend-api) alongside this app using the steps below. Missing or unreachable RPC endpoints can leave the app on skeleton loaders.
 
 1. Clone the backend repo alongside this one:
    ```sh
@@ -101,7 +133,7 @@ Full local functionality (wallet balances, positions, on-chain reads) requires t
    ```
    See `wrangler.toml`'s `[vars]` block for the rest (`alchemyArbMainnet`, `alchemyPolygonMainnet`, `alchemyBaseMainnet`, etc.) if you need other networks.
 
-4. Start the proxy over HTTPS (plain HTTP won't work — this app's RPC URLs are always constructed as `https://`):
+4. Start the proxy over HTTPS:
    ```sh
    npx wrangler dev --local --local-protocol https
    ```
@@ -109,9 +141,9 @@ Full local functionality (wallet balances, positions, on-chain reads) requires t
 
 5. **One-time only**: visit `https://localhost:8787/` directly in your browser and click through the self-signed-certificate warning (Advanced → Proceed). Browsers remember this exception per-origin, so the frontend's requests to it will go through afterward without further prompts.
 
-6. In this repo's `.env.local`:
+6. In this repo's `.env.local`, set full proxy URLs for each network you need, for example:
    ```
-   VITE_V3_RPC_PROVIDER_HOST=localhost:8787
+   VITE_MAINNET_URL=https://localhost:8787/ethereum-mainnet
    ```
    Restart `yarn dev` if it's already running to pickup the envvar updates
 
@@ -131,7 +163,7 @@ You can also use:
 yarn dev --mode playground
 ```
 
-In playground mode, mainnet will point to `http://localhost:8545`, and all extensions will point to `http://localhost:8545/embedded.html`.
+In playground mode, empty RPC overrides use the chain defaults, and all extensions point to `http://localhost:5183/embedded.html`. To use a local mainnet node, set `VITE_MAINNET_URL=http://localhost:8545` in `.env.playground.local` and start the node at that address.
 
 You can also use:
 
