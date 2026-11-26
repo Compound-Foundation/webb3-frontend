@@ -59,22 +59,6 @@ export function checkImageURL(url: string) {
   });
 }
 
-// returns title, description from decoded proposal body
-export function parseTitleDescriptionFromBody(description: string): {
-  title: string;
-  description: string;
-} {
-  const match = description.match(/\s*#\s+([^\r\n]+)/);
-  if (match === null || match.index === undefined) {
-    return { title: 'Untitled', description };
-  }
-  description = description.slice(match.index + match[0].length);
-  return {
-    title: match[1],
-    description: description.trim(),
-  };
-}
-
 type TimeElement = {
   singleName: string;
   pluralName: string;

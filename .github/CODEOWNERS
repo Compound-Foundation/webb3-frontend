@@ -9,8 +9,8 @@
 
 # security-sensitive: begin
 # Transaction building and signing: contract addresses and ABIs, actions, the
-# hooks that write to Comet and the Governor, the approval spender on the home
-# page, and the action queue.
+# hooks that write to Comet, the approval spender on the home page, and the
+# action queue.
 /src/helpers/ @Compound-Foundation/foundation-engineering
 /src/contexts/ @Compound-Foundation/foundation-engineering
 /src/constants/ @Compound-Foundation/foundation-engineering
