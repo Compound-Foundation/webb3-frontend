@@ -20,7 +20,6 @@ const HTML_ENTRIES = [
   'markets',
   'marketDetail',
   'extensions',
-  'vote',
   'extensionDetail',
   'transactions',
   'rewards',
@@ -101,7 +100,7 @@ function resolve(command: 'build' | 'serve', inline: object = {}): Resolved {
   }
 }
 
-test('the production build keeps its target, minifiers, nine HTML entries, relative URLs and the Node polyfills', () => {
+test('the production build keeps its target, minifiers, eight HTML entries, relative URLs and the Node polyfills', () => {
   const resolved = resolve('build');
   expect(resolved).toMatchObject({
     isProduction: true,
