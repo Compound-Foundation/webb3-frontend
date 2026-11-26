@@ -222,6 +222,7 @@ const SupportedNetworks = ({
                 content={<span className="market-selector__tooltip-text">{INACTIVE_MARKETS_TOOLTIP}</span>}
                 width={230}
                 yOffset={14}
+                interactive={true}
               >
                 <div className="market-selector__inactive-label">
                   <label className="label label--secondary text-color--2">{INACTIVE_MARKETS}</label>

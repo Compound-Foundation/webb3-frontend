@@ -237,6 +237,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
               </span>
             }
             width={240}
+            interactive={true}
           >
             <span>{supplyButton}</span>
           </Tooltip>
