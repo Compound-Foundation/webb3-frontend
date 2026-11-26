@@ -98,6 +98,7 @@ import {
   StateType,
   Token,
   TokenWithAccountState,
+  TokenWithState,
   Transaction,
   TransactionOutcome,
   TransactionState,
@@ -347,18 +348,18 @@ const Home = ({
   const hasCollateralError = (token: { address: string; price: bigint }) =>
     token.price === 0n || getCollateralFor(token.address)?.status === 'error';
 
-  const isCollateralShown = (assetAddress: string, balance = 0n) => {
+  const isCollateralShown = (token: TokenWithState, balance = 0n) => {
     if (balance > 0n) return true;
 
-    const collateral = getCollateralFor(assetAddress);
+    const collateral = getCollateralFor(token.address);
 
     if (collateral?.isDeprecated) return false;
 
-    return !showTopCollateralOnly || collateral?.isVisible !== false || collateral?.status === 'error';
+    return !showTopCollateralOnly || collateral?.isVisible !== false || hasCollateralError(token);
   };
 
-  const sortErrorsLast = (a: Token, b: Token) =>
-    Number(getCollateralFor(a.address)?.status === 'error') - Number(getCollateralFor(b.address)?.status === 'error');
+  const sortErrorsLast = (a: TokenWithState, b: TokenWithState) =>
+    Number(hasCollateralError(a)) - Number(hasCollateralError(b));
 
   const isFilterHidingCollateral =
     showTopCollateralOnly && !!selected?.collaterals?.some((c) => !c.isDeprecated && c.isVisible === false);
@@ -736,7 +737,7 @@ const Home = ({
     });
     mastheadState = [StateType.NoWallet, { baseAsset, earnAPR }];
     assetRows = collateralAssets
-      .filter((token) => isCollateralShown(token.address))
+      .filter((token) => isCollateralShown(token))
       .sort(sortTokensAlphabetically)
       .sort(sortErrorsLast)
       .map((token, index) => (
@@ -1673,7 +1674,7 @@ const Home = ({
     ];
 
     const [unwrappedAdditionalCollateralAssets, onlyActualCollateralAssets] = arrayPartition(
-      collateralAssets.filter((asset) => isCollateralShown(asset.address, asset.balance)),
+      collateralAssets.filter((asset) => isCollateralShown(asset, asset.balance)),
       (asset) => isUnwrappedCollateralAsset(market.chainInformation, asset.address)
     );
 

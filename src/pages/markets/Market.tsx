@@ -183,7 +183,8 @@ const Market = ({ web3 }: MarketsProps) => {
     const rows = collateralAssets.flatMap((token) => {
       const collateral = market.collaterals?.find((c) => c.address.toLowerCase() === token.address.toLowerCase());
 
-      const isError = collateral?.status === 'error';
+      // The summary status can lag behind a feed that already reverts, which the market query reports as price 0
+      const isError = collateral?.status === 'error' || token.price === 0n;
 
       if (collateral?.isDeprecated || (showTopCollateralOnly && collateral?.isVisible === false && !isError)) return [];
 
