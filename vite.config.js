@@ -4,7 +4,7 @@ import { resolve } from 'path';
 
 import nodePolyfills from 'rollup-plugin-polyfill-node';
 
-import { defineConfig } from 'vite';
+import { defineConfig, transformWithOxc } from 'vite';
 import pluginRewriteAll from 'vite-plugin-rewrite-all';
 
 // The Buffer and process shims that the dependency optimizer injects into pre-bundled dependencies. They
@@ -12,12 +12,46 @@ import pluginRewriteAll from 'vite-plugin-rewrite-all';
 // optimizer cannot run.
 const nodeGlobalsPolyfill = (file) => resolve(__dirname, 'node_modules/@esbuild-plugins/node-globals-polyfill', file);
 
+// Vite replaces `process.env.NODE_ENV` in the build only after other plugins' transforms. By then the Node
+// polyfills below have rewritten `process` to their shim. The shim's `process.env` has no NODE_ENV, so React's
+// entry points take their development branch at run time, and the build ships and runs development React.
+//
+// This build-only plugin runs before the polyfills. It replaces `process.env.NODE_ENV` with the value Vite
+// would give it: a `define` entry for it, else NODE_ENV, else the mode. It parses the code, so it changes
+// expressions only, never strings or comments. It handles JavaScript files only. Application code reads no
+// `process.env`, and the dependencies that read NODE_ENV, React among them, ship JavaScript.
+const replaceNodeEnvBeforePolyfills = () => {
+  let define;
+  let sourcemap;
+  return {
+    name: 'replace-node-env-before-polyfills',
+    enforce: 'pre',
+    apply: 'build',
+    configResolved(config) {
+      const nodeEnv = config.define?.['process.env.NODE_ENV'] ?? JSON.stringify(process.env.NODE_ENV || config.mode);
+      define = {
+        'process.env.NODE_ENV': nodeEnv,
+        'global.process.env.NODE_ENV': nodeEnv,
+        'globalThis.process.env.NODE_ENV': nodeEnv,
+      };
+      sourcemap = Boolean(config.build.sourcemap);
+    },
+    transform: {
+      filter: { id: /\.[cm]?js$/, code: 'process.env.NODE_ENV' },
+      async handler(code, id) {
+        const result = await transformWithOxc(code, id, { lang: 'js', define, tsconfig: false, sourcemap });
+        return { code: result.code, map: result.map ?? null };
+      },
+    },
+  };
+};
+
 // https://vitejs.dev/config/
 export default defineConfig({
   // pluginRewriteAll fixes an issue where the dev server doesn't properly
   // handle paths with a `.`. See https://stackoverflow.com/questions/66734726/paramname-doesnt-match-url-segments-containing-dot-in-react-app-with-vitej
   // eg. /markets/usdc.e-arb
-  plugins: [react(), pluginRewriteAll()],
+  plugins: [replaceNodeEnvBeforePolyfills(), react(), pluginRewriteAll()],
   // Bind dev/preview servers to loopback only — never expose to the network
   // (do not use `--host` / `host: true`). Security: prevents the local dev
   // server from being reachable from the LAN.

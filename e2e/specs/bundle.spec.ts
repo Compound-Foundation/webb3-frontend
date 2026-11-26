@@ -1,7 +1,7 @@
 // AC10: the production bundle holds none of the harness: no injected provider, wallet server, test key or
 // control credential. It scans each production build this run made and, when one exists, the repository's
 // `dist/` from `yarn build`. The global teardown also scans the same outputs for every key the wallet made
-// and the private upstream URL, which only the runner holds (see stats.json and summary.md).
+// and the private upstream URL and token, which only the runner holds (see stats.json and summary.md).
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -22,6 +22,7 @@ const HARNESS_MARKERS = [
   'cf-browser-wallet',
   'BROWSER_WALLET_CONTROL',
   'BROWSER_FORK_RPC_URL',
+  'BROWSER_FORK_RPC_TOKEN',
 ];
 
 /** anvil's well-known test mnemonic and its first ten keys, which the harness must never use. */
