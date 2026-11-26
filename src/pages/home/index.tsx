@@ -815,6 +815,9 @@ const Home = ({
         },
       };
     }
+    if (market.isInactive) {
+      actionRules.isMarketInactive = true;
+    }
     const wrappedValue = wrappedPosition?.grossAssets ?? 0n;
     // The dashboard's base asset: the Comet one, with the wrapped value added to a supply. A direct
     // borrow is shown as it is, and the wrapped value beneath it.

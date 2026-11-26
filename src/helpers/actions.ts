@@ -253,6 +253,8 @@ export type ActionRules = {
    * wrapper, so each action there is its own wallet transaction.
    */
   isSingleAction?: boolean;
+  /** Set on an inactive market, where a repay may not exceed the debt, since the excess would be a new supply. */
+  isMarketInactive?: boolean;
 };
 
 /**
@@ -362,6 +364,10 @@ export function validateAddingAction(
       const isMax = amount === MAX_UINT256;
       if ((isMax && baseAsset.walletBalance < borrowBalance) || (!isMax && amount > baseAsset.walletBalance)) {
         return [false, 'Amount Exceeds Wallet Balance'];
+      }
+      const excessRepay = rules.isMarketInactive ? excessRepayProblem(baseAsset, amount) : undefined;
+      if (excessRepay !== undefined) {
+        return [false, excessRepay];
       }
       break;
     }
