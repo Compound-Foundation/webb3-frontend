@@ -267,6 +267,7 @@ function App({ Component, pageProps }: any) {
               <MerklRedirectModal web3={web3}/>
               <Header
                 web3={web3}
+                theme={theme}
                 transactions={transactions}
                 clearTransactions={() => {
                   clearTransactions();

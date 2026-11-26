@@ -343,6 +343,44 @@ export interface ChainInformation {
   walletRpcUrls: string[];
 }
 
+export type MarketStatus = 'success' | 'partially' | 'error';
+
+export type CollateralStatus = 'success' | 'error';
+
+// A latest market summary from the v3 API after convertApiResponse (snake_case -> camelCase)
+export type LatestMarketSummaryResponse = {
+  chainId: number;
+  comet: {
+    address: string;
+    bulker: string;
+    rewards: string;
+  };
+  deploymentKey?: string;
+  displayName?: string;
+  baseAssetName?: string;
+  slug?: string;
+  isDefault?: boolean;
+  isInstitutional?: boolean;
+  status?: MarketStatus;
+  isInactive?: boolean;
+  // A market in the error status comes without the numbers
+  borrowApr?: string;
+  supplyApr?: string;
+  totalBorrowValue?: string;
+  totalSupplyValue?: string;
+  totalCollateralValue?: string;
+  utilization?: string;
+  timestamp: number;
+  date: string;
+  baseUsdPrice?: string;
+  collateralAssetSymbols: string[];
+  collaterals?: {
+    address: string;
+    symbol: string;
+    status: CollateralStatus;
+  }[];
+};
+
 export type MarketData = {
   baseAsset: BaseAssetConfig;
   chainInformation: ChainInformation;
@@ -351,6 +389,11 @@ export type MarketData = {
   bulkerAddress: string;
   fauceteerAddress?: string;
   rewardsAddress?: string;
+  // Statuses from the latest market summary
+  status?: MarketStatus;
+  collaterals?: LatestMarketSummaryResponse['collaterals'];
+  isInactive?: boolean;
+  utilization?: string;
   // Overrides the base-asset part of the market's URL key (e.g. 'usdc-institutional' -> '?market=usdc-institutional-mainnet').
   // Required when multiple markets on the same chain share a base asset symbol.
   slug?: string;
@@ -409,6 +452,9 @@ export type MarketSummary = {
   date: string;
   isInstitutional?: boolean;
   isRewardsLoading?: boolean;
+  status?: MarketStatus;
+  isInactive?: boolean;
+  errorCollateralSymbols?: string[];
 };
 
 export type AggregatedHistoricalSummary = {

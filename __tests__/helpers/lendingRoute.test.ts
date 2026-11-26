@@ -8,7 +8,6 @@ import {
   WrappedMarketSource,
 } from '@constants/wrappedMarkets';
 import { CONNECTOR_LOCALSTORAGE_KEY } from '@helpers/constants';
-import { getIsDeprecatedwUSDMMarket } from '@helpers/deprecatedMarkets';
 import {
   Eligibility,
   LendingRoute,
@@ -18,7 +17,9 @@ import {
   ValidationStatus,
   wrappedRouteKey,
 } from '@helpers/lendingRoute';
-import { getMarket, getMarkets, marketKey, MARKETS, V2_MARKET } from '@helpers/markets';
+import { getMarket, marketKey, V2_MARKET } from '@helpers/markets';
+
+import { MOCK_MARKETS } from '../mocks/mockMarkets';
 
 const ACCOUNT = '0x0000000000000000000000000000000000000aa1';
 
@@ -121,7 +122,7 @@ describe('lendingRoute', () => {
       expect(shipped.reads).toEqual(ELIGIBLE);
     });
 
-    const unsupportedEthereum = MARKETS.filter(
+    const unsupportedEthereum = MOCK_MARKETS.filter(
       (market) =>
         market.chainInformation.chainId === 1 && !CONFIGURED.some(([, comet]) => comet === market.marketAddress),
     );
@@ -133,7 +134,7 @@ describe('lendingRoute', () => {
       },
     );
 
-    const otherChains = MARKETS.filter((market) => market.chainInformation.chainId !== 1);
+    const otherChains = MOCK_MARKETS.filter((market) => market.chainInformation.chainId !== 1);
     it.each(otherChains.map((market) => [marketKey(market), market] as const))(
       'non-Ethereum market %s stays standard',
       (_key, market) => {
@@ -200,10 +201,11 @@ describe('lendingRoute', () => {
   });
 
   it('keeps the market list and market identities unchanged', () => {
-    const before = JSON.stringify(MARKETS, (_key, value) => (typeof value === 'bigint' ? value.toString() : value));
-    const keysBefore = getMarkets(false).map(marketKey);
+    const before = JSON.stringify(MOCK_MARKETS, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value,
+    );
 
-    for (const market of MARKETS) {
+    for (const market of MOCK_MARKETS) {
       for (const session of [
         anchorage({ chainId: market.chainInformation.chainId }),
         anchorage({ connector: undefined }),
@@ -212,21 +214,20 @@ describe('lendingRoute', () => {
       }
     }
 
-    expect(JSON.stringify(MARKETS, (_key, value) => (typeof value === 'bigint' ? value.toString() : value))).toBe(
-      before,
-    );
-    expect(getMarkets(false).map(marketKey)).toEqual(keysBefore);
+    expect(
+      JSON.stringify(MOCK_MARKETS, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)),
+    ).toBe(before);
     // No wrapper is listed as a market of its own, and each configured Comet is listed exactly once.
     for (const [, cometAddress] of CONFIGURED) {
       const wrapper = wrappedMarket(OPEN_REGISTRY, cometAddress).wrapperAddress.toLowerCase();
-      expect(MARKETS.some((market) => market.marketAddress.toLowerCase() === wrapper)).toBe(false);
+      expect(MOCK_MARKETS.some((market) => market.marketAddress.toLowerCase() === wrapper)).toBe(false);
       expect(
-        MARKETS.filter((market) => market.marketAddress.toLowerCase() === cometAddress.toLowerCase()),
+        MOCK_MARKETS.filter((market) => market.marketAddress.toLowerCase() === cometAddress.toLowerCase()),
       ).toHaveLength(1);
     }
     // USDC and institutional USDC keep their own identities and URL slugs.
-    expect(getMarket(1, CONFIGURED[0][1])?.slug).toBeUndefined();
-    expect(getMarket(1, CONFIGURED[2][1])?.slug).toBe('usdc-institutional');
+    expect(getMarket(MOCK_MARKETS, 1, CONFIGURED[0][1])?.slug).toBeUndefined();
+    expect(getMarket(MOCK_MARKETS, 1, CONFIGURED[2][1])?.slug).toBe('usdc-institutional');
     expect(resolve(V2_MARKET.marketAddress, anchorage()).kind).toBe('standard');
   });
 
@@ -298,20 +299,6 @@ describe('lendingRoute', () => {
         resolve(USDC_COMET, anchorage({ connector: { id: 'injected' } }), { conflictedRdns: new Set(['io.metamask']) }),
       ).toEqual({ kind: 'standard', writes: blocked('connector-conflict') });
     });
-
-    it('leaves the deprecated-market rules as they are', () => {
-      // main has no deprecated-market action restriction for these markets: the only rule is
-      // deprecated price-feed handling, which flags mainnet USDT. Routing neither consumes nor
-      // changes it.
-      const flags = MARKETS.map((market) => getIsDeprecatedwUSDMMarket(market.baseAsset, market.chainInformation));
-      for (const [, cometAddress] of CONFIGURED) resolve(cometAddress, anchorage());
-      expect(MARKETS.map((market) => getIsDeprecatedwUSDMMarket(market.baseAsset, market.chainInformation))).toEqual(
-        flags,
-      );
-      const usdt = getMarket(1, CONFIGURED[1][1]);
-      expect(usdt && getIsDeprecatedwUSDMMarket(usdt.baseAsset, usdt.chainInformation)).toBe(true);
-      expect(expectWrapped(resolve(CONFIGURED[1][1], anchorage())).deposit).toEqual(ELIGIBLE);
-    });
   });
 
   describe('disables deposits independently of reads and exits', () => {
@@ -358,7 +345,7 @@ describe('lendingRoute', () => {
       ['deposits and exits off', false, false],
     ] as const;
     const WATCH_ONLY: Partial<LendingSession> = { connector: undefined, isWatchOnly: true, isSignerReady: false };
-    const UNMAPPED_MARKETS = MARKETS.filter(
+    const UNMAPPED_MARKETS = MOCK_MARKETS.filter(
       (market) => !CONFIGURED.some(([, comet]) => comet === market.marketAddress)
     );
 

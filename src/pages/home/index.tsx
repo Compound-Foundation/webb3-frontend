@@ -36,7 +36,7 @@ import { arrayPartition } from '@helpers/functions';
 import { getKeyForActions, PreEstimatedAction } from '@helpers/gasEstimator';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { WriteBlockReason } from '@helpers/lendingRoute';
-import { DEFAULT_MARKET } from '@helpers/markets';
+import { getStatusCollateralAddress } from '@helpers/marketStatus';
 import { formatValue, MAX_UINT256 } from '@helpers/numbers';
 import {
   isSingleActionRoute,
@@ -72,6 +72,7 @@ import {
   WrappedPosition,
 } from '@helpers/wrappedPositions';
 import { getWithdrawalLimits, WithdrawalLimits, WithdrawalRequest } from '@helpers/wrappedWithdrawals';
+import { useMarkets } from '@hooks/useMarkets';
 import { Theme } from '@hooks/useThemeManager';
 import type { AddTransaction } from '@hooks/useTransactionManager';
 import type { WrappedActionState } from '@hooks/useWrappedAction';
@@ -100,6 +101,7 @@ import {
 
 import ActionModal from './components/ActionModal';
 import AssetRow from './components/AssetRow';
+import InactiveMarketBanner from './components/InactiveMarketBanner';
 import InstitutionalBanner from './components/InstitutionalBanner';
 import Masthead, { MastheadNotice, MastheadState } from './components/Masthead';
 import PositionCard, { PositionCardState } from './components/PositionCard';
@@ -295,7 +297,7 @@ type HomeProps = {
 const Home = ({
   transactions,
   web3,
-  cometState: state,
+  cometState: cometStateProp,
   addTransaction,
   switchWriteNetwork,
   estimatedGasMap,
@@ -303,13 +305,16 @@ const Home = ({
 }: HomeProps) => {
   // when V2 market was selected from market page and open up a new window default dashboard with default market
   const { selectedMarket, selectMarket } = useContext(getSelectedMarketContext());
+  const [marketsStateType, marketsState] = useMarkets();
+  const defaultMarket = marketsStateType === StateType.Hydrated ? marketsState.defaultMarket : undefined;
 
   // We use a useEffect here to prevent infinite renders by the state update in selectMarket
   useEffect(() => {
-    if (selectedMarket[0] === 'hydrated' && selectedMarket[1].baseAsset.symbol == 'Compound V2') {
-      selectMarket(DEFAULT_MARKET);
+    const isV2Selected = selectedMarket[0] === 'hydrated' && selectedMarket[1].baseAsset.symbol == 'Compound V2';
+    if (isV2Selected && defaultMarket !== undefined) {
+      selectMarket(defaultMarket);
     }
-  }, [selectedMarket[0], selectedMarket[1]?.baseAsset?.symbol]);
+  }, [selectedMarket[0], selectedMarket[1]?.baseAsset?.symbol, defaultMarket]);
 
   const rewards = useContext(RewardsStateContext);
   const { addOrUpdateAction, clearActions, getActions, getPendingAction, removeAction, setPendingAction } = useContext(
@@ -317,6 +322,18 @@ const Home = ({
   );
 
   const [compare, setCompare] = useState(false);
+  // A market the summary reports in the error status is shown like one whose on-chain data failed to load
+  const selected = selectedMarket[1];
+  const isMarketStatusError = selected?.status === 'error';
+  const getCollateralStatusFor = (assetAddress: string) => {
+    if (selected === undefined) return undefined;
+    const statusAddress = getStatusCollateralAddress(selected.chainInformation, assetAddress).toLowerCase();
+    return selected.collaterals?.find((collateral) => collateral.address.toLowerCase() === statusAddress)?.status;
+  };
+  // The summary status can lag behind a feed that already reverts, which the market query reports as price 0
+  const hasCollateralError = (token: { address: string; price: bigint }) =>
+    token.price === 0n || getCollateralStatusFor(token.address) === 'error';
+  const state: CometState = isMarketStatusError ? [StateType.Loading, undefined] : cometStateProp;
   const [cometState] = state;
 
   const wrappedLending = useWrappedLending();
@@ -663,6 +680,7 @@ const Home = ({
   const wrapperAddress = lendingRoute.kind === 'wrapped' ? lendingRoute.market?.wrapperAddress : undefined;
   const isWrapperTransaction = (transaction: Transaction) =>
     wrapperAddress !== undefined && transaction.key.toLowerCase() === wrapperAddress.toLowerCase();
+  let hasPositions = false;
 
   const whitelistStatus = institutionalWhitelistStatus(web3.read.account);
 
@@ -690,7 +708,12 @@ const Home = ({
     mastheadState = [StateType.NoWallet, { baseAsset, earnAPR }];
     assetRows = collateralAssets
       .sort(sortTokensAlphabetically)
-      .map((token, index) => <AssetRow key={index} state={[StateType.NoWallet, { asset: token }]} />);
+      .map((token, index) => (
+        <AssetRow
+          key={index}
+          state={[StateType.NoWallet, { asset: token, isCollateralError: hasCollateralError(token) }]}
+        />
+      ));
     positionCardState = [
       StateType.NoWallet,
       {
@@ -791,6 +814,9 @@ const Home = ({
         },
       };
     }
+    if (market.isInactive) {
+      actionRules.isMarketInactive = true;
+    }
     const wrappedValue = wrappedPosition?.grossAssets ?? 0n;
     // The dashboard's base asset: the Comet one, with the wrapped value added to a supply. A direct
     // borrow is shown as it is, and the wrapped value beneath it.
@@ -824,6 +850,9 @@ const Home = ({
       ) ||
       // A kept callback writes through the session it was made in, whatever the live balances allow.
       !isSameWalletSession(walletSession, liveWalletSession.current);
+
+    const isUtilizationHigh = BigInt(market.utilization ?? 0) >= 9n * 10n ** 17n;
+    hasPositions = baseAsset.balance !== 0n || collateralAssets.some((asset) => asset.balance > 0n);
 
     const actions = getActions(baseAsset, collateralAssets, rewards);
     // The same queue against the Comet base asset, which the direct actions are submitted with.
@@ -1471,6 +1500,7 @@ const Home = ({
         earnAPR,
         earnRewardsAPR: supplyIncentives.earnRewardsAPR,
         isInstitutional: supplyIncentives.isInstitutional ?? false,
+        isInactive: market.isInactive,
         institutionalWhitelistStatus: whitelistStatus,
         liquidationCapacity,
         liquidationCapacityPost: updatedDataPostActions.liquidationCapacity,
@@ -1658,6 +1688,9 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
+              isCollateralError: hasCollateralError(token),
+              isMarketInactive: market.isInactive,
+              isUtilizationHigh,
               unwrappedAssetSupplyAction: stEthWrapSupplyAction,
               onDripClicked: () => {
                 if (isFromEarlierVisit()) return;
@@ -1719,6 +1752,9 @@ const Home = ({
               baseAsset,
               pendingAction: pendingActionOrUndefined,
               transaction: blockingTransaction,
+              isCollateralError: hasCollateralError(token),
+              isMarketInactive: market.isInactive,
+              isUtilizationHigh,
               wrappedAsset: matchingWrappedAsset,
               onCancelClicked: () => {
                 if (isFromEarlierVisit() || isQueueLocked()) return;
@@ -1751,6 +1787,7 @@ const Home = ({
     <div className="page home">
       <ActionModal isBulkerAllowed={isBulkerAllowed} state={actionModalState} transactions={transactions} />
       <InstitutionalBanner market={selectedMarket[1]} />
+      {selected?.isInactive && cometState !== StateType.Loading && !hasPositions && <InactiveMarketBanner />}
       <Masthead state={mastheadState} />
       <div className="home__content grid-container">
         <div className="home__assets grid-column--7">

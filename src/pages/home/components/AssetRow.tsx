@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
 
 import DetailSheet from '@components/DetailSheet';
-import { ArrowDown, ArrowUp, Close, Minus, Plus } from '@components/Icons';
+import { ArrowDown, ArrowUp, CircleExclamationSmall, Close, Minus, Plus } from '@components/Icons';
 import Tooltip from '@components/Tooltip';
 import AssetTooltipContent from '@components/Tooltips/AssetTooltipContent';
 import UnwrappedAssetTooltipContent from '@components/Tooltips/UnwrappedAssetTooltipContent';
@@ -23,7 +23,7 @@ import {
 } from '@types';
 
 type AssetRowLoading = [StateType.Loading];
-type AssetRowNoWallet = [StateType.NoWallet, { asset: TokenWithState }];
+type AssetRowNoWallet = [StateType.NoWallet, { asset: TokenWithState; isCollateralError?: boolean }];
 type AssetRowHydrated = [
   StateType.Hydrated,
   {
@@ -34,6 +34,9 @@ type AssetRowHydrated = [
     transaction?: Transaction;
     unwrappedAssetSupplyAction?: Action;
     wrappedAsset?: TokenWithAccountState;
+    isCollateralError: boolean;
+    isMarketInactive?: boolean;
+    isUtilizationHigh?: boolean;
     onCancelClicked: () => void;
     onEditClicked: () => void;
     onSupplyClicked: () => void;
@@ -94,7 +97,7 @@ type Content = {
 };
 
 function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency: Currency): Content {
-  const [stateType, { asset }] = state;
+  const [stateType, { asset, isCollateralError }] = state;
   const tooltipContent = getTooltipContent(state, currency);
 
   if (stateType === StateType.NoWallet) {
@@ -113,7 +116,7 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
 
     return {
       asset,
-      assetRowModifier: '',
+      assetRowModifier:  isCollateralError ? ' asset-row--error' : '',
       collateralValue: null,
       assetBalance: <p className="body text-color--3">0.0000</p>,
       displayWalletBalance: '',
@@ -124,11 +127,13 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
   }
 
   const {
-    baseAsset: { symbol, baseAssetPriceInDollars },
+    baseAsset: { symbol, baseAssetPriceInDollars, balance: baseAssetBalance },
     action,
     pendingAction,
     transaction,
     unwrappedAssetSupplyAction,
+    isMarketInactive,
+    isUtilizationHigh,
     onCancelClicked,
     onEditClicked,
     onSupplyClicked,
@@ -136,7 +141,8 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
     onDripClicked,
   } = state[1];
   const { decimals, price, balance, walletBalance } = asset as TokenWithAccountState;
-  const assetRowModifier = pendingAction !== undefined ? ` asset-row--active` : '';
+  const assetRowModifier =
+    (pendingAction !== undefined ? ` asset-row--active` : '') + (isCollateralError ? ' asset-row--error' : '');
   const formattedWalletBalance = (
     <p className="L2 meta">&nbsp;•&nbsp;{formatValue(decimals, walletBalance)} in wallet</p>
   );
@@ -199,23 +205,50 @@ function getFormattedState(state: AssetRowNoWallet | AssetRowHydrated, currency:
       ? ['mobile-only', ' button--circle']
       : ['', ''];
 
+    // On an inactive market only borrowers can add collateral, at high utilization, to defend their positions
+    const isBorrowerPosition = baseAssetBalance < 0n;
+    const canSupplyOnInactiveMarket = isBorrowerPosition && isUtilizationHigh;
+
+    const supplyButton = (
+      <button
+        onClick={() => {
+          onSupplyClicked();
+        }}
+        className={`button${supplyButtonModifier}`}
+        disabled={
+          walletBalance === 0n ||
+          transaction !== undefined ||
+          isCollateralError ||
+          (isMarketInactive && !canSupplyOnInactiveMarket)
+        }
+      >
+        <Plus />
+        <span className={supplyButtonTextClass}>Supply</span>
+      </button>
+    );
+
     buttons = (
       <>
-        <button
-          onClick={() => {
-            onSupplyClicked();
-          }}
-          className={`button${supplyButtonModifier}`}
-          disabled={walletBalance === 0n || transaction !== undefined}
-        >
-          <Plus />
-          <span className={supplyButtonTextClass}>Supply</span>
-        </button>
+        {isMarketInactive && isBorrowerPosition && !isUtilizationHigh ? (
+          <Tooltip
+            content={
+              <span className="asset-row__tooltip-text">
+                {'Adding collateral in this market is only available when market utilization is at least 90%'}
+              </span>
+            }
+            width={240}
+            interactive={true}
+          >
+            <span>{supplyButton}</span>
+          </Tooltip>
+        ) : (
+          supplyButton
+        )}
         {onWithdrawClicked && (
           <button
             onClick={() => onWithdrawClicked()}
             className="button button--circle"
-            disabled={balanceToUse === 0n || transaction !== undefined}
+            disabled={balanceToUse === 0n || transaction !== undefined || isCollateralError}
           >
             <Minus />
             <span className="mobile-only">Withdraw</span>
@@ -341,6 +374,16 @@ const AssetRow = ({ state }: AssetRowProps) => {
   };
 
   const abbrSymbol = asset.symbol === 'wsuperOETHb' ? '...OETHb' : asset.symbol;
+  const isCollateralError = state[1].isCollateralError === true;
+
+  const assetIcon = (
+    <span
+      className={`asset asset--${assetIconForAssetSymbol(asset.symbol)}${
+        isCollateralError ? ' asset-row__icon--disabled' : ''
+      }`}
+      onClick={onIconClick}
+    ></span>
+  );
 
   return (
     <div
@@ -350,7 +393,8 @@ const AssetRow = ({ state }: AssetRowProps) => {
       }}
     >
       <div className={`asset-row__hover${hoverModifier}`}></div>
-      <Tooltip content={tooltipContent} width={340} hideArrow={true} yOffset={30}>
+      {/* A collateral in the error status shows its status over the error badge instead of the asset details */}
+      <Tooltip content={tooltipContent} width={340} hideArrow={true} yOffset={30} disabled={isCollateralError}>
         <div
           className="asset-row__detail-content"
           onMouseEnter={() => {
@@ -360,9 +404,27 @@ const AssetRow = ({ state }: AssetRowProps) => {
             setHoverModifier('');
           }}
         >
-          <span className={`asset asset--${assetIconForAssetSymbol(asset.symbol)}`} onClick={onIconClick}></span>
+          {isCollateralError ? (
+            <span className="asset-row__icon-container">
+              {assetIcon}
+              <Tooltip
+                open={hoverModifier !== ''}
+                content={<span className="asset-row__tooltip-text">{'Collateral temporarily unavailable.'}</span>}
+                width={214}
+                // Hover-only tooltips are hidden on small screens, the status one opens on tap there
+                interactive={true}
+                yOffset={12}
+              >
+                <span className="asset-row__error-icon">
+                  <CircleExclamationSmall />
+                </span>
+              </Tooltip>
+            </span>
+          ) : (
+            assetIcon
+          )}
           <div className="asset-row__info">
-            <p className="body">{asset.name}</p>
+            <p className={`body${isCollateralError ? ' text-color--3' : ''}`}>{asset.name}</p>
             <div className="asset-row__info__details meta L2">
               {abbrSymbol}
               {displayWalletBalance}

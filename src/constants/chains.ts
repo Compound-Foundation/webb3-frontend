@@ -521,17 +521,3 @@ export function isUnwrappedCollateralAsset(chainInformation: ChainInformation, a
   );
   return unwrappedCollateralAddresses.includes(assetAddress);
 }
-
-/**
- * Chains whose markets are considered inactive/legacy. Their market panels are
- * hidden behind the "Inactive Markets" toggle on the Markets overview page.
- * Edit this set to add/remove inactive chains.
- */
-export const INACTIVE_CHAIN_IDS: ReadonlySet<number> = new Set([
-  534352, // Scroll
-  59144, // Linea
-  2020, // Ronin
-  137, // Polygon
-  130, // Unichain
-  5000, // Mantle
-]);

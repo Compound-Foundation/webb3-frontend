@@ -8,6 +8,7 @@ import { filterMap } from '@helpers/functions';
 import { isV2Market } from '@helpers/markets';
 import { COMPOUND_URL, getBlockExplorerUrlForTransaction, TALLY_GOV_URL, V2_URL } from '@helpers/urls';
 import useDisableScroll from '@hooks/useDisableScroll';
+import { Theme } from '@hooks/useThemeManager';
 import { RECENT_NUM, useTransactionHistory } from '@hooks/useTransactionHistory';
 import { Transaction, PendingTransaction, StateType, TransactionHistoryItem, TransactionState } from '@types';
 
@@ -28,9 +29,17 @@ export type HeaderProps = {
   clearTransactions: () => void;
   onConnectWalletClick: () => void;
   onWalletDisconnect: () => void;
+  theme: Theme;
 };
 
-const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, onWalletDisconnect }: HeaderProps) => {
+const Header = ({
+  web3,
+  transactions,
+  clearTransactions,
+  onConnectWalletClick,
+  onWalletDisconnect,
+  theme,
+}: HeaderProps) => {
   const [mobileNavActive, setMobileNavActive] = useState(false);
   const [mobileWalletActive, setMobileWalletActive] = useState(false);
   const { selectedMarket } = useContext(getSelectedMarketContext());
@@ -105,7 +114,7 @@ const Header = ({ web3, transactions, clearTransactions, onConnectWalletClick, o
           </div>
           <div className="header__content__right">
             <div className="header__buttons">
-              {!hideMarketSelector && <MarketSelector />}
+              {!hideMarketSelector && <MarketSelector theme={theme} />}
               <RewardsButton web3={web3} />
               <WalletButton
                 transactions={transactions}

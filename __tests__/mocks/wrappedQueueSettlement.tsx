@@ -34,6 +34,7 @@ import Home from '@pages/home';
 import { Action, ActionType, CometState, MarketData, StateType, TransactionState } from '@types';
 
 import { mockBaseAsset } from './mockBaseAsset';
+import { MOCK_MARKETS, MockMarketsProvider } from './mockMarkets';
 import { mockWeb3 } from './mockWeb3';
 import { mockLastProps, mockTab } from './wrappedQueueSettlementProps';
 
@@ -57,7 +58,7 @@ export const USDC_COMET = '0xc3d688B66703497DAA19211EEdff47f25384cdc3';
 export const lookup = OPEN.lookup(1, USDC_COMET);
 if (lookup.status !== 'valid') throw new Error('the mapping must be valid');
 export const MARKET: WrappedMarket = lookup.market;
-export const USDC_MARKET = getMarket(1, USDC_COMET) as MarketData;
+export const USDC_MARKET = getMarket(MOCK_MARKETS, 1, USDC_COMET) as MarketData;
 
 export const isSame = (a: unknown, b: string) => typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
 
@@ -537,26 +538,28 @@ export function Dashboard({
     submission,
   };
   return (
-    <mockTab.Provider value={tab}>
-      <WrappedLendingContext.Provider value={lending}>
-        <MarketContext.Provider value={SELECTED as never}>
-          <QueueContext.Provider value={queue}>
-            {isHomeShown && (
-              <Home
-                transactions={manager.transactions}
-                web3={web3}
-                selectedMarketData={SELECTED as never}
-                cometState={state}
-                addTransaction={manager.addTransaction}
-                switchWriteNetwork={switchWriteNetwork}
-                estimatedGasMap={new Map()}
-                theme={Theme.Dark}
-              />
-            )}
-          </QueueContext.Provider>
-        </MarketContext.Provider>
-      </WrappedLendingContext.Provider>
-    </mockTab.Provider>
+    <MockMarketsProvider>
+      <mockTab.Provider value={tab}>
+        <WrappedLendingContext.Provider value={lending}>
+          <MarketContext.Provider value={SELECTED as never}>
+            <QueueContext.Provider value={queue}>
+              {isHomeShown && (
+                <Home
+                  transactions={manager.transactions}
+                  web3={web3}
+                  selectedMarketData={SELECTED as never}
+                  cometState={state}
+                  addTransaction={manager.addTransaction}
+                  switchWriteNetwork={switchWriteNetwork}
+                  estimatedGasMap={new Map()}
+                  theme={Theme.Dark}
+                />
+              )}
+            </QueueContext.Provider>
+          </MarketContext.Provider>
+        </WrappedLendingContext.Provider>
+      </mockTab.Provider>
+    </MockMarketsProvider>
   );
 }
 
