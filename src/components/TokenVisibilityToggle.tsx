@@ -26,6 +26,7 @@ const TokenVisibilityToggle = (props: TokenVisibilityToggleProps) => {
             open={hovered}
             width={240}
             yOffset={12}
+            interactive={true}
             content={
               <span className='visibility-toggle__tooltip-text'>
                 Show top collateral while hiding assets below $250k or flagged as low-priority.
