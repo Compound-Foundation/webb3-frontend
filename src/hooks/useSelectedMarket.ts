@@ -152,10 +152,16 @@ export function useSelectedMarketState(web3: Web3): SelectedMarketData {
         // Only update state if market key has not changed since the start of this callback
         // We compare to a ref because the `market` in the callback can be stale
         if (marketKey(market) === marketRef.current) {
-          // The market list may have refreshed the statuses while this request ran
+          // The market list may have refreshed the summary fields while this request ran
           setState(([, latest]) => [
             hydratedType,
-            { ...hydratedMarket, status: latest?.status, collaterals: latest?.collaterals },
+            {
+              ...hydratedMarket,
+              status: latest?.status,
+              collaterals: latest?.collaterals,
+              isInactive: latest?.isInactive,
+              utilization: latest?.utilization,
+            },
           ]);
           setIsError(false);
         }
