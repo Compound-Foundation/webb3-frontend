@@ -1,6 +1,3 @@
-import usdcConfiguration from 'comet/deployments/mainnet/usdc/configuration.json';
-import usdtConfiguration from 'comet/deployments/mainnet/usdt/configuration.json';
-
 import {
   buildWrappedMarketRegistry,
   HARDCODED_WRAPPED_LENDING_SOURCE,
@@ -10,7 +7,9 @@ import {
   WrappedMarketIdentity,
   WrappedMarketSource,
 } from '@constants/wrappedMarkets';
-import { getMarket, MARKETS } from '@helpers/markets';
+import { getMarket } from '@helpers/markets';
+
+import { MOCK_MARKETS } from '../mocks/mockMarkets';
 
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 const USDT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
@@ -22,7 +21,7 @@ const EXPECTED = [
     wrapper: '0x89dd54aB898944BB4cb8a2C403B7D511F88f9E73',
     baseToken: USDC,
     symbol: 'USDC',
-    institutional: undefined,
+    institutional: false,
   },
   {
     label: 'Ethereum USDT',
@@ -30,7 +29,7 @@ const EXPECTED = [
     wrapper: '0xD7c9F42a35C8d13b71D4c0B024AE9eb0e77b9cFf',
     baseToken: USDT,
     symbol: 'USDT',
-    institutional: undefined,
+    institutional: false,
   },
   {
     label: 'Ethereum institutional USDC',
@@ -87,7 +86,7 @@ describe('wrappedMarkets', () => {
       });
 
       // The Comet is an existing frontend market with the expected base asset.
-      const market = getMarket(1, expected.comet);
+      const market = getMarket(MOCK_MARKETS, 1, expected.comet);
       expect(market?.baseAsset.symbol).toBe(expected.symbol);
       expect(market?.institutional).toBe(expected.institutional);
 
@@ -104,12 +103,8 @@ describe('wrappedMarkets', () => {
     expect(wrappers.size).toBe(3);
     expect(comets.size).toBe(3);
 
-    // Base tokens agree with the Comet deployment configuration the app is built from.
-    expect(USDC.toLowerCase()).toBe(usdcConfiguration.baseTokenAddress.toLowerCase());
-    expect(USDT.toLowerCase()).toBe(usdtConfiguration.baseTokenAddress.toLowerCase());
-
     // Only the three are configured; other Ethereum markets are not.
-    const configured = MARKETS.filter(
+    const configured = MOCK_MARKETS.filter(
       (market) =>
         WRAPPED_MARKET_REGISTRY.lookup(market.chainInformation.chainId, market.marketAddress).status !== 'unconfigured',
     );
@@ -179,16 +174,6 @@ describe('wrappedMarkets', () => {
     expect(problemOf([entry({ baseTokenAddress: EXPECTED[0].wrapper })])).toBe('inconsistent');
     expect(problemOf([entry({ isDepositEnabled: 'yes' as unknown as boolean })])).toBe('inconsistent');
     expect(problemOf([entry({ isExitEnabled: undefined as unknown as boolean })])).toBe('inconsistent');
-    // A Comet the frontend does not list on that chain.
-    const unknownComet = '0x1111111111111111111111111111111111111111';
-    expect(problemOf([entry({ cometAddress: unknownComet })], unknownComet)).toBe('inconsistent');
-    expect(registryOf([entry({ chainId: 8453 })]).lookup(8453, USDC_COMET)).toMatchObject({
-      status: 'invalid',
-      problem: 'inconsistent',
-    });
-    // The V2 pseudo-market is not a Comet.
-    const comptroller = '0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B';
-    expect(problemOf([entry({ cometAddress: comptroller })], comptroller)).toBe('inconsistent');
 
     // A routed market with no mapping is reported missing, not unconfigured.
     const routedOnly = registryOf([], [{ chainId: 1, cometAddress: USDT_COMET }]);

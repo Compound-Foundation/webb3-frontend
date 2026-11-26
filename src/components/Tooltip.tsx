@@ -28,6 +28,7 @@ const Tooltip = ({
   yOffset = 20,
   x,
   y,
+  open,
 }: {
   width: number;
   children: React.ReactElement;
@@ -44,6 +45,7 @@ const Tooltip = ({
   yOffset?: number;
   x?: number;
   y?: number;
+  open?: boolean;
 }) => {
   const [showTooltip, setShowTooltip] = useState<boolean>(false);
   const [coordinates, setCoordinates] = useState<TooltipCoordinates>({ x: 0, y: 0 });
@@ -141,6 +143,14 @@ const Tooltip = ({
     }
   };
 
+  useEffect(() => {
+    if (open && triggerRef.current) {
+      handleMouseOver({ currentTarget: triggerRef.current });
+    } else {
+      setShowTooltip(false);
+    }
+  }, [open]);
+
   // While an interactive tooltip is open, a tap anywhere outside it (and outside
   // its trigger, whose own touchend handles the toggle) dismisses it.
   useEffect(() => {
@@ -158,6 +168,7 @@ const Tooltip = ({
       {disabled
         ? children
         : cloneElement(children, {
+            ref: triggerRef,
             onMouseOver: handleMouseOver,
             onMouseOut: handleMouseOut,
             ...(interactive &&
@@ -176,7 +187,7 @@ const Tooltip = ({
       {disabled || (
         <Portal>
           <span
-            className={`tooltip tooltip${!showTooltip && '--inactive'} tooltip${hideArrow && '--hide-arrow'} tooltip${
+            className={`tooltip tooltip${!(open || showTooltip) && '--inactive'} tooltip${hideArrow && '--hide-arrow'} tooltip${
               mini && '--mini'
             } tooltip${placement === 'below' && '--below'} tooltip${interactive && '--interactive'}`}
             id="tooltip"

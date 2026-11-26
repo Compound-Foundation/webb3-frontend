@@ -48,6 +48,7 @@ import {
 } from '@hooks/useWriteWrappedState';
 import { MarketData, SettledTransaction, TransactionState } from '@types';
 
+import { MOCK_MARKETS } from '../mocks/mockMarkets';
 import { mockWeb3 } from '../mocks/mockWeb3';
 
 // uuid ships ESM only, which Jest does not load here. The transaction manager uses it.
@@ -483,7 +484,7 @@ const supplyAndWrap = (market: WrappedMarket, amount: bigint): DecodedRequest =>
 
 /** Only the base token's approval to the wrapper and the wrapper's supply: no Comet, Bulker or Permit2. */
 function expectOnlyWrapperRequests(wallet: Wallet, market: WrappedMarket) {
-  const { bulkerAddress } = getMarket(1, market.cometAddress) as MarketData;
+  const { bulkerAddress } = getMarket(MOCK_MARKETS, 1, market.cometAddress) as MarketData;
   for (const request of walletRequests(wallet)) {
     expect([market.baseTokenAddress.toLowerCase(), market.wrapperAddress.toLowerCase()]).toContain(request.to);
     expect(['approve', 'supplyAndWrap']).toContain(request.method);
@@ -1821,7 +1822,7 @@ describe('useWriteWrappedState', () => {
     readProvider: ReturnType<typeof readProviderFor>,
     market: WrappedMarket
   ) {
-    const { bulkerAddress } = getMarket(1, market.cometAddress) as MarketData;
+    const { bulkerAddress } = getMarket(MOCK_MARKETS, 1, market.cometAddress) as MarketData;
     const forbidden = [market.cometAddress, bulkerAddress, PERMIT2].map((address) => address.toLowerCase());
     for (const request of walletRequests(wallet)) {
       expect(request).toMatchObject({
