@@ -1,6 +1,5 @@
 import { StaticJsonRpcProvider } from '@ethersproject/providers';
 import { ConnectionInfo } from 'ethers/lib/utils';
-import { Provider } from 'ethers-multicall';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Web3 } from '@contexts/Web3Context';
@@ -20,7 +19,6 @@ import {
   CometWithAccountStateResponse,
   RateModelResponse,
 } from '@helpers/sleuth/types';
-import { getStETHAccountState, isStETH, isWrappedStETH } from '@helpers/steth';
 import { delaysCometRefresh } from '@hooks/useTransactionManager';
 import { useWaiter } from '@hooks/useWaiter';
 import {
@@ -80,8 +78,22 @@ export function useCometState(
             account
           );
           newState = formatCometStateHydrated(cometResponse, marketStateData, rewards);
-          const ethcallProvider = new Provider(web3.read.provider, marketStateData.chainInformation.chainId);
-          await maybeHydrateStEthCollateral(newState, marketStateData, account, ethcallProvider);
+          // stETHState names the bulker's stETH and wstETH, or zero addresses when wstETH is not a collateral here
+          const { stETHState } = cometResponse;
+          const wstETH = newState[1].collateralAssets.find((asset) => asset.address === stETHState.wstETH);
+          const stETH = marketStateData.chainInformation.unwrappedCollateralAssets[stETHState.wstETH];
+          if (wstETH && stETH?.address.toLowerCase() === stETHState.stETH.toLowerCase()) {
+            newState[1].collateralAssets.push({
+              ...wstETH,
+              balance: 0n,
+              bulkerAllowance: stETHState.bulkerAllowance.toBigInt(),
+              price: (wstETH.price * stETHState.wstETHPerStETH.toBigInt()) / BigInt(10 ** wstETH.decimals),
+              walletBalance: stETHState.walletBalance.toBigInt(),
+              address: stETH.address,
+              symbol: stETH.symbol,
+              name: stETH.name,
+            });
+          }
         } else {
           const cometResponse = await queryCometData(web3.read.provider.connection, marketStateData);
           newState = formatCometStateNoWallet(cometResponse, marketStateData, rewards);
@@ -318,50 +330,6 @@ const formatCometStateHydrated = (
   };
 
   return [StateType.Hydrated, state];
-};
-
-const maybeHydrateStEthCollateral = async (
-  cometStateFormatted: CometStateHydrated,
-  market: MarketData | MarketDataLoaded,
-  account: string,
-  provider: Provider
-): Promise<void> => {
-  const extraCollateralAssetsWithAccountState: TokenWithAccountState[] =
-    market.chainInformation.unwrappedCollateralAssets !== undefined
-      ? await Promise.all(
-          cometStateFormatted[1].collateralAssets
-            .filter((asset) => market.chainInformation.unwrappedCollateralAssets[asset.address] !== undefined)
-            .map(async (asset) => {
-              const unwrappedAsset = market.chainInformation.unwrappedCollateralAssets[asset.address];
-              if (isWrappedStETH(asset.symbol) && isStETH(unwrappedAsset.symbol)) {
-                //The initial values will be updated when we getStEthAccountState
-                let tokenWithAccountState: TokenWithAccountState;
-                tokenWithAccountState = {
-                  ...asset,
-                  allowance: asset.allowance,
-                  balance: 0n,
-                  bulkerAllowance: 0n,
-                  walletBalance: 0n,
-                };
-
-                tokenWithAccountState = await getStETHAccountState(
-                  account,
-                  tokenWithAccountState,
-                  unwrappedAsset,
-                  market.bulkerAddress,
-                  provider
-                );
-                return tokenWithAccountState;
-              } else {
-                console.error('Unknown handling for extra collateral asset: ', unwrappedAsset);
-                return Promise.reject();
-              }
-            })
-        )
-      : ([] as TokenWithAccountState[]);
-  cometStateFormatted[1].collateralAssets = cometStateFormatted[1].collateralAssets.concat(
-    extraCollateralAssetsWithAccountState
-  );
 };
 
 const formatCometStateNoWallet = (

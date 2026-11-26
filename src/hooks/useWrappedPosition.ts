@@ -1,9 +1,11 @@
 import { JsonRpcProvider } from '@ethersproject/providers';
-import { Provider } from 'ethers-multicall';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Address } from 'viem';
 
+import { CHAINS } from '@constants/chains';
 import { WrappedMarket } from '@constants/wrappedMarkets';
 import { LendingRoute, WriteBlockReason } from '@helpers/lendingRoute';
+import { multicallReader } from '@helpers/multicall';
 import { REFRESH_INTERVAL } from '@helpers/numbers';
 import {
   BlockWait,
@@ -31,7 +33,7 @@ export const WRAPPED_POSITION_READ_FAILED =
   'Your wrapped position could not be loaded. Check your connection and try again.';
 
 const readWithMulticall: WrappedPositionReader = (provider, market, account) =>
-  readWrappedPosition(new Provider(provider, market.chainId), market, account);
+  readWrappedPosition(multicallReader(provider, CHAINS[market.chainId]), market, account as Address);
 
 /**
  * A `refreshToken` that changes whenever a transaction is added or settles. A settled transaction,

@@ -1,11 +1,11 @@
-import { JsonRpcProvider, StaticJsonRpcProvider } from '@ethersproject/providers';
-import { BigNumber } from 'ethers';
-import { Contract, Provider } from 'ethers-multicall';
+import { JsonRpcProvider } from '@ethersproject/providers';
 import { useEffect, useState } from 'react';
+import type { Address } from 'viem';
 
 import type { Web3 } from '@contexts/Web3Context';
 import Comet from '@helpers/abis/Comet';
 import { isV2Market } from '@helpers/markets';
+import { multicallReader } from '@helpers/multicall';
 import { MarketData, MarketDataLoaded, MarketDataState, StateType, ExtensionsEnableState } from '@types';
 
 import { Extension } from '../helpers/core';
@@ -41,7 +41,7 @@ export function useExtensionsEnableStateByMarket(web3: Web3, selectedMarket: Mar
       setState([StateType.Hydrated, { enabled: [], notEnabled: supportedExtensions.map((ext) => ext.id) }]);
     } else {
       // Look up which supported extensions are enabled for this account.
-      getState(web3Provider, marketData, supportedExtensions, maybeAccountAddress).then(setState);
+      getState(web3Provider, marketData, supportedExtensions, maybeAccountAddress as Address).then(setState);
     }
   }, [marketData, maybeAccountAddress]);
 
@@ -52,15 +52,9 @@ async function getState(
   rawProvider: JsonRpcProvider,
   marketData: MarketData | MarketDataLoaded,
   extensions: Extension[],
-  accountAddress: string
+  accountAddress: Address
 ): Promise<ExtensionsEnableState> {
-  const provider = new StaticJsonRpcProvider(rawProvider.connection);
-  const chainId = marketData?.chainInformation.chainId;
-  const ethcallProvider = new Provider(provider, chainId);
-
-  // Contract address for the V3 market.
-  const cometAddress = marketData?.marketAddress;
-  const cometContract = new Contract(cometAddress, Comet);
+  const readContract = multicallReader(rawProvider, marketData.chainInformation);
 
   // For each extension, hydrate their operator (contract) addresses.
   const extensionswithMaybeOperator = extensions.map((ext) => ({
@@ -72,13 +66,19 @@ async function getState(
   const extensionsWithOperators = extensionswithMaybeOperator.filter((ext) => !!ext.operatorAddress);
   // Look up on comet market contract, whether the operator is allowed to perform extension
   // actions on behalf of the account.
-  const extensionsEnableStatusCall = extensionsWithOperators.map((ext) =>
-    cometContract.allowance(accountAddress, ext.operatorAddress)
+  const extensionsEnableStatus = await Promise.all(
+    extensionsWithOperators.map((ext) =>
+      readContract({
+        address: marketData.marketAddress as Address,
+        abi: Comet,
+        functionName: 'allowance',
+        args: [accountAddress, ext.operatorAddress as Address],
+      })
+    )
   );
-  const extensionsEnableStatus = await ethcallProvider.all<BigNumber[]>(extensionsEnableStatusCall);
 
   const enabledExtensionsIds = extensionsWithOperators
-    .filter((_, idx) => extensionsEnableStatus[idx].gt(0))
+    .filter((_, idx) => extensionsEnableStatus[idx] > 0n)
     .map((ext) => ext.id);
   // Any supported extensions that are not enabled are considered disabled.
   const notEnabledExtensionsIds = extensionswithMaybeOperator

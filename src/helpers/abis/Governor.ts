@@ -942,12 +942,4 @@ export default [
     stateMutability: 'view',
     type: 'function',
   },
-];
-
-// REMOVED
-// causes parsing issue with ethers-multicall
-/* {
-   "payable": true,
-   "stateMutability": "payable",
-   "type": "fallback"
-} */
+] as const;
