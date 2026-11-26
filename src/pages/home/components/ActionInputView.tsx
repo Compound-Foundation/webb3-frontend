@@ -485,7 +485,8 @@ function getContent(
         // (and read a dust balance as a max of 0). A collateral with a zero borrow
         // factor adds nothing to the capacity, so all of it is withdrawable too.
         let maxWithdrawableAmount = collateralAsset.balance;
-        if (isOverBorrowCapacity(baseAsset)) {
+        // Comet prices every held collateral to check a borrow, so without a price the withdrawal reverts
+        if (isOverBorrowCapacity(baseAsset) || (borrowBalance > 0n && collateralAsset.price === 0n)) {
           maxWithdrawableAmount = 0n;
         } else if (borrowBalance > 0n && collateralAsset.collateralFactor > 0n) {
           const maxBorrowableBaseAmount =
