@@ -26,6 +26,13 @@ export function addsSecondAction(queued: readonly Action[], action: Action | Pen
 /** Why a queue limited to one action refuses another, as the amount form and the queue show it. */
 export const QUEUED_ACTION_FIRST = 'Submit Or Remove The Queued Action First';
 
+export const OVER_BORROW_CAPACITY = 'Your debt exceeds your borrow capacity. Repay or supply collateral first.';
+
+/** Whether the debt is above the borrow capacity, so Comet rejects any borrow or collateral withdrawal. */
+export function isOverBorrowCapacity({ balance, borrowCapacity }: BaseAssetWithAccountState): boolean {
+  return balance < 0n && borrowCapacity < -balance;
+}
+
 export function isSameClaimAction(action1: Action | PendingAction, action2: Action | PendingAction): boolean {
   return (
     action1[0] === ActionType.ClaimRewards &&
@@ -317,6 +324,9 @@ export function validateAddingAction(
 
   switch (actionType) {
     case ActionType.Borrow: {
+      if (isOverBorrowCapacity(baseAsset)) {
+        return [false, OVER_BORROW_CAPACITY];
+      }
       const amount = actionToAdd[2];
 
       const borrowBalance = baseAsset.balance < 0n ? -baseAsset.balance : 0n;
@@ -408,6 +418,9 @@ export function validateAddingAction(
       const collateralAsset = collateralAssets.find((asset) => isSameToken(asset, actionToAdd[1]));
       if (collateralAsset === undefined) {
         return [false, "Collateral Asset Doesn't Exist"];
+      }
+      if (isOverBorrowCapacity(baseAsset)) {
+        return [false, OVER_BORROW_CAPACITY];
       }
       const amount = actionToAdd[2];
       const borrowBalance = baseAsset.balance < 0n ? -baseAsset.balance : 0n;

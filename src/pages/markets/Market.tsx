@@ -6,11 +6,14 @@ import { ArrowLeft, ExternalLink } from '@components/Icons';
 import { getSelectedMarketContext } from '@contexts/SelectedMarketContext';
 import type { Web3 } from '@contexts/Web3Context';
 import { useWrappedLending } from '@contexts/WrappedLendingContext';
+import { MARKET_DETAILS_TOP_COLLATERAL_KEY } from '@helpers/constants';
 import { institutionalWhitelistStatus } from '@helpers/institutionalWhitelist';
 import { getMarket, isV2Market } from '@helpers/markets';
 import { formatTokenBalance, getTokenValue, PRICE_PRECISION } from '@helpers/numbers';
 import { getBlockExplorerUrlForAddress, INSTITUTIONAL_MARKET_URL } from '@helpers/urls';
-import { CTokenWithMarketState, Currency, StateType, TokenWithMarketState } from '@types';
+import { useLocalStorage } from '@hooks/useLocalStorage';
+import { useMarkets } from '@hooks/useMarkets';
+import { CTokenWithMarketState, Currency, StateType } from '@types';
 
 import AdditionalMarketDataPanel from './components/AdditionalMarketDataPanel';
 import AssetsTableRow from './components/AssetsTableRow';
@@ -30,12 +33,14 @@ type MarketsProps = {
 
 const Market = ({ web3 }: MarketsProps) => {
   const { selectedMarket } = useContext(getSelectedMarketContext());
+  const [marketsStateType, marketsState] = useMarkets();
+  const [showTopCollateralOnly, setShowTopCollateralOnly] = useLocalStorage(MARKET_DETAILS_TOP_COLLATERAL_KEY, true);
 
   const marketCurrencyToShow = Currency.USD;
 
   const state = useMarketsState(web3, selectedMarket);
-  const [marketStateType, marketStateData] = state;
   const [, market] = selectedMarket;
+  const [marketStateType, marketStateData] = market?.status === 'error' ? [StateType.Loading] : state;
   const { route } = useWrappedLending();
   const isWrappedRoute =
     route.kind === 'wrapped' &&
@@ -48,8 +53,15 @@ const Market = ({ web3 }: MarketsProps) => {
       : ['Connecting', -1, undefined];
   // The configured market entry keeps the display name and institutional flags,
   // which the hydrated market's on-chain base asset data doesn't carry
-  const configMarket = market !== undefined ? getMarket(market.chainInformation.chainId, market.marketAddress) : undefined;
-  const marketDisplayName = configMarket?.institutional ? configMarket.baseAsset.name : currentBaseToken;
+  const configMarket =
+    market !== undefined && marketsStateType === StateType.Hydrated
+      ? getMarket(marketsState.markets, market.chainInformation.chainId, market.marketAddress)
+      : undefined;
+  // The market list symbol stays the same once the market loads, unlike the on-chain one,
+  // so the title doesn't change
+  const marketDisplayName = configMarket?.institutional
+    ? configMarket.baseAsset.name
+    : (configMarket?.baseAsset.symbol ?? currentBaseToken);
   let assetRows: ReactNode = null;
   let marketOverviewPanel: ReactNode = null;
   let marketStatsPanel: ReactNode = null;
@@ -74,7 +86,7 @@ const Market = ({ web3 }: MarketsProps) => {
   } else if (marketStateType === StateType.Loading || market === undefined) {
     marketOverviewPanel = <MarketOverviewPanel state={[StateType.Loading, undefined]} />;
     assetRows = (
-      <CollateralAssetsPanel>
+      <CollateralAssetsPanel isLoading={true}>
         {[...Array(5)].map((_, index) => (
           <AssetsTableRow key={index} state={[StateType.Loading]} />
         ))}
@@ -168,17 +180,29 @@ const Market = ({ web3 }: MarketsProps) => {
       );
     }
 
+    const rows = collateralAssets.flatMap((token) => {
+      const collateral = market.collaterals?.find((c) => c.address.toLowerCase() === token.address.toLowerCase());
+
+      // The summary status can lag behind a feed that already reverts, which the market query reports as price 0
+      const isError = collateral?.status === 'error' || token.price === 0n;
+
+      if (collateral?.isDeprecated || (showTopCollateralOnly && collateral?.isVisible === false && !isError)) return [];
+
+      const totalSupplyValue = isError ? 0 : (Number(token.totalSupply) / 10 ** token.decimals) * Number(token.price);
+
+      return [{ token, isError, totalSupplyValue }];
+    });
+
     assetRows = (
-      <CollateralAssetsPanel>
-        {collateralAssets
-          .sort((a: TokenWithMarketState, b: TokenWithMarketState): number =>
-            Number(a.totalSupply / BigInt(10 ** a.decimals)) * Number(a.price) >
-            Number(b.totalSupply / BigInt(10 ** b.decimals)) * Number(b.price)
-              ? -1
-              : 1
-          )
-          .map((token, index) => (
-            <AssetsTableRow key={index} state={[StateType.Hydrated, token, baseAsset]} />
+      <CollateralAssetsPanel
+        checked={showTopCollateralOnly}
+        onChange={() => setShowTopCollateralOnly(!showTopCollateralOnly)}
+        isFiltered={showTopCollateralOnly && !!market.collaterals?.some((c) => !c.isDeprecated && c.isVisible === false)}
+      >
+        {rows
+          .sort((a, b) => Number(a.isError) - Number(b.isError) || b.totalSupplyValue - a.totalSupplyValue)
+          .map(({ token, isError }, index) => (
+            <AssetsTableRow key={index} state={[StateType.Hydrated, token, baseAsset]} isCollateralError={isError} />
           ))}
       </CollateralAssetsPanel>
     );

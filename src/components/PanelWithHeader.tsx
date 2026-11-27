@@ -12,7 +12,7 @@ const PanelWithHeader = ({ header, className, secondaryHeader, children, actions
   const extraClassNameString = className ? className : '';
   return (
     <div className={`panel-with-header ${extraClassNameString}`}>
-      <div className="panel-with-header__header">
+      <div className="panel-with-header__header panel-with-header__header__justify-between">
         {typeof header === 'string' ? <label className="label L1 text-color--2">{header}</label> : header}
         {secondaryHeader && (
           <div className="panel-with-header__header__secondary-text">

@@ -6,6 +6,7 @@ import {
   addsSecondAction,
   calculateUpdatedBalances,
   getActionFromPendingAction,
+  isOverBorrowCapacity,
   isSameAction,
   isSameToken,
   QUEUED_ACTION_FIRST,
@@ -481,9 +482,13 @@ function getContent(
         // With no outstanding borrow the full balance is withdrawable. Only route
         // through borrow capacity when a borrow must stay collateralized — that
         // conversion truncates at base-token precision, which would strand dust
-        // (and read a dust balance as a max of 0).
+        // (and read a dust balance as a max of 0). A collateral with a zero borrow
+        // factor adds nothing to the capacity, so all of it is withdrawable too.
         let maxWithdrawableAmount = collateralAsset.balance;
-        if (borrowBalance > 0n) {
+        // Comet prices every held collateral to check a borrow, so without a price the withdrawal reverts
+        if (isOverBorrowCapacity(baseAsset) || (borrowBalance > 0n && collateralAsset.price === 0n)) {
+          maxWithdrawableAmount = 0n;
+        } else if (borrowBalance > 0n && collateralAsset.collateralFactor > 0n) {
           const maxBorrowableBaseAmount =
             ((baseAsset.borrowCapacity - borrowBalance) * BASE_FACTOR) / collateralAsset.collateralFactor;
           const maxBorrowableCollateralAmount =

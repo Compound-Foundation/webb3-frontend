@@ -1,14 +1,13 @@
-import v8 from 'v8';
-
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import { ReactNode } from 'react';
 
 import RewardsStateContext from '@contexts/RewardsStateContext';
-import { MARKETS } from "@helpers/markets";
 import { useMarketsOverviewState } from '@pages/markets/hooks/useMarketsOverviewState';
 import { StateType } from '@types';
 
+// The market list and the latest summaries come from the summary MSW serves. Rewards are loaded without a COMP
+// price, so the mainnet USDC and WETH rewards overrides only add their rewards asset symbol
 const Provider = ({ children }: { children: ReactNode }) => {
   const queryClient = new QueryClient();
 
@@ -20,14 +19,6 @@ const Provider = ({ children }: { children: ReactNode }) => {
 };
 
 describe('useMarketsOverview', () => {
-  const initialMarkets = v8.deserialize(v8.serialize(MARKETS));
-  
-  beforeAll(() => {
-    for (const a of MARKETS) {
-      delete a.rewardsOverwrite;
-    }
-  });
-  
   test('should return loading state', () => {
     const { result } = renderHook(() => useMarketsOverviewState(), { wrapper: Provider });
     expect(result.current).toEqual([StateType.Loading]);
@@ -231,15 +222,20 @@ describe('useMarketsOverview', () => {
                 address: '0xc3d688B66703497DAA19211EEdff47f25384cdc3',
               },
               date: '2023-09-07',
+              isRewardsLoading: false,
+              rewardsAssetSymbol: 'COMP',
               supplyAPR: 30836040536016000n,
               supplyRewardsAPR: 0n,
-              isRewardsLoading: false,
+              status: 'success',
+              errorCollateralSymbols: [],
               timestamp: 1694099375,
               totalBorrowValue: 28502368452920876n,
               totalCollateralValue: 53514681927004113n,
               totalSupplyValue: 31426863916176594n,
               utilization: 906942369819992364n,
               collateralAssetSymbols: ['COMP', 'WBTC', 'WETH', 'UNI', 'LINK'],
+
+              topCollateralAssetSymbols: ['COMP', 'WBTC', 'WETH', 'UNI', 'LINK'],
             },
             {
               borrowAPR: 33898024514016004n,
@@ -249,15 +245,20 @@ describe('useMarketsOverview', () => {
                 address: '0xA17581A9E3356d9A858b789D68B4d866e593aE94',
               },
               date: '2023-09-07',
+              isRewardsLoading: false,
+              rewardsAssetSymbol: 'COMP',
               supplyAPR: 18374010062832000n,
               supplyRewardsAPR: 0n,
-              isRewardsLoading: false,
+              status: 'success',
+              errorCollateralSymbols: [],
               timestamp: 1694099351,
               totalBorrowValue: 3852450502826696n,
               totalCollateralValue: 5071775730806631n,
               totalSupplyValue: 5950870954216523n,
               utilization: 647373375204769162n,
               collateralAssetSymbols: ['cbETH', 'wstETH'],
+
+              topCollateralAssetSymbols: ['cbETH', 'wstETH'],
             },
             {
               borrowAPR: 41637919658256000n,
@@ -267,15 +268,19 @@ describe('useMarketsOverview', () => {
                 address: '0xF25212E676D1F7F89Cd72fFEe66158f541246445',
               },
               date: '2023-09-07',
+              isRewardsLoading: false,
               supplyAPR: 24735211142400000n,
               supplyRewardsAPR: 0n,
-              isRewardsLoading: false,
+              status: 'success',
+              errorCollateralSymbols: [],
               timestamp: 1694099375,
               totalBorrowValue: 1772672815086393n,
               totalCollateralValue: 3307331296344870n,
               totalSupplyValue: 2329143489247043n,
               utilization: 761083420635047735n,
               collateralAssetSymbols: ['WETH', 'WBTC', 'WMATIC', 'MaticX'],
+
+              topCollateralAssetSymbols: ['WETH', 'WBTC', 'WMATIC', 'MaticX'],
             },
             {
               borrowAPR: 46244384597376000n,
@@ -285,15 +290,19 @@ describe('useMarketsOverview', () => {
                 address: '0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA',
               },
               date: '2023-09-07',
+              isRewardsLoading: false,
               supplyAPR: 31191015428496000n,
               supplyRewardsAPR: 0n,
-              isRewardsLoading: false,
+              status: 'success',
+              errorCollateralSymbols: [],
               timestamp: 1694099377,
               totalBorrowValue: 328125763640274n,
               totalCollateralValue: 810090339504329n,
               totalSupplyValue: 403609749915354n,
               utilization: 812977538620675375n,
               collateralAssetSymbols: ['ARB', 'GMX', 'WETH', 'WBTC'],
+
+              topCollateralAssetSymbols: ['ARB', 'GMX', 'WETH', 'WBTC'],
             },
             {
               borrowAPR: 19339728476112000n,
@@ -303,15 +312,19 @@ describe('useMarketsOverview', () => {
                 address: '0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf',
               },
               date: '2023-09-07',
+              isRewardsLoading: false,
               supplyAPR: 4029747879312000n,
               supplyRewardsAPR: 0n,
-              isRewardsLoading: false,
+              status: 'success',
+              errorCollateralSymbols: [],
               timestamp: 1694099357,
               totalBorrowValue: 39063581432039n,
               totalCollateralValue: 89935764341405n,
               totalSupplyValue: 315045023059815n,
               utilization: 123992243058846637n,
               collateralAssetSymbols: ['ARB', 'GMX', 'WETH', 'WBTC'],
+
+              topCollateralAssetSymbols: ['ARB', 'GMX', 'WETH', 'WBTC'],
             },
             {
               borrowAPR: 18165959344512000n,
@@ -321,15 +334,19 @@ describe('useMarketsOverview', () => {
                 address: '0x46e6b214b524310239732D51387075E0e70970bf',
               },
               date: '2023-09-07',
+              isRewardsLoading: false,
               supplyAPR: 6306070443552000n,
               supplyRewardsAPR: 0n,
-              isRewardsLoading: false,
+              status: 'success',
+              errorCollateralSymbols: [],
               timestamp: 1694099345,
               totalBorrowValue: 141514294509716n,
               totalCollateralValue: 174554019184166n,
               totalSupplyValue: 636926202890887n,
               utilization: 222182424985284321n,
               collateralAssetSymbols: ['cbETH'],
+
+              topCollateralAssetSymbols: ['cbETH'],
             },
             {
               borrowAPR: 31609869295680000n,
@@ -339,23 +356,23 @@ describe('useMarketsOverview', () => {
                 address: '0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf',
               },
               date: '2023-09-07',
+              isRewardsLoading: false,
               supplyAPR: 15423450057648000n,
               supplyRewardsAPR: 0n,
-              isRewardsLoading: false,
+              status: 'success',
+              errorCollateralSymbols: [],
               timestamp: 1694099357,
               totalBorrowValue: 590761320826590n,
               totalCollateralValue: 1059542673866321n,
               totalSupplyValue: 1244839758544010n,
               utilization: 474567695122316508n,
               collateralAssetSymbols: ['cbETH', 'WETH'],
+
+              topCollateralAssetSymbols: ['cbETH', 'WETH'],
             },
           ],
         },
       ])
     );
-  });
-  
-  afterAll(() => {
-    MARKETS.splice(0, MARKETS.length, ...initialMarkets);
   });
 });

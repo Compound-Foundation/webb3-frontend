@@ -1,3 +1,4 @@
+import { FACTOR_PRECISION, PRICE_PRECISION } from '@helpers/numbers';
 import { getMarketRewardsAPRs } from '@helpers/rewards';
 import { RewardsState, StateType } from '@types';
 
@@ -6,11 +7,18 @@ const LOADING_REWARDS_STATE: RewardsState = [StateType.Loading];
 describe('getMarketRewardsAPRs', () => {
   it('institutional market: uses institutionalSupplyRewardRate, borrowRewardsAPR is 0', () => {
     const market = { institutional: true, chainInformation: { chainId: 1 } } as any;
-    const result = getMarketRewardsAPRs(market, LOADING_REWARDS_STATE, 1_000_000n * 10n ** 8n, 500_000n * 10n ** 8n);
+    // Supply and borrow totals are in dollars at PRICE_PRECISION: $1M supplied, $500k borrowed
+    const result = getMarketRewardsAPRs(
+      market,
+      LOADING_REWARDS_STATE,
+      1_000_000n * 10n ** BigInt(PRICE_PRECISION),
+      500_000n * 10n ** BigInt(PRICE_PRECISION)
+    );
 
     expect(result.isInstitutional).toBe(true);
     expect(result.borrowRewardsAPR).toBe(0n);
-    expect(result.supplyRewardsAPR).toBeGreaterThan(0n);
+    // $1M level pays 80%
+    expect(result.supplyRewardsAPR).toBe(8n * 10n ** BigInt(FACTOR_PRECISION - 1));
   });
 
   it('market without rewards data available yet: returns 0n APRs, no throw', () => {

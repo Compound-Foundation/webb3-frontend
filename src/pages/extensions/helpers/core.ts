@@ -1,7 +1,4 @@
 import { Permissions } from '@compound-finance/comet-extension';
-import mainnetUSDCRoots from 'comet/deployments/mainnet/usdc/roots.json';
-import mainnetWETHRoots from 'comet/deployments/mainnet/weth/roots.json';
-import polygonUSDCRoots from 'comet/deployments/polygon/usdc/roots.json';
 
 export declare type ExtensionSource =
   | {
@@ -19,6 +16,8 @@ export declare type Links = {
 
 // Special keyword to represent all supported markets.
 export const AllMarkets = 'all';
+// Operator placeholder resolved to the selected market's bulker from the market list.
+export const MarketBulker = 'market-bulker';
 export declare type SupportedMarkets = Record<string, string | null> | typeof AllMarkets;
 export interface Extension {
   id: string;
@@ -59,9 +58,9 @@ export const extensions: Extension[] = [
       url: null,
     },
     supportedMarkets: {
-      '1_USDC_0xc3d688B66703497DAA19211EEdff47f25384cdc3': mainnetUSDCRoots['bulker'],
-      '1_ETH_0xA17581A9E3356d9A858b789D68B4d866e593aE94': mainnetWETHRoots['bulker'],
-      '137_USDC_0xF25212E676D1F7F89Cd72fFEe66158f541246445': polygonUSDCRoots['bulker'],
+      '1_USDC_0xc3d688B66703497DAA19211EEdff47f25384cdc3': MarketBulker,
+      '1_ETH_0xA17581A9E3356d9A858b789D68B4d866e593aE94': MarketBulker,
+      '137_USDC_0xF25212E676D1F7F89Cd72fFEe66158f541246445': MarketBulker,
     },
   },
   {

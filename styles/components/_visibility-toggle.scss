@@ -1,0 +1,121 @@
+@use '../abstracts/variables' as *;
+
+.visibility-toggle {
+  display: inline-block;
+  height: 1.5rem;
+  line-height: 1.5rem;
+  max-width: 100%;
+  white-space: nowrap;
+  outline: none;
+
+  &__label {
+    user-select: none;
+    display: flex;
+    flex: 1;
+    flex-direction: row;
+    align-items: center;
+    height: inherit;
+    cursor: pointer;
+  }
+
+  &__hint {
+    display: flex;
+    align-items: center;
+  }
+
+  &__hint-suffix {
+    @media (max-width: $device--xs) {
+      display: none;
+    }
+  }
+
+  &__icon {
+    display: flex;
+    margin-left: 0.5rem;
+  }
+
+  &__tooltip-text {
+    font-weight: 400;
+    line-height: 1rem;
+    font-size: 11px;
+  }
+
+  &__bar {
+    position: relative;
+    width: 2.5rem;
+    height: 1rem;
+    flex-shrink: 0;
+    border-radius: 0.5rem;
+    background-color: $neutral--85;
+    margin-left: 0.75rem;
+
+    &:has(.visibility-toggle__input:focus-visible) {
+      outline: 2px solid currentColor;
+      outline-offset: 2px;
+    }
+  }
+
+  &__input {
+    border: 0;
+    clip: rect(0 0 0 0);
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    -webkit-appearance: none;
+    outline: 0;
+    padding: 0;
+    margin: -1px;
+  }
+
+  &__thumb {
+    border-radius: 50%;
+    background-color: $neutral--80;
+    position: absolute;
+    z-index: 1;
+    width: 1.25rem;
+    height: 1.25rem;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    margin: auto 0;
+    transform: translateX(0);
+    transition: transform 80ms linear;
+  }
+
+  &--checked {
+    .visibility-toggle__bar {
+      background-color: $neutral--60;
+    }
+
+    .visibility-toggle__thumb {
+      background-color: $neutral--00;
+      transform: translateX(1.25rem);
+    }
+  }
+}
+
+.theme--light {
+  .visibility-toggle__bar {
+    background-color: $neutral--15;
+  }
+
+  .visibility-toggle__thumb {
+    background-color: $neutral--30;
+  }
+
+  .visibility-toggle--checked {
+    .visibility-toggle__bar {
+      background-color: $neutral--40;
+    }
+
+    .visibility-toggle__thumb {
+      background-color: $neutral--50;
+    }
+  }
+
+  .visibility-toggle__icon {
+    background: radial-gradient(circle, $neutral--90 5px, transparent 5px);
+  }
+}

@@ -81,6 +81,15 @@ describe('validateAddingAction', () => {
       expect(result[1]).toBe('Not Enough Market Liquidity');
     });
 
+    it('Debt exceeds borrow capacity. isMax = true', () => {
+      baseAssetPre = mockBaseAsset({ balance: -20000000000n });
+      baseActionToAdd = mockBaseAction({ actionType: ActionType.Borrow, amount: MAX_UINT256 });
+
+      const result = validateAddingAction(baseAssetPre, collateralAssetsPre, actions, baseActionToAdd);
+      expect(result[0]).toBe(false);
+      expect(result[1]).toBe('Your debt exceeds your borrow capacity. Repay or supply collateral first.');
+    });
+
     it('Has existing supply', () => {
       baseAssetPre = mockBaseAsset({ balance: 10000000000n });
       baseActionToAdd = mockBaseAction({ actionType: ActionType.Borrow, amount: 10000000000n });

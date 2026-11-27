@@ -2,6 +2,13 @@
 @use '../base/typography' as *;
 
 .market-overview-panels {
+  &__controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
   &__dropdowns {
     display: flex;
     gap: 1rem;
@@ -183,6 +190,36 @@
     > .icon-pair:first-child .asset {
       border-color: var(--row-background-color);
     }
+
+    > .icon-pair__disabled {
+      opacity: 0.3;
+    }
+  }
+
+  &__asset-name-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  &__exclamation {
+    display: flex;
+  }
+
+  &__exclamation-icon {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+
+  &__tooltip-text {
+    font-weight: 400;
+    line-height: 1rem;
+    font-size: 11px;
+  }
+
+  &__tooltip-text-centered {
+    display: flex;
+    justify-content: center;
   }
 
   &__asset-description-container {
@@ -275,11 +312,31 @@
   }
 
   &__collateral-asset-icon {
+    // Positioned like the error badge's container, so every icon, badge included, is painted
+    // in markup order and the next icon covers the previous one
+    position: relative;
     width: 1rem;
     height: 1rem;
 
     border: 1px solid var(--row-background-color);
     margin-left: -0.25rem;
+
+    &--error {
+      opacity: 0.3;
+    }
+  }
+
+  &__collateral-asset-icon-container {
+    position: relative;
+    display: flex;
+  }
+
+  &__collateral-asset-error-icon {
+    position: absolute;
+    top: -0.125rem;
+    right: 0;
+    width: 0.625rem;
+    height: 0.625rem;
   }
 
   &__header-with-logo {
@@ -326,5 +383,10 @@
     &:hover {
       --institutional-row-base: #e0e4e9;
     }
+  }
+
+  // The "!" is a cutout in the icon, so a circle behind it colors the mark
+  .market-overview-panels__exclamation {
+    background: radial-gradient(circle, $neutral--90 4.5px, transparent 4.5px);
   }
 };

@@ -1,6 +1,9 @@
 export const CONNECTOR_LOCALSTORAGE_KEY = 'webb3-preferred-connector';
 export const MARKET_LOCAL_STORAGE_KEY = 'webb3-preferred-market';
 export const V2_ALERT_DISMISSED_KEY = 'webb3-v2-alert-dismissed';
+export const HOME_TOP_COLLATERAL_KEY = 'webb3-home-top-collateral-only';
+export const MARKETS_TOP_COLLATERAL_KEY = 'webb3-markets-top-collateral-only';
+export const MARKET_DETAILS_TOP_COLLATERAL_KEY = 'webb3-market-details-top-collateral-only';
 
 /*
 `${chaind id}_${base asset}_${address}`
