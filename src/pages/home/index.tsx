@@ -739,9 +739,9 @@ const Home = ({
       .filter((token) => isCollateralShown(token))
       .sort(sortTokensAlphabetically)
       .sort(sortErrorsLast)
-      .map((token, index) => (
+      .map((token) => (
         <AssetRow
-          key={index}
+          key={token.address}
           state={[StateType.NoWallet, { asset: token, isCollateralError: hasCollateralError(token) }]}
         />
       ));
@@ -1691,7 +1691,7 @@ const Home = ({
       sortErrorsLast
     );
 
-    assetRows = sortedAssets.map((token, index) => {
+    assetRows = sortedAssets.map((token) => {
       const action = actions.find((action) => action[0] !== ActionType.ClaimRewards && isSameToken(action[1], token));
       let displayAction: Action | undefined;
       if (action !== undefined) {
@@ -1711,7 +1711,7 @@ const Home = ({
       const collateral = getCollateralFor(token.address);
       return (
         <AssetRow
-          key={index}
+          key={token.address}
           state={[
             StateType.Hydrated,
             {
