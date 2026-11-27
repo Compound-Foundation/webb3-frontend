@@ -200,7 +200,7 @@ const Market = ({ web3 }: MarketsProps) => {
         isFiltered={showTopCollateralOnly && !!market.collaterals?.some((c) => !c.isDeprecated && c.isVisible === false)}
       >
         {rows
-          .sort((a, b) => b.totalSupplyValue - a.totalSupplyValue)
+          .sort((a, b) => Number(a.isError) - Number(b.isError) || b.totalSupplyValue - a.totalSupplyValue)
           .map(({ token, isError }, index) => (
             <AssetsTableRow key={index} state={[StateType.Hydrated, token, baseAsset]} isCollateralError={isError} />
           ))}
